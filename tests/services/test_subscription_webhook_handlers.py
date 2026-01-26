@@ -866,3 +866,170 @@ class TestCacheInvalidationOnSubscriptionUpdates:
 
             # Verify cache was invalidated for the correct user (at the end after all updates)
             mock_invalidate.assert_called_with(55)
+
+
+class TestUserIdExtractionFallback:
+    """Test user_id extraction with fallback to stripe_customer_id lookup"""
+
+    def test_extract_user_id_from_metadata(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that user_id is extracted from metadata when present"""
+        mock_subscription = MagicMock()
+        mock_subscription.metadata = {"user_id": "42"}
+        mock_subscription.customer = "cus_test_123"
+
+        user_id = stripe_service_with_mock_db._extract_user_id_from_subscription(mock_subscription)
+
+        assert user_id == 42
+
+    def test_extract_user_id_fallback_to_customer_lookup(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that user_id is looked up by stripe_customer_id when metadata is missing"""
+        fake_supabase.clear_all()
+
+        # Setup: create user with stripe_customer_id
+        fake_supabase.table("users").insert({
+            "id": 99,
+            "email": "fallback_user@example.com",
+            "stripe_customer_id": "cus_fallback_test"
+        }).execute()
+
+        # Create mock subscription with NO user_id in metadata
+        mock_subscription = MagicMock()
+        mock_subscription.metadata = {}  # No user_id
+        mock_subscription.customer = "cus_fallback_test"
+
+        user_id = stripe_service_with_mock_db._extract_user_id_from_subscription(mock_subscription)
+
+        assert user_id == 99
+
+    def test_extract_user_id_returns_none_when_not_found(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that None is returned when user cannot be identified"""
+        fake_supabase.clear_all()
+
+        # Create mock subscription with NO user_id and unknown customer
+        mock_subscription = MagicMock()
+        mock_subscription.metadata = {}  # No user_id
+        mock_subscription.customer = "cus_unknown"
+
+        user_id = stripe_service_with_mock_db._extract_user_id_from_subscription(mock_subscription)
+
+        assert user_id is None
+
+    def test_subscription_created_uses_fallback_lookup(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.created uses customer_id fallback when metadata missing"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user with stripe_customer_id
+        fake_supabase.table("plans").insert({
+            "id": 1,
+            "name": "Pro",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 77,
+            "email": "fallback_test@example.com",
+            "subscription_status": "trial",
+            "stripe_customer_id": "cus_fallback_sub_test"
+        }).execute()
+
+        # Create mock subscription with NO user_id but valid customer
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_fallback_test"
+        mock_subscription.metadata = {
+            # No "user_id" key!
+            "tier": "pro",
+            "product_id": "prod_test"
+        }
+        mock_subscription.customer = "cus_fallback_sub_test"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.items = None
+
+        # Call the handler - should succeed by looking up user via customer_id
+        stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
+
+        # Verify user was updated
+        users = fake_supabase.table("users").select("*").eq("id", 77).execute().data
+        assert len(users) == 1
+        assert users[0]["subscription_status"] == "active"
+        assert users[0]["tier"] == "pro"
+
+    def test_subscription_created_raises_when_user_not_found(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.created raises ValueError when user cannot be identified"""
+        fake_supabase.clear_all()
+
+        # Create mock subscription with NO user_id and unknown customer
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_unknown_user"
+        mock_subscription.metadata = {}  # No user_id
+        mock_subscription.customer = "cus_completely_unknown"
+        mock_subscription.current_period_end = None
+        mock_subscription.items = None
+
+        # Call should raise ValueError
+        with pytest.raises(ValueError) as excinfo:
+            stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
+
+        assert "Missing user_id" in str(excinfo.value)
+        assert "sub_unknown_user" in str(excinfo.value)
+
+    def test_subscription_updated_uses_fallback_lookup(self, stripe_service_with_mock_db, fake_supabase):
+        """Test that subscription.updated uses customer_id fallback when metadata missing"""
+        fake_supabase.clear_all()
+
+        # Setup: create plan and user with stripe_customer_id
+        fake_supabase.table("plans").insert({
+            "id": 2,
+            "name": "Max",
+            "is_active": True
+        }).execute()
+
+        fake_supabase.table("users").insert({
+            "id": 88,
+            "email": "update_fallback@example.com",
+            "subscription_status": "active",
+            "tier": "pro",
+            "stripe_customer_id": "cus_update_fallback"
+        }).execute()
+
+        # Create mock subscription with NO user_id but valid customer
+        mock_subscription = MagicMock()
+        mock_subscription.id = "sub_update_fallback"
+        mock_subscription.status = "active"
+        mock_subscription.metadata = {
+            # No "user_id" key!
+            "tier": "max"
+        }
+        mock_subscription.customer = "cus_update_fallback"
+        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.items = None
+
+        # Call the handler - should succeed by looking up user via customer_id
+        stripe_service_with_mock_db._handle_subscription_updated(mock_subscription)
+
+        # Verify user was updated to max tier
+        users = fake_supabase.table("users").select("*").eq("id", 88).execute().data
+        assert len(users) == 1
+        assert users[0]["tier"] == "max"
+
+    def test_lookup_user_by_stripe_customer(self, stripe_service_with_mock_db, fake_supabase):
+        """Test the _lookup_user_by_stripe_customer helper method"""
+        fake_supabase.clear_all()
+
+        # Setup: create user with stripe_customer_id
+        fake_supabase.table("users").insert({
+            "id": 123,
+            "email": "lookup_test@example.com",
+            "stripe_customer_id": "cus_lookup_test_123"
+        }).execute()
+
+        # Test successful lookup
+        user_id = stripe_service_with_mock_db._lookup_user_by_stripe_customer("cus_lookup_test_123")
+        assert user_id == 123
+
+        # Test lookup with unknown customer
+        user_id = stripe_service_with_mock_db._lookup_user_by_stripe_customer("cus_unknown_xyz")
+        assert user_id is None
+
+        # Test lookup with None
+        user_id = stripe_service_with_mock_db._lookup_user_by_stripe_customer(None)
+        assert user_id is None

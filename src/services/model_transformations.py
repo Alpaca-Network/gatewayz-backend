@@ -153,6 +153,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "aihubmix": "openai/gpt-4o-mini",
     "anannas": "openai/gpt-4o-mini",
     "alibaba-cloud": "qwen/qwen-plus",
+    "simplismart": "meta-llama/Llama-3.3-70B-Instruct",
 }
 
 # Shared helper for resolving aliases before any downstream routing logic runs.
@@ -1122,6 +1123,45 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
             "gpt-4o": "gpt-4o@latest",
             "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
         },
+        "simplismart": {
+            # Simplismart uses org/model format, supports various LLM models
+            # Llama 3.1 models
+            "simplismart/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "simplismart/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            "simplismart/llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+            "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            "llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+            "llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+            # Llama 3.3 models
+            "simplismart/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+            "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+            # Llama 4 models
+            "simplismart/llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
+            "llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
+            # DeepSeek models
+            "simplismart/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "simplismart/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
+            "deepseek-v3": "deepseek-ai/DeepSeek-V3",
+            # Gemma models
+            "simplismart/gemma-3-1b": "google/gemma-3-1b-it",
+            "simplismart/gemma-3-4b": "google/gemma-3-4b-it",
+            "simplismart/gemma-3-27b": "google/gemma-3-27b-it",
+            "gemma-3-1b": "google/gemma-3-1b-it",
+            "gemma-3-4b": "google/gemma-3-4b-it",
+            "gemma-3-27b": "google/gemma-3-27b-it",
+            # Qwen models
+            "simplismart/qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
+            "simplismart/qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+            "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
+            "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+            # Mixtral models
+            "simplismart/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
+            "mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
+            # Devstral
+            "simplismart/devstral-small": "mistralai/Devstral-Small-2505",
+            "devstral-small": "mistralai/Devstral-Small-2505",
+        },
     }
 
     return mappings.get(provider, {})
@@ -1355,6 +1395,7 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "cloudflare-workers-ai",
         "morpheus",
         "onerouter",
+        "simplismart",
     ]:
         mapping = get_model_id_mapping(provider)
         if model_id in mapping:

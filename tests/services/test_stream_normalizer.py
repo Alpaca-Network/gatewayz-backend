@@ -81,6 +81,68 @@ class TestStreamNormalizer(unittest.TestCase):
         self.assertEqual(normalized.choices[0]["delta"]["reasoning_content"], "Thinking process")
         self.assertEqual(normalizer.get_accumulated_reasoning(), "Thinking process")
 
+    def test_reasoning_details_array_extraction(self):
+        """Test Grok 4.1 reasoning_details array format"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "The answer is 42.",
+                        "reasoning_details": [
+                            {"content": "First, let me analyze the question."},
+                            {"content": "Now I'll compute the result."}
+                        ]
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        self.assertEqual(normalized.choices[0]["delta"]["content"], "The answer is 42.")
+        reasoning = normalized.choices[0]["delta"]["reasoning_content"]
+        self.assertIn("First, let me analyze the question.", reasoning)
+        self.assertIn("Now I'll compute the result.", reasoning)
+
+    def test_reasoning_details_string_array_extraction(self):
+        """Test reasoning_details as array of strings"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "Result",
+                        "reasoning_details": ["Step 1", "Step 2", "Step 3"]
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        reasoning = normalized.choices[0]["delta"]["reasoning_content"]
+        self.assertIn("Step 1", reasoning)
+        self.assertIn("Step 2", reasoning)
+        self.assertIn("Step 3", reasoning)
+
+    def test_reasoning_details_text_field(self):
+        """Test reasoning_details with 'text' field instead of 'content'"""
+        normalizer = StreamNormalizer("xai", "grok-4.1-fast")
+        chunk = {
+            "choices": [
+                {
+                    "delta": {
+                        "content": "Answer",
+                        "reasoning_details": [
+                            {"text": "Thinking step 1"},
+                            {"text": "Thinking step 2"}
+                        ]
+                    }
+                }
+            ]
+        }
+        normalized = normalizer.normalize_chunk(chunk)
+        reasoning = normalized.choices[0]["delta"]["reasoning_content"]
+        self.assertIn("Thinking step 1", reasoning)
+        self.assertIn("Thinking step 2", reasoning)
+
     def test_finish_reason_normalization(self):
         normalizer = StreamNormalizer("test", "test")
         self.assertEqual(normalizer._normalize_finish_reason("stop_sequence"), "stop")

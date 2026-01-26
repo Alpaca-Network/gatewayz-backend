@@ -159,6 +159,12 @@ class CreateCheckoutSessionRequest(BaseModel):
     """Request to create a Stripe checkout session"""
 
     amount: int = Field(..., description="Amount in cents (e.g., 2999 for $29.99)", gt=0)
+    credit_value: float | None = Field(
+        None,
+        description="Credit value in dollars to add (for discounted packages). If not provided, amount/100 is used.",
+        gt=0,  # Must be positive if provided
+        le=10000,  # Maximum $10,000 credits per transaction
+    )
     currency: StripeCurrency = Field(default=StripeCurrency.USD)
     success_url: str | None = Field(None, description="URL to redirect on success")
     cancel_url: str | None = Field(None, description="URL to redirect on cancel")
@@ -173,6 +179,24 @@ class CreateCheckoutSessionRequest(BaseModel):
             raise ValueError("Amount must be at least $0.50 (50 cents)")
         if v > 99999999:  # Maximum ~$1M
             raise ValueError("Amount exceeds maximum allowed")
+        return v
+
+    @field_validator("credit_value")
+    @classmethod
+    def validate_credit_value(cls, v, info):
+        """Validate credit_value is reasonable relative to payment amount."""
+        if v is None:
+            return v
+        # Get amount from the data being validated
+        amount = info.data.get("amount")
+        if amount:
+            amount_dollars = amount / 100
+            # Credit value should be at least 50% of payment (generous discount limit)
+            if v < amount_dollars * 0.5:
+                raise ValueError("Credit value cannot be less than 50% of payment amount")
+            # Credit value shouldn't exceed 2x payment (prevents abuse)
+            if v > amount_dollars * 2:
+                raise ValueError("Credit value cannot exceed 2x the payment amount")
         return v
 
 

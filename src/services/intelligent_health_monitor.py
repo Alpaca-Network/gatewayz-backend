@@ -527,9 +527,12 @@ class IntelligentHealthMonitor:
 
             next_check_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
 
-            # Calculate uptime percentages (simplified - should use history)
-            success_rate = success_count / call_count if call_count > 0 else 1.0
-            uptime_percentage = success_rate * 100
+            # Preserve existing uptime percentages - they are calculated from actual history
+            # by the _aggregate_hourly_metrics background task. Only set initial defaults
+            # for new models that don't have values yet.
+            existing_uptime_24h = current_data.get("uptime_percentage_24h")
+            existing_uptime_7d = current_data.get("uptime_percentage_7d")
+            existing_uptime_30d = current_data.get("uptime_percentage_30d")
 
             # Update model_health_tracking
             update_data = {
@@ -550,9 +553,11 @@ class IntelligentHealthMonitor:
                 "last_success_at": result.checked_at.isoformat() if is_success else current_data.get("last_success_at"),
                 "last_failure_at": result.checked_at.isoformat() if not is_success else current_data.get("last_failure_at"),
                 "next_check_at": next_check_at.isoformat(),
-                "uptime_percentage_24h": uptime_percentage,  # Should be calculated from history
-                "uptime_percentage_7d": uptime_percentage,
-                "uptime_percentage_30d": uptime_percentage,
+                # Preserve existing uptime percentages (calculated by aggregate task)
+                # Default to 100.0 for new models - they will be updated by the aggregate task
+                "uptime_percentage_24h": existing_uptime_24h if existing_uptime_24h is not None else 100.0,
+                "uptime_percentage_7d": existing_uptime_7d if existing_uptime_7d is not None else 100.0,
+                "uptime_percentage_30d": existing_uptime_30d if existing_uptime_30d is not None else 100.0,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -828,39 +833,31 @@ class IntelligentHealthMonitor:
                 simple_health_cache.cache_providers_health(providers_data)
                 logger.debug(f"Published {len(providers_data)} providers health to Redis cache")
 
-            # Calculate system health from tracked models
-            tracked_models = len(models_data)
-            healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
-            unhealthy_models = tracked_models - healthy_models
-            tracked_providers = len(providers_data)
-            healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
-            degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
-            unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
-
             # Get total counts from openrouter_models table (not just tracked)
+            # NOTE: We get total counts FIRST so we can properly calculate healthy/unhealthy
             try:
                 catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
-                total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                total_models = catalog_models_response.count if catalog_models_response.count is not None else 0
                 logger.info(f"Got {total_models} total models from openrouter_models table")
             except Exception as e:
                 logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
                 try:
                     catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
-                    total_models = catalog_models_response.count if catalog_models_response.count is not None else tracked_models
+                    total_models = catalog_models_response.count if catalog_models_response.count is not None else 0
                     logger.info(f"Got {total_models} total models from models table")
                 except Exception as e2:
-                    logger.warning(f"Failed to get models catalog count: {e2}, using tracked count: {tracked_models}")
-                    total_models = tracked_models
-                
+                    logger.warning(f"Failed to get models catalog count: {e2}")
+                    total_models = 0
+
             try:
                 # Get all providers from providers table
                 providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                total_providers = providers_response.count if providers_response.count is not None else tracked_providers
+                total_providers = providers_response.count if providers_response.count is not None else 0
                 logger.info(f"Got {total_providers} total providers from providers table")
             except Exception as e:
-                logger.warning(f"Failed to get providers catalog count: {e}, using tracked count: {tracked_providers}")
-                total_providers = tracked_providers
-                
+                logger.warning(f"Failed to get providers catalog count: {e}")
+                total_providers = 0
+
             # Get gateway count from GATEWAY_CONFIG (not a database table)
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
@@ -868,16 +865,62 @@ class IntelligentHealthMonitor:
             except Exception:
                 total_gateways = 0
 
-            if unhealthy_providers == 0 and degraded_providers == 0:
+            # Calculate system health from tracked models
+            # NOTE: tracked counts are from models we actually checked health for
+            tracked_models = len(models_data)
+            tracked_healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
+            tracked_unhealthy_models = tracked_models - tracked_healthy_models
+            tracked_providers = len(providers_data)
+            healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
+            degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
+            unhealthy_providers = sum(1 for p in providers_data if p.get("status") == "offline")
+
+            # IMPORTANT: healthy_models and unhealthy_models must be based on total_models
+            # Report only what we actually know from tracked data
+            # Otherwise, report 0 healthy until we have actual health data
+            if tracked_models > 0 and total_models > 0:
+                # For models we haven't tracked, we don't know their status
+                # Report only what we actually know: healthy = tracked healthy, unhealthy = tracked unhealthy
+                # Untracked models are in "unknown" state (not counted as healthy or unhealthy)
+                healthy_models = tracked_healthy_models
+                unhealthy_models = tracked_unhealthy_models
+                # Ensure healthy_models never exceeds total_models (data consistency)
+                healthy_models = min(healthy_models, total_models)
+                unhealthy_models = min(unhealthy_models, total_models - healthy_models)
+            else:
+                # No tracking data available
+                healthy_models = 0
+                unhealthy_models = 0
+
+            # Determine overall status based on tracked data
+            if tracked_models == 0:
+                overall_status = "unknown"
+            elif unhealthy_providers == 0 and degraded_providers == 0 and tracked_healthy_models == tracked_models:
                 overall_status = "healthy"
             elif tracked_providers > 0 and unhealthy_providers >= tracked_providers * 0.5:
                 overall_status = "unhealthy"
-            elif unhealthy_providers > 0 or degraded_providers > 0:
+            elif unhealthy_providers > 0 or degraded_providers > 0 or tracked_unhealthy_models > 0:
                 overall_status = "degraded"
             else:
                 overall_status = "healthy"
 
-            system_uptime = (healthy_models / tracked_models * 100) if tracked_models > 0 else 100.0
+            # Calculate system uptime from tracked models
+            system_uptime = (tracked_healthy_models / tracked_models * 100) if tracked_models > 0 else 0.0
+
+            # Calculate healthy gateways based on provider health data
+            # A gateway is considered healthy if at least one of its providers is online
+            gateway_health = {}
+            for p in providers_data:
+                gw = p.get("gateway", "unknown")
+                if gw not in gateway_health:
+                    gateway_health[gw] = {"healthy": False, "status": "offline"}
+                if p.get("status") == "online":
+                    gateway_health[gw]["healthy"] = True
+                    gateway_health[gw]["status"] = "online"
+                elif p.get("status") == "degraded" and gateway_health[gw]["status"] == "offline":
+                    gateway_health[gw]["status"] = "degraded"
+
+            healthy_gateways = sum(1 for g in gateway_health.values() if g.get("healthy", False))
 
             system_data = {
                 "overall_status": overall_status,
@@ -887,9 +930,10 @@ class IntelligentHealthMonitor:
                 "unhealthy_providers": unhealthy_providers,
                 "total_models": total_models,
                 "healthy_models": healthy_models,
-                "degraded_models": 0,  # Would need more complex calculation
+                "degraded_models": 0,  # Not tracked - models are either healthy or unhealthy
                 "unhealthy_models": unhealthy_models,
                 "total_gateways": total_gateways,
+                "healthy_gateways": healthy_gateways,
                 "tracked_models": tracked_models,
                 "tracked_providers": tracked_providers,
                 "system_uptime": system_uptime,
@@ -897,7 +941,7 @@ class IntelligentHealthMonitor:
             }
 
             simple_health_cache.cache_system_health(system_data)
-            logger.info(f"Published health data to Redis cache: {total_models} models, {total_providers} providers, {total_gateways} gateways (tracked: {tracked_models} models)")
+            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy), tracked: {tracked_models} models")
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")
@@ -950,10 +994,125 @@ class IntelligentHealthMonitor:
                 await asyncio.sleep(300)
 
     async def _aggregate_hourly_metrics(self):
-        """Aggregate hourly health metrics for fast querying"""
-        # This would aggregate model_health_history into model_health_aggregates
-        # Implementation details depend on volume and requirements
-        pass
+        """Aggregate hourly health metrics and update uptime percentages from actual history data"""
+        try:
+            from src.config.supabase_config import supabase
+
+            # Calculate 24h uptime from model_health_history for all models
+            # This uses actual success/failure counts from the last 24 hours
+            now = datetime.now(timezone.utc)
+            twenty_four_hours_ago = now - timedelta(hours=24)
+            seven_days_ago = now - timedelta(days=7)
+            thirty_days_ago = now - timedelta(days=30)
+
+            # Get all tracked models
+            tracked_models = (
+                supabase.table("model_health_tracking")
+                .select("provider, model, gateway")
+                .eq("is_enabled", True)
+                .execute()
+            )
+
+            if not tracked_models.data:
+                logger.debug("No tracked models found for uptime aggregation")
+                return
+
+            # Process models in batches to avoid overwhelming the database
+            batch_size = 50
+            updated_count = 0
+
+            for i in range(0, len(tracked_models.data), batch_size):
+                batch = tracked_models.data[i : i + batch_size]
+
+                for model_data in batch:
+                    try:
+                        provider = model_data["provider"]
+                        model = model_data["model"]
+
+                        # Calculate 24h uptime from history
+                        history_24h = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", twenty_four_hours_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_24h.data and len(history_24h.data) > 0:
+                            total_checks_24h = len(history_24h.data)
+                            success_checks_24h = len(
+                                [h for h in history_24h.data if h.get("status") == "success"]
+                            )
+                            uptime_24h = (success_checks_24h / total_checks_24h * 100) if total_checks_24h > 0 else 100.0
+                        else:
+                            # No history data in 24h - use last_status as indicator
+                            # If no checks, assume healthy (new model)
+                            uptime_24h = 100.0
+
+                        # Calculate 7d uptime from history
+                        history_7d = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", seven_days_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_7d.data and len(history_7d.data) > 0:
+                            total_checks_7d = len(history_7d.data)
+                            success_checks_7d = len(
+                                [h for h in history_7d.data if h.get("status") == "success"]
+                            )
+                            uptime_7d = (success_checks_7d / total_checks_7d * 100) if total_checks_7d > 0 else 100.0
+                        else:
+                            uptime_7d = 100.0
+
+                        # Calculate 30d uptime from history
+                        history_30d = (
+                            supabase.table("model_health_history")
+                            .select("status")
+                            .eq("provider", provider)
+                            .eq("model", model)
+                            .gte("checked_at", thirty_days_ago.isoformat())
+                            .execute()
+                        )
+
+                        if history_30d.data and len(history_30d.data) > 0:
+                            total_checks_30d = len(history_30d.data)
+                            success_checks_30d = len(
+                                [h for h in history_30d.data if h.get("status") == "success"]
+                            )
+                            uptime_30d = (success_checks_30d / total_checks_30d * 100) if total_checks_30d > 0 else 100.0
+                        else:
+                            uptime_30d = 100.0
+
+                        # Update the model_health_tracking table with calculated uptime
+                        supabase.table("model_health_tracking").update(
+                            {
+                                "uptime_percentage_24h": round(uptime_24h, 2),
+                                "uptime_percentage_7d": round(uptime_7d, 2),
+                                "uptime_percentage_30d": round(uptime_30d, 2),
+                                "updated_at": now.isoformat(),
+                            }
+                        ).eq("provider", provider).eq("model", model).execute()
+
+                        updated_count += 1
+
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to aggregate metrics for {model_data.get('provider')}/{model_data.get('model')}: {e}"
+                        )
+                        continue
+
+                # Small delay between batches to avoid rate limiting
+                await asyncio.sleep(0.1)
+
+            logger.info(f"Aggregated uptime metrics for {updated_count} models")
+
+        except Exception as e:
+            logger.error(f"Failed to aggregate hourly metrics: {e}", exc_info=True)
 
     async def _incident_resolution_loop(self):
         """Check for auto-resolvable incidents"""

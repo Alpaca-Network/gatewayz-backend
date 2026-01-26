@@ -211,6 +211,46 @@ def test_submit_feedback_session_not_found(
     assert "Chat session not found" in response.json()["detail"]
 
 
+@patch("src.routes.chat_history.validate_message_ownership")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_message_not_owned(
+    mock_get_user, mock_validate_ownership, client, auth_headers, mock_user
+):
+    """Test submitting feedback with message_id not owned by user returns 404"""
+    mock_get_user.return_value = mock_user
+    mock_validate_ownership.return_value = False
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={"feedback_type": "thumbs_up", "message_id": 99999},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert "Message not found" in response.json()["detail"]
+
+
+@patch("src.routes.chat_history.validate_message_ownership")
+@patch("src.routes.chat_history.get_chat_session")
+@patch("src.routes.chat_history.get_user")
+def test_submit_feedback_message_not_in_session(
+    mock_get_user, mock_get_session, mock_validate_ownership, client, auth_headers, mock_user
+):
+    """Test submitting feedback with message_id not in specified session returns 404"""
+    mock_get_user.return_value = mock_user
+    mock_get_session.return_value = {"id": 123, "user_id": 1}  # Session exists
+    mock_validate_ownership.return_value = False  # But message doesn't belong to it
+
+    response = client.post(
+        "/v1/chat/feedback",
+        json={"feedback_type": "thumbs_up", "session_id": 123, "message_id": 456},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 404
+    assert "Message not found" in response.json()["detail"]
+
+
 def test_submit_feedback_unauthorized(client):
     """Test submitting feedback without auth returns 401"""
     # Don't use the auth override

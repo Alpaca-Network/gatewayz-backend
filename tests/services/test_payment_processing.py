@@ -150,6 +150,109 @@ class TestCheckoutSession:
     @patch('src.services.payments.create_payment')
     @patch('stripe.checkout.Session.create')
     @patch('src.services.payments.update_payment_status')
+    def test_create_checkout_session_with_discounted_credit_value(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment
+    ):
+        """Test checkout session with discounted credit_value (e.g., $9 for $10 credits)"""
+
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+
+        # Mock Stripe session
+        mock_session = Mock()
+        mock_session.id = 'cs_test_discount'
+        mock_session.url = 'https://checkout.stripe.com/pay/cs_test_discount'
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = None
+        mock_stripe_create.return_value = mock_session
+
+        # Create request with discounted pricing:
+        # User pays $9 (900 cents) but gets $10 worth of credits
+        request = CreateCheckoutSessionRequest(
+            amount=900,  # $9.00 in cents (payment amount)
+            credit_value=10.0,  # $10 worth of credits
+            currency=StripeCurrency.USD,
+            description="Discounted credits purchase",
+            customer_email="test@example.com"
+        )
+
+        # Execute
+        response = stripe_service.create_checkout_session(
+            user_id=1,
+            request=request
+        )
+
+        # Verify response
+        assert response.session_id == 'cs_test_discount'
+        assert response.amount == 900  # Payment amount in cents
+
+        # Verify Stripe was called with correct values
+        mock_stripe_create.assert_called_once()
+        call_kwargs = mock_stripe_create.call_args[1]
+
+        # Payment amount should be $9 (900 cents)
+        assert call_kwargs['line_items'][0]['price_data']['unit_amount'] == 900
+
+        # But credits_cents metadata should be $10 (1000 cents)
+        assert call_kwargs['metadata']['credits_cents'] == '1000'
+        assert call_kwargs['metadata']['credits'] == '1000'
+
+        # Description should show the credit value
+        assert '$10' in call_kwargs['line_items'][0]['price_data']['product_data']['description']
+
+    @patch('src.services.payments.get_user_by_id')
+    @patch('src.services.payments.create_payment')
+    @patch('stripe.checkout.Session.create')
+    @patch('src.services.payments.update_payment_status')
+    def test_create_checkout_session_large_discounted_package(
+        self,
+        mock_update_payment,
+        mock_stripe_create,
+        mock_create_payment,
+        mock_get_user,
+        stripe_service,
+        mock_user,
+        mock_payment
+    ):
+        """Test checkout session with larger discounted package ($75 for $100 credits)"""
+
+        mock_get_user.return_value = mock_user
+        mock_create_payment.return_value = mock_payment
+
+        mock_session = Mock()
+        mock_session.id = 'cs_test_large_discount'
+        mock_session.url = 'https://checkout.stripe.com/pay/cs_test_large_discount'
+        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.payment_intent = None
+        mock_stripe_create.return_value = mock_session
+
+        # User pays $75 but gets $100 worth of credits (33% bonus)
+        request = CreateCheckoutSessionRequest(
+            amount=7500,  # $75.00 in cents
+            credit_value=100.0,  # $100 worth of credits
+            currency=StripeCurrency.USD,
+        )
+
+        # Execute and verify response
+        response = stripe_service.create_checkout_session(user_id=1, request=request)
+        assert response.session_id == 'cs_test_large_discount'
+        assert response.amount == 7500
+
+        call_kwargs = mock_stripe_create.call_args[1]
+        assert call_kwargs['line_items'][0]['price_data']['unit_amount'] == 7500
+        assert call_kwargs['metadata']['credits_cents'] == '10000'  # $100 in cents
+
+    @patch('src.services.payments.get_user_by_id')
+    @patch('src.services.payments.create_payment')
+    @patch('stripe.checkout.Session.create')
+    @patch('src.services.payments.update_payment_status')
     def test_create_checkout_session_persists_payment_intent(
         self,
         mock_update_payment,

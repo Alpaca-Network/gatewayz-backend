@@ -83,6 +83,10 @@ class SystemHealthResponse(BaseModel):
     healthy_models: int = Field(0, description="Number of healthy models")
     degraded_models: int = Field(0, description="Number of degraded models")
     unhealthy_models: int = Field(0, description="Number of unhealthy models")
+    total_gateways: int = Field(0, description="Total number of gateways")
+    healthy_gateways: int = Field(0, description="Number of healthy gateways")
+    tracked_models: int = Field(0, description="Number of models with health data")
+    tracked_providers: int = Field(0, description="Number of providers with health data")
     system_uptime: float = Field(0.0, description="System uptime percentage (0-100)")
     last_updated: datetime | None = Field(None, description="Last update timestamp")
 
