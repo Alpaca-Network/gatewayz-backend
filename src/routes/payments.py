@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from src.db.payments import (
@@ -640,7 +641,10 @@ async def get_current_subscription(
     """
     try:
         user_id = current_user["id"]
-        subscription = stripe_service.get_current_subscription(user_id)
+        # Use run_in_threadpool to avoid blocking the event loop with sync Stripe/DB calls
+        subscription = await run_in_threadpool(
+            stripe_service.get_current_subscription, user_id
+        )
 
         return {
             "has_subscription": subscription.has_subscription,
@@ -705,7 +709,10 @@ async def upgrade_subscription(
             f"Upgrading subscription for user {user_id} to product {request.new_product_id}"
         )
 
-        result = stripe_service.upgrade_subscription(user_id=user_id, request=request)
+        # Use run_in_threadpool to avoid blocking the event loop with sync Stripe/DB calls
+        result = await run_in_threadpool(
+            stripe_service.upgrade_subscription, user_id, request
+        )
 
         return {
             "success": result.success,
@@ -767,7 +774,10 @@ async def downgrade_subscription(
             f"Downgrading subscription for user {user_id} to product {request.new_product_id}"
         )
 
-        result = stripe_service.downgrade_subscription(user_id=user_id, request=request)
+        # Use run_in_threadpool to avoid blocking the event loop with sync Stripe/DB calls
+        result = await run_in_threadpool(
+            stripe_service.downgrade_subscription, user_id, request
+        )
 
         return {
             "success": result.success,
@@ -833,7 +843,10 @@ async def cancel_subscription(
             f"(cancel_at_period_end: {request.cancel_at_period_end})"
         )
 
-        result = stripe_service.cancel_subscription(user_id=user_id, request=request)
+        # Use run_in_threadpool to avoid blocking the event loop with sync Stripe/DB calls
+        result = await run_in_threadpool(
+            stripe_service.cancel_subscription, user_id, request
+        )
 
         return {
             "success": result.success,
