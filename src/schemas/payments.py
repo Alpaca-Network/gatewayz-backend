@@ -543,3 +543,85 @@ class StripeErrorResponse(BaseModel):
     code: str | None = None
     decline_code: str | None = None
     param: str | None = None
+
+
+# ==================== Subscription Management Models ====================
+
+
+class UpgradeSubscriptionRequest(BaseModel):
+    """Request to upgrade subscription (e.g., Pro -> Max)"""
+
+    new_price_id: str = Field(..., description="Stripe price ID for the new plan")
+    new_product_id: str = Field(..., description="Stripe product ID for the new plan")
+    proration_behavior: str = Field(
+        default="create_prorations",
+        description="How to handle proration: create_prorations (default), always_invoice, or none",
+    )
+
+    @field_validator("proration_behavior")
+    @classmethod
+    def validate_proration_behavior(cls, v):
+        allowed = ["create_prorations", "always_invoice", "none"]
+        if v not in allowed:
+            raise ValueError(f'proration_behavior must be one of: {", ".join(allowed)}')
+        return v
+
+
+class DowngradeSubscriptionRequest(BaseModel):
+    """Request to downgrade subscription (e.g., Max -> Pro)"""
+
+    new_price_id: str = Field(..., description="Stripe price ID for the new plan")
+    new_product_id: str = Field(..., description="Stripe product ID for the new plan")
+    proration_behavior: str = Field(
+        default="create_prorations",
+        description="How to handle proration: create_prorations (credits unused time), always_invoice, or none",
+    )
+
+    @field_validator("proration_behavior")
+    @classmethod
+    def validate_proration_behavior(cls, v):
+        allowed = ["create_prorations", "always_invoice", "none"]
+        if v not in allowed:
+            raise ValueError(f'proration_behavior must be one of: {", ".join(allowed)}')
+        return v
+
+
+class CancelSubscriptionRequest(BaseModel):
+    """Request to cancel subscription"""
+
+    cancel_at_period_end: bool = Field(
+        default=True,
+        description="If True, subscription remains active until the end of the billing period. If False, cancels immediately.",
+    )
+    reason: str | None = Field(None, description="Optional cancellation reason")
+
+
+class SubscriptionManagementResponse(BaseModel):
+    """Response from subscription management operations (upgrade/downgrade/cancel)"""
+
+    success: bool
+    subscription_id: str
+    status: str = Field(..., description="New subscription status")
+    current_tier: str = Field(..., description="Current/new tier after the operation")
+    message: str
+    effective_date: datetime | None = Field(
+        None, description="When the change takes effect (for cancel_at_period_end)"
+    )
+    proration_amount: int | None = Field(
+        None, description="Proration amount in cents (positive = charge, negative = credit)"
+    )
+
+
+class CurrentSubscriptionResponse(BaseModel):
+    """Response containing current subscription details"""
+
+    has_subscription: bool
+    subscription_id: str | None = None
+    status: str | None = None
+    tier: str = Field(default="basic")
+    current_period_start: datetime | None = None
+    current_period_end: datetime | None = None
+    cancel_at_period_end: bool = False
+    canceled_at: datetime | None = None
+    product_id: str | None = None
+    price_id: str | None = None

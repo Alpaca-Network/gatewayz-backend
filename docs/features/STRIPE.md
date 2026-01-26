@@ -105,7 +105,7 @@ https://your-domain.com/api/stripe/webhook
 
 ### Events to Listen For
 
-**Required:**
+**Required (One-Time Payments):**
 
 - `checkout.session.completed`
 - `checkout.session.expired`
@@ -113,11 +113,17 @@ https://your-domain.com/api/stripe/webhook
 - `payment_intent.payment_failed`
 - `payment_intent.canceled`
 
+**Required (Subscriptions):**
+
+- `customer.subscription.created` — New subscription created, upgrades user tier
+- `customer.subscription.updated` — Subscription modified (tier change, renewal, etc.)
+- `customer.subscription.deleted` — Subscription canceled, downgrades to basic
+- `invoice.paid` — Subscription renewal, resets monthly allowance
+- `invoice.payment_failed` — Payment failed, marks subscription past_due
+
 **Recommended:**
 
 - `charge.refunded`
-
-(Optionally add customer/invoice events if you use subscriptions.)
 
 ### Signature Verification
 
@@ -146,6 +152,8 @@ Keep the Stripe CLI webhook listener running in another terminal during local te
 
 ## API Endpoints Overview
 
+### One-Time Payment Endpoints
+
 - `GET  /api/stripe/credit-packages` — Public; returns available credit bundles.
 - `POST /api/stripe/checkout-session` — Auth; create a Checkout Session.
 - `GET  /api/stripe/checkout-session/{session_id}` — Auth; fetch session info.
@@ -156,7 +164,132 @@ Keep the Stripe CLI webhook listener running in another terminal during local te
 - `POST /api/stripe/webhook` — Stripe calls this; verify signature & process.
 - `POST /api/stripe/refund` — Admin only; create a refund.
 
+### Subscription Endpoints
+
+- `POST /api/stripe/subscription-checkout` — Auth; create a subscription checkout session.
+- `GET  /api/stripe/subscription` — Auth; get current subscription status.
+- `POST /api/stripe/subscription/upgrade` — Auth; upgrade subscription (e.g., Pro → Max).
+- `POST /api/stripe/subscription/downgrade` — Auth; downgrade subscription (e.g., Max → Pro).
+- `POST /api/stripe/subscription/cancel` — Auth; cancel subscription (at period end or immediately).
+
 **Credit Model:** *1 credit = $0.01*. Example: $10 purchase → 1000 credits.
+
+### Subscription Tiers
+
+| Tier | Monthly Price | Monthly Allowance | Product ID |
+|------|--------------|-------------------|------------|
+| Free/Basic | $0 | $0 | - |
+| Pro | $8 | $15 | `prod_TKOqQPhVRxNp4Q` |
+| Max | $75 | $150 | `prod_TKOraBpWMxMAIu` |
+
+**Note:** Subscription allowance is refreshed monthly on invoice payment. Unused allowance does not carry over.
+
+---
+
+## Subscription Management
+
+### Creating a New Subscription
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/subscription-checkout \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_API_KEY" \
+  -d '{
+    "price_id": "price_xxxxx",
+    "product_id": "prod_TKOqQPhVRxNp4Q",
+    "success_url": "https://example.com/success?session_id={CHECKOUT_SESSION_ID}",
+    "cancel_url": "https://example.com/cancel"
+  }' | jq
+```
+
+### Getting Current Subscription
+
+```bash
+curl http://localhost:8000/api/stripe/subscription \
+  -H "Authorization: Bearer $TEST_API_KEY" | jq
+```
+
+**Response:**
+```json
+{
+  "has_subscription": true,
+  "subscription_id": "sub_xxxxx",
+  "status": "active",
+  "tier": "pro",
+  "current_period_start": "2024-01-01T00:00:00Z",
+  "current_period_end": "2024-02-01T00:00:00Z",
+  "cancel_at_period_end": false,
+  "product_id": "prod_TKOqQPhVRxNp4Q",
+  "price_id": "price_xxxxx"
+}
+```
+
+### Upgrading Subscription (Pro → Max)
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/subscription/upgrade \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_API_KEY" \
+  -d '{
+    "new_price_id": "price_max_xxxxx",
+    "new_product_id": "prod_TKOraBpWMxMAIu",
+    "proration_behavior": "create_prorations"
+  }' | jq
+```
+
+**Proration behavior options:**
+- `create_prorations` (default) — Charges the difference immediately
+- `always_invoice` — Creates an invoice immediately
+- `none` — No proration, new price takes effect next billing cycle
+
+### Downgrading Subscription (Max → Pro)
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/subscription/downgrade \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_API_KEY" \
+  -d '{
+    "new_price_id": "price_pro_xxxxx",
+    "new_product_id": "prod_TKOqQPhVRxNp4Q",
+    "proration_behavior": "create_prorations"
+  }' | jq
+```
+
+**Note:** On downgrade with `create_prorations`, unused time from the higher tier is credited to the customer's account.
+
+### Canceling Subscription
+
+**Cancel at period end (user keeps access until billing period ends):**
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/subscription/cancel \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_API_KEY" \
+  -d '{
+    "cancel_at_period_end": true,
+    "reason": "Switching to another service"
+  }' | jq
+```
+
+**Cancel immediately (immediate downgrade to free tier):**
+
+```bash
+curl -X POST http://localhost:8000/api/stripe/subscription/cancel \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TEST_API_KEY" \
+  -d '{
+    "cancel_at_period_end": false
+  }' | jq
+```
+
+### Subscription Flow Summary
+
+| Action | From | To | Endpoint | Behavior |
+|--------|------|-----|----------|----------|
+| Subscribe | None | Pro/Max | `/subscription-checkout` | Creates Stripe checkout |
+| Upgrade | Pro | Max | `/subscription/upgrade` | Updates subscription, charges difference |
+| Downgrade | Max | Pro | `/subscription/downgrade` | Updates subscription, credits unused time |
+| Cancel | Pro/Max | Free | `/subscription/cancel` | Cancels at period end or immediately |
 
 ---
 
