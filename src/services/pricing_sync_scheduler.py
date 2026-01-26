@@ -421,6 +421,9 @@ async def _run_background_sync_with_error_handling(sync_id: str, triggered_by: s
         # Run the actual sync
         result = await run_scheduled_sync(triggered_by=triggered_by)
 
+        # Calculate duration
+        duration_ms = int((time.time() - start_time) * 1000)
+
         # Update status to completed
         supabase.table('pricing_sync_jobs').update({
             'status': 'completed',
