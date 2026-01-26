@@ -1,8 +1,7 @@
 """Tests for api_key_lookup utilities."""
 
-import asyncio
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.utils.api_key_lookup import get_api_key_id_with_retry, mask_api_key_for_logging
 
