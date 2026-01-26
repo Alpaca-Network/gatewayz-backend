@@ -1,8 +1,10 @@
-# OneRouter Integration Guide
+# Infron AI Integration Guide
+
+> **Note**: Infron AI was formerly known as OneRouter. Internal code identifiers still use `onerouter` for backward compatibility.
 
 ## Overview
 
-OneRouter is a unified AI gateway that provides access to multiple AI models with automatic fallbacks, prompt caching, and multimodal support. It implements the OpenAI API specification, making it a drop-in replacement for OpenAI's endpoints.
+Infron AI is a unified AI gateway that provides access to multiple AI models with automatic fallbacks, prompt caching, and multimodal support. It implements the OpenAI API specification, making it a drop-in replacement for OpenAI's endpoints.
 
 ## Key Features
 
@@ -17,13 +19,13 @@ OneRouter is a unified AI gateway that provides access to multiple AI models wit
 
 ### API Endpoints
 
-- **Base URL**: `https://llm.onerouter.pro/v1`
+- **Base URL**: `https://llm.infron.ai/v1`
 - **Chat Completions**: `/chat/completions`
-- **Models List**: `https://app.onerouter.pro/api/display_models/` (public, no auth required)
+- **Models List**: `https://app.infron.ai/api/display_models/` (public, no auth required)
 
 ### Authentication
 
-OneRouter uses Bearer token authentication:
+Infron AI uses Bearer token authentication:
 
 ```
 Authorization: Bearer YOUR_API_KEY
@@ -31,7 +33,7 @@ Authorization: Bearer YOUR_API_KEY
 
 ## Installation
 
-OneRouter client is integrated using the OpenAI Python SDK (already included in requirements.txt):
+Infron AI client is integrated using the OpenAI Python SDK (already included in requirements.txt):
 
 ```bash
 pip install openai>=1.44.0
@@ -41,7 +43,7 @@ pip install openai>=1.44.0
 
 ### Environment Variables
 
-Set your OneRouter API key:
+Set your Infron AI API key:
 
 ```bash
 export ONEROUTER_API_KEY=your_api_key_here
@@ -55,7 +57,7 @@ ONEROUTER_API_KEY=your_api_key_here
 
 ### Getting Your API Key
 
-1. Create an account at [https://app.onerouter.pro/index](https://app.onerouter.pro/index)
+1. Create an account at [https://app.infron.ai/index](https://app.infron.ai/index)
 2. Navigate to the API Keys section
 3. Generate a new API key
 4. Copy and securely store your key
@@ -163,7 +165,7 @@ for model in models:
 
 ## Model Format
 
-OneRouter uses a specific model identifier format:
+Infron AI uses a specific model identifier format:
 
 ```
 model-name@version
@@ -176,14 +178,14 @@ Examples:
 
 ## Pricing
 
-OneRouter pricing structure:
+Infron AI pricing structure:
 - **Base fee**: $0.35 + 5% on credit purchases
 - **Per-model pricing**: Varies by model (prompt/completion token rates)
 - **Discounts**: 20-80% available depending on provider
 - **Caching costs**: Apply by default for all requests
 
 View detailed pricing:
-- In the Models tab at [https://app.onerouter.pro/models](https://app.onerouter.pro/models)
+- In the Models tab at [https://app.infron.ai/models](https://app.infron.ai/models)
 - In the Logs dashboard after making requests
 
 ## Special Features
@@ -197,7 +199,7 @@ Prompt caching is **automatically enabled** by default across all API calls and 
 
 ### Automatic Fallbacks
 
-If a provider is unavailable, OneRouter automatically:
+If a provider is unavailable, Infron AI automatically:
 1. Detects the failure
 2. Transparently switches to the next available provider
 3. Completes the request without user intervention
@@ -222,13 +224,13 @@ print(response.usage.total_tokens)
 
 ## Integration with Gatewayz
 
-OneRouter is integrated into Gatewayz as a provider client:
+Infron AI is integrated into Gatewayz as a provider client:
 
 ### File Structure
 
 ```
 src/services/
-├── onerouter_client.py          # OneRouter client implementation
+├── onerouter_client.py          # Infron AI client implementation
 └── connection_pool.py            # Connection pooling (get_onerouter_pooled_client)
 
 src/config/
@@ -240,7 +242,7 @@ tests/services/
 
 ### Connection Pooling
 
-OneRouter client uses connection pooling for improved performance:
+Infron AI client uses connection pooling for improved performance:
 
 ```python
 from src.services.connection_pool import get_onerouter_pooled_client
@@ -256,7 +258,7 @@ Benefits:
 
 ## Error Handling
 
-The OneRouter client includes comprehensive error handling:
+The Infron AI client includes comprehensive error handling:
 
 ```python
 from src.services.onerouter_client import make_onerouter_request_openai
@@ -278,7 +280,7 @@ Errors are automatically logged and sent to Sentry (if configured) with provider
 
 ## Testing
 
-Run OneRouter client tests:
+Run Infron AI client tests:
 
 ```bash
 pytest tests/services/test_onerouter_client.py -v
@@ -293,7 +295,7 @@ Test coverage includes:
 
 ## SDK Compatibility
 
-OneRouter works with any OpenAI-compatible SDK:
+Infron AI works with any OpenAI-compatible SDK:
 - **OpenAI Python SDK** ✅ (used by Gatewayz)
 - **LangChain** ✅
 - **Anthropic SDK** ✅
@@ -302,7 +304,7 @@ OneRouter works with any OpenAI-compatible SDK:
 
 ## Monitoring & Observability
 
-OneRouter integration includes:
+Infron AI integration includes:
 - **Logging**: Comprehensive request/response logging
 - **Sentry**: Error tracking with provider context
 - **Metrics**: Request timing and success rates
@@ -322,7 +324,7 @@ OneRouter integration includes:
 ### API Key Not Configured
 
 ```
-ValueError: OneRouter API key not configured
+ValueError: Infron AI API key not configured
 ```
 
 **Solution**: Set the `ONEROUTER_API_KEY` environment variable.
@@ -341,7 +343,7 @@ HTTPStatusError: 401 Unauthorized
 ReadTimeout: Request timed out
 ```
 
-**Solution**: OneRouter uses 60s read timeout. For longer requests, responses may need adjustment or use streaming.
+**Solution**: Infron AI uses 60s read timeout. For longer requests, responses may need adjustment or use streaming.
 
 ### Model Not Found
 
@@ -353,18 +355,22 @@ Error: Model not found
 
 ## Resources
 
-- **Documentation**: [https://docs.onerouter.pro/](https://docs.onerouter.pro/)
-- **Dashboard**: [https://app.onerouter.pro/](https://app.onerouter.pro/)
-- **Models List**: [https://app.onerouter.pro/models](https://app.onerouter.pro/models)
-- **API Keys**: [https://app.onerouter.pro/api-keys](https://app.onerouter.pro/api-keys)
+- **Website**: [https://infron.ai/](https://infron.ai/)
+- **Dashboard**: [https://app.infron.ai/](https://app.infron.ai/)
+- **Models List**: [https://app.infron.ai/models](https://app.infron.ai/models)
+- **API Keys**: [https://app.infron.ai/api-keys](https://app.infron.ai/api-keys)
 
 ## Support
 
 For issues specific to:
-- **OneRouter API**: Contact OneRouter support
+- **Infron AI API**: Contact Infron AI support
 - **Gatewayz Integration**: Open an issue in the Gatewayz repository
 
 ## Changelog
+
+### 2026-01-24
+- Rebranded from OneRouter to Infron AI
+- Updated all API endpoints to infron.ai domain
 
 ### 2025-11-27
 - Initial OneRouter integration

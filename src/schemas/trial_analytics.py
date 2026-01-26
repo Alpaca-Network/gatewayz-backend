@@ -1,8 +1,8 @@
 """Pydantic schemas for trial analytics endpoints"""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 # ===========================
 # Trial User Schemas

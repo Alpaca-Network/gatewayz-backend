@@ -1,0 +1,18 @@
+FROM prom/alertmanager:latest
+
+# Install gettext for envsubst command
+USER root
+RUN apk add --no-cache gettext
+
+# Copy the template configuration
+COPY alertmanager.yml.template /etc/alertmanager/alertmanager.yml.template
+
+# Copy entrypoint script
+COPY alertmanager-entrypoint.sh /alertmanager-entrypoint.sh
+RUN chmod +x /alertmanager-entrypoint.sh
+
+# Set back to alertmanager user
+USER nobody
+
+ENTRYPOINT ["/alertmanager-entrypoint.sh"]
+CMD ["--config.file=/etc/alertmanager/alertmanager.yml", "--storage.path=/alertmanager"]

@@ -101,17 +101,17 @@ class GrafanaMetricsService:
         This ensures Grafana dashboards have data to display.
         """
         from src.services.prometheus_metrics import (
-            fastapi_requests_total,
-            fastapi_requests_duration_seconds,
-            fastapi_requests_in_progress,
-            model_inference_requests,
-            model_inference_duration,
-            tokens_used,
-            provider_availability,
-            provider_error_rate,
+            active_connections,
             cache_hits,
             cache_misses,
-            active_connections,
+            fastapi_requests_duration_seconds,
+            fastapi_requests_in_progress,
+            fastapi_requests_total,
+            model_inference_duration,
+            model_inference_requests,
+            provider_availability,
+            provider_error_rate,
+            tokens_used,
         )
 
         # Synthetic request data for common endpoints
@@ -291,8 +291,8 @@ class GrafanaMetricsService:
         # Add trace context if available
         try:
             from src.config.opentelemetry_config import (
-                get_current_trace_id,
                 get_current_span_id,
+                get_current_trace_id,
             )
 
             trace_id = get_current_trace_id()

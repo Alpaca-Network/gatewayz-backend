@@ -17,7 +17,8 @@ Usage:
 """
 
 import logging
-from typing import Any, Optional, Dict
+from typing import Any, Dict, Optional
+
 from src.utils.security_validators import sanitize_for_logging
 
 

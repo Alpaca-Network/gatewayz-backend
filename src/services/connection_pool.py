@@ -111,11 +111,16 @@ def _get_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
 ) -> httpx.Client:
-    """Create an HTTP client with connection pooling and keepalive."""
+    """Create an HTTP client with connection pooling and keepalive.
+
+    Note: HTTP/2 is disabled by default to prevent "Bad file descriptor" errors
+    when servers close idle connections. HTTP/1.1 with keepalive provides better
+    stability for long-running services.
+    """
     return httpx.Client(
         timeout=timeout,
         limits=limits,
-        http2=True,  # Enable HTTP/2 for multiplexing
+        http2=False,  # Disable HTTP/2 to prevent stale connection issues
         follow_redirects=True,
     )
 
@@ -132,11 +137,16 @@ def _get_async_http_client(
     timeout: httpx.Timeout = DEFAULT_TIMEOUT,
     limits: httpx.Limits = DEFAULT_LIMITS,
 ) -> httpx.AsyncClient:
-    """Create an async HTTP client with connection pooling and keepalive."""
+    """Create an async HTTP client with connection pooling and keepalive.
+
+    Note: HTTP/2 is disabled by default to prevent "Bad file descriptor" errors
+    when servers close idle connections. HTTP/1.1 with keepalive provides better
+    stability for long-running services.
+    """
     return httpx.AsyncClient(
         timeout=timeout,
         limits=limits,
-        http2=True,
+        http2=False,  # Disable HTTP/2 to prevent stale connection issues
         follow_redirects=True,
     )
 
@@ -428,13 +438,13 @@ def get_clarifai_pooled_client() -> OpenAI:
 
 
 def get_onerouter_pooled_client() -> OpenAI:
-    """Get pooled client for OneRouter."""
+    """Get pooled client for Infron AI (formerly OneRouter)."""
     if not Config.ONEROUTER_API_KEY:
-        raise ValueError("OneRouter API key not configured")
+        raise ValueError("Infron AI API key not configured")
 
     return get_pooled_client(
         provider="onerouter",
-        base_url="https://llm.onerouter.pro/v1",
+        base_url="https://llm.infron.ai/v1",
         api_key=Config.ONEROUTER_API_KEY,
     )
 
@@ -448,6 +458,22 @@ def get_groq_pooled_client() -> OpenAI:
         provider="groq",
         base_url="https://api.groq.com/openai/v1",
         api_key=Config.GROQ_API_KEY,
+    )
+
+
+def get_zai_pooled_client() -> OpenAI:
+    """Get pooled client for Z.AI (Zhipu AI).
+
+    Z.AI provides OpenAI-compatible API endpoints for the GLM model family.
+    See: https://docs.z.ai
+    """
+    if not Config.ZAI_API_KEY:
+        raise ValueError("Z.AI API key not configured")
+
+    return get_pooled_client(
+        provider="zai",
+        base_url="https://api.z.ai/api/paas/v4/",
+        api_key=Config.ZAI_API_KEY,
     )
 
 
@@ -551,6 +577,171 @@ def get_simplismart_pooled_client() -> OpenAI:
         provider="simplismart",
         base_url=SIMPLISMART_BASE_URL,
         api_key=Config.SIMPLISMART_API_KEY,
+    )
+
+
+# Sybil base URL constant
+SYBIL_BASE_URL = "https://api.sybil.com/v1"
+
+
+def get_sybil_pooled_client() -> OpenAI:
+    """Get pooled client for Sybil AI.
+
+    Sybil provides an OpenAI-compatible API endpoint for fast, open-source models
+    with GPU infrastructure for efficient inference.
+    See: https://docs.sybil.com/
+    """
+    if not Config.SYBIL_API_KEY:
+        raise ValueError("Sybil API key not configured")
+
+    return get_pooled_client(
+        provider="sybil",
+        base_url=SYBIL_BASE_URL,
+        api_key=Config.SYBIL_API_KEY,
+    )
+
+
+def get_canopywave_pooled_client() -> OpenAI:
+    """Get pooled client for Canopy Wave AI.
+
+    Canopy Wave provides an OpenAI-compatible API endpoint for open-source models
+    with serverless GPU infrastructure for efficient inference.
+    See: https://canopywave.com/docs/get-started/openai-compatible
+    """
+    if not Config.CANOPYWAVE_API_KEY:
+        raise ValueError("Canopy Wave API key not configured")
+
+    return get_pooled_client(
+        provider="canopywave",
+        base_url=Config.CANOPYWAVE_BASE_URL,
+        api_key=Config.CANOPYWAVE_API_KEY,
+    )
+
+
+# Nosana base URL constant
+NOSANA_BASE_URL = "https://dashboard.k8s.prd.nos.ci/api/v1"
+
+
+def get_nosana_pooled_client() -> OpenAI:
+    """Get pooled client for Nosana GPU Computing Network.
+
+    Nosana provides a distributed GPU computing network with OpenAI-compatible
+    API endpoints for AI model inference.
+    See: https://learn.nosana.com/api
+    """
+    if not Config.NOSANA_API_KEY:
+        raise ValueError("Nosana API key not configured")
+
+    return get_pooled_client(
+        provider="nosana",
+        base_url=NOSANA_BASE_URL,
+        api_key=Config.NOSANA_API_KEY,
+    )
+
+
+# Butter.dev timeout (slightly shorter since caching should be fast)
+# Only configure timeout when Butter.dev is enabled
+BUTTER_DEV_TIMEOUT = httpx.Timeout(
+    connect=5.0,
+    read=float(Config.BUTTER_DEV_TIMEOUT) if Config.BUTTER_DEV_ENABLED else 30.0,
+    write=10.0,
+    pool=5.0,
+)
+
+
+def get_butter_pooled_client(
+    target_provider: str,
+    target_api_key: str,
+    target_base_url: str | None = None,
+) -> OpenAI:
+    """
+    Get a pooled client that routes through Butter.dev caching proxy.
+
+    Butter.dev is a caching layer for LLM APIs that identifies patterns in
+    responses and serves cached responses to reduce costs and latency.
+
+    Args:
+        target_provider: The actual provider to route to (e.g., 'openrouter')
+        target_api_key: The API key for the target provider
+        target_base_url: Optional base URL override (Butter.dev needs this to route correctly)
+
+    Returns:
+        OpenAI client configured to route through Butter.dev
+
+    Raises:
+        ValueError: If Butter.dev is not enabled
+
+    See: https://butter.dev
+
+    Note:
+        Butter.dev acts as a transparent proxy. It uses the target provider's
+        API key and routes the request through its caching layer before
+        forwarding to the actual provider.
+    """
+    if not Config.BUTTER_DEV_ENABLED:
+        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
+
+    # Use a unique cache key that includes the target provider
+    # This ensures we don't accidentally share connections between providers
+    cache_provider = f"butter-{target_provider}"
+
+    # Butter.dev headers to help with routing and analytics
+    default_headers = {
+        "X-Butter-Target-Provider": target_provider,
+    }
+
+    # If we have a target base URL, include it so Butter.dev knows where to route
+    if target_base_url:
+        default_headers["X-Butter-Target-Base-URL"] = target_base_url
+
+    return get_pooled_client(
+        provider=cache_provider,
+        base_url=Config.BUTTER_DEV_BASE_URL,
+        api_key=target_api_key,  # Use the target provider's API key
+        default_headers=default_headers,
+        timeout=BUTTER_DEV_TIMEOUT,
+    )
+
+
+def get_butter_pooled_async_client(
+    target_provider: str,
+    target_api_key: str,
+    target_base_url: str | None = None,
+) -> AsyncOpenAI:
+    """
+    Get a pooled async client that routes through Butter.dev caching proxy.
+
+    Async version of get_butter_pooled_client for use with async request handlers.
+
+    Args:
+        target_provider: The actual provider to route to
+        target_api_key: The API key for the target provider
+        target_base_url: Optional base URL override
+
+    Returns:
+        AsyncOpenAI client configured to route through Butter.dev
+
+    Raises:
+        ValueError: If Butter.dev is not enabled
+    """
+    if not Config.BUTTER_DEV_ENABLED:
+        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
+
+    cache_provider = f"butter-{target_provider}"
+
+    default_headers = {
+        "X-Butter-Target-Provider": target_provider,
+    }
+
+    if target_base_url:
+        default_headers["X-Butter-Target-Base-URL"] = target_base_url
+
+    return get_pooled_async_client(
+        provider=cache_provider,
+        base_url=Config.BUTTER_DEV_BASE_URL,
+        api_key=target_api_key,
+        default_headers=default_headers,
+        timeout=BUTTER_DEV_TIMEOUT,
     )
 
 

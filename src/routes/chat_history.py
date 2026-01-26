@@ -2,6 +2,7 @@ import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from src.db.chat_history import (
     create_chat_session,
@@ -22,8 +23,6 @@ from src.db.feedback import (
     save_message_feedback,
     update_feedback,
 )
-from src.services.user_lookup_cache import get_user
-from src.services.background_tasks import log_activity_background
 from src.schemas.chat import (
     ChatSessionResponse,
     ChatSessionsListResponse,
@@ -38,8 +37,9 @@ from src.schemas.chat import (
     UpdateChatSessionRequest,
     UpdateMessageFeedbackRequest,
 )
-from pydantic import BaseModel
 from src.security.deps import get_api_key
+from src.services.background_tasks import log_activity_background
+from src.services.user_lookup_cache import get_user
 
 # Initialize logging
 logger = logging.getLogger(__name__)

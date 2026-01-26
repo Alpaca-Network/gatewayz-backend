@@ -8,8 +8,8 @@ Nebius Token Factory provides access to various LLM models including DeepSeek, L
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from src.cache import _nebius_models_cache
@@ -228,7 +228,25 @@ def fetch_models_from_nebius():
 
 
 def _fallback_nebius_models(reason: str) -> list[dict[str, Any]] | None:
-    logger.warning("Using static Nebius model catalog (%s)", reason)
+    logger.warning("Using fallback Nebius model catalog (%s)", reason)
+
+    # Try database fallback first (dynamic, from last successful sync)
+    try:
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = get_fallback_models_from_db("nebius")
+        if db_fallback:
+            normalized = [
+                model for model in (_normalize_nebius_model(entry) for entry in db_fallback) if model
+            ]
+            if normalized:
+                logger.info(f"Using {len(normalized)} Nebius models from database fallback")
+                return normalized
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for Nebius: {e}")
+
+    # Static fallback as last resort
+    logger.warning("Database fallback empty, using static fallback for Nebius")
     normalized = [
         model for model in (_normalize_nebius_model(entry) for entry in DEFAULT_NEBIUS_MODELS) if model
     ]

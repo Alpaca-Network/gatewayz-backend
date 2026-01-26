@@ -1,29 +1,32 @@
 """Trial Analytics Routes - Admin endpoints for monitoring trial usage and conversions"""
+import json
 import logging
-from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Query
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from src.config.redis_config import get_redis_config
+from src.config.supabase_config import get_supabase_client
 from src.schemas.trial_analytics import (
-    TrialUsersResponse,
-    TrialUser,
-    TrialUsersPagination,
-    DomainAnalysisResponse,
-    DomainAnalysis,
-    ConversionFunnelResponse,
-    ConversionFunnelData,
-    ConversionBreakdown,
-    IPAnalysisResponse,
-    IPAnalysis,
-    SaveConversionMetricsRequest,
-    SaveConversionMetricsResponse,
+    BestWorstCohort,
     CohortAnalysisResponse,
     CohortData,
     CohortSummary,
-    BestWorstCohort,
+    ConversionBreakdown,
+    ConversionFunnelData,
+    ConversionFunnelResponse,
+    DomainAnalysis,
+    DomainAnalysisResponse,
+    IPAnalysis,
+    IPAnalysisResponse,
+    SaveConversionMetricsRequest,
+    SaveConversionMetricsResponse,
+    TrialUser,
+    TrialUsersPagination,
+    TrialUsersResponse,
 )
 from src.security.deps import require_admin
-from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -283,31 +286,69 @@ async def get_domain_analysis(
     admin_user: dict = Depends(require_admin),
 ):
     """
-    Analyze trial users by email domain to detect potential abuse
+    Analyze trial users by email domain to detect potential abuse with Redis caching
 
     **Purpose:** Group users by domain and calculate abuse scores
     """
+    CACHE_KEY = "trial:domain:analysis"
+    CACHE_TTL = 300  # 5 minutes
+
     try:
+        # Try to get from cache first
+        redis_config = get_redis_config()
+        cached_data = redis_config.get_cache(CACHE_KEY)
+
+        if cached_data:
+            try:
+                logger.info("Returning domain analysis from cache")
+                cached_result = json.loads(cached_data)
+                # Return properly formatted response
+                return DomainAnalysisResponse(
+                    success=True,
+                    domains=[DomainAnalysis(**d) for d in cached_result['domains']],
+                    suspicious_domains=cached_result['suspicious_domains']
+                )
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.warning(f"Failed to decode cached domain analysis: {e}, fetching fresh data")
+
         client = get_supabase_client()
         current_time = datetime.now(timezone.utc)
 
         # Fetch all trial users with their API key data
-        result = (
-            client.table("users")
-            .select(
-                "id, email, "
-                "api_keys_new!inner("
-                "is_trial, trial_converted, trial_end_date, "
-                "trial_used_tokens, trial_used_requests, trial_used_credits"
-                ")"
+        # Note: Supabase has a default limit of 1000, so we need to paginate
+        all_data = []
+        page_size = 1000
+        offset = 0
+
+        while True:
+            result = (
+                client.table("users")
+                .select(
+                    "id, email, "
+                    "api_keys_new!inner("
+                    "is_trial, trial_converted, trial_end_date, "
+                    "trial_used_tokens, trial_used_requests, trial_used_credits"
+                    ")"
+                )
+                .range(offset, offset + page_size - 1)
+                .execute()
             )
-            .execute()
-        )
+
+            if not result.data or len(result.data) == 0:
+                break
+
+            all_data.extend(result.data)
+
+            # If we got less than page_size, we've reached the end
+            if len(result.data) < page_size:
+                break
+
+            offset += page_size
 
         # Group by domain
         domain_stats = {}
 
-        for row in result.data if result.data else []:
+        for row in all_data:
             email = row.get("email", "")
             domain = email.split("@")[1] if "@" in email else "unknown"
 
@@ -389,11 +430,24 @@ async def get_domain_analysis(
         # Sort by abuse score descending
         domains.sort(key=lambda x: x.abuse_score, reverse=True)
 
-        return DomainAnalysisResponse(
+        response_data = DomainAnalysisResponse(
             success=True,
             domains=domains,
             suspicious_domains=suspicious_domains,
         )
+
+        # Cache the result
+        try:
+            cache_payload = {
+                "domains": [d.dict() for d in domains],
+                "suspicious_domains": suspicious_domains
+            }
+            redis_config.set_cache(CACHE_KEY, json.dumps(cache_payload), CACHE_TTL)
+            logger.info("Domain analysis cached successfully")
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache domain analysis: {cache_error}")
+
+        return response_data
 
     except Exception as e:
         logger.error(f"Error analyzing domains: {e}")
@@ -413,26 +467,58 @@ async def get_conversion_funnel(
         client = get_supabase_client()
 
         # Fetch all trial API keys with conversion data
-        result = (
-            client.table("api_keys_new")
-            .select(
-                "id, is_trial, trial_converted, trial_used_requests, trial_used_tokens, created_at"
+        # Paginate to get all records beyond 1000 limit
+        all_trials = []
+        page_size = 1000
+        offset = 0
+
+        while True:
+            result = (
+                client.table("api_keys_new")
+                .select(
+                    "id, is_trial, trial_converted, trial_used_requests, trial_used_tokens, created_at"
+                )
+                .eq("is_trial", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
             )
-            .eq("is_trial", True)
-            .execute()
-        )
+
+            if not result.data or len(result.data) == 0:
+                break
+
+            all_trials.extend(result.data)
+
+            if len(result.data) < page_size:
+                break
+
+            offset += page_size
 
         # Fetch conversion metrics
-        conversion_metrics_result = (
-            client.table("trial_conversion_metrics")
-            .select("requests_at_conversion, tokens_at_conversion")
-            .execute()
-        )
+        all_conversion_metrics = []
+        offset = 0
 
-        conversion_metrics = conversion_metrics_result.data if conversion_metrics_result.data else []
+        while True:
+            conversion_metrics_result = (
+                client.table("trial_conversion_metrics")
+                .select("requests_at_conversion, tokens_at_conversion")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+
+            if not conversion_metrics_result.data or len(conversion_metrics_result.data) == 0:
+                break
+
+            all_conversion_metrics.extend(conversion_metrics_result.data)
+
+            if len(conversion_metrics_result.data) < page_size:
+                break
+
+            offset += page_size
+
+        conversion_metrics = all_conversion_metrics
 
         # Initialize counters
-        total_trials = len(result.data) if result.data else 0
+        total_trials = len(all_trials)
         made_first_request = 0
         made_10_requests = 0
         made_50_requests = 0
@@ -444,7 +530,7 @@ async def get_conversion_funnel(
         converted_between_50_100 = 0
         converted_after_100 = 0
 
-        for row in result.data if result.data else []:
+        for row in all_trials:
             requests = row.get("trial_used_requests", 0)
 
             if requests >= 1:
@@ -617,27 +703,57 @@ async def get_cohort_analysis(
             period_label = "Month"
 
         # Fetch all trial API keys with their creation dates and conversion data
-        all_trials_result = (
-            client.table("api_keys_new")
-            .select(
-                "id, created_at, is_trial, trial_converted, trial_start_date, "
-                "trial_used_requests, trial_used_tokens"
-            )
-            .eq("is_trial", True)
-            .execute()
-        )
+        # Paginate to get all records beyond 1000 limit
+        all_trials_data = []
+        page_size = 1000
+        offset = 0
 
-        all_trials_data = all_trials_result.data if all_trials_result.data else []
+        while True:
+            all_trials_result = (
+                client.table("api_keys_new")
+                .select(
+                    "id, created_at, is_trial, trial_converted, trial_start_date, "
+                    "trial_used_requests, trial_used_tokens"
+                )
+                .eq("is_trial", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+
+            if not all_trials_result.data or len(all_trials_result.data) == 0:
+                break
+
+            all_trials_data.extend(all_trials_result.data)
+
+            if len(all_trials_result.data) < page_size:
+                break
+
+            offset += page_size
 
         # Fetch conversion metrics for days_to_convert calculation
-        conversion_metrics_result = (
-            client.table("trial_conversion_metrics")
-            .select("api_key_id, conversion_date, trial_days_used")
-            .execute()
-        )
+        all_conversion_metrics = []
+        offset = 0
+
+        while True:
+            conversion_metrics_result = (
+                client.table("trial_conversion_metrics")
+                .select("api_key_id, conversion_date, trial_days_used")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+
+            if not conversion_metrics_result.data or len(conversion_metrics_result.data) == 0:
+                break
+
+            all_conversion_metrics.extend(conversion_metrics_result.data)
+
+            if len(conversion_metrics_result.data) < page_size:
+                break
+
+            offset += page_size
 
         conversion_metrics_map = {}
-        for metric in conversion_metrics_result.data if conversion_metrics_result.data else []:
+        for metric in all_conversion_metrics:
             conversion_metrics_map[metric["api_key_id"]] = metric
 
         # Group trials by cohort

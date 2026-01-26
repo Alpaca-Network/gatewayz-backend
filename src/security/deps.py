@@ -11,8 +11,9 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from src.services.user_lookup_cache import get_user
 from src.security.security import audit_logger, validate_api_key_security
+from src.services.user_lookup_cache import get_user
+from src.utils.trial_utils import validate_trial_expiration
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)
@@ -190,9 +191,10 @@ async def get_api_key(
 
 async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any]:
     """
-    Get the current authenticated user
+    Get the current authenticated user and validate trial expiration
 
-    Chains with get_api_key to extract full user object.
+    Chains with get_api_key to extract full user object and checks
+    if trial period has expired for trial users.
 
     Args:
         api_key: Validated API key
@@ -201,12 +203,16 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
         User dictionary with all data
 
     Raises:
-        HTTPException: 404 if user not found
+        HTTPException: 404 if user not found, 402 if trial expired
     """
     user = get_user(api_key)
 
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Check if trial has expired
+    # Validate trial expiration using centralized utility
+    validate_trial_expiration(user)
 
     return user
 
@@ -338,18 +344,21 @@ async def check_credits(
     user: dict[str, Any] = Depends(get_current_user), min_credits: float = 0.0
 ) -> dict[str, Any]:
     """
-    Check if user has sufficient credits
+    Check if user has sufficient credits and trial hasn't expired
 
     Args:
         user: Current user
         min_credits: Minimum credits required
 
     Returns:
-        User if credits sufficient
+        User if credits sufficient and trial valid
 
     Raises:
-        HTTPException: 402 if insufficient credits
+        HTTPException: 402 if insufficient credits or trial expired
     """
+    # Check if trial has expired using centralized utility
+    validate_trial_expiration(user)
+
     current_credits = user.get("credits", 0.0)
 
     if current_credits < min_credits:

@@ -1,0 +1,47 @@
+# Tempo 2.x configuration - single binary mode
+target: all
+
+server:
+  http_listen_port: 3200
+  grpc_listen_port: 3201
+  http_listen_address: "0.0.0.0"
+  grpc_listen_address: "0.0.0.0"
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+ingester:
+  max_block_duration: 5m
+  trace_idle_period: 10s
+  max_block_bytes: 500000000
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/traces
+    wal:
+      path: /var/tempo/wal
+    block:
+      bloom_filter_false_positive: 0.05
+
+# Query limits to prevent OOM
+query_frontend:
+  max_retries: 2
+
+querier:
+  max_concurrent_queries: 5
+
+# Memory limits for Railway (limited resources)
+overrides:
+  defaults:
+    ingestion:
+      max_traces_per_user: 5000
+    read:
+      max_bytes_per_tag_values_query: 5000000

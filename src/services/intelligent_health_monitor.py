@@ -741,9 +741,9 @@ class IntelligentHealthMonitor:
     async def _publish_health_to_cache(self):
         """Publish aggregated health data to Redis cache for main API consumption"""
         try:
+            from src.config.redis_config import get_redis_config
             from src.config.supabase_config import supabase
             from src.services.simple_health_cache import simple_health_cache
-            from src.config.redis_config import get_redis_config
 
             # Debug log to check Redis connection
             redis_config = get_redis_config()
@@ -913,12 +913,75 @@ class IntelligentHealthMonitor:
             for p in providers_data:
                 gw = p.get("gateway", "unknown")
                 if gw not in gateway_health:
-                    gateway_health[gw] = {"healthy": False, "status": "offline"}
+                    gateway_health[gw] = {
+                        "healthy": False,
+                        "status": "offline",
+                        "latency_ms": 0,
+                        "available": False,
+                        "last_check": None,
+                        "error": None
+                    }
                 if p.get("status") == "online":
                     gateway_health[gw]["healthy"] = True
                     gateway_health[gw]["status"] = "online"
+                    gateway_health[gw]["available"] = True
+                    gateway_health[gw]["latency_ms"] = p.get("avg_response_time_ms", 0)
+                    gateway_health[gw]["last_check"] = p.get("last_checked")
                 elif p.get("status") == "degraded" and gateway_health[gw]["status"] == "offline":
                     gateway_health[gw]["status"] = "degraded"
+
+            # Add all gateways from GATEWAY_CONFIG that aren't tracked yet
+            # Check cache and API key status to determine appropriate status
+            try:
+                from src.services.gateway_health_service import GATEWAY_CONFIG
+                for gateway_name, gateway_config in GATEWAY_CONFIG.items():
+                    if gateway_name not in gateway_health:
+                        # Check if API key is configured (static_catalog is valid for some gateways)
+                        api_key = gateway_config.get("api_key")
+                        url = gateway_config.get("url")
+                        # Gateway is considered configured if it has an API key OR doesn't need one (url is None)
+                        has_api_key = api_key is not None and api_key != ""
+                        needs_api_key = url is not None  # Gateways with url=None use static catalogs
+
+                        # Check if cache has models
+                        cache = gateway_config.get("cache", {})
+                        cache_data = cache.get("data") if cache else None
+                        has_cached_models = cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        model_count = len(cache_data) if has_cached_models else 0
+
+                        # Determine status and error based on configuration state
+                        if needs_api_key and not has_api_key:
+                            status = "unconfigured"
+                            error_msg = f"API key not configured. Set {gateway_config.get('api_key_env', 'API_KEY')} environment variable."
+                            is_healthy = False
+                        elif has_cached_models:
+                            # Has models in cache - gateway is available
+                            status = "healthy"
+                            error_msg = None
+                            is_healthy = True
+                        elif not needs_api_key:
+                            # Static catalog gateway without cached models yet
+                            status = "pending"
+                            error_msg = "Static catalog not yet loaded. Models will appear on first request."
+                            is_healthy = False
+                        else:
+                            # Has API key but no models in cache - needs sync
+                            status = "pending"
+                            error_msg = "Models not yet synced. They will appear when first accessed."
+                            is_healthy = False
+
+                        gateway_health[gateway_name] = {
+                            "healthy": is_healthy,
+                            "status": status,
+                            "latency_ms": None,
+                            "available": is_healthy,
+                            "last_check": datetime.now(timezone.utc).isoformat(),
+                            "error": error_msg,
+                            "total_models": model_count,
+                            "configured": has_api_key or not needs_api_key,
+                        }
+            except Exception as e:
+                logger.warning(f"Failed to add unconfigured gateways: {e}")
 
             healthy_gateways = sum(1 for g in gateway_health.values() if g.get("healthy", False))
 
@@ -941,7 +1004,8 @@ class IntelligentHealthMonitor:
             }
 
             simple_health_cache.cache_system_health(system_data)
-            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy), tracked: {tracked_models} models")
+            simple_health_cache.cache_gateways_health(gateway_health)
+            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy / {len(gateway_health)} cached), tracked: {tracked_models} models")
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")

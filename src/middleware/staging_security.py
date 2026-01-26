@@ -156,7 +156,10 @@ class StagingSecurityMiddleware:
         forwarded_for = headers.get(b"x-forwarded-for", b"").decode()
         if forwarded_for:
             # X-Forwarded-For can be comma-separated, take the first IP
-            return forwarded_for.split(",")[0].strip()
+            # Defensive bounds checking to prevent potential issues
+            parts = forwarded_for.split(",")
+            if parts:  # Defensive check (split always returns at least [''])
+                return parts[0].strip()
 
         # Fall back to direct connection IP
         client = scope.get("client")

@@ -16,12 +16,10 @@ The db.users module handles:
 import logging
 from typing import Any
 
-from src.db.users import (
-    get_user as db_get_user,
-    clear_user_cache as db_clear_cache,
-    get_user_cache_stats as db_get_cache_stats,
-    invalidate_user_cache as db_invalidate_cache,
-)
+from src.db.users import clear_user_cache as db_clear_cache
+from src.db.users import get_user as db_get_user
+from src.db.users import get_user_cache_stats as db_get_cache_stats
+from src.db.users import invalidate_user_cache as db_invalidate_cache
 
 logger = logging.getLogger(__name__)
 

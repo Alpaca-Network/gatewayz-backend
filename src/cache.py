@@ -1,7 +1,7 @@
 """Cache module for storing model and provider data"""
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +99,13 @@ _nebius_models_cache = {
 
 _xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
 
+_zai_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,
+    "stale_ttl": 7200,
+}  # 1 hour TTL for Z.AI
+
 _novita_models_cache = {
     "data": None,
     "timestamp": None,
@@ -182,7 +189,7 @@ _alibaba_models_cache = {
 _onerouter_models_cache = {
     "data": None,
     "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for OneRouter catalog
+    "ttl": 3600,  # 1 hour TTL for Infron AI (formerly OneRouter) catalog
     "stale_ttl": 7200,
 }
 
@@ -221,6 +228,27 @@ _simplismart_models_cache = {
     "stale_ttl": 7200,
 }
 
+_sybil_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Sybil catalog
+    "stale_ttl": 7200,
+}
+
+_canopywave_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Canopy Wave catalog
+    "stale_ttl": 7200,
+}
+
+_morpheus_models_cache = {
+    "data": None,
+    "timestamp": None,
+    "ttl": 3600,  # 1 hour TTL for Morpheus AI Gateway catalog
+    "stale_ttl": 7200,
+}
+
 # BACKWARD COMPATIBILITY: Alias for old cache name
 # Some deployed modules may still reference the old name
 _hug_models_cache = _huggingface_models_cache
@@ -245,6 +273,7 @@ def get_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
@@ -262,6 +291,9 @@ def get_models_cache(gateway: str):
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
+        "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
+        "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
     return cache_map.get(gateway.lower())
@@ -286,6 +318,7 @@ def clear_models_cache(gateway: str):
         "cerebras": _cerebras_models_cache,
         "nebius": _nebius_models_cache,
         "xai": _xai_models_cache,
+        "zai": _zai_models_cache,
         "novita": _novita_models_cache,
         "huggingface": _huggingface_models_cache,
         "hug": _huggingface_models_cache,  # Alias for backward compatibility
@@ -303,6 +336,9 @@ def clear_models_cache(gateway: str):
         "openai": _openai_models_cache,
         "anthropic": _anthropic_models_cache,
         "simplismart": _simplismart_models_cache,
+        "sybil": _sybil_models_cache,
+        "canopywave": _canopywave_models_cache,
+        "morpheus": _morpheus_models_cache,
         "modelz": _modelz_cache,
     }
     cache = cache_map.get(gateway.lower())
@@ -336,7 +372,7 @@ def is_cache_fresh(cache: dict) -> bool:
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     return cache_age < cache.get("ttl", 3600)
 
 
@@ -348,7 +384,7 @@ def is_cache_stale_but_usable(cache: dict) -> bool:
     """
     if cache.get("timestamp") is None:
         return False
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", ttl * 2)
     return ttl <= cache_age < stale_ttl
@@ -378,7 +414,7 @@ def initialize_fal_cache_from_catalog():
         # Store raw models temporarily - will be normalized on first access
         # This avoids circular import with models.py
         _fal_models_cache["data"] = raw_models
-        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _fal_models_cache["timestamp"] = datetime.now(UTC)
         logger.debug(f"Preloaded {len(raw_models)} FAL models from catalog")
 
     except (ImportError, OSError) as error:
@@ -402,7 +438,7 @@ def initialize_featherless_cache_from_catalog():
         if raw_models and len(raw_models) > 0:
             # Successfully loaded from export
             _featherless_models_cache["data"] = raw_models
-            _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
+            _featherless_models_cache["timestamp"] = datetime.now(UTC)
             logger.debug(f"Preloaded {len(raw_models)} Featherless models from catalog export")
         else:
             # No export available - initialize empty to enable lazy loading via API
@@ -422,7 +458,7 @@ def initialize_featherless_cache_from_catalog():
 # Error state caching functions
 def set_gateway_error(gateway: str, error_message: str):
     """Cache error state for a gateway with exponential backoff
-    
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
         error_message: The error message to cache
@@ -436,7 +472,7 @@ def set_gateway_error(gateway: str, error_message: str):
 
     _gateway_error_cache[gateway] = {
         "error": error_message,
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": datetime.now(UTC),
         "failure_count": failure_count,
     }
 
@@ -447,10 +483,10 @@ def set_gateway_error(gateway: str, error_message: str):
 
 def get_gateway_error_ttl(failure_count: int) -> int:
     """Calculate TTL for error cache based on failure count (exponential backoff)
-    
+
     Args:
         failure_count: Number of consecutive failures
-        
+
     Returns:
         TTL in seconds
     """
@@ -467,10 +503,10 @@ def get_gateway_error_ttl(failure_count: int) -> int:
 
 def is_gateway_in_error_state(gateway: str) -> bool:
     """Check if a gateway is currently in error state
-    
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
-        
+
     Returns:
         True if gateway is in error state and TTL hasn't expired, False otherwise
     """
@@ -487,7 +523,7 @@ def is_gateway_in_error_state(gateway: str) -> bool:
         return False
 
     ttl = get_gateway_error_ttl(failure_count)
-    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    age = (datetime.now(UTC) - timestamp).total_seconds()
 
     if age >= ttl:
         # TTL expired, clear error state
@@ -499,7 +535,7 @@ def is_gateway_in_error_state(gateway: str) -> bool:
 
 def clear_gateway_error(gateway: str):
     """Clear error state for a gateway (called after successful fetch)
-    
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
     """
@@ -510,10 +546,10 @@ def clear_gateway_error(gateway: str):
 
 def get_gateway_error_message(gateway: str) -> str | None:
     """Get the cached error message for a gateway
-    
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
-        
+
     Returns:
         Error message if gateway is in error state, None otherwise
     """

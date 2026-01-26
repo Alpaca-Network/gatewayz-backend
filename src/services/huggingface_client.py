@@ -265,6 +265,20 @@ def make_huggingface_request_openai(messages, model, **kwargs):
         response.raise_for_status()
         logger.info("Hugging Face request successful for model: %s", payload["model"])
         return response.json()
+    except httpx.HTTPStatusError as e:
+        # Log detailed error information for 400 errors to help diagnose issues
+        if e.response.status_code == 400:
+            error_body = e.response.text[:500] if hasattr(e.response, 'text') else str(e)
+            logger.error(
+                "Hugging Face 400 Bad Request for model '%s': %s. "
+                "This model may not be available on HF Inference Router despite appearing in the catalog. "
+                "Request payload: %s",
+                model,
+                error_body,
+                json.dumps(payload, default=str)[:500]
+            )
+        logger.error("Hugging Face request failed for model '%s': %s", model, e)
+        raise
     except Exception as e:
         logger.error("Hugging Face request failed for model '%s': %s", model, e)
         raise
@@ -310,6 +324,20 @@ def make_huggingface_request_openai_stream(
                     except json.JSONDecodeError as err:
                         logger.warning("Failed to decode Hugging Face stream chunk: %s", err)
                         continue
+    except httpx.HTTPStatusError as e:
+        # Log detailed error information for 400 errors to help diagnose issues
+        if e.response.status_code == 400:
+            error_body = e.response.text[:500] if hasattr(e.response, 'text') else str(e)
+            logger.error(
+                "Hugging Face 400 Bad Request (streaming) for model '%s': %s. "
+                "This model may not be available on HF Inference Router despite appearing in the catalog. "
+                "Request payload: %s",
+                model,
+                error_body,
+                json.dumps(payload, default=str)[:500]
+            )
+        logger.error("Hugging Face streaming request failed for model '%s': %s", model, e)
+        raise
     except (TypeError, ValueError) as ve:
         logger.error("Invalid request format for HuggingFace: %s", ve)
         raise

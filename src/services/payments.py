@@ -13,7 +13,6 @@ from typing import Any
 import stripe
 
 from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
-from src.utils.sentry_context import capture_payment_error
 from src.db.subscription_products import get_credits_from_tier, get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
@@ -32,6 +31,7 @@ from src.schemas.payments import (
     SubscriptionCheckoutResponse,
     WebhookProcessingResult,
 )
+from src.utils.sentry_context import capture_payment_error
 
 # Import Stripe SDK with alias to avoid conflict with schema module
 
@@ -860,28 +860,55 @@ class StripeService:
             logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
 
             # Clear trial status for the user when they purchase credits
-            # This converts trial users to paid users
+            # This converts trial users to paid users (pay-per-use, NOT subscription)
+            # IMPORTANT: subscription_status should be 'inactive' for credit purchases,
+            # NOT 'active'. 'active' subscription_status implies an actual subscription
+            # (Pro/Max tier), which would cause tier/subscription mismatch bugs.
             try:
                 from src.config.supabase_config import get_supabase_client
 
                 client = get_supabase_client()
 
-                # Update user's subscription status to 'active' (no longer on trial)
-                client.table("users").update(
-                    {
-                        "subscription_status": "active",
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    }
-                ).eq("id", user_id).execute()
+                # First check if user already has an active subscription (Pro/Max)
+                # If so, don't change their subscription_status
+                user_result = client.table("users").select("subscription_status, tier").eq("id", user_id).execute()
+                current_status = None
+                current_tier = None
+                if user_result.data and len(user_result.data) > 0:
+                    current_status = user_result.data[0].get("subscription_status")
+                    current_tier = user_result.data[0].get("tier")
+
+                # Only update subscription_status if user is on trial or has expired trial
+                # Users with active subscriptions (Pro/Max) should keep their status
+                if current_status in ("trial", "expired") or current_tier == "basic":
+                    # Set to 'inactive' - meaning no active subscription but not on trial
+                    # This is the correct status for pay-per-use credit purchasers
+                    client.table("users").update(
+                        {
+                            "subscription_status": "inactive",
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    ).eq("id", user_id).execute()
+
+                    logger.info(f"User {user_id} subscription_status updated to 'inactive' after credit purchase")
+                else:
+                    logger.info(
+                        f"User {user_id} already has subscription_status='{current_status}', "
+                        f"tier='{current_tier}' - not changing status for credit purchase"
+                    )
 
                 # Clear trial status for all user's API keys
-                client.table("api_keys_new").update(
-                    {
-                        "is_trial": False,
-                        "trial_converted": True,
-                        "subscription_status": "active",
-                    }
-                ).eq("user_id", user_id).execute()
+                # Only update subscription_status if the user doesn't have an active subscription
+                api_key_update_data = {
+                    "is_trial": False,
+                    "trial_converted": True,
+                }
+                # Only set subscription_status to 'inactive' for users without active subscriptions
+                # Pro/Max users should keep their 'active' status on API keys
+                if current_status != "active":
+                    api_key_update_data["subscription_status"] = "inactive"
+
+                client.table("api_keys_new").update(api_key_update_data).eq("user_id", user_id).execute()
 
                 logger.info(f"User {user_id} trial status cleared after credit purchase")
 
@@ -1308,6 +1335,21 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
+            # Set initial subscription allowance
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance
+
+            allowance = get_allowance_from_tier(tier)
+            if allowance > 0:
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from having active subscription but zero credits
+                    raise RuntimeError(
+                        f"Failed to set initial allowance for user {user_id} ({tier} tier). "
+                        f"Webhook will be retried by Stripe."
+                    )
+                logger.info(f"Set initial allowance of ${allowance} for user {user_id} ({tier} tier)")
+
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
             from src.db.users import invalidate_user_cache_by_id
@@ -1451,6 +1493,15 @@ class StripeService:
 
             logger.info(f"Subscription deleted for user {user_id}: {subscription.id}")
 
+            # Forfeit subscription allowance before downgrading
+            # Use raise_on_error=True to ensure data consistency - if forfeiture fails,
+            # Stripe will retry the webhook
+            from src.db.users import forfeit_subscription_allowance
+
+            forfeited = forfeit_subscription_allowance(user_id, raise_on_error=True)
+            if forfeited > 0:
+                logger.info(f"Forfeited ${forfeited} allowance for user {user_id} on subscription cancellation")
+
             # Downgrade user to basic tier
             from src.config.supabase_config import get_supabase_client
 
@@ -1507,28 +1558,25 @@ class StripeService:
             # Resolve tier from metadata or subscription items
             tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
 
-            # Get credits from database configuration
-            credits = get_credits_from_tier(tier)
+            # Reset subscription allowance (old allowance is forfeited, no carry-over)
+            from src.db.subscription_products import get_allowance_from_tier
+            from src.db.users import reset_subscription_allowance
 
-            if credits > 0:
-                # Add credits to user account
-                add_credits_to_user(
-                    user_id=user_id,
-                    credits=credits,
-                    transaction_type="subscription_renewal",
-                    description=f"Monthly subscription credits - {tier.upper()} tier",
-                    metadata={
-                        "stripe_invoice_id": invoice.id,
-                        "stripe_subscription_id": subscription.id,
-                        "tier": tier,
-                    },
-                )
-
+            allowance = get_allowance_from_tier(tier)
+            if allowance > 0:
+                # Reset allowance to full amount (old allowance is forfeited, no carry-over)
+                if not reset_subscription_allowance(user_id, allowance, tier):
+                    # If allowance reset fails, raise an exception to trigger webhook retry
+                    # This prevents a user from paying but not receiving their credits
+                    raise RuntimeError(
+                        f"Failed to reset allowance for user {user_id} ({tier} tier) "
+                        f"on invoice payment. Webhook will be retried by Stripe."
+                    )
                 logger.info(
-                    f"Added {credits} credits to user {user_id} for {tier} subscription renewal (invoice: {invoice.id})"
+                    f"Reset allowance to ${allowance} for user {user_id} ({tier} tier) on invoice payment"
                 )
             else:
-                logger.warning(f"No credits configured for tier: {tier}")
+                logger.warning(f"No allowance configured for tier: {tier}")
 
         except Exception as e:
             logger.error(f"Error handling invoice paid: {e}", exc_info=True)

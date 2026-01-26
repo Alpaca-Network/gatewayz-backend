@@ -30,6 +30,7 @@ from typing import Any
 import httpx
 
 from src.config import Config
+from datetime import UTC
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -73,26 +74,43 @@ def _ensure_vertex_imports():
     return _vertexai, _GenerativeModel
 
 
-def _get_model_location(model_name: str) -> str:
+def _get_model_location(model_name: str, try_regional_fallback: bool = False) -> str:
     """
     Determine the appropriate GCP location for a given model.
 
-    Some models are only available on global endpoints (e.g., Gemini 3 preview models),
-    while others can use regional endpoints.
+    Preview models (e.g., Gemini 3, models with 'preview' in name) are only available
+    on global endpoints. Generally available models use regional endpoints by default
+    for better performance (44-45% faster TTFC based on testing).
 
     Args:
         model_name: The model name to check
+        try_regional_fallback: If True, attempts regional endpoint even for preview models
+                               (useful for performance testing and fallback scenarios)
 
     Returns:
         The location string to use ('global' or the configured regional location)
     """
-    # Gemini 3 models are only available on the global endpoint
-    # See: https://cloud.google.com/vertex-ai/generative-ai/docs/models/gemini/3-flash
-    if "gemini-3" in model_name.lower():
+    model_lower = model_name.lower()
+
+    # Preview models require global endpoint:
+    # 1. Gemini 3 models (e.g., gemini-3-flash-preview, gemini-3-pro-preview)
+    # 2. Any model with 'preview' in the name
+    # Regional endpoints for these show ~20% failure rate (404 Model Not Found)
+    is_preview_model = "gemini-3" in model_lower or "preview" in model_lower
+
+    if is_preview_model:
+        if try_regional_fallback:
+            logger.info(
+                f"Model {model_name} normally requires global endpoint, but trying regional "
+                f"fallback ({Config.GOOGLE_VERTEX_LOCATION}) for performance optimization"
+            )
+            return Config.GOOGLE_VERTEX_LOCATION
         logger.debug(f"Model {model_name} requires global endpoint (preview model)")
         return "global"
 
-    # All other models use the configured regional location
+    # Generally available models (e.g., gemini-2.5-flash-lite, gemini-2.0-flash-exp)
+    # use regional endpoints by default for better performance
+    logger.debug(f"Model {model_name} using regional endpoint ({Config.GOOGLE_VERTEX_LOCATION}) for optimal performance")
     return Config.GOOGLE_VERTEX_LOCATION
 
 
@@ -423,7 +441,9 @@ def initialize_vertex_ai(location: str | None = None):
         # Use provided location or fall back to config
         effective_location = location or Config.GOOGLE_VERTEX_LOCATION
 
-        logger.info(f"Initializing Vertex AI with Application Default Credentials (location: {effective_location})")
+        logger.info(
+            f"Initializing Vertex AI with Application Default Credentials (location: {effective_location})"
+        )
 
         # Validate configuration & prepare environment
         _prepare_vertex_environment()
@@ -435,7 +455,9 @@ def initialize_vertex_ai(location: str | None = None):
         # The library will automatically find them from the environment
         vertexai.init(project=Config.GOOGLE_PROJECT_ID, location=effective_location)
 
-        logger.info(f"✓ Successfully initialized Vertex AI for project: {Config.GOOGLE_PROJECT_ID} in {effective_location}")
+        logger.info(
+            f"✓ Successfully initialized Vertex AI for project: {Config.GOOGLE_PROJECT_ID} in {effective_location}"
+        )
 
     except Exception as e:
         error_msg = f"Failed to initialize Vertex AI: {str(e)}"
@@ -505,7 +527,10 @@ def _make_google_vertex_request_sdk(
             raise
 
         # Step 2: Determine the appropriate location for this model
-        location = _get_model_location(model_name)
+        # Use regional fallback if configured (for A/B testing or latency optimization)
+        location = _get_model_location(
+            model_name, try_regional_fallback=Config.GOOGLE_VERTEX_REGIONAL_FALLBACK
+        )
         logger.info(f"Using location '{location}' for model '{model_name}'")
 
         # Step 3: Initialize Vertex AI with the appropriate location (will use ADC)
@@ -529,7 +554,9 @@ def _make_google_vertex_request_sdk(
             generation_config = {}
             if max_tokens is not None:
                 # Validate and clamp to Vertex AI's valid range to prevent 400 errors
-                adjusted_max_tokens = max(VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS))
+                adjusted_max_tokens = max(
+                    VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS)
+                )
                 if adjusted_max_tokens != max_tokens:
                     logger.warning(
                         f"max_tokens={max_tokens} is outside valid range ({VERTEX_MIN_OUTPUT_TOKENS}-{VERTEX_MAX_OUTPUT_TOKENS}). "
@@ -654,7 +681,9 @@ def _make_google_vertex_request_rest(
         generation_config: dict[str, Any] = {}
         if max_tokens is not None:
             # Validate and clamp to Vertex AI's valid range to prevent 400 errors
-            adjusted_max_tokens = max(VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS))
+            adjusted_max_tokens = max(
+                VERTEX_MIN_OUTPUT_TOKENS, min(max_tokens, VERTEX_MAX_OUTPUT_TOKENS)
+            )
             if adjusted_max_tokens != max_tokens:
                 logger.warning(
                     f"max_tokens={max_tokens} is outside valid range ({VERTEX_MIN_OUTPUT_TOKENS}-{VERTEX_MAX_OUTPUT_TOKENS}). "
@@ -672,7 +701,10 @@ def _make_google_vertex_request_rest(
             request_body["safetySettings"] = kwargs["safety_settings"]
 
         # Determine the appropriate location for this model
-        location = _get_model_location(model_name)
+        # Use regional fallback if configured (for A/B testing or latency optimization)
+        location = _get_model_location(
+            model_name, try_regional_fallback=Config.GOOGLE_VERTEX_REGIONAL_FALLBACK
+        )
         logger.info(f"Using location '{location}' for model '{model_name}'")
 
         # Build the API URL based on location
@@ -1372,6 +1404,9 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
 
     Uses the publishers/google/models endpoint to list all available Gemini models.
     Returns None if the API call fails, allowing fallback to static config.
+
+    Note: This function attempts both regional and global endpoints due to inconsistent
+    availability across different regions and API versions.
     """
     try:
         _prepare_vertex_environment()
@@ -1382,32 +1417,55 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
         location = Config.GOOGLE_VERTEX_LOCATION
         project_id = Config.GOOGLE_PROJECT_ID
 
-        # The publishers/google/models endpoint lists all available Gemini models
-        url = f"https://{location}-aiplatform.googleapis.com/v1/publishers/google/models"
+        # Try multiple endpoint patterns as the API availability varies by region
+        # Pattern 1: Regional endpoint with project context (most accurate for access control)
+        # Pattern 2: Regional endpoint without project (simpler, but may not respect all access)
+        # Pattern 3: Global endpoint (fallback, but doesn't always have all models)
+        endpoint_patterns = [
+            f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}/publishers/google/models",
+            f"https://{location}-aiplatform.googleapis.com/v1/publishers/google/models",
+            "https://aiplatform.googleapis.com/v1/publishers/google/models",
+        ]
 
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         }
 
-        logger.info(f"Fetching models from Vertex AI API: {url}")
+        last_error = None
+        for url in endpoint_patterns:
+            try:
+                logger.debug(f"Attempting to fetch models from Vertex AI API: {url}")
 
-        with httpx.Client(timeout=30.0) as client:
-            response = client.get(url, headers=headers)
+                with httpx.Client(timeout=30.0) as client:
+                    response = client.get(url, headers=headers)
 
-            if response.status_code != 200:
-                logger.warning(
-                    f"Vertex AI models API returned {response.status_code}: {response.text[:500]}"
-                )
-                return None
+                    if response.status_code == 200:
+                        data = response.json()
+                        models = data.get("publisherModels", [])
+                        logger.info(
+                            f"Successfully fetched {len(models)} models from Vertex AI API using endpoint: {url}"
+                        )
+                        return models
+                    else:
+                        last_error = f"Status {response.status_code}: {response.text[:500]}"
+                        logger.debug(f"Endpoint {url} returned {response.status_code}")
+                        continue
 
-            data = response.json()
-            models = data.get("publisherModels", [])
-            logger.info(f"Fetched {len(models)} models from Vertex AI API")
-            return models
+            except Exception as e:
+                last_error = str(e)
+                logger.debug(f"Endpoint {url} failed: {e}")
+                continue
+
+        # All endpoints failed
+        logger.warning(
+            f"Failed to fetch models from all Vertex AI API endpoints. Last error: {last_error}. "
+            "Falling back to static model configuration (12 models)."
+        )
+        return None
 
     except Exception as e:
-        logger.warning(f"Failed to fetch models from Vertex AI API: {e}")
+        logger.warning(f"Failed to fetch models from Vertex AI API: {e}. Using fallback configuration.")
         return None
 
 
@@ -1432,7 +1490,9 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         # Skip non-generative models (embeddings handled separately, imagen, etc.)
         # We want chat/text generation models
         supported_actions = api_model.get("supportedActions", {})
-        if not supported_actions.get("generateContent") and not supported_actions.get("streamGenerateContent"):
+        if not supported_actions.get("generateContent") and not supported_actions.get(
+            "streamGenerateContent"
+        ):
             # Check if it's an embedding model we want to include
             if not supported_actions.get("computeTokens") and "embedding" not in model_id.lower():
                 return None
@@ -1561,9 +1621,7 @@ def _get_static_model_config() -> list[dict]:
     normalized_models = []
 
     for model in multi_provider_models:
-        vertex_provider = next(
-            (p for p in model.providers if p.name == "google-vertex"), None
-        )
+        vertex_provider = next((p for p in model.providers if p.name == "google-vertex"), None)
 
         pricing = {}
         features = []
@@ -1640,7 +1698,7 @@ def fetch_models_from_google_vertex():
     Falls back to static configuration if the API call fails.
     Merges dynamic models with static config to get accurate pricing.
     """
-    from datetime import timezone, datetime
+    from datetime import datetime
 
     from src.cache import _google_vertex_models_cache
 
@@ -1696,7 +1754,7 @@ def fetch_models_from_google_vertex():
 
         # Update cache
         _google_vertex_models_cache["data"] = normalized_models
-        _google_vertex_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _google_vertex_models_cache["timestamp"] = datetime.now(UTC)
 
         return normalized_models
 

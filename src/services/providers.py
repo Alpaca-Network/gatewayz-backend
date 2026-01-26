@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -46,7 +47,15 @@ def fetch_providers_from_openrouter():
         response = httpx.get("https://openrouter.ai/api/v1/providers", headers=headers)
         response.raise_for_status()
 
-        providers_data = response.json()
+        try:
+            providers_data = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response from OpenRouter providers API: {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return None
+
         _provider_cache["data"] = providers_data.get("data", [])
         _provider_cache["timestamp"] = datetime.now(timezone.utc)
 
@@ -81,7 +90,7 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             "aihubmix": "https://aihubmix.com/favicon.ico",
             "anannas": "https://api.anannas.ai/favicon.ico",
             "alpaca-network": "https://console.anyscale.com/favicon.ico",
-            "onerouter": "https://onerouter.pro/favicon.ico",
+            "onerouter": "https://infron.ai/favicon.ico",
             "simplismart": "https://simplismart.ai/favicon.ico",
         }
 
@@ -190,8 +199,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["privacy_policy_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse privacy_policy_url for provider: {e}")
 
             # Try terms of service URL if privacy policy didn't work
             if not site_url and provider.get("terms_of_service_url"):
@@ -200,8 +209,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["terms_of_service_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse terms_of_service_url for provider: {e}")
 
             # Try status page URL if others didn't work
             if not site_url and provider.get("status_page_url"):
@@ -210,8 +219,8 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 
                     parsed = urlparse(provider["status_page_url"])
                     site_url = f"{parsed.scheme}://{parsed.netloc}"
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Failed to parse status_page_url for provider: {e}")
 
             # Manual mapping for known providers
             if not site_url:
@@ -294,7 +303,7 @@ def fetch_models_from_novita():
 
 
 def fetch_models_from_onerouter():
-    """Fetch models from OneRouter client"""
+    """Fetch models from Infron AI client"""
     from src.services.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()

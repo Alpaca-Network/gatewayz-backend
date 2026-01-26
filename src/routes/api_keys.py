@@ -3,10 +3,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.services.auth_rate_limiting import (
-    AuthRateLimitType,
-    check_auth_rate_limit,
-)
 from src.db.api_keys import (
     create_api_key,
     delete_api_key,
@@ -16,7 +12,6 @@ from src.db.api_keys import (
     update_api_key,
     validate_api_key_permissions,
 )
-from src.services.user_lookup_cache import get_user
 from src.schemas import (
     ApiKeyResponse,
     CreateApiKeyRequest,
@@ -25,6 +20,11 @@ from src.schemas import (
     UpdateApiKeyResponse,
 )
 from src.security.deps import get_api_key
+from src.services.auth_rate_limiting import (
+    AuthRateLimitType,
+    check_auth_rate_limit,
+)
+from src.services.user_lookup_cache import get_user
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging

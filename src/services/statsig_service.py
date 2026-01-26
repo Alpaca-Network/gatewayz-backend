@@ -69,8 +69,14 @@ class StatsigService:
             self._StatsigUser = StatsigUser
             self._StatsigOptions = StatsigOptions
 
-            # Create Statsig options
+            # Create Statsig options with event batching configuration
             options = StatsigOptions()
+
+            # Configure event batching for more reliable delivery
+            # Flush events every 10 seconds (instead of default ~60s)
+            options.event_logging_flush_interval_ms = 10000
+            # Flush when 50 events are queued (instead of default ~500)
+            options.event_logging_max_queue_size = 50
 
             # Set environment tier
             app_env = os.environ.get("APP_ENV", "development")
@@ -174,6 +180,72 @@ class StatsigService:
             logger.error(f"   Traceback:\n{traceback.format_exc()}")
             return False
 
+    def log_session_start(
+        self,
+        user_id: str,
+        platform: str = "web",
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Log a session start event for DAU/WAU/MAU tracking.
+
+        This event is used by Statsig to compute Product Growth metrics
+        (Daily/Weekly/Monthly Active Users, stickiness, retention).
+
+        Args:
+            user_id: User identifier (required)
+            platform: Platform identifier (web, ios, android, desktop)
+            metadata: Optional additional session metadata
+
+        Returns:
+            True if logged successfully, False otherwise
+
+        Example:
+            statsig_service.log_session_start(
+                user_id="user123",
+                platform="web",
+                metadata={"version": "2.0.0", "referrer": "google"}
+            )
+        """
+        event_metadata = {"platform": platform}
+        if metadata:
+            event_metadata.update(metadata)
+
+        return self.log_event(
+            user_id=user_id,
+            event_name="session_start",
+            metadata=event_metadata,
+        )
+
+    def log_session_end(
+        self,
+        user_id: str,
+        session_duration_seconds: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> bool:
+        """
+        Log a session end event.
+
+        Args:
+            user_id: User identifier (required)
+            session_duration_seconds: Optional session duration in seconds
+            metadata: Optional additional session metadata
+
+        Returns:
+            True if logged successfully, False otherwise
+        """
+        event_metadata = {}
+        if session_duration_seconds is not None:
+            event_metadata["duration_seconds"] = str(session_duration_seconds)
+        if metadata:
+            event_metadata.update(metadata)
+
+        return self.log_event(
+            user_id=user_id,
+            event_name="session_end",
+            metadata=event_metadata if event_metadata else None,
+        )
+
     def get_feature_flag(self, flag_name: str, user_id: str, default_value: bool = False) -> bool:
         """
         Get a feature flag value for a user.
@@ -205,18 +277,53 @@ class StatsigService:
             logger.error(f"❌ Failed to check feature flag '{flag_name}': {e}")
             return default_value
 
+    def flush(self) -> bool:
+        """
+        Flush any pending events to Statsig.
+
+        This forces an immediate flush of the event queue, useful for:
+        - Ensuring critical events are sent immediately
+        - Testing that events are being logged
+        - Pre-shutdown flush for extra reliability
+
+        Returns:
+            True if flush was successful, False otherwise
+        """
+        if self.enabled and self.statsig:
+            try:
+                # Statsig Python Core SDK uses shutdown() with wait() to flush
+                # For explicit flush without shutdown, we trigger a flush by
+                # calling flush() if available, otherwise log a warning
+                if hasattr(self.statsig, 'flush'):
+                    self.statsig.flush().wait(timeout=5)
+                    logger.debug("📤 Statsig events flushed successfully")
+                    return True
+                else:
+                    # SDK may not have explicit flush, events will be sent on next batch interval
+                    logger.debug("📤 Statsig flush requested (will send on next batch interval)")
+                    return True
+            except Exception as e:
+                logger.warning(f"⚠️  Statsig flush warning: {e}")
+                return False
+        else:
+            logger.debug("📤 Statsig flush skipped (not enabled)")
+            return True
+
     async def shutdown(self):
         """
         Gracefully shutdown Statsig SDK.
 
-        Flushes any pending events before shutdown.
+        Flushes any pending events before shutdown using .wait() to ensure
+        all events are sent before the application exits.
         Should be called during application shutdown.
         """
         if self.enabled and self.statsig:
             try:
                 logger.info("🛑 Shutting down Statsig SDK...")
-                self.statsig.shutdown()
-                logger.info("✅ Statsig shutdown complete")
+                # CRITICAL: Use .wait() to ensure all pending events are flushed
+                # before the application exits. Without .wait(), events may be lost.
+                self.statsig.shutdown().wait(timeout=10)
+                logger.info("✅ Statsig shutdown complete (events flushed)")
             except Exception as e:
                 logger.warning(f"⚠️  Statsig shutdown warning: {e}")
 

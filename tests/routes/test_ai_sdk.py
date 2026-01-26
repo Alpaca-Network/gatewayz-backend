@@ -3,19 +3,21 @@ Tests for the Vercel AI SDK endpoint.
 """
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 # Set test environment variables before imports
-os.environ.setdefault('APP_ENV', 'testing')
-os.environ.setdefault('TESTING', 'true')
-os.environ.setdefault('SUPABASE_URL', 'https://test.supabase.co')
-os.environ.setdefault('SUPABASE_KEY', 'test-key')
-os.environ.setdefault('OPENROUTER_API_KEY', 'test-openrouter-key')
-os.environ.setdefault('ENCRYPTION_KEY', 'test-encryption-key-32-bytes-long!')
-os.environ.setdefault('AI_SDK_API_KEY', 'test-ai-sdk-key')
+os.environ.setdefault("APP_ENV", "testing")
+os.environ.setdefault("TESTING", "true")
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-key")
+os.environ.setdefault("OPENROUTER_API_KEY", "test-openrouter-key")
+os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-32-bytes-long!")
+os.environ.setdefault("AI_SDK_API_KEY", "test-ai-sdk-key")
 
 from fastapi.testclient import TestClient
+
 from src.main import app
 
 # Create test client
@@ -40,9 +42,7 @@ class TestAISDKEndpoint:
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
     @patch("src.routes.ai_sdk.process_ai_sdk_response")
-    def test_ai_sdk_chat_completion_success(
-        self, mock_process, mock_request, mock_validate
-    ):
+    def test_ai_sdk_chat_completion_success(self, mock_process, mock_request, mock_validate):
         """Test successful AI SDK chat completion request"""
         # Setup mocks
         mock_validate.return_value = "test-api-key"
@@ -55,9 +55,7 @@ class TestAISDKEndpoint:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         # Mock processed response
@@ -182,9 +180,7 @@ class TestAISDKEndpoint:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=15, completion_tokens=5, total_tokens=20
-        )
+        mock_response.usage = MagicMock(prompt_tokens=15, completion_tokens=5, total_tokens=20)
         mock_request.return_value = mock_response
 
         # Mock processed response
@@ -229,9 +225,7 @@ class TestAISDKEndpoint:
     @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
     @patch("src.routes.ai_sdk.process_ai_sdk_response")
-    def test_ai_sdk_completions_endpoint_works(
-        self, mock_process, mock_request, mock_validate
-    ):
+    def test_ai_sdk_completions_endpoint_works(self, mock_process, mock_request, mock_validate):
         """Test that the -completions variant endpoint works identically"""
         # Setup mocks
         mock_validate.return_value = "test-api-key"
@@ -244,9 +238,7 @@ class TestAISDKEndpoint:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         # Mock processed response
@@ -350,9 +342,7 @@ class TestAISDKModelRouting:
 
     @patch("src.routes.ai_sdk.make_openrouter_request_openai")
     @patch("src.routes.ai_sdk.process_openrouter_response")
-    def test_openrouter_auto_routes_to_openrouter(
-        self, mock_process, mock_request
-    ):
+    def test_openrouter_auto_routes_to_openrouter(self, mock_process, mock_request):
         """Test that openrouter/auto is routed directly to OpenRouter"""
         mock_response = MagicMock()
         mock_response.choices = [
@@ -361,9 +351,7 @@ class TestAISDKModelRouting:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         mock_process.return_value = {
@@ -551,10 +539,14 @@ class TestAISDKStreamingReasoningContent:
 
         # Mock streaming response with reasoning_content (e.g., Claude extended thinking)
         mock_chunk1 = MagicMock()
-        mock_chunk1.choices = [MagicMock(delta=MagicMock(content=None, reasoning_content="Let me think..."))]
+        mock_chunk1.choices = [
+            MagicMock(delta=MagicMock(content=None, reasoning_content="Let me think..."))
+        ]
 
         mock_chunk2 = MagicMock()
-        mock_chunk2.choices = [MagicMock(delta=MagicMock(content="Here's my answer", reasoning_content=None))]
+        mock_chunk2.choices = [
+            MagicMock(delta=MagicMock(content="Here's my answer", reasoning_content=None))
+        ]
 
         # Create async iterator mock
         async def mock_async_iter():
@@ -587,10 +579,14 @@ class TestAISDKStreamingReasoningContent:
 
         # Mock streaming response with ONLY reasoning_content (no text)
         mock_chunk1 = MagicMock()
-        mock_chunk1.choices = [MagicMock(delta=MagicMock(content=None, reasoning_content="Step 1: Analyze"))]
+        mock_chunk1.choices = [
+            MagicMock(delta=MagicMock(content=None, reasoning_content="Step 1: Analyze"))
+        ]
 
         mock_chunk2 = MagicMock()
-        mock_chunk2.choices = [MagicMock(delta=MagicMock(content=None, reasoning_content=" Step 2: Compute"))]
+        mock_chunk2.choices = [
+            MagicMock(delta=MagicMock(content=None, reasoning_content=" Step 2: Compute"))
+        ]
 
         # Create async iterator mock
         async def mock_async_iter():
@@ -656,10 +652,14 @@ class TestAISDKStreamingReasoningContent:
 
         # Mock streaming response with reasoning_content via OpenRouter
         mock_chunk1 = MagicMock()
-        mock_chunk1.choices = [MagicMock(delta=MagicMock(content=None, reasoning_content="OpenRouter thinking..."))]
+        mock_chunk1.choices = [
+            MagicMock(delta=MagicMock(content=None, reasoning_content="OpenRouter thinking..."))
+        ]
 
         mock_chunk2 = MagicMock()
-        mock_chunk2.choices = [MagicMock(delta=MagicMock(content="OpenRouter answer", reasoning_content=None))]
+        mock_chunk2.choices = [
+            MagicMock(delta=MagicMock(content="OpenRouter answer", reasoning_content=None))
+        ]
 
         # Create async iterator mock
         async def mock_async_iter():
@@ -722,18 +722,278 @@ class TestAISDKStreamingReasoningContent:
         assert "Should not appear" not in content
 
 
+class TestAISDKAuthentication:
+    """Tests for AI SDK endpoint authentication requirement"""
+
+    def test_ai_sdk_requires_authentication(self):
+        """Test that AI SDK endpoints require API key authentication"""
+        # Request without any authentication should fail
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        # Should return 401 Unauthorized (or 403 if using different auth pattern)
+        assert response.status_code in [401, 403, 422]
+
+    def test_ai_sdk_completions_requires_authentication(self):
+        """Test that AI SDK completions endpoint requires API key authentication"""
+        # Request without any authentication should fail
+        response = client.post(
+            "/api/chat/ai-sdk-completions",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        # Should return 401 Unauthorized (or 403 if using different auth pattern)
+        assert response.status_code in [401, 403, 422]
+
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
+    @patch("src.routes.ai_sdk.get_api_key")
+    def test_ai_sdk_invalid_api_key(self, mock_get_api_key, mock_validate_trial, mock_get_user):
+        """Test that invalid API key returns 401"""
+        mock_get_api_key.return_value = "invalid-key"
+        mock_get_user.return_value = None  # User not found
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 401
+        assert "invalid api key" in response.text.lower()
+
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
+    @patch("src.routes.ai_sdk.get_api_key")
+    def test_ai_sdk_trial_expired(self, mock_get_api_key, mock_validate_trial, mock_get_user):
+        """Test that expired trial returns 403"""
+        mock_get_api_key.return_value = "test-key"
+        mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
+        mock_validate_trial.return_value = {"is_valid": False, "error": "Trial expired"}
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 403
+        assert "trial expired" in response.text.lower()
+
+
+class TestAISDKCreditDeduction:
+    """Tests for AI SDK endpoint credit deduction"""
+
+    @patch("src.routes.ai_sdk.record_usage")
+    @patch("src.routes.ai_sdk.deduct_credits")
+    @patch("src.routes.ai_sdk.calculate_cost")
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
+    @patch("src.routes.ai_sdk.get_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
+    @patch("src.routes.ai_sdk.process_ai_sdk_response")
+    def test_ai_sdk_deducts_credits_for_non_trial(
+        self,
+        mock_process,
+        mock_request,
+        mock_get_api_key,
+        mock_validate_trial,
+        mock_get_user,
+        mock_calculate_cost,
+        mock_deduct_credits,
+        mock_record_usage,
+    ):
+        """Test that AI SDK deducts credits for non-trial users"""
+        # Setup mocks
+        mock_get_api_key.return_value = "test-key"
+        mock_get_user.return_value = {"id": 1, "email": "test@example.com", "key_id": "key-123"}
+        mock_validate_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_calculate_cost.return_value = 0.05  # $0.05 cost
+
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(role="assistant", content="Hello!"),
+                finish_reason="stop",
+            )
+        ]
+        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+        mock_request.return_value = mock_response
+
+        mock_process.return_value = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        }
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 200
+        # Verify credits were deducted
+        mock_deduct_credits.assert_called_once()
+        call_args = mock_deduct_credits.call_args
+        assert call_args[0][0] == "test-key"  # api_key
+        assert call_args[0][1] == 0.05  # cost
+        # Verify usage was recorded
+        mock_record_usage.assert_called_once()
+
+    @patch("src.routes.ai_sdk.track_trial_usage")
+    @patch("src.routes.ai_sdk.deduct_credits")
+    @patch("src.routes.ai_sdk.calculate_cost")
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
+    @patch("src.routes.ai_sdk.get_api_key")
+    @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
+    @patch("src.routes.ai_sdk.process_ai_sdk_response")
+    def test_ai_sdk_tracks_trial_usage(
+        self,
+        mock_process,
+        mock_request,
+        mock_get_api_key,
+        mock_validate_trial,
+        mock_get_user,
+        mock_calculate_cost,
+        mock_deduct_credits,
+        mock_track_trial,
+    ):
+        """Test that AI SDK tracks trial usage for trial users"""
+        # Setup mocks
+        mock_get_api_key.return_value = "test-key"
+        mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
+        mock_validate_trial.return_value = {"is_valid": True, "is_trial": True, "is_expired": False}
+        mock_calculate_cost.return_value = 0.05
+
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(role="assistant", content="Hello!"),
+                finish_reason="stop",
+            )
+        ]
+        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50, total_tokens=150)
+        mock_request.return_value = mock_response
+
+        mock_process.return_value = {
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        }
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openai/gpt-4",
+                "messages": [{"role": "user", "content": "Hello!"}],
+            },
+        )
+
+        assert response.status_code == 200
+        # Verify trial usage was tracked
+        mock_track_trial.assert_called_once()
+        # Verify credits were NOT deducted for trial user
+        mock_deduct_credits.assert_not_called()
+
+    @patch("src.routes.ai_sdk.deduct_credits")
+    @patch("src.routes.ai_sdk.calculate_cost")
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
+    @patch("src.routes.ai_sdk.get_api_key")
+    @patch("src.routes.ai_sdk.make_openrouter_request_openai_stream_async")
+    @patch("src.routes.ai_sdk.get_openrouter_client")
+    def test_ai_sdk_streaming_deducts_credits(
+        self,
+        mock_get_client,
+        mock_stream,
+        mock_get_api_key,
+        mock_validate_trial,
+        mock_get_user,
+        mock_calculate_cost,
+        mock_deduct_credits,
+    ):
+        """Test that AI SDK streaming deducts credits after stream completes"""
+        # Setup mocks
+        mock_get_api_key.return_value = "test-key"
+        mock_get_user.return_value = {"id": 1, "email": "test@example.com", "key_id": "key-123"}
+        mock_validate_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_calculate_cost.return_value = 0.05
+        mock_get_client.return_value = MagicMock()
+
+        # Mock streaming response with usage
+        mock_chunk = MagicMock()
+        mock_chunk.choices = [MagicMock(delta=MagicMock(content="Hello"))]
+        mock_chunk.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+
+        async def mock_async_iter():
+            yield mock_chunk
+
+        mock_stream.return_value = mock_async_iter()
+
+        response = client.post(
+            "/api/chat/ai-sdk",
+            json={
+                "model": "openrouter/auto",
+                "messages": [{"role": "user", "content": "Hello!"}],
+                "stream": True,
+            },
+        )
+
+        assert response.status_code == 200
+        # Consume the stream
+        _ = response.text
+        # Verify credits were deducted after stream completed
+        mock_deduct_credits.assert_called_once()
+
+
 class TestAISDKSentryIntegration:
     """Tests for Sentry error capture in AI SDK endpoint"""
 
     @patch("src.routes.ai_sdk.SENTRY_AVAILABLE", True)
     @patch("src.routes.ai_sdk.sentry_sdk")
-    @patch("src.routes.ai_sdk.validate_ai_sdk_api_key")
+    @patch("src.routes.ai_sdk.get_api_key")
+    @patch("src.routes.ai_sdk.get_user")
+    @patch("src.routes.ai_sdk.validate_trial_access")
     @patch("src.routes.ai_sdk.make_ai_sdk_request_openai")
     def test_general_error_captured_to_sentry(
-        self, mock_request, mock_validate, mock_sentry
+        self, mock_request, mock_validate_trial, mock_get_user, mock_get_api_key, mock_sentry
     ):
         """Test that general errors are captured to Sentry"""
-        mock_validate.return_value = "test-api-key"
+        mock_get_api_key.return_value = "test-key"
+        mock_get_user.return_value = {"id": 1}
+        mock_validate_trial.return_value = {"is_valid": True, "is_trial": False}
         mock_request.side_effect = RuntimeError("API request failed")
 
         response = client.post(
@@ -788,3 +1048,97 @@ class TestAISDKSentryIntegration:
         assert "error" in content.lower()
         # Verify error was captured to Sentry
         mock_sentry.capture_exception.assert_called_once()
+
+
+class TestTrialStatusOverride:
+    """Tests for the trial status override defense-in-depth logic"""
+
+    def test_check_trial_override_non_trial_user_returns_false(self):
+        """Test that non-trial users return False (should be billed)"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": False}
+        user = {"id": "user-123", "tier": "free"}
+        assert _check_trial_override(trial, user) is False
+
+    def test_check_trial_override_legitimate_trial_user_returns_true(self):
+        """Test that legitimate trial users return True (should NOT be billed)"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": True}
+        user = {"id": "user-123", "tier": "free", "subscription_status": None}
+        assert _check_trial_override(trial, user) is True
+
+    def test_check_trial_override_paid_user_with_stale_trial_flag(self):
+        """Test that paid users with stale is_trial=TRUE are overridden to billing path"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        # User has is_trial=TRUE but has active Stripe subscription
+        trial = {"is_trial": True}
+        user = {
+            "id": "user-123",
+            "tier": "free",
+            "stripe_subscription_id": "sub_abc123",
+            "subscription_status": "active",
+        }
+        # Should return False - user should be billed
+        assert _check_trial_override(trial, user) is False
+
+    def test_check_trial_override_pro_tier_with_trial_flag(self):
+        """Test that pro tier users with is_trial=TRUE are overridden"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": True}
+        user = {"id": "user-123", "tier": "pro"}
+        # Should return False - user should be billed
+        assert _check_trial_override(trial, user) is False
+
+    def test_check_trial_override_max_tier_with_trial_flag(self):
+        """Test that max tier users with is_trial=TRUE are overridden"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": True}
+        user = {"id": "user-123", "tier": "max"}
+        # Should return False - user should be billed
+        assert _check_trial_override(trial, user) is False
+
+    def test_check_trial_override_admin_tier_with_trial_flag(self):
+        """Test that admin tier users with is_trial=TRUE are overridden"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": True}
+        user = {"id": "user-123", "tier": "admin"}
+        # Should return False - user should be billed
+        assert _check_trial_override(trial, user) is False
+
+    def test_check_trial_override_inactive_subscription_not_overridden(self):
+        """Test that cancelled subscriptions are NOT overridden"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        # User has subscription but it's not active
+        trial = {"is_trial": True}
+        user = {
+            "id": "user-123",
+            "tier": "free",
+            "stripe_subscription_id": "sub_abc123",
+            "subscription_status": "cancelled",
+        }
+        # Should return True - user is treated as trial
+        assert _check_trial_override(trial, user) is True
+
+    def test_check_trial_override_null_user_returns_trial_status(self):
+        """Test that None user returns original trial status"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {"is_trial": True}
+        # Should return True - treat as trial when user info unavailable
+        assert _check_trial_override(trial, None) is True
+
+    def test_check_trial_override_empty_trial_dict_returns_false(self):
+        """Test that empty trial dict is treated as non-trial"""
+        from src.routes.ai_sdk import _check_trial_override
+
+        trial = {}
+        user = {"id": "user-123"}
+        # Should return False - no is_trial flag means not a trial user
+        assert _check_trial_override(trial, user) is False

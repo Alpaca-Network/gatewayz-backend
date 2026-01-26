@@ -36,20 +36,31 @@ class TestModelAliasResolution:
         assert apply_model_alias("gpt5.1") == "openai/gpt-5.1"
 
     def test_apply_model_alias_xai_deprecated(self):
-        """Test XAI deprecated model aliases"""
-        assert apply_model_alias("grok-beta") == "grok-3"
-        assert apply_model_alias("xai/grok-beta") == "xai/grok-3"
-        assert apply_model_alias("grok-vision-beta") == "grok-3"
+        """Test XAI deprecated model aliases - now mapped to canonical x-ai/ prefix"""
+        # grok-beta and grok-vision-beta are deprecated, map to x-ai/grok-3
+        assert apply_model_alias("grok-beta") == "x-ai/grok-3"
+        assert apply_model_alias("xai/grok-beta") == "x-ai/grok-3"
+        assert apply_model_alias("grok-vision-beta") == "x-ai/grok-3"
 
     def test_apply_model_alias_case_insensitive(self):
         """Test that alias lookup is case insensitive"""
         assert apply_model_alias("GPT-5-1") == "openai/gpt-5.1"
-        assert apply_model_alias("GROK-BETA") == "grok-3"
+        assert apply_model_alias("GROK-BETA") == "x-ai/grok-3"
 
     def test_apply_model_alias_no_match(self):
-        """Test non-aliased models pass through"""
-        assert apply_model_alias("gpt-4") == "gpt-4"
-        assert apply_model_alias("claude-3-opus") == "claude-3-opus"
+        """Test non-aliased models pass through
+
+        Note: Many common models like gpt-4 and claude-3-opus now have aliases
+        to map them to canonical prefixed versions (openai/gpt-4, anthropic/claude-3-opus).
+        This ensures proper provider routing and failover behavior.
+        """
+        # gpt-4 is now aliased to openai/gpt-4 for proper routing
+        assert apply_model_alias("gpt-4") == "openai/gpt-4"
+        # claude-3-opus is now aliased to anthropic/claude-3-opus for proper routing
+        assert apply_model_alias("claude-3-opus") == "anthropic/claude-3-opus"
+        # Test a truly non-aliased model
+        assert apply_model_alias("custom-model-xyz") == "custom-model-xyz"
+        assert apply_model_alias("some-org/some-model") == "some-org/some-model"
 
     def test_apply_model_alias_none_input(self):
         """Test None input returns None"""
@@ -94,10 +105,11 @@ class TestFireworksTransformations:
         result = transform_model_id(model, "fireworks")
         assert result == model.lower()
 
-    def test_transform_unknown_model_constructs_path(self):
-        """Test unknown model gets constructed path"""
+    def test_transform_unknown_model_passes_through(self):
+        """Test unknown model passes through as-is (Fireworks API will reject if invalid)"""
         result = transform_model_id("org/unknown-model", "fireworks")
-        assert result.startswith("accounts/fireworks/models/")
+        # Unknown models now pass through as-is rather than constructing a Fireworks path
+        assert result == "org/unknown-model"
 
     def test_transform_deepseek_r1(self):
         """Test DeepSeek-R1 transformation"""

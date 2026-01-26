@@ -8,29 +8,51 @@ with auto-fix capabilities for cache refresh.
 import asyncio
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
+from src.services.prometheus_metrics import (
+    record_zero_model_event,
+    set_gateway_model_count,
+    record_fallback_activation,
+    record_gateway_recovery,
+    track_gateway_health_check,
+    record_auto_fix_attempt,
+)
 from src.cache import (
     _aihubmix_models_cache,
     _aimo_models_cache,
+    _alibaba_models_cache,
     _anannas_models_cache,
+    _anthropic_models_cache,
+    _canopywave_models_cache,
     _cerebras_models_cache,
     _chutes_models_cache,
+    _clarifai_models_cache,
+    _cloudflare_workers_ai_models_cache,
     _deepinfra_models_cache,
     _fal_models_cache,
     _featherless_models_cache,
     _fireworks_models_cache,
+    _google_vertex_models_cache,
     _groq_models_cache,
+    _helicone_models_cache,
     _huggingface_models_cache,
     _models_cache,
+    _modelz_cache,
+    _morpheus_models_cache,
     _near_models_cache,
     _nebius_models_cache,
     _novita_models_cache,
     _onerouter_models_cache,
+    _openai_models_cache,
+    _simplismart_models_cache,
+    _sybil_models_cache,
     _together_models_cache,
+    _vercel_ai_gateway_models_cache,
     _xai_models_cache,
 )
 from src.config import Config
@@ -149,7 +171,7 @@ GATEWAY_CONFIG = {
     },
     "aimo": {
         "name": "AIMO",
-        "url": "https://devnet.aimo.network/api/v1/models",
+        "url": "https://beta.aimo.network/api/v1/models",
         "api_key_env": "AIMO_API_KEY",
         "api_key": getattr(Config, "AIMO_API_KEY", None),
         "cache": _aimo_models_cache,
@@ -193,12 +215,129 @@ GATEWAY_CONFIG = {
         "header_type": "bearer",
     },
     "onerouter": {
-        "name": "OneRouter",
-        "url": "https://api.onerouter.pro/v1/models",
+        "name": "Infron AI",
+        "url": "https://api.infron.ai/v1/models",
         "api_key_env": "ONEROUTER_API_KEY",
         "api_key": Config.ONEROUTER_API_KEY,
         "cache": _onerouter_models_cache,
         "min_expected_models": 100,
+        "header_type": "bearer",
+    },
+    "google-vertex": {
+        "name": "Google Vertex AI",
+        "url": None,  # Google Vertex uses service account, not REST endpoint
+        "api_key_env": "GOOGLE_APPLICATION_CREDENTIALS",
+        "api_key": getattr(Config, "GOOGLE_APPLICATION_CREDENTIALS", None),
+        "cache": _google_vertex_models_cache,
+        "min_expected_models": 10,
+        "header_type": "google",
+    },
+    "cloudflare-workers-ai": {
+        "name": "Cloudflare Workers AI",
+        "url": None,  # Cloudflare uses account-specific URLs
+        "api_key_env": "CLOUDFLARE_API_TOKEN",
+        "api_key": getattr(Config, "CLOUDFLARE_API_TOKEN", None),
+        "cache": _cloudflare_workers_ai_models_cache,
+        "min_expected_models": 10,
+        "header_type": "bearer",
+    },
+    "vercel-ai-gateway": {
+        "name": "Vercel AI Gateway",
+        "url": None,  # Vercel AI Gateway uses proxy, not direct endpoint
+        "api_key_env": "VERCEL_API_TOKEN",
+        "api_key": getattr(Config, "VERCEL_API_TOKEN", None),
+        "cache": _vercel_ai_gateway_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "helicone": {
+        "name": "Helicone",
+        "url": None,  # Helicone is a proxy/observability layer
+        "api_key_env": "HELICONE_API_KEY",
+        "api_key": getattr(Config, "HELICONE_API_KEY", None),
+        "cache": _helicone_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "openai": {
+        "name": "OpenAI",
+        "url": "https://api.openai.com/v1/models",
+        "api_key_env": "OPENAI_API_KEY",
+        "api_key": getattr(Config, "OPENAI_API_KEY", None),
+        "cache": _openai_models_cache,
+        "min_expected_models": 10,
+        "header_type": "bearer",
+    },
+    "anthropic": {
+        "name": "Anthropic",
+        "url": None,  # Anthropic doesn't have /models endpoint
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "api_key": getattr(Config, "ANTHROPIC_API_KEY", None),
+        "cache": _anthropic_models_cache,
+        "min_expected_models": 3,
+        "header_type": "bearer",
+    },
+    "clarifai": {
+        "name": "Clarifai",
+        "url": None,  # Clarifai uses custom API
+        "api_key_env": "CLARIFAI_API_KEY",
+        "api_key": getattr(Config, "CLARIFAI_API_KEY", None),
+        "cache": _clarifai_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "alibaba": {
+        "name": "Alibaba Cloud",
+        "url": None,  # Alibaba uses Dashscope API
+        "api_key_env": "ALIBABA_API_KEY",
+        "api_key": getattr(Config, "ALIBABA_API_KEY", None),
+        "cache": _alibaba_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "simplismart": {
+        "name": "SimpliSmart",
+        "url": "https://api.simplismart.ai/v1/models",
+        "api_key_env": "SIMPLISMART_API_KEY",
+        "api_key": getattr(Config, "SIMPLISMART_API_KEY", None),
+        "cache": _simplismart_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "modelz": {
+        "name": "Modelz",
+        "url": None,  # Modelz uses custom deployment API
+        "api_key_env": "MODELZ_API_KEY",
+        "api_key": getattr(Config, "MODELZ_API_KEY", None),
+        "cache": _modelz_cache,
+        "min_expected_models": 3,
+        "header_type": "bearer",
+    },
+    "canopywave": {
+        "name": "Canopy Wave",
+        "url": "https://inference.canopywave.io/v1/models",
+        "api_key_env": "CANOPYWAVE_API_KEY",
+        "api_key": getattr(Config, "CANOPYWAVE_API_KEY", None),
+        "cache": _canopywave_models_cache,
+        "min_expected_models": 5,
+        "header_type": "bearer",
+    },
+    "sybil": {
+        "name": "Sybil",
+        "url": None,  # Sybil uses static catalog
+        "api_key_env": "SYBIL_API_KEY",
+        "api_key": getattr(Config, "SYBIL_API_KEY", None),
+        "cache": _sybil_models_cache,
+        "min_expected_models": 3,
+        "header_type": "bearer",
+    },
+    "morpheus": {
+        "name": "Morpheus",
+        "url": None,  # Morpheus uses custom API
+        "api_key_env": "MORPHEUS_API_KEY",
+        "api_key": getattr(Config, "MORPHEUS_API_KEY", None),
+        "cache": _morpheus_models_cache,
+        "min_expected_models": 3,
         "header_type": "bearer",
     },
 }
@@ -378,6 +517,9 @@ async def check_single_gateway(
         gateway_result["final_status"] = "unconfigured"
         return gateway_result
 
+    # Track health check start time for metrics
+    check_start_time = time.time()
+
     # Test 1: Direct endpoint test (async)
     endpoint_success, endpoint_msg, endpoint_count = await test_gateway_endpoint(
         gateway_name, config
@@ -387,6 +529,15 @@ async def check_single_gateway(
         "message": endpoint_msg,
         "model_count": endpoint_count,
     }
+
+    # Record zero-model event if endpoint returned 0 models
+    if endpoint_count == 0 and config.get("url"):  # Only for gateways with API endpoints
+        if "timeout" in endpoint_msg.lower():
+            record_zero_model_event(gateway_name, "timeout")
+        elif "error" in endpoint_msg.lower():
+            record_zero_model_event(gateway_name, "error")
+        else:
+            record_zero_model_event(gateway_name, "api_empty")
 
     if verbose:
         status_icon = "✅" if endpoint_success else "❌"
@@ -401,12 +552,25 @@ async def check_single_gateway(
         "models": cached_models,
     }
 
+    # Update model count gauge
+    set_gateway_model_count(gateway_name, cache_count)
+
+    # Record cache-related zero-model events
+    if cache_count == 0:
+        record_zero_model_event(gateway_name, "cache_empty")
+    elif not cache_success and "expected" in cache_msg.lower():
+        record_zero_model_event(gateway_name, "below_threshold")
+
     if verbose:
         status_icon = "✅" if cache_success else "❌"
         logger.info(f"  Cache: {status_icon} {cache_msg}")
 
     # Determine if gateway is healthy
     is_healthy = endpoint_success or cache_success
+
+    # Track if this is a recovery (was unhealthy, now healthy)
+    # This would need state tracking across checks, simplified here
+    was_previously_unhealthy = gateway_result.get("_previous_status") == "unhealthy"
 
     # Auto-fix if needed and enabled
     if not is_healthy and auto_fix:
@@ -423,11 +587,21 @@ async def check_single_gateway(
             if cache_success_retry:
                 gateway_result["auto_fix_successful"] = True
                 is_healthy = True
+                record_auto_fix_attempt(gateway_name, success=True)
+                record_gateway_recovery(gateway_name)
                 if verbose:
                     logger.info("  ✅ Auto-fix successful")
+            else:
+                record_auto_fix_attempt(gateway_name, success=False)
+                # Record fallback activation when auto-fix fails
+                record_fallback_activation(gateway_name, "database")
 
     # Set final status
     gateway_result["final_status"] = "healthy" if is_healthy else "unhealthy"
+
+    # Track health check duration and status
+    check_duration = time.time() - check_start_time
+    track_gateway_health_check(gateway_name, gateway_result["final_status"], check_duration)
 
     return gateway_result
 

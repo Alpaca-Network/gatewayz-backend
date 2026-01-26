@@ -331,9 +331,14 @@ class TestHttpxClientConfiguration:
             "Custom httpx client must be injected into postgrest.session"
 
     @patch("src.config.supabase_config.create_client")
-    @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_has_http2_enabled(self, mock_httpx_client, mock_create_client):
-        """Test that httpx client is created with HTTP/2 enabled for better performance."""
+    @patch("src.config.supabase_config.httpx.HTTPTransport")
+    def test_httpx_client_has_http2_disabled(self, mock_http_transport, mock_create_client):
+        """Test that httpx client is created with HTTP/2 disabled to prevent connection errors.
+
+        HTTP/2 was disabled to fix "Bad file descriptor" errors (errno 9) that occur
+        when Supabase closes idle HTTP/2 connections. HTTP/1.1 with connection pooling
+        provides better stability for long-running services.
+        """
         import src.config.supabase_config as supabase_config_mod
 
         supabase_config_mod._supabase_client = None
@@ -346,8 +351,9 @@ class TestHttpxClientConfiguration:
                 with patch.object(supabase_config_mod.Config, "validate", return_value=True):
                     supabase_config_mod.get_supabase_client()
 
-        call_kwargs = mock_httpx_client.call_args[1]
-        assert call_kwargs.get("http2") is True, "HTTP/2 must be enabled"
+        # Verify HTTP/2 is disabled in the transport configuration
+        call_kwargs = mock_http_transport.call_args[1]
+        assert call_kwargs.get("http2") is False, "HTTP/2 must be disabled to prevent stale connection errors"
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
@@ -560,3 +566,126 @@ class TestTestConnection:
 
                     # create_client should only be called once
                     assert mock_create_client.call_count == 1
+
+
+class TestConnectionErrorHandling:
+    """Test connection error handling and retry logic"""
+
+    def test_is_connection_error_detects_write_error(self):
+        """Test that is_connection_error detects WriteError with bad file descriptor"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Simulate the exact error from Railway logs
+        error = Exception("WriteError: [Errno 9] Bad file descriptor")
+        assert supabase_config_mod.is_connection_error(error) is True
+
+    def test_is_connection_error_detects_connection_terminated(self):
+        """Test that is_connection_error detects connection terminated errors"""
+        import src.config.supabase_config as supabase_config_mod
+
+        error = Exception("ConnectionTerminated: HTTP/2 connection was terminated")
+        assert supabase_config_mod.is_connection_error(error) is True
+
+    def test_is_connection_error_ignores_other_errors(self):
+        """Test that is_connection_error doesn't flag non-connection errors"""
+        import src.config.supabase_config as supabase_config_mod
+
+        error = ValueError("Invalid input")
+        assert supabase_config_mod.is_connection_error(error) is False
+
+    @patch("src.config.supabase_config.get_supabase_client")
+    @patch("src.config.supabase_config.refresh_supabase_client")
+    def test_execute_with_retry_retries_on_connection_error(self, mock_refresh, mock_get_client):
+        """Test that execute_with_retry retries when a connection error occurs"""
+        import src.config.supabase_config as supabase_config_mod
+
+        mock_client = create_mock_supabase_client_with_connection()
+
+        # First call fails with connection error, second succeeds
+        call_count = [0]
+
+        def operation(client):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("WriteError: [Errno 9] Bad file descriptor")
+            return {"success": True}
+
+        mock_get_client.return_value = mock_client
+        mock_refresh.return_value = mock_client
+
+        result = supabase_config_mod.execute_with_retry(
+            operation, max_retries=2, retry_delay=0.1, operation_name="test operation"
+        )
+
+        assert result == {"success": True}
+        assert call_count[0] == 2  # First call failed, second succeeded
+        mock_refresh.assert_called_once()  # Client was refreshed
+
+    @patch("src.config.supabase_config.get_supabase_client")
+    def test_execute_with_retry_exhausts_retries(self, mock_get_client):
+        """Test that execute_with_retry raises after exhausting retries"""
+        import src.config.supabase_config as supabase_config_mod
+
+        mock_client = create_mock_supabase_client_with_connection()
+
+        def operation(client):
+            raise Exception("WriteError: [Errno 9] Bad file descriptor")
+
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(Exception, match="Bad file descriptor"):
+            supabase_config_mod.execute_with_retry(
+                operation, max_retries=2, retry_delay=0.1, operation_name="test operation"
+            )
+
+    @patch("src.config.supabase_config.get_supabase_client")
+    def test_execute_with_retry_doesnt_retry_non_connection_errors(self, mock_get_client):
+        """Test that execute_with_retry doesn't retry non-connection errors"""
+        import src.config.supabase_config as supabase_config_mod
+
+        mock_client = create_mock_supabase_client_with_connection()
+
+        call_count = [0]
+
+        def operation(client):
+            call_count[0] += 1
+            raise ValueError("Invalid input")
+
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(ValueError, match="Invalid input"):
+            supabase_config_mod.execute_with_retry(
+                operation, max_retries=2, retry_delay=0.1, operation_name="test operation"
+            )
+
+        # Should fail immediately without retries
+        assert call_count[0] == 1
+
+    @patch("src.config.supabase_config.create_client")
+    @patch("src.config.supabase_config.httpx.Client")
+    def test_refresh_supabase_client_closes_old_connection(self, mock_httpx_client, mock_create_client):
+        """Test that refresh_supabase_client properly closes the old connection"""
+        import src.config.supabase_config as supabase_config_mod
+
+        # Set up an existing client with a session
+        old_session = MagicMock()
+        old_session.close = MagicMock()
+
+        old_client = create_mock_supabase_client_with_connection()
+        old_client.postgrest.session = old_session
+
+        supabase_config_mod._supabase_client = old_client
+
+        # Mock new client creation
+        new_client = create_mock_supabase_client_with_connection()
+        mock_create_client.return_value = new_client
+
+        with patch.object(supabase_config_mod.Config, "SUPABASE_URL", "https://test.supabase.co"):
+            with patch.object(supabase_config_mod.Config, "SUPABASE_KEY", "test_key"):
+                with patch.object(supabase_config_mod.Config, "validate", return_value=True):
+                    result = supabase_config_mod.refresh_supabase_client()
+
+        # Verify old session was closed
+        old_session.close.assert_called_once()
+        # Verify we got a new client
+        assert result == new_client

@@ -19,6 +19,7 @@ from src.db.credit_transactions import (
     get_transaction_summary,
     log_credit_transaction,
 )
+
 # Note: Database operations are performed directly via supabase client
 # to maintain consistency within transaction logging
 from src.security.deps import require_admin
@@ -140,7 +141,7 @@ async def add_credits_endpoint(
         # Get user
         user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
 
-        if not user_result.data:
+        if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]
@@ -225,7 +226,7 @@ async def adjust_credits_endpoint(
         # Get user
         user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
 
-        if not user_result.data:
+        if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]
@@ -454,7 +455,7 @@ async def refund_credits_endpoint(
         # Get user
         user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
 
-        if not user_result.data:
+        if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]

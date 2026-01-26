@@ -12,8 +12,8 @@ in a structured JSON format.
 
 import logging
 import re
-from typing import Optional
 from collections import defaultdict
+from typing import Optional
 
 import httpx
 

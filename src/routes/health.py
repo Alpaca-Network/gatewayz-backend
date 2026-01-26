@@ -15,6 +15,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from src.config.supabase_config import get_initialization_status, supabase
 from src.models.health_models import (
     HealthCheckRequest,
     HealthDashboardResponse,
@@ -27,7 +28,6 @@ from src.models.health_models import (
     SystemHealthResponse,
     UptimeMetricsResponse,
 )
-from src.config.supabase_config import get_initialization_status, supabase
 from src.security.deps import get_api_key
 from src.services.simple_health_cache import (
     simple_health_cache,
@@ -122,9 +122,9 @@ async def get_system_health(
         logger.error(f"Failed to get system health: {e}")
         capture_error(
             e,
-            context_type='health_endpoint',
-            context_data={'endpoint': '/health/system', 'operation': 'get_system_health'},
-            tags={'endpoint': 'system_health', 'error_type': type(e).__name__}
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/system", "operation": "get_system_health"},
+            tags={"endpoint": "system_health", "error_type": type(e).__name__},
         )
         return SystemHealthResponse(
             overall_status=HealthStatus.UNKNOWN,
@@ -171,17 +171,19 @@ async def get_providers_health(
         # Get system health to get total provider count
         system_health = simple_health_cache.get_system_health() or {}
         total_providers = system_health.get("total_providers", 0)
-        
+
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_providers_health()
         tracked_providers = len(cached) if cached else 0
-        
+
         if cached:
-            logger.debug(f"Returning cached providers health from health-service ({tracked_providers} tracked of {total_providers} total)")
+            logger.debug(
+                f"Returning cached providers health from health-service ({tracked_providers} tracked of {total_providers} total)"
+            )
             # Apply gateway filter if specified
             if gateway:
                 cached = [p for p in cached if p.get("gateway") == gateway]
-            
+
             # Return format that frontend expects
             return {
                 "data": cached,
@@ -191,8 +193,8 @@ async def get_providers_health(
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
             }
 
         # No cached data available
@@ -205,16 +207,16 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         }
     except Exception as e:
         logger.error(f"Failed to get providers health: {e}", exc_info=True)
         capture_error(
             e,
-            context_type='health_endpoint',
-            context_data={'endpoint': '/health/providers', 'operation': 'get_providers_health'},
-            tags={'endpoint': 'providers_health', 'error_type': type(e).__name__}
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/providers", "operation": "get_providers_health"},
+            tags={"endpoint": "providers_health", "error_type": type(e).__name__},
         )
         return {
             "data": [],
@@ -224,8 +226,8 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         }
 
 
@@ -259,13 +261,15 @@ async def get_models_health(
         # Get system health to get total model count
         system_health = simple_health_cache.get_system_health() or {}
         total_models = system_health.get("total_models", 0)
-        
+
         # Get health data from Redis cache (populated by health-service)
         cached = simple_health_cache.get_models_health()
         tracked_models = len(cached) if cached else 0
-        
+
         if cached:
-            logger.debug(f"Returning cached models health from health-service ({tracked_models} tracked of {total_models} total)")
+            logger.debug(
+                f"Returning cached models health from health-service ({tracked_models} tracked of {total_models} total)"
+            )
             # Apply filters
             if gateway:
                 cached = [m for m in cached if m.get("gateway") == gateway]
@@ -273,51 +277,267 @@ async def get_models_health(
                 cached = [m for m in cached if m.get("provider") == provider]
             if status:
                 cached = [m for m in cached if m.get("status") == status]
-            
+
             # Return format that frontend expects
             return {
                 "data": cached,
-                "models": cached,  # Also include as 'models' for compatibility
                 "total_models": total_models,
                 "tracked_models": tracked_models,
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
-                    "timestamp": datetime.now(timezone.utc).isoformat()
-                }
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
             }
 
         # No cached data available
         logger.debug("No models health in cache - health-service may not be running")
         return {
             "data": [],
-            "models": [],
             "total_models": total_models,
             "tracked_models": 0,
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         }
     except Exception as e:
         logger.error(f"Failed to get models health: {e}", exc_info=True)
         capture_error(
             e,
-            context_type='health_endpoint',
-            context_data={'endpoint': '/health/models', 'operation': 'get_models_health'},
-            tags={'endpoint': 'models_health', 'error_type': type(e).__name__}
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/models", "operation": "get_models_health"},
+            tags={"endpoint": "models_health", "error_type": type(e).__name__},
         )
         return {
             "data": [],
-            "models": [],
             "total_models": 0,
             "tracked_models": 0,
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+
+
+@router.get("/health/catalog/models", tags=["health", "catalog"])
+async def get_catalog_models(
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    provider: str | None = Query(None, description="Filter by specific provider"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of models to return"),
+    offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get ALL models from the model catalog (not just health-tracked ones)
+
+    This endpoint returns the complete model catalog from all gateway caches,
+    including models that are not currently being health-monitored.
+
+    Use this for:
+    - Getting the full list of available models (9000+)
+    - Browsing all models across all gateways
+    - Model discovery and search
+
+    Pagination:
+    - limit: Maximum records to return per request (default: 100, max: 1000)
+    - offset: Number of records to skip (use for cursor-based pagination)
+    - Example: Page 1 = offset=0, Page 2 = offset=100 (with limit=100)
+
+    Query Parameters:
+    - gateway: Filter by specific gateway (e.g., 'openrouter', 'anthropic')
+    - provider: Filter by specific provider
+
+    Note: This returns catalog data, not health/monitoring data.
+    For health metrics, use /health/models instead.
+    """
+    try:
+        from src.services.models import get_all_models_parallel
+        from src.routes.catalog import GATEWAY_REGISTRY
+
+        # Get all models from all gateways
+        all_models = get_all_models_parallel()
+
+        # Get health data from cache to merge with catalog data
+        health_models = simple_health_cache.get_models_health() or []
+        health_lookup = {m.get("model_id"): m for m in health_models if m.get("model_id")}
+        logger.debug(f"Loaded {len(health_lookup)} health records for catalog enrichment")
+
+        # Apply filters
+        filtered_models = all_models
+        if gateway:
+            filtered_models = [
+                m
+                for m in filtered_models
+                if m.get("source_gateway") == gateway or m.get("gateway") == gateway
+            ]
+        if provider:
+            filtered_models = [
+                m
+                for m in filtered_models
+                if m.get("provider_slug") == provider or m.get("provider") == provider
+            ]
+
+        total_count = len(filtered_models)
+
+        # Apply pagination
+        paginated_models = filtered_models[offset : offset + limit]
+
+        # Transform catalog models and merge with health data
+        transformed_models = []
+        for model in paginated_models:
+            model_id = model.get("id", "unknown")
+            health_data = health_lookup.get(model_id, {})
+
+            # Use health data if available, otherwise default to None/unknown
+            transformed = {
+                "model_id": model_id,
+                "provider": model.get("source_gateway", "unknown"),
+                "gateway": model.get("source_gateway", "unknown"),
+                "status": health_data.get("status", "unknown"),
+                "response_time_ms": health_data.get("response_time_ms"),
+                "avg_response_time_ms": health_data.get("avg_response_time_ms"),
+                "uptime_percentage": health_data.get("uptime_percentage"),
+                "error_count": health_data.get("error_count"),
+                "total_requests": health_data.get("total_requests"),
+                "last_checked": health_data.get("last_checked"),
             }
+            transformed_models.append(transformed)
+
+        # Match /health/models schema exactly
+        return {
+            "data": transformed_models,
+            "total_models": len(all_models),
+            "tracked_models": len(all_models),  # All catalog models are "tracked"
+            "metadata": {
+                "total_models": len(all_models),
+                "tracked_models": len(all_models),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to get catalog models: {e}", exc_info=True)
+        capture_error(
+            e,
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/catalog/models", "operation": "get_catalog_models"},
+            tags={"endpoint": "catalog_models", "error_type": type(e).__name__},
+        )
+        # Match /health/models schema exactly
+        return {
+            "data": [],
+            "total_models": 0,
+            "tracked_models": 0,
+            "metadata": {
+                "total_models": 0,
+                "tracked_models": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+            },
+        }
+
+
+@router.get("/health/catalog/providers", tags=["health", "catalog"])
+async def get_catalog_providers(
+    priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),
+    api_key: str = Depends(get_api_key),
+):
+    """
+    Get ALL providers/gateways from the gateway registry (not just health-tracked ones)
+
+    This endpoint returns the complete list of all configured gateways/providers,
+    including those that may not have health data available.
+
+    Use this for:
+    - Getting the full list of available providers (26+)
+    - Understanding which gateways are configured
+    - Provider discovery and configuration status
+
+    Query Parameters:
+    - priority: Filter by priority ('fast' or 'slow')
+
+    Note: This returns registry/config data, not health/monitoring data.
+    For health metrics, use /health/providers instead.
+    """
+    try:
+        from src.routes.catalog import GATEWAY_REGISTRY
+        from src.services.gateway_health_service import GATEWAY_CONFIG
+
+        # Get health data from cache to merge with catalog data
+        health_providers = simple_health_cache.get_providers_health() or []
+        health_lookup = {p.get("provider"): p for p in health_providers if p.get("provider")}
+        logger.debug(f"Loaded {len(health_lookup)} provider health records for catalog enrichment")
+
+        providers = []
+        for gateway_id, registry_config in GATEWAY_REGISTRY.items():
+            # Get additional config from GATEWAY_CONFIG if available
+            gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
+            cache = gateway_config.get("cache", {})
+            cache_data = cache.get("data") if cache else None
+            model_count = len(cache_data) if cache_data else 0
+            has_api_key = bool(gateway_config.get("api_key"))
+
+            # Apply priority filter early if specified
+            if priority and registry_config.get("priority") != priority:
+                continue
+
+            # Get health data for this provider if available
+            health_data = health_lookup.get(gateway_id, {})
+
+            # Transform to match health provider format with real health data
+            provider_data = {
+                "provider": gateway_id,
+                "gateway": gateway_id,
+                "status": health_data.get("status", "online" if has_api_key else "offline"),
+                "total_models": health_data.get("total_models", model_count),
+                "healthy_models": health_data.get("healthy_models", 0),
+                "degraded_models": health_data.get("degraded_models", 0),
+                "unhealthy_models": health_data.get("unhealthy_models", 0),
+                "avg_response_time_ms": health_data.get("avg_response_time_ms", 0.0),
+                "overall_uptime": health_data.get("overall_uptime", 0),
+            }
+            providers.append(provider_data)
+
+        # Sort by provider name
+        providers.sort(key=lambda x: x.get("provider", ""))
+
+        # Match /health/providers schema
+        return {
+            "data": providers,
+            "providers": providers,
+            "total_providers": len(providers),
+            "tracked_providers": len(providers),  # All catalog providers are "tracked"
+            "metadata": {
+                "total_providers": len(providers),
+                "tracked_providers": len(providers),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to get catalog providers: {e}", exc_info=True)
+        capture_error(
+            e,
+            context_type="health_endpoint",
+            context_data={
+                "endpoint": "/health/catalog/providers",
+                "operation": "get_catalog_providers",
+            },
+            tags={"endpoint": "catalog_providers", "error_type": type(e).__name__},
+        )
+        # Match /health/providers schema
+        return {
+            "data": [],
+            "providers": [],
+            "total_providers": 0,
+            "tracked_providers": 0,
+            "metadata": {
+                "total_providers": 0,
+                "tracked_providers": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "error": str(e),
+            },
         }
 
 
@@ -457,7 +677,9 @@ async def get_health_summary(
             if last_updated_str:
                 try:
                     if isinstance(last_updated_str, str):
-                        last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
+                        last_updated = datetime.fromisoformat(
+                            last_updated_str.replace("Z", "+00:00")
+                        )
                     else:
                         last_updated = last_updated_str
                     age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
@@ -467,7 +689,9 @@ async def get_health_summary(
 
         return HealthSummaryResponse(
             system=system_health,
-            providers=[ProviderHealthResponse(**p) for p in cached_providers] if cached_providers else [],
+            providers=[ProviderHealthResponse(**p) for p in cached_providers]
+            if cached_providers
+            else [],
             models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
             monitoring_active=monitoring_active,
             last_check=datetime.now(timezone.utc),
@@ -518,7 +742,9 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "models_in_cache": len(cached_models),
         "providers_in_cache": len(cached_providers),
-        "system_status": cached_system.get("overall_status", "unknown") if cached_system else "unknown",
+        "system_status": cached_system.get("overall_status", "unknown")
+        if cached_system
+        else "unknown",
         "cache_available": cached_system is not None,
     }
 
@@ -566,9 +792,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
 
         # Get average response time
         response_times = [
-            m.get("avg_response_time_ms")
-            for m in cached_models
-            if m.get("avg_response_time_ms")
+            m.get("avg_response_time_ms") for m in cached_models if m.get("avg_response_time_ms")
         ]
         avg_response_time = sum(response_times) / len(response_times) if response_times else None
 
@@ -601,9 +825,9 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
         logger.error(f"Failed to get uptime metrics: {e}")
         capture_error(
             e,
-            context_type='health_endpoint',
-            context_data={'endpoint': '/health/uptime', 'operation': 'get_uptime_metrics'},
-            tags={'endpoint': 'uptime', 'error_type': type(e).__name__}
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/uptime", "operation": "get_uptime_metrics"},
+            tags={"endpoint": "uptime", "error_type": type(e).__name__},
         )
         # Return default metrics instead of failing (graceful degradation)
         return UptimeMetricsResponse(
@@ -698,7 +922,7 @@ async def get_health_dashboard(
                 if response_time_ms < 1000:
                     response_time_display = f"{response_time_ms:.0f}ms"
                 else:
-                    response_time_display = f"{response_time_ms/1000:.1f}s"
+                    response_time_display = f"{response_time_ms / 1000:.1f}s"
 
             providers_status.append(
                 ProviderStatusResponse(
@@ -737,7 +961,7 @@ async def get_health_dashboard(
                 if response_time_ms < 1000:
                     response_time_display = f"{response_time_ms:.0f}ms"
                 else:
-                    response_time_display = f"{response_time_ms/1000:.1f}s"
+                    response_time_display = f"{response_time_ms / 1000:.1f}s"
 
             # Format last checked
             last_checked_display = None
@@ -745,6 +969,7 @@ async def get_health_dashboard(
             if last_checked:
                 try:
                     from datetime import datetime as dt
+
                     if isinstance(last_checked, str):
                         parsed = dt.fromisoformat(last_checked.replace("Z", "+00:00"))
                         last_checked_display = parsed.strftime("%H:%M:%S")
@@ -801,11 +1026,12 @@ async def get_health_dashboard(
         logger.error(f"Failed to get health dashboard: {e}")
         capture_error(
             e,
-            context_type='health_endpoint',
-            context_data={'endpoint': '/health/dashboard', 'operation': 'get_health_dashboard'},
-            tags={'endpoint': 'dashboard', 'error_type': type(e).__name__}
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/dashboard", "operation": "get_health_dashboard"},
+            tags={"endpoint": "dashboard", "error_type": type(e).__name__},
         )
         import traceback
+
         logger.error(f"Full traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=500, detail=f"Failed to retrieve health dashboard: {str(e)}"
@@ -1032,13 +1258,16 @@ async def database_health():
         }
 
 
-@router.get("/health/providers", tags=["health"])
-async def provider_health():
+@router.get("/health/providers/import-status", tags=["health", "admin"])
+async def get_provider_import_status():
     """
-    Check provider import status
+    Check provider import status (for debugging)
 
     Returns which providers successfully imported and which failed.
     This is essential for debugging chat endpoint issues in Railway.
+
+    Note: This is different from /health/providers which returns health metrics.
+    This endpoint shows which provider modules loaded successfully at startup.
     """
     try:
         from src.routes.chat import _provider_import_errors
@@ -1110,19 +1339,16 @@ async def get_all_health(
         # Calculate summary stats
         total_providers = len(cached_providers)
         healthy_providers = sum(
-            1 for p in cached_providers
-            if p.get("status", "").lower() in ["online", "healthy"]
+            1 for p in cached_providers if p.get("status", "").lower() in ["online", "healthy"]
         )
         degraded_providers = sum(
-            1 for p in cached_providers
-            if p.get("status", "").lower() == "degraded"
+            1 for p in cached_providers if p.get("status", "").lower() == "degraded"
         )
         unhealthy_providers = total_providers - healthy_providers - degraded_providers
 
         total_models = len(cached_models)
         healthy_models = sum(
-            1 for m in cached_models
-            if m.get("status", "").lower() in ["online", "healthy"]
+            1 for m in cached_models if m.get("status", "").lower() in ["online", "healthy"]
         )
 
         # Determine overall status
@@ -1137,7 +1363,8 @@ async def get_all_health(
             "status": "success",
             "overall_status": overall_status,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "system": cached_system or {
+            "system": cached_system
+            or {
                 "status": "unknown",
                 "uptime": 0.0,
             },
@@ -1249,7 +1476,9 @@ async def get_models_health_stats(
                 "healthy_models": healthy_models,
                 "degraded_models": degraded_models,
                 "unhealthy_models": unhealthy_models,
-                "health_rate": round(healthy_models / total_models * 100, 2) if total_models > 0 else 0,
+                "health_rate": round(healthy_models / total_models * 100, 2)
+                if total_models > 0
+                else 0,
                 "avg_response_time_ms": (
                     round(total_response_time / response_time_count, 2)
                     if response_time_count > 0
@@ -1311,16 +1540,18 @@ async def get_providers_health_stats(
             uptime = provider.get("overall_uptime", 0.0)
             total_uptime += uptime
 
-            provider_details.append({
-                "provider": provider.get("provider", "unknown"),
-                "gateway": provider.get("gateway"),
-                "status": status,
-                "models_count": models_count,
-                "healthy_models": provider.get("healthy_models", 0),
-                "uptime": round(uptime, 2),
-                "avg_response_time_ms": provider.get("avg_response_time_ms"),
-                "last_check": provider.get("last_check"),
-            })
+            provider_details.append(
+                {
+                    "provider": provider.get("provider", "unknown"),
+                    "gateway": provider.get("gateway"),
+                    "status": status,
+                    "models_count": models_count,
+                    "healthy_models": provider.get("healthy_models", 0),
+                    "uptime": round(uptime, 2),
+                    "avg_response_time_ms": provider.get("avg_response_time_ms"),
+                    "last_check": provider.get("last_check"),
+                }
+            )
 
         return {
             "status": "success",
@@ -1336,7 +1567,9 @@ async def get_providers_health_stats(
                     else 0
                 ),
                 "total_models": total_models,
-                "avg_uptime": round(total_uptime / total_providers, 2) if total_providers > 0 else 0,
+                "avg_uptime": round(total_uptime / total_providers, 2)
+                if total_providers > 0
+                else 0,
             },
             "providers": provider_details,
         }

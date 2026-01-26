@@ -4,38 +4,39 @@ Handles CRUD operations for AI models with provider relationships
 """
 
 import logging
+
 from fastapi import APIRouter, HTTPException, Path, Query, status
 
-from src.schemas.models_catalog import (
-    ModelCreate,
-    ModelBulkCreate,
-    ModelUpdate,
-    ModelResponse,
-    ModelWithProvider,
-    ModelHealthUpdate,
-    ModelHealthHistoryResponse,
-    ModelStats,
-)
 from src.db.models_catalog_db import (
+    activate_model,
+    bulk_create_models,
+    bulk_upsert_models,
+    create_model,
+    deactivate_model,
+    delete_model,
     get_all_models,
     get_model_by_id,
-    get_models_by_provider_slug,
     get_model_by_provider_and_model_id,
-    create_model,
-    bulk_create_models,
-    update_model,
-    delete_model,
-    deactivate_model,
-    activate_model,
-    update_model_health,
     get_model_health_history,
     get_models_by_health_status,
-    search_models,
+    get_models_by_provider_slug,
     get_models_stats,
+    search_models,
+    update_model,
+    update_model_health,
     upsert_model,
-    bulk_upsert_models,
 )
 from src.db.providers_db import get_provider_by_id, get_provider_by_slug
+from src.schemas.models_catalog import (
+    ModelBulkCreate,
+    ModelCreate,
+    ModelHealthHistoryResponse,
+    ModelHealthUpdate,
+    ModelResponse,
+    ModelStats,
+    ModelUpdate,
+    ModelWithProvider,
+)
 
 logger = logging.getLogger(__name__)
 

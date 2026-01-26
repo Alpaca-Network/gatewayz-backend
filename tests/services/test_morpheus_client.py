@@ -208,6 +208,60 @@ class TestMorpheusClient:
         assert models[0]["provider_slug"] == "morpheus"
         assert models[1]["id"] == "morpheus/mistral-7b"
 
+    @patch("httpx.get")
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_on_success(self, mock_config, mock_httpx_get):
+        """Test that cache timestamp is updated after successful fetch"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = "test-key"
+        mock_response = Mock()
+        mock_response.json.return_value = {
+            "data": [{"id": "test-model", "context_length": 4096}]
+        }
+        mock_response.raise_for_status = Mock()
+        mock_httpx_get.return_value = mock_response
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated
+        assert len(models) == 1
+        assert _morpheus_models_cache["data"] == models
+        assert _morpheus_models_cache["timestamp"] is not None
+
+    @patch("httpx.get")
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_on_http_error(self, mock_config, mock_httpx_get):
+        """Test that cache timestamp is updated even when API fails (prevents repeated calls)"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+        import httpx
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = "test-key"
+        mock_httpx_get.side_effect = httpx.HTTPStatusError(
+            "Server Error",
+            request=Mock(),
+            response=Mock(status_code=500)
+        )
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated with empty list and timestamp (prevents repeated API calls)
+        assert models == []
+        assert _morpheus_models_cache["data"] == []
+        assert _morpheus_models_cache["timestamp"] is not None
+
     @patch("src.services.morpheus_client.Config")
     def test_fetch_models_from_morpheus_no_api_key(self, mock_config):
         """Test fetch_models returns empty list without API key"""
@@ -217,6 +271,26 @@ class TestMorpheusClient:
 
         models = fetch_models_from_morpheus()
         assert models == []
+
+    @patch("src.services.morpheus_client.Config")
+    def test_fetch_models_from_morpheus_updates_cache_when_no_api_key(self, mock_config):
+        """Test that cache is updated even when API key is missing"""
+        from src.cache import _morpheus_models_cache, clear_models_cache
+
+        # Clear cache first
+        clear_models_cache("morpheus")
+        assert _morpheus_models_cache["timestamp"] is None
+
+        mock_config.MORPHEUS_API_KEY = None
+
+        from src.services.morpheus_client import fetch_models_from_morpheus
+
+        models = fetch_models_from_morpheus()
+
+        # Verify cache was updated (prevents repeated calls when key is missing)
+        assert models == []
+        assert _morpheus_models_cache["data"] == []
+        assert _morpheus_models_cache["timestamp"] is not None
 
     @patch("httpx.get")
     @patch("src.services.morpheus_client.Config")
@@ -279,3 +353,69 @@ class TestMorpheusConfig:
         from src.config import Config
 
         assert hasattr(Config, "MORPHEUS_API_KEY")
+
+
+class TestMorpheusCacheIntegration:
+    """Test Morpheus cache integration"""
+
+    def test_morpheus_cache_exists(self):
+        """Test that Morpheus cache is defined in cache module"""
+        from src.cache import _morpheus_models_cache
+
+        assert _morpheus_models_cache is not None
+        assert "data" in _morpheus_models_cache
+        assert "timestamp" in _morpheus_models_cache
+        assert "ttl" in _morpheus_models_cache
+        assert "stale_ttl" in _morpheus_models_cache
+
+    def test_morpheus_cache_in_get_models_cache(self):
+        """Test that Morpheus is included in get_models_cache mapping"""
+        from src.cache import get_models_cache
+
+        cache = get_models_cache("morpheus")
+        assert cache is not None
+
+    def test_morpheus_cache_clearable(self):
+        """Test that Morpheus cache can be cleared"""
+        from src.cache import clear_models_cache, get_models_cache
+
+        # Clear should not raise
+        clear_models_cache("morpheus")
+
+        cache = get_models_cache("morpheus")
+        assert cache["data"] is None
+        assert cache["timestamp"] is None
+
+
+class TestMorpheusGatewayRegistry:
+    """Test Morpheus gateway registry integration"""
+
+    def test_morpheus_in_gateway_registry(self):
+        """Test that Morpheus is in the GATEWAY_REGISTRY"""
+        from src.routes.catalog import GATEWAY_REGISTRY
+
+        assert "morpheus" in GATEWAY_REGISTRY
+        assert GATEWAY_REGISTRY["morpheus"]["name"] == "Morpheus"
+        assert "color" in GATEWAY_REGISTRY["morpheus"]
+        assert "priority" in GATEWAY_REGISTRY["morpheus"]
+        assert "site_url" in GATEWAY_REGISTRY["morpheus"]
+
+
+class TestMorpheusConnectionPool:
+    """Test Morpheus connection pool integration"""
+
+    def test_morpheus_pooled_client_function_exists(self):
+        """Test that get_morpheus_pooled_client function exists"""
+        from src.services.connection_pool import get_morpheus_pooled_client
+
+        assert callable(get_morpheus_pooled_client)
+
+    @patch("src.services.connection_pool.Config")
+    def test_morpheus_pooled_client_raises_without_key(self, mock_config):
+        """Test that get_morpheus_pooled_client raises without API key"""
+        mock_config.MORPHEUS_API_KEY = None
+
+        from src.services.connection_pool import get_morpheus_pooled_client
+
+        with pytest.raises(ValueError, match="Morpheus API key not configured"):
+            get_morpheus_pooled_client()

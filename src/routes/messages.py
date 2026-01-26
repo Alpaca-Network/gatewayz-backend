@@ -17,8 +17,8 @@ from fastapi.responses import JSONResponse
 
 import src.db.activity as activity_module
 import src.db.api_keys as api_keys_module
-import src.db.chat_history as chat_history_module
 import src.db.chat_completion_requests as chat_completion_requests_module
+import src.db.chat_history as chat_history_module
 import src.db.model_health as model_health_module
 import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
@@ -28,12 +28,6 @@ import src.services.trial_validation as trial_module
 from src.config import Config
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
-from src.services.anthropic_transformer import (
-    extract_text_from_content,
-    transform_anthropic_to_openai,
-    transform_openai_to_anthropic,
-)
-from src.services.passive_health_monitor import capture_model_health
 from src.services.aihubmix_client import (
     make_aihubmix_request_openai,
     process_aihubmix_response,
@@ -45,6 +39,11 @@ from src.services.alibaba_cloud_client import (
 from src.services.anannas_client import (
     make_anannas_request_openai,
     process_anannas_response,
+)
+from src.services.anthropic_transformer import (
+    extract_text_from_content,
+    transform_anthropic_to_openai,
+    transform_openai_to_anthropic,
 )
 from src.services.cerebras_client import (
     make_cerebras_request_openai,
@@ -63,15 +62,12 @@ from src.services.huggingface_client import (
     make_huggingface_request_openai,
     process_huggingface_response,
 )
-from src.services.vercel_ai_gateway_client import (
-    make_vercel_ai_gateway_request_openai,
-    process_vercel_ai_gateway_response,
-)
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.openrouter_client import (
     make_openrouter_request_openai,
     process_openrouter_response,
 )
+from src.services.passive_health_monitor import capture_model_health
 from src.services.pricing import calculate_cost
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -81,6 +77,10 @@ from src.services.provider_failover import (
     should_failover,
 )
 from src.services.together_client import make_together_request_openai, process_together_response
+from src.services.vercel_ai_gateway_client import (
+    make_vercel_ai_gateway_request_openai,
+    process_vercel_ai_gateway_response,
+)
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
@@ -255,7 +255,11 @@ async def anthropic_messages(
     if Config.IS_TESTING and request:
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.lower().startswith("bearer "):
-            api_key = auth_header.split(" ", 1)[1].strip()
+            parts = auth_header.split(" ", 1)
+            if len(parts) == 2:
+                api_key = parts[1].strip()
+            else:
+                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
 
     logger.info(
         "anthropic_messages start (request_id=%s, api_key=%s, model=%s)",
@@ -882,7 +886,11 @@ async def anthropic_messages(
                 tokens=total_tokens,
                 cost=cost if not trial.get("is_trial", False) else 0.0,
                 speed=speed,
-                finish_reason=processed.get("choices", [{}])[0].get("finish_reason", "stop"),
+                finish_reason=(
+                    processed.get("choices", [{}])[0].get("finish_reason", "stop")
+                    if processed.get("choices") and len(processed.get("choices")) > 0
+                    else "stop"
+                ),
                 app="API",
                 metadata={
                     "prompt_tokens": prompt_tokens,
@@ -923,9 +931,10 @@ async def anthropic_messages(
                             )
 
                         # Save assistant response
-                        assistant_content = (
-                            processed.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        )
+                        choices = processed.get("choices", [])
+                        assistant_content = ""
+                        if choices and len(choices) > 0:
+                            assistant_content = choices[0].get("message", {}).get("content", "")
                         if assistant_content:
                             save_chat_message(
                                 session_id,
@@ -996,10 +1005,58 @@ async def anthropic_messages(
 
         return JSONResponse(content=anthropic_response, headers=headers)
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else req.model,
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         raise
-    except Exception:
+    except Exception as e:
         logger.exception("Unhandled server error in anthropic_messages")
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+
+                # Save failed request to database
+                await _to_thread(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=model if 'model' in dir() else req.model,
+                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    output_tokens=0,  # No output on error
+                    processing_time_ms=int(error_elapsed * 1000),
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=user["id"] if user and 'user' in dir() else None,
+                    provider_name=provider if 'provider' in dir() else None,
+                    model_id=None,
+                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

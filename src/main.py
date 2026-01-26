@@ -5,7 +5,6 @@ import secrets
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from prometheus_client import REGISTRY
@@ -14,7 +13,13 @@ from src.config import Config
 
 # Initialize logging with Loki integration
 from src.config.logging_config import configure_logging
-from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL
+from src.constants import (
+    FRONTEND_BETA_URL,
+    FRONTEND_STAGING_URL,
+    TAURI_DESKTOP_URL,
+    TAURI_DESKTOP_PROTOCOL_URL,
+)
+from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -150,6 +155,8 @@ def create_app() -> FastAPI:
     base_origins = [
         FRONTEND_BETA_URL,
         FRONTEND_STAGING_URL,
+        TAURI_DESKTOP_URL,  # Tauri desktop app origin (http://tauri.localhost)
+        TAURI_DESKTOP_PROTOCOL_URL,  # Tauri desktop app origin (tauri://localhost)
         "https://api.gatewayz.ai",  # Added for chat API access from frontend
         "https://docs.gatewayz.ai",  # Added for documentation site access
     ]
@@ -325,6 +332,7 @@ def create_app() -> FastAPI:
 
     # ==================== Sentry Debug Endpoint ====================
     if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+
         @app.get("/sentry-debug", tags=["monitoring"], include_in_schema=False)
         async def trigger_sentry_error(raise_exception: bool = False):
             """
@@ -378,10 +386,12 @@ def create_app() -> FastAPI:
         ("chat", "Chat Completions"),
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
+        ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
+        ("butter_analytics", "Butter.dev Cache Analytics"),  # LLM response cache analytics
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
@@ -402,13 +412,17 @@ def create_app() -> FastAPI:
             "optimization_monitor",
             "Optimization Monitoring",
         ),  # Connection pool, cache, and priority stats
-        ("health_timeline", "System Health Timeline"),  # Provider and model uptime timeline tracking
+        (
+            "health_timeline",
+            "System Health Timeline",
+        ),  # Provider and model uptime timeline tracking
         ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("root", "Root/Home"),
         ("auth", "Authentication"),
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
+        ("admin_pricing_analytics", "Admin Pricing Analytics"),  # Cost tracking and analytics
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
@@ -428,6 +442,8 @@ def create_app() -> FastAPI:
         ("pricing_audit", "Pricing Audit Dashboard"),
         ("pricing_sync", "Pricing Sync Service"),
         ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
+        ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
+        ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
     ]
 
     loaded_count = 0
@@ -531,6 +547,16 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
 
+    # ==================== Prometheus/Grafana SimpleJSON Datasource Router ====================
+    # Load Prometheus/Grafana datasource router for dashboard compatibility
+    try:
+        from src.routes.prometheus_grafana import router as prometheus_grafana_router
+
+        app.include_router(prometheus_grafana_router)
+        logger.info("  [OK] Prometheus/Grafana SimpleJSON Datasource (/prometheus/datasource/*)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
+
     # ==================== Exception Handler ====================
 
     @app.exception_handler(Exception)
@@ -556,15 +582,14 @@ def create_app() -> FastAPI:
             elif "authorization" in request.headers:
                 # Use a hash of the auth header as distinct_id if no user_id available
                 import hashlib
-                auth_hash = hashlib.sha256(
-                    request.headers["authorization"].encode()
-                ).hexdigest()[:16]
+
+                auth_hash = hashlib.sha256(request.headers["authorization"].encode()).hexdigest()[
+                    :16
+                ]
                 distinct_id = f"user_{auth_hash}"
 
             posthog_service.capture_exception(
-                exception=exc,
-                distinct_id=distinct_id,
-                properties=properties
+                exception=exc, distinct_id=distinct_id, properties=properties
             )
         except Exception as posthog_error:
             logger.warning(f"Failed to capture exception in PostHog: {posthog_error}")
@@ -584,10 +609,16 @@ def create_app() -> FastAPI:
             try:
                 from src.config.opentelemetry_config import OpenTelemetryConfig
 
-                OpenTelemetryConfig.initialize()
-                OpenTelemetryConfig.instrument_fastapi(app)
+                init_result = OpenTelemetryConfig.initialize()
+                if init_result:
+                    OpenTelemetryConfig.instrument_fastapi(app)
+                    logger.info("  [OK] OpenTelemetry tracing initialized")
+                else:
+                    logger.warning(
+                        "  [WARN] OpenTelemetry initialization returned False - tracing disabled"
+                    )
             except Exception as otel_e:
-                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}")
+                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}", exc_info=True)
 
             # Validate configuration
             logger.info("    Validating configuration...")
@@ -666,12 +697,17 @@ def create_app() -> FastAPI:
                 posthog_service.initialize()
                 logger.info("   PostHog analytics initialized")
 
-                # Initialize Braintrust
+                # Initialize Braintrust tracing service
+                # Uses centralized service to ensure spans are properly associated with project
                 try:
-                    from braintrust import init_logger
+                    from src.services.braintrust_service import initialize_braintrust
 
-                    init_logger(project="Gatewayz Backend")
-                    logger.info("   Braintrust tracing initialized")
+                    if initialize_braintrust(project="Gatewayz Backend"):
+                        logger.info("   Braintrust tracing initialized (async_flush=False)")
+                    else:
+                        logger.warning(
+                            "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
+                        )
                 except Exception as bt_e:
                     logger.warning(f"    Braintrust initialization warning: {bt_e}")
 

@@ -929,6 +929,62 @@
       "pricing_model": "per_minute"
     }
   },
+  "sybil": {
+    "deepseek-ai/DeepSeek-V3-0324": {
+      "prompt": "0.0000019",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 163840
+    },
+    "mistralai/Mistral-7B-Instruct-v0.3": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 32768
+    },
+    "moonshotai/Kimi-K2-Thinking": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 262144
+    },
+    "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
+      "prompt": "0.00000125",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 262144
+    },
+    "zai-org/GLM-4.5": {
+      "prompt": "0.00000140",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "zai-org/GLM-4.6": {
+      "prompt": "0.00000150",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0",
+      "context_length": 202752
+    },
+    "distilbert/distilbert-base-uncased": {
+      "prompt": "0.000001",
+      "completion": "0.000002",
+      "request": "0",
+      "image": "0"
+    },
+    "Qwen/Qwen3-Embedding-8B": {
+      "prompt": "0.0000001",
+      "completion": "0",
+      "request": "0",
+      "image": "0"
+    }
+  },
   "onerouter": {
     "claude-opus-4-5@20251101": {
       "prompt": "5.00",
@@ -1197,8 +1253,81 @@
       "context_length": 128000
     }
   },
+  "nosana": {
+    "meta-llama/Llama-3.3-70B-Instruct": {
+      "prompt": "0.90",
+      "completion": "0.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072,
+      "pricing_note": "GPU compute pricing varies by market"
+    },
+    "meta-llama/Llama-3.1-70B-Instruct": {
+      "prompt": "0.90",
+      "completion": "0.90",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "meta-llama/Llama-3.1-8B-Instruct": {
+      "prompt": "0.18",
+      "completion": "0.18",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "Qwen/Qwen2.5-72B-Instruct": {
+      "prompt": "1.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "Qwen/Qwen2.5-7B-Instruct": {
+      "prompt": "0.18",
+      "completion": "0.18",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "deepseek-ai/DeepSeek-R1": {
+      "prompt": "3.00",
+      "completion": "7.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "deepseek-ai/DeepSeek-V3": {
+      "prompt": "1.25",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0",
+      "context_length": 131072
+    },
+    "mistralai/Mixtral-8x22B-Instruct-v0.1": {
+      "prompt": "1.20",
+      "completion": "1.20",
+      "request": "0",
+      "image": "0",
+      "context_length": 65536
+    },
+    "stabilityai/stable-diffusion-xl-base-1.0": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.02",
+      "image": "0.02",
+      "pricing_model": "per_image"
+    },
+    "whisper-large-v3": {
+      "prompt": "0",
+      "completion": "0",
+      "request": "0.003",
+      "image": "0",
+      "pricing_model": "per_minute"
+    }
+  },
   "_metadata": {
-    "last_updated": "2026-01-11",
+    "last_updated": "2026-01-20",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
     "sources": [
       "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference, image generation, and speech-to-text)",
@@ -1211,12 +1340,13 @@
       "https://cloud-api.near.ai/v1/model/list (Near AI - dynamic API)",
       "https://www.alibabacloud.com/help/en/model-studio/models (Alibaba Cloud / DashScope)",
       "https://docs.clarifai.com (Clarifai - based on underlying model provider pricing)",
-      "https://app.onerouter.pro/models (OneRouter - AI gateway with automatic fallbacks and prompt caching)",
+      "https://app.infron.ai/models (Infron AI - AI gateway with automatic fallbacks and prompt caching)",
       "https://fireworks.ai/pricing (Fireworks AI - serverless inference)",
       "https://groq.com/pricing (Groq - LPU inference, API: https://api.groq.com/openai/v1/models)",
       "https://www.together.ai/pricing (Together AI - 200+ models)",
       "https://akashml.com (Akash Network - decentralized AI inference)",
-      "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)"
+      "https://developers.cloudflare.com/workers-ai/platform/pricing/ (Cloudflare Workers AI - neuron-based pricing)",
+      "https://nosana.com (Nosana - distributed GPU computing network)"
     ],
     "currency": "USD",
     "units": "per 1M tokens (unless specified otherwise)"

@@ -7,8 +7,8 @@ from typing import Any
 from src.config.supabase_config import get_supabase_client
 from src.db.api_keys import create_api_key
 from src.services.prometheus_metrics import track_database_query
+from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
 from src.utils.security_validators import sanitize_for_logging
-from src.utils.db_safety import safe_get_first, safe_get_value, DatabaseResultError
 
 logger = logging.getLogger(__name__)
 
@@ -185,8 +185,18 @@ def create_enhanced_user(
     auth_method: str,
     credits: float = 5.0,
     privy_user_id: str | None = None,
+    subscription_status: str = "trial",
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage)"""
+    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage).
+
+    Args:
+        username: User's username
+        email: User's email address
+        auth_method: Authentication method used (e.g., 'privy', 'email')
+        credits: Initial credit amount (default $5)
+        privy_user_id: Optional Privy user ID for Privy-authenticated users
+        subscription_status: Initial subscription status (default 'trial', use 'bot' for temp emails)
+    """
     try:
         client = get_supabase_client()
 
@@ -201,7 +211,7 @@ def create_enhanced_user(
             "is_active": True,
             "registration_date": trial_start.isoformat(),
             "auth_method": auth_method,
-            "subscription_status": "trial",
+            "subscription_status": subscription_status,
             "trial_expires_at": trial_end.isoformat(),
             "welcome_email_sent": False,  # New users haven't received welcome email yet
             "tier": "basic",
@@ -227,9 +237,13 @@ def create_enhanced_user(
             logger.error(f"User creation failed: {e}")
             raise ValueError(f"Failed to create user account: {e}")
 
-        # Generate primary API key
+        # Generate primary API key with the appropriate subscription status
         primary_key, _ = create_api_key(
-            user_id=user_id, key_name="Primary Key", environment_tag="live", is_primary=True
+            user_id=user_id,
+            key_name="Primary Key",
+            environment_tag="live",
+            is_primary=True,
+            subscription_status=subscription_status,
         )
 
         # Update user with the actual API key
@@ -256,7 +270,7 @@ def create_enhanced_user(
             "email": email,
             "credits": credits,
             "primary_api_key": primary_key,
-            "subscription_status": "trial",
+            "subscription_status": subscription_status,
             "trial_expires_at": trial_end.isoformat(),
             "tier": "basic",
         }
@@ -495,7 +509,9 @@ def add_credits_to_user(
     metadata: dict | None = None,
 ) -> None:
     """
-    Add credits to user account by user ID and log the transaction
+    Add credits to user account by user ID and log the transaction.
+    For purchases, credits go to purchased_credits field.
+    For other types, credits go to subscription_allowance field (or purchased_credits if not a subscription).
 
     Args:
         user_id: User ID
@@ -513,27 +529,50 @@ def add_credits_to_user(
 
         client = get_supabase_client()
 
-        # Get current balance
-        user_result = client.table("users").select("credits").eq("id", user_id).execute()
+        # Get current balances
+        user_result = client.table("users").select(
+            "subscription_allowance, purchased_credits"
+        ).eq("id", user_id).execute()
 
         try:
             user_data = safe_get_first(
                 user_result,
                 error_message=f"User with ID {user_id} not found",
-                validate_keys=["credits"]
+                validate_keys=[]
             )
-            balance_before = safe_get_value(user_data, "credits", default=0.0, expected_type=float)
-            balance_after = balance_before + credits
+            allowance_before = safe_get_value(user_data, "subscription_allowance", default=0.0, expected_type=float)
+            purchased_before = safe_get_value(user_data, "purchased_credits", default=0.0, expected_type=float)
+            balance_before = allowance_before + purchased_before
         except (DatabaseResultError, KeyError, TypeError) as e:
             logger.error(f"Error getting user balance for user {user_id}: {e}")
             raise ValueError(f"Failed to get user balance: {e}")
 
+        # Determine which field to update based on transaction type
+        # Purchases go to purchased_credits, everything else uses current logic
+        if transaction_type == "purchase":
+            # Credit purchases go to purchased_credits field
+            purchased_after = purchased_before + credits
+            allowance_after = allowance_before
+            update_data = {
+                "purchased_credits": purchased_after,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        else:
+            # Other types (admin_credit, trial, etc.) - add to purchased for simplicity
+            # Could be enhanced to add to allowance for subscription-related credits
+            purchased_after = purchased_before + credits
+            allowance_after = allowance_before
+            update_data = {
+                "purchased_credits": purchased_after,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+
+        balance_after = allowance_after + purchased_after
+
         # Update user credits
         result = (
             client.table("users")
-            .update(
-                {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
-            )
+            .update(update_data)
             .eq("id", user_id)
             .execute()
         )
@@ -550,15 +589,25 @@ def add_credits_to_user(
             balance_before=balance_before,
             balance_after=balance_after,
             payment_id=payment_id,
-            metadata=metadata,
+            metadata={
+                **(metadata or {}),
+                "allowance_before": allowance_before,
+                "allowance_after": allowance_after,
+                "purchased_before": purchased_before,
+                "purchased_after": purchased_after,
+            },
         )
 
         logger.info(
-            "Added %s credits to user %s. Balance: %s → %s",
+            "Added %s credits to user %s. Balance: %s → %s (allowance: %s → %s, purchased: %s → %s)",
             sanitize_for_logging(str(credits)),
             sanitize_for_logging(str(user_id)),
             sanitize_for_logging(str(balance_before)),
             sanitize_for_logging(str(balance_after)),
+            sanitize_for_logging(str(allowance_before)),
+            sanitize_for_logging(str(allowance_after)),
+            sanitize_for_logging(str(purchased_before)),
+            sanitize_for_logging(str(purchased_after)),
         )
 
         # Invalidate cache to ensure fresh credit balance on next get_user call
@@ -575,7 +624,12 @@ def add_credits(api_key: str, credits: int) -> None:
     if not user:
         raise ValueError(f"User with API key {api_key} not found")
 
-    add_credits_to_user(user["id"], credits)
+    add_credits_to_user(
+        user_id=user["id"],
+        credits=credits,
+        transaction_type="admin_credit",
+        description="Legacy credit addition",
+    )
     # Invalidate cache to ensure fresh credit balance on next get_user call
     invalidate_user_cache(api_key)
 
@@ -643,7 +697,8 @@ def deduct_credits(
     api_key: str, tokens: float, description: str = "API usage", metadata: dict | None = None
 ) -> None:
     """
-    Deduct credits from user account by API key and log the transaction
+    Deduct credits from user account by API key and log the transaction.
+    Deducts from subscription_allowance first, then purchased_credits.
 
     Args:
         api_key: User's API key
@@ -665,7 +720,10 @@ def deduct_credits(
 
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
-        from src.services.daily_usage_limiter import enforce_daily_usage_limit, DailyUsageLimitExceeded
+        from src.services.daily_usage_limiter import (
+            DailyUsageLimitExceeded,
+            enforce_daily_usage_limit,
+        )
 
         client = get_supabase_client()
 
@@ -678,14 +736,18 @@ def deduct_credits(
             key_result = client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
 
         if key_result.data:
-            # Found in api_keys_new - get user data
+            # Found in api_keys_new - get user data with both allowance and purchased credits
             user_id = key_result.data[0]["user_id"]
             with track_database_query(table="users", operation="select"):
-                user_lookup = client.table("users").select("id, credits").eq("id", user_id).execute()
+                user_lookup = client.table("users").select(
+                    "id, subscription_allowance, purchased_credits, tier"
+                ).eq("id", user_id).execute()
         else:
             # Fallback: try legacy users.api_key column
             with track_database_query(table="users", operation="select"):
-                user_lookup = client.table("users").select("id, credits").eq("api_key", api_key).execute()
+                user_lookup = client.table("users").select(
+                    "id, subscription_allowance, purchased_credits, tier"
+                ).eq("api_key", api_key).execute()
 
         if not user_lookup.data:
             raise ValueError(f"User with API key not found")
@@ -716,24 +778,40 @@ def deduct_credits(
             logger.warning(f"Daily usage limit exceeded for user {user_id}: {e}")
             raise ValueError(str(e)) from e
 
-        balance_before = user_lookup.data[0]["credits"]
+        # Get current balances
+        allowance_before = float(user_lookup.data[0].get("subscription_allowance") or 0)
+        purchased_before = float(user_lookup.data[0].get("purchased_credits") or 0)
+        balance_before = allowance_before + purchased_before
 
-        # Check sufficiency with fresh balance
+        # Check sufficiency
         if balance_before < tokens:
-            raise ValueError(f"Insufficient credits. Current: {balance_before}, Required: {tokens}")
+            raise ValueError(
+                f"Insufficient credits. Current: ${balance_before:.6f} "
+                f"(allowance: ${allowance_before:.6f}, purchased: ${purchased_before:.6f}), "
+                f"Required: ${tokens:.6f}"
+            )
 
-        balance_after = balance_before - tokens
+        # Calculate deduction breakdown: deduct from allowance first, then purchased
+        from_allowance = min(allowance_before, tokens)
+        from_purchased = tokens - from_allowance
 
-        # Use optimistic locking: update only if credits haven't changed since we read them
+        allowance_after = allowance_before - from_allowance
+        purchased_after = purchased_before - from_purchased
+        balance_after = allowance_after + purchased_after
+
+        # Use optimistic locking on both fields: update only if neither has changed
         # This prevents race conditions where multiple requests deduct simultaneously
         with track_database_query(table="users", operation="update"):
             result = (
                 client.table("users")
-                .update(
-                    {"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()}
-                )
+                .update({
+                    "subscription_allowance": allowance_after,
+                    "purchased_credits": purchased_after,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                })
                 .eq("id", user_id)
-                .eq("credits", balance_before)  # Optimistic lock: only update if balance unchanged
+                .eq("subscription_allowance", allowance_before)  # Optimistic lock
+                .eq("purchased_credits", purchased_before)  # Optimistic lock
                 .execute()
             )
 
@@ -741,16 +819,33 @@ def deduct_credits(
             # Balance changed between our read and update (concurrent modification)
             # Fetch current balance and fail with accurate error
             with track_database_query(table="users", operation="select"):
-                current = client.table("users").select("credits").eq("id", user_id).execute()
-            current_balance = (
-                current.data[0]["credits"] if current.data and len(current.data) > 0 else "unknown"
-            )
+                current = client.table("users").select(
+                    "subscription_allowance, purchased_credits"
+                ).eq("id", user_id).execute()
+
+            if current.data and len(current.data) > 0:
+                current_allowance = float(current.data[0].get("subscription_allowance") or 0)
+                current_purchased = float(current.data[0].get("purchased_credits") or 0)
+                current_balance = current_allowance + current_purchased
+            else:
+                current_balance = "unknown"
+
             raise ValueError(
                 f"Failed to update user balance due to concurrent modification. "
-                f"Current balance: {current_balance}, Required: {tokens}. Please retry."
+                f"Current balance: {current_balance}, Required: ${tokens:.6f}. Please retry."
             )
 
-        # Log the transaction (negative amount for deduction)
+        # Log the transaction with breakdown (negative amount for deduction)
+        transaction_metadata = {
+            **(metadata or {}),
+            "from_allowance": from_allowance,
+            "from_purchased": from_purchased,
+            "allowance_before": allowance_before,
+            "allowance_after": allowance_after,
+            "purchased_before": purchased_before,
+            "purchased_after": purchased_after,
+        }
+
         transaction_result = log_credit_transaction(
             user_id=user_id,
             amount=-tokens,  # Negative for deduction
@@ -758,23 +853,28 @@ def deduct_credits(
             description=description,
             balance_before=balance_before,
             balance_after=balance_after,
-            metadata=metadata,
+            metadata=transaction_metadata,
         )
 
         if not transaction_result:
             logger.error(
                 f"Failed to log credit transaction for user {user_id}. "
                 f"Credits were deducted but transaction not logged. "
-                f"Amount: -{tokens}, Balance: {balance_before} → {balance_after}"
+                f"Amount: -${tokens:.6f}, Balance: ${balance_before:.6f} → ${balance_after:.6f}"
             )
             # Don't raise here - credits were already deducted, just log the error
         else:
             logger.info(
-                "Deducted %s credits from user %s. Balance: %s → %s. Transaction logged: %s",
-                sanitize_for_logging(str(tokens)),
+                "Deducted $%s from user %s. Balance: $%s → $%s "
+                "(allowance: $%s → $%s, purchased: $%s → $%s). Transaction logged: %s",
+                sanitize_for_logging(f"{tokens:.6f}"),
                 sanitize_for_logging(str(user_id)),
-                sanitize_for_logging(str(balance_before)),
-                sanitize_for_logging(str(balance_after)),
+                sanitize_for_logging(f"{balance_before:.6f}"),
+                sanitize_for_logging(f"{balance_after:.6f}"),
+                sanitize_for_logging(f"{allowance_before:.6f}"),
+                sanitize_for_logging(f"{allowance_after:.6f}"),
+                sanitize_for_logging(f"{purchased_before:.6f}"),
+                sanitize_for_logging(f"{purchased_after:.6f}"),
                 transaction_result.get("id", "unknown"),
             )
 
@@ -787,6 +887,166 @@ def deduct_credits(
         if isinstance(e, RuntimeError):
             raise
         raise RuntimeError(f"Failed to deduct credits: {e}") from e
+
+
+def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: str) -> bool:
+    """
+    Reset subscription allowance on subscription creation or renewal.
+    Old allowance is forfeited (no carry-over).
+
+    Args:
+        user_id: User ID
+        allowance_amount: New allowance amount based on tier
+        tier: User's subscription tier
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
+
+        client = get_supabase_client()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Get current allowance (will be forfeited)
+        user_result = client.table("users").select(
+            "subscription_allowance, purchased_credits"
+        ).eq("id", user_id).execute()
+
+        if not user_result.data:
+            logger.error(f"User {user_id} not found for allowance reset")
+            return False
+
+        old_allowance = float(user_result.data[0].get("subscription_allowance") or 0)
+        purchased = float(user_result.data[0].get("purchased_credits") or 0)
+
+        # Reset allowance to new amount
+        result = (
+            client.table("users")
+            .update({
+                "subscription_allowance": allowance_amount,
+                "allowance_reset_date": now,
+                "updated_at": now,
+            })
+            .eq("id", user_id)
+            .execute()
+        )
+
+        if not result.data:
+            logger.error(f"Failed to reset allowance for user {user_id}")
+            return False
+
+        # Log the transaction
+        log_credit_transaction(
+            user_id=user_id,
+            amount=allowance_amount,  # Positive amount for reset
+            transaction_type=TransactionType.SUBSCRIPTION_RENEWAL,
+            description=f"Monthly allowance reset - {tier.upper()} tier (${allowance_amount})",
+            balance_before=old_allowance + purchased,
+            balance_after=allowance_amount + purchased,
+            metadata={
+                "tier": tier,
+                "forfeited_allowance": old_allowance,
+                "new_allowance": allowance_amount,
+                "purchased_credits_unchanged": purchased,
+            },
+        )
+
+        # Invalidate cache
+        invalidate_user_cache_by_id(user_id)
+
+        logger.info(
+            f"Reset allowance for user {user_id}: ${old_allowance} -> ${allowance_amount} ({tier} tier)"
+        )
+        return True
+
+    except Exception as e:
+        logger.error(f"Failed to reset subscription allowance for user {user_id}: {e}", exc_info=True)
+        return False
+
+
+def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -> float:
+    """
+    Forfeit remaining subscription allowance on cancellation.
+    Purchased credits are preserved.
+
+    Args:
+        user_id: User ID
+        raise_on_error: If True, raises exception on database errors instead of returning 0.0
+
+    Returns:
+        Amount of allowance that was forfeited (0.0 if user had no allowance)
+
+    Raises:
+        RuntimeError: If raise_on_error is True and database operation fails
+    """
+    try:
+        from src.db.credit_transactions import TransactionType, log_credit_transaction
+
+        client = get_supabase_client()
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Get current balances
+        user_result = client.table("users").select(
+            "subscription_allowance, purchased_credits"
+        ).eq("id", user_id).execute()
+
+        if not user_result.data:
+            error_msg = f"User {user_id} not found for allowance forfeiture"
+            logger.error(error_msg)
+            if raise_on_error:
+                raise RuntimeError(error_msg)
+            return 0.0
+
+        forfeited_amount = float(user_result.data[0].get("subscription_allowance") or 0)
+        purchased = float(user_result.data[0].get("purchased_credits") or 0)
+
+        if forfeited_amount > 0:
+            # Set allowance to 0
+            update_result = client.table("users").update({
+                "subscription_allowance": 0,
+                "updated_at": now,
+            }).eq("id", user_id).execute()
+
+            # Check if update succeeded
+            if not update_result.data:
+                error_msg = f"Failed to update subscription_allowance to 0 for user {user_id}"
+                logger.error(error_msg)
+                if raise_on_error:
+                    raise RuntimeError(error_msg)
+                return 0.0
+
+            # Log forfeiture
+            log_credit_transaction(
+                user_id=user_id,
+                amount=-forfeited_amount,
+                transaction_type=TransactionType.SUBSCRIPTION_CANCELLATION,
+                description="Subscription allowance forfeited on cancellation",
+                balance_before=forfeited_amount + purchased,
+                balance_after=purchased,
+                metadata={
+                    "forfeited_allowance": forfeited_amount,
+                    "purchased_credits_preserved": purchased,
+                },
+            )
+
+            # Invalidate cache
+            invalidate_user_cache_by_id(user_id)
+
+            logger.info(f"Forfeited ${forfeited_amount} allowance for user {user_id}")
+
+        return forfeited_amount
+
+    except Exception as e:
+        logger.error(
+            f"Failed to forfeit subscription allowance for user {user_id}: {e}",
+            exc_info=True,
+        )
+        if raise_on_error:
+            raise RuntimeError(
+                f"Failed to forfeit subscription allowance for user {user_id}: {e}"
+            ) from e
+        return 0.0
 
 
 def get_all_users() -> list[dict[str, Any]]:
@@ -1366,11 +1626,39 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         tier_display_map = {"basic": "Basic", "pro": "Pro", "max": "MAX"}
         tier_display_name = tier_display_map.get(tier) if tier else None
 
+        # Calculate credit breakdown
+        # Database stores values in dollars, but frontend expects cents for consistency with TIER_CONFIG
+        subscription_allowance_dollars = float(user.get("subscription_allowance") or 0)
+        purchased_credits_dollars = float(user.get("purchased_credits") or 0)
+        legacy_credits_dollars = float(user.get("credits") or 0)
+
+        # If tiered fields are empty but legacy credits exist, use legacy credits
+        # For Pro/Max users with active subscription, legacy credits should go to subscription_allowance
+        # For basic users or purchased credits, they should go to purchased_credits
+        if subscription_allowance_dollars == 0 and purchased_credits_dollars == 0 and legacy_credits_dollars > 0:
+            if tier in ("pro", "max") and user.get("subscription_status") == "active":
+                # Active Pro/Max subscriber - legacy credits are subscription allowance
+                subscription_allowance_dollars = legacy_credits_dollars
+            else:
+                # Basic user or no active subscription - legacy credits are purchased credits
+                purchased_credits_dollars = legacy_credits_dollars
+
+        total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
+
+        # Convert to cents for frontend (multiply by 100)
+        subscription_allowance_cents = int(subscription_allowance_dollars * 100)
+        purchased_credits_cents = int(purchased_credits_dollars * 100)
+        total_credits_cents = int(total_credits_dollars * 100)
+
         # Return profile data
         profile = {
             "user_id": user["id"],
             "api_key": f"{api_key[:10]}...",
-            "credits": user["credits"],
+            "credits": total_credits_cents,  # Total credits in cents (sum for backward compatibility)
+            "subscription_allowance": subscription_allowance_cents,  # Monthly subscription allowance in cents
+            "purchased_credits": purchased_credits_cents,  # One-time purchased credits in cents
+            "total_credits": total_credits_cents,  # Explicit sum of both in cents
+            "allowance_reset_date": user.get("allowance_reset_date"),  # When allowance was last reset
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
             "username": user.get("username"),
@@ -1383,6 +1671,7 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
             "subscription_end_date": user.get("subscription_end_date"),  # Unix timestamp
             "is_active": user.get("is_active"),
             "registration_date": user.get("registration_date"),
+            "settings": user.get("settings"),  # User settings including auto top-up configuration
         }
 
         logger.info(f"Profile built successfully for user {user.get('id')}")

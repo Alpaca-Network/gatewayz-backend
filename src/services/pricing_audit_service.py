@@ -14,10 +14,10 @@ Features:
 
 import json
 import logging
-from datetime import datetime, timezone, timedelta
-from typing import Any
-from dataclasses import dataclass, asdict
 from collections import defaultdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from src.config.config import Config
 
@@ -552,9 +552,10 @@ class PricingAuditService:
         costs_by_gateway = {}
 
         for gateway, record in gateway_latest.items():
+            # FIXED: Pricing is per single token, so just multiply (no division)
             monthly_cost = (
-                (prompt_tokens * record.prompt_price) / 1_000_000
-                + (completion_tokens * record.completion_price) / 1_000_000
+                (prompt_tokens * record.prompt_price)
+                + (completion_tokens * record.completion_price)
             )
             costs_by_gateway[gateway] = monthly_cost
             max_cost = max(max_cost, monthly_cost)

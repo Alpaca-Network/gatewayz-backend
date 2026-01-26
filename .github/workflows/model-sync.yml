@@ -1,0 +1,163 @@
+name: Scheduled Model Sync
+
+# Sync models from provider APIs on a schedule
+# This keeps the models table up-to-date with latest provider offerings
+
+on:
+  # Run every 6 hours
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours at minute 0
+
+  # Allow manual triggering
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: 'Comma-separated list of providers to sync (leave empty for all)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Dry run (fetch but do not write to database)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  sync-models:
+    name: Sync Models from Providers
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run model sync
+        env:
+          # Database
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+          # Provider API keys
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          FEATHERLESS_API_KEY: ${{ secrets.FEATHERLESS_API_KEY }}
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS }}
+          NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
+          NOVITA_API_KEY: ${{ secrets.NOVITA_API_KEY }}
+          AIMO_API_KEY: ${{ secrets.AIMO_API_KEY }}
+          NEAR_API_KEY: ${{ secrets.NEAR_API_KEY }}
+          FAL_API_KEY: ${{ secrets.FAL_API_KEY }}
+          HELICONE_API_KEY: ${{ secrets.HELICONE_API_KEY }}
+          CLOUDFLARE_WORKERS_AI_API_KEY: ${{ secrets.CLOUDFLARE_WORKERS_AI_API_KEY }}
+          ALIBABA_CLOUD_API_KEY: ${{ secrets.ALIBABA_CLOUD_API_KEY }}
+          CLARIFAI_API_KEY: ${{ secrets.CLARIFAI_API_KEY }}
+          CHUTES_API_KEY: ${{ secrets.CHUTES_API_KEY }}
+          VERCEL_AI_GATEWAY_KEY: ${{ secrets.VERCEL_AI_GATEWAY_KEY }}
+          AIHUBMIX_API_KEY: ${{ secrets.AIHUBMIX_API_KEY }}
+          ANANNAS_API_KEY: ${{ secrets.ANANNAS_API_KEY }}
+          ONEROUTER_API_KEY: ${{ secrets.ONEROUTER_API_KEY }}
+          SIMPLISMART_API_KEY: ${{ secrets.SIMPLISMART_API_KEY }}
+
+        run: |
+          echo "🔄 Starting scheduled model sync..."
+
+          # Build curl command for API call
+          if [ -z "${{ github.event.inputs.providers }}" ]; then
+            PROVIDERS_PARAM=""
+          else
+            PROVIDERS_PARAM="?providers=${{ github.event.inputs.providers }}"
+          fi
+
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+          if [ -z "$DRY_RUN" ]; then
+            DRY_RUN="false"
+          fi
+
+          if [ "$DRY_RUN" == "true" ]; then
+            DRY_RUN_PARAM="&dry_run=true"
+          else
+            DRY_RUN_PARAM=""
+          fi
+
+          # Use Python script for better error handling
+          python - <<EOF
+          import os
+          import sys
+          import asyncio
+          from src.services.provider_model_sync_service import sync_models_from_providers
+
+          async def main():
+              providers_input = "${{ github.event.inputs.providers }}"
+              providers = providers_input.split(',') if providers_input else None
+              dry_run = "$DRY_RUN" == "true"
+
+              print(f"Syncing models...")
+              print(f"  Providers: {providers or 'ALL'}")
+              print(f"  Dry run: {dry_run}")
+
+              result = await sync_models_from_providers(
+                  provider_slugs=providers,
+                  batch_size=5
+              )
+
+              if result['success']:
+                  print(f"✅ SUCCESS")
+                  print(f"  Providers synced: {result['providers_synced']}/{result['total_providers']}")
+                  print(f"  Models synced: {result['total_models_synced']}")
+
+                  if result.get('errors'):
+                      print(f"⚠️  Errors: {len(result['errors'])}")
+                      for error in result['errors'][:5]:
+                          print(f"    - {error}")
+
+                  sys.exit(0)
+              else:
+                  print(f"❌ FAILED: {result.get('error')}")
+                  sys.exit(1)
+
+          asyncio.run(main())
+          EOF
+
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '⚠️ Scheduled Model Sync Failed',
+              body: `Scheduled model sync failed on ${new Date().toISOString()}\n\nWorkflow: ${context.workflow}\nRun: ${context.runNumber}`,
+              labels: ['automated', 'model-sync', 'failure']
+            })
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Model Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY

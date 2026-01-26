@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter
-from openai import AsyncOpenAI, BadRequestError, APIStatusError
+from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools

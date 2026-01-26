@@ -12,13 +12,13 @@ import os
 from contextlib import asynccontextmanager
 
 from src.cache import initialize_fal_cache_from_catalog
+from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
     get_pool_stats,
     warmup_provider_connections_async,
 )
-from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.prometheus_remote_write import (
     init_prometheus_remote_write,
     shutdown_prometheus_remote_write,
@@ -133,14 +133,54 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"FastAPI instrumentation warning: {e}")
 
-        # Initialize Tempo/OpenTelemetry OTLP exporter in background
-        # The endpoint check has 1s timeout, so defer to not block healthcheck
+        # Initialize Tempo/OpenTelemetry OTLP exporter in background with retry
+        # Uses exponential backoff to handle Railway timing issues where Tempo
+        # may not be ready when the backend starts
         async def init_tempo_exporter_background():
-            try:
-                init_tempo_otlp()
-                logger.info("Tempo/OTLP tracing initialized")
-            except Exception as e:
-                logger.warning(f"Tempo/OTLP initialization warning: {e}")
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            max_retries = 5
+            base_delay = 2.0  # Start with 2 seconds
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # Check if already initialized (e.g., via on_startup event)
+                    if OpenTelemetryConfig._initialized:
+                        logger.info("Tempo/OTLP tracing already initialized")
+                        return
+
+                    success = OpenTelemetryConfig.initialize()
+                    if success:
+                        logger.info(f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})")
+                        return
+                    else:
+                        # Initialization returned False (endpoint not reachable, etc.)
+                        if attempt < max_retries:
+                            delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff
+                            logger.info(
+                                f"Tempo/OTLP initialization attempt {attempt}/{max_retries} failed, "
+                                f"retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                        else:
+                            logger.warning(
+                                f"Tempo/OTLP initialization failed after {max_retries} attempts. "
+                                f"Tracing will be disabled. Use POST /api/instrumentation/otel/initialize "
+                                f"to manually retry."
+                            )
+                except Exception as e:
+                    if attempt < max_retries:
+                        delay = base_delay * (2 ** (attempt - 1))
+                        logger.warning(
+                            f"Tempo/OTLP initialization attempt {attempt}/{max_retries} error: {e}, "
+                            f"retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning(
+                            f"Tempo/OTLP initialization failed after {max_retries} attempts: {e}. "
+                            f"Use POST /api/instrumentation/otel/initialize to manually retry."
+                        )
 
         _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
 
@@ -177,6 +217,25 @@ async def lifespan(app):
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
+        # PERF: Pre-warm database connections in background
+        # This ensures the HTTP/2 connection pool is ready and eliminates cold-start latency
+        async def warmup_database_connections():
+            try:
+                if db_initialized:
+                    logger.info("🔥 Pre-warming database connections...")
+                    # Execute a simple query to warm up the connection pool
+                    from src.config.supabase_config import get_supabase_client
+                    client = get_supabase_client()
+                    # Ping the database with a lightweight query
+                    await asyncio.to_thread(
+                        lambda: client.table("plans").select("id").limit(1).execute()
+                    )
+                    logger.info("✅ Database connection pool warmed")
+            except Exception as e:
+                logger.warning(f"Database connection warmup warning: {e}")
+
+        _create_background_task(warmup_database_connections(), name="warmup_database")
+
         # PERF: Pre-warm connections to frequently used AI providers in background
         # This eliminates cold-start penalty (~100-200ms) for first requests
         # Moved to background to not block healthcheck
@@ -197,6 +256,21 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
+        # PERF: Preload frequently accessed model metadata into cache
+        async def preload_hot_models_cache():
+            try:
+                logger.info("🔥 Preloading hot model metadata...")
+                from src.services.models import get_all_models
+
+                # Preload all models to warm up the cache
+                # This prevents cold cache misses on first requests
+                models = await asyncio.to_thread(get_all_models)
+                logger.info(f"✅ Preloaded {len(models)} models into cache")
+            except Exception as e:
+                logger.warning(f"Model cache preload warning: {e}")
+
+        _create_background_task(preload_hot_models_cache(), name="preload_models")
+
         # Initialize Google Vertex AI models catalog in background
         async def init_google_models_background():
             try:
@@ -208,6 +282,49 @@ async def lifespan(app):
                 logger.warning(f"Google models initialization warning: {e}", exc_info=True)
 
         _create_background_task(init_google_models_background(), name="init_google_models")
+
+        # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
+        async def sync_providers_background():
+            try:
+                from src.services.provider_model_sync_service import sync_providers_on_startup
+
+                result = await sync_providers_on_startup()
+                if result["success"]:
+                    logger.info(f"✓ Synced {result['providers_synced']} providers from GATEWAY_REGISTRY")
+                else:
+                    logger.warning(f"Provider sync warning: {result.get('error')}")
+            except Exception as e:
+                logger.warning(f"Provider sync warning: {e}")
+
+        _create_background_task(sync_providers_background(), name="sync_providers")
+
+        # Optionally sync high-priority models on startup (can be disabled for faster startup)
+        sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"
+        if sync_models_on_startup:
+            async def sync_initial_models_background():
+                try:
+                    from src.services.provider_model_sync_service import sync_initial_models_on_startup
+
+                    result = await sync_initial_models_on_startup()
+                    if result["success"]:
+                        logger.info(f"✓ Initial model sync: {result['total_models_synced']} models")
+                except Exception as e:
+                    logger.warning(f"Initial model sync warning: {e}")
+
+            _create_background_task(sync_initial_models_background(), name="sync_initial_models")
+
+        # Start background model sync task (runs every N hours)
+        model_sync_interval = int(os.environ.get("MODEL_SYNC_INTERVAL_HOURS", "6"))
+        async def start_model_sync_background():
+            try:
+                from src.services.provider_model_sync_service import start_background_model_sync
+
+                await start_background_model_sync(interval_hours=model_sync_interval)
+                logger.info(f"✓ Background model sync started (every {model_sync_interval}h)")
+            except Exception as e:
+                logger.warning(f"Background model sync warning: {e}")
+
+        _create_background_task(start_model_sync_background(), name="start_model_sync")
 
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
@@ -230,6 +347,24 @@ async def lifespan(app):
 
         _create_background_task(init_error_monitoring_background(), name="init_error_monitoring")
 
+        # Initialize router health snapshot background task
+        # This updates pre-computed healthy model lists for the prompt router
+        # Critical for meeting < 2ms router latency (single Redis read vs N awaits)
+        async def init_router_health_snapshots_background():
+            try:
+                router_enabled = os.environ.get("ROUTER_ENABLED", "true").lower() == "true"
+                if router_enabled:
+                    from src.services.background_tasks import start_router_health_snapshot_task
+
+                    start_router_health_snapshot_task()
+                    logger.info("✓ Router health snapshot background task started")
+                else:
+                    logger.info("⏭️  Router disabled via ROUTER_ENABLED env var")
+            except Exception as e:
+                logger.warning(f"Router health snapshot initialization warning: {e}")
+
+        _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -250,6 +385,15 @@ async def lifespan(app):
         _background_tasks.clear()
 
     try:
+        # Stop background model sync
+        try:
+            from src.services.provider_model_sync_service import stop_background_model_sync
+
+            await stop_background_model_sync()
+            logger.info("Background model sync stopped")
+        except Exception as e:
+            logger.warning(f"Model sync shutdown warning: {e}")
+
         # Stop autonomous error monitoring
         try:
             autonomous_monitor = get_autonomous_monitor()
@@ -257,6 +401,15 @@ async def lifespan(app):
             logger.info("Autonomous error monitoring stopped")
         except Exception as e:
             logger.warning(f"Error monitoring shutdown warning: {e}")
+
+        # Stop router health snapshot background task
+        try:
+            from src.services.background_tasks import stop_router_health_snapshot_task
+
+            stop_router_health_snapshot_task()
+            logger.info("Router health snapshot task stopped")
+        except Exception as e:
+            logger.warning(f"Router health snapshot shutdown warning: {e}")
 
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API
@@ -269,6 +422,15 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
+
+        # Shutdown OpenTelemetry (Tempo tracing)
+        try:
+            from src.config.opentelemetry_config import OpenTelemetryConfig
+
+            OpenTelemetryConfig.shutdown()
+            logger.info("OpenTelemetry (Tempo) shutdown complete")
+        except Exception as e:
+            logger.warning(f"OpenTelemetry shutdown warning: {e}")
 
         # Shutdown Arize OTEL
         try:

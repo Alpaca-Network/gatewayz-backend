@@ -116,8 +116,8 @@ async def test_metrics(request: Request):
         dict: Test results with trace IDs for correlation
     """
     from src.services.prometheus_metrics import (
-        fastapi_requests_total,
         fastapi_requests_duration_seconds,
+        fastapi_requests_total,
         model_inference_requests,
     )
 
@@ -128,9 +128,9 @@ async def test_metrics(request: Request):
     # Get trace context
     try:
         from src.config.opentelemetry_config import (
-            get_current_trace_id,
-            get_current_span_id,
             OpenTelemetryConfig,
+            get_current_span_id,
+            get_current_trace_id,
         )
 
         trace_id = get_current_trace_id()
@@ -353,8 +353,8 @@ async def metrics_health():
 
     # Check OpenTelemetry
     try:
-        from src.config.opentelemetry_config import OPENTELEMETRY_AVAILABLE
         from src.config.config import Config
+        from src.config.opentelemetry_config import OPENTELEMETRY_AVAILABLE
 
         health["components"]["opentelemetry"] = {
             "status": "healthy" if OPENTELEMETRY_AVAILABLE and Config.TEMPO_ENABLED else "disabled",

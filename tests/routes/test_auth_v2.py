@@ -192,7 +192,7 @@ def client(sb, monkeypatch):
         result = sb.table('users').select('*').eq('username', username).execute()
         return result.data[0] if result.data else None
 
-    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5):
+    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"):
         # Create user (let stub auto-assign ID)
         trial_expires_at = datetime.now(timezone.utc).isoformat()
         user_data = {
@@ -202,7 +202,7 @@ def client(sb, monkeypatch):
             'privy_user_id': privy_user_id,
             'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
             'created_at': datetime.now(timezone.utc).isoformat(),
-            'subscription_status': 'trial',
+            'subscription_status': subscription_status,
             'trial_expires_at': trial_expires_at,
             'tier': 'basic',
         }
@@ -228,7 +228,7 @@ def client(sb, monkeypatch):
             'credits': credits,
             'primary_api_key': api_key,
             'api_key': api_key,
-            'subscription_status': 'trial',
+            'subscription_status': subscription_status,
             'trial_expires_at': trial_expires_at,
             'tier': 'basic',
         }

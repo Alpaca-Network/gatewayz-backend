@@ -1,13 +1,27 @@
 """
 Braintrust integration for LLM tracing and observability.
 
-This module provides utilities for tracing LLM calls using Braintrust.
+DEPRECATED: This module is deprecated. Use src.services.braintrust_service instead.
+
+The braintrust_service module provides proper project association by using
+logger.start_span() instead of the standalone start_span() function.
+
+This module is kept for backward compatibility only.
+
 Learn more at https://www.braintrust.dev/docs
 """
 
+import warnings
+
+warnings.warn(
+    "braintrust_tracing is deprecated. Use src.services.braintrust_service instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 import functools
-import logging
 import inspect
+import logging
 
 try:
     from braintrust import current_span, init_logger, start_span, traced
@@ -60,7 +74,10 @@ except ModuleNotFoundError:
 
         return decorator
 
-# Initialize logger with your project name
+# NOTE: This module-level logger initialization is DEPRECATED and kept only for
+# backward compatibility. It demonstrates the OLD pattern that caused orphaned spans.
+# New code should use src.services.braintrust_service which properly stores the logger
+# and uses logger.start_span() for correct project association.
 logger = init_logger(project="Gatewayz Backend")
 
 

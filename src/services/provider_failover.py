@@ -45,7 +45,9 @@ except ImportError:  # pragma: no cover - handled gracefully below
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "onerouter",
-    "openrouter",
+    "openai",  # Native OpenAI - try first for openai/* models
+    "anthropic",  # Native Anthropic - try first for anthropic/* models
+    "openrouter",  # Fallback for OpenAI/Anthropic models
     "cerebras",
     "huggingface",
     "featherless",
@@ -61,7 +63,12 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 # Include 402 (Payment Required) to allow failover when provider credits are exhausted
 FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
 _OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
-_OPENROUTER_PREFIX_LOCKS = ("openrouter/", "openai/", "anthropic/")
+_OPENROUTER_ONLY_PREFIX_LOCKS = ("openrouter/",)  # Models that can ONLY use OpenRouter
+# Models that should try native provider first, then OpenRouter as fallback
+_NATIVE_PROVIDER_PREFIXES = {
+    "openai/": ("openai", "openrouter"),  # OpenAI models: try openai first, then openrouter
+    "anthropic/": ("anthropic", "openrouter"),  # Anthropic models: try anthropic first, then openrouter
+}
 
 
 def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
@@ -104,11 +111,12 @@ def enforce_model_failover_rules(
     """
     Restrict the provider chain when a model is provider-specific.
 
-    Currently we only lock models that use the OpenRouter namespace or OpenAI/Anthropic
-    aliases that are exclusively served through OpenRouter (e.g. openai/gpt-4o, anthropic/claude),
-    along with special OpenRouter suffixes (e.g. openrouter/auto, z-ai/glm-4.6:exacto).
-    These identifiers are not recognized by other providers, so attempting failover only
-    creates noisy upstream errors.
+    For OpenAI and Anthropic models:
+    - Try the native provider first (openai for openai/*, anthropic for anthropic/*)
+    - Fall back to OpenRouter if the native provider fails
+
+    For OpenRouter-specific models (openrouter/* prefix or :exacto/:free/:extended suffix):
+    - Lock to OpenRouter only
 
     Args:
         model_id: The model identifier being requested
@@ -124,37 +132,93 @@ def enforce_model_failover_rules(
     if not model_id:
         return provider_chain
 
-    # If payment failover is allowed (e.g., after a 402 error), don't restrict the chain
-    # This allows the system to try alternative providers when credits are exhausted
+    # Apply model aliases to normalize model IDs (e.g., "gpt-4" -> "openai/gpt-4")
+    # This ensures bare OpenAI/Anthropic model names are correctly routed
+    from src.services.model_transformations import apply_model_alias
+
+    aliased_model_id = apply_model_alias(model_id)
+    normalized = aliased_model_id.lower()
+
+    # Check for native provider prefixes (openai/, anthropic/)
+    # These should try native provider first, then OpenRouter as fallback
+    # IMPORTANT: These restrictions apply EVEN with payment failover enabled,
+    # because these models can ONLY work with their native provider or OpenRouter.
+    # Routing them to other providers like Cerebras/HuggingFace will always fail.
+    for prefix, allowed_providers in _NATIVE_PROVIDER_PREFIXES.items():
+        if normalized.startswith(prefix):
+            # Filter chain to only include the allowed providers for this model type
+            filtered_chain = [p for p in provider_chain if p in allowed_providers]
+            if filtered_chain:
+                # Ensure native provider comes first if it's in the chain
+                native_provider = allowed_providers[0]
+                if native_provider in filtered_chain and filtered_chain[0] != native_provider:
+                    filtered_chain.remove(native_provider)
+                    filtered_chain.insert(0, native_provider)
+                logger.info(
+                    "Model '%s' routed to native provider chain: %s (allow_payment_failover=%s)",
+                    model_id,
+                    filtered_chain,
+                    allow_payment_failover,
+                )
+                return filtered_chain
+            # If no allowed providers in chain, return original chain
+            return provider_chain
+
+    # If payment failover is allowed (e.g., after a 402 error), allow broader provider chain
+    # for models that are not vendor-specific (i.e., not openai/* or anthropic/*)
+    # Note: OpenRouter-only models (:free, :exacto, :extended suffixes) still need to respect
+    # their restrictions even with payment failover, as these models only exist on OpenRouter.
     if allow_payment_failover:
+        # Check for OpenRouter-only suffixes first - these must still be restricted
+        if ":" in normalized:
+            suffix = normalized.split(":", 1)[1]
+            if suffix in _OPENROUTER_SUFFIX_LOCKS:
+                if "openrouter" in provider_chain:
+                    logger.info(
+                        "Model '%s' has OpenRouter-specific suffix ':%s'; "
+                        "locking to OpenRouter (even with payment failover)",
+                        model_id,
+                        suffix,
+                    )
+                    return ["openrouter"]
+        # Check for OpenRouter-only prefixes
+        if normalized.startswith(_OPENROUTER_ONLY_PREFIX_LOCKS):
+            if "openrouter" in provider_chain:
+                logger.info(
+                    "Model '%s' is restricted to OpenRouter only (even with payment failover)",
+                    model_id,
+                )
+                return ["openrouter"]
+        # For other models, allow broader failover
         logger.info(
             "Payment failover enabled for model '%s'; allowing alternative providers",
             model_id,
         )
         return provider_chain
 
-    normalized = model_id.lower()
-    locked_provider = None
+    # Check for OpenRouter-only prefixes
+    if normalized.startswith(_OPENROUTER_ONLY_PREFIX_LOCKS):
+        if "openrouter" in provider_chain:
+            logger.info(
+                "Model '%s' is restricted to OpenRouter only",
+                model_id,
+            )
+            return ["openrouter"]
+        return provider_chain
 
-    if normalized.startswith(_OPENROUTER_PREFIX_LOCKS):
-        locked_provider = "openrouter"
-    elif ":" in normalized:
+    # Check for OpenRouter-specific suffixes (:exacto, :free, :extended)
+    if ":" in normalized:
         suffix = normalized.split(":", 1)[1]
         if suffix in _OPENROUTER_SUFFIX_LOCKS:
-            locked_provider = "openrouter"
+            if "openrouter" in provider_chain:
+                logger.info(
+                    "Model '%s' has OpenRouter-specific suffix ':%s'; locking to OpenRouter",
+                    model_id,
+                    suffix,
+                )
+                return ["openrouter"]
 
-    if not locked_provider or locked_provider not in provider_chain:
-        return provider_chain
-
-    if provider_chain == [locked_provider]:
-        return provider_chain
-
-    logger.info(
-        "Model '%s' is restricted to provider '%s'; suppressing failover to other providers",
-        model_id,
-        locked_provider,
-    )
-    return [locked_provider]
+    return provider_chain
 
 
 def filter_by_circuit_breaker(

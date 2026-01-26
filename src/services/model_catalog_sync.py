@@ -4,38 +4,46 @@ Fetches models from all provider APIs and syncs to database
 """
 
 import logging
-from typing import Any
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any
 
-from src.db.providers_db import (
-    get_provider_by_slug,
-    create_provider,
-)
 from src.db.models_catalog_db import bulk_upsert_models
-from src.services.models import (
-    fetch_models_from_openrouter,
-    fetch_models_from_deepinfra,
-    fetch_models_from_featherless,
-    fetch_models_from_chutes,
-    fetch_models_from_groq,
-    fetch_models_from_fireworks,
-    fetch_models_from_together,
-    fetch_models_from_aimo,
-    fetch_models_from_near,
-    fetch_models_from_fal,
-    fetch_models_from_vercel_ai_gateway,
-    fetch_models_from_aihubmix,
-    fetch_models_from_helicone,
-    fetch_models_from_anannas,
-    fetch_models_from_alibaba,
+from src.db.providers_db import (
+    create_provider,
+    get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.clarifai_client import fetch_models_from_clarifai
+from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
+from src.services.cohere_client import fetch_models_from_cohere
 from src.services.google_vertex_client import fetch_models_from_google_vertex
-from src.services.xai_client import fetch_models_from_xai
+from src.services.huggingface_models import fetch_models_from_huggingface_api
+from src.services.models import (
+    fetch_models_from_aihubmix,
+    fetch_models_from_aimo,
+    fetch_models_from_alibaba,
+    fetch_models_from_anannas,
+    fetch_models_from_anthropic,
+    fetch_models_from_chutes,
+    fetch_models_from_deepinfra,
+    fetch_models_from_fal,
+    fetch_models_from_featherless,
+    fetch_models_from_fireworks,
+    fetch_models_from_groq,
+    fetch_models_from_helicone,
+    fetch_models_from_near,
+    fetch_models_from_openai,
+    fetch_models_from_openrouter,
+    fetch_models_from_together,
+    fetch_models_from_vercel_ai_gateway,
+)
+from src.services.modelz_client import fetch_models_from_modelz
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
+from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.simplismart_client import fetch_models_from_simplismart
+from src.services.xai_client import fetch_models_from_xai
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +71,15 @@ PROVIDER_FETCH_FUNCTIONS = {
     "xai": fetch_models_from_xai,
     "nebius": fetch_models_from_nebius,
     "novita": fetch_models_from_novita,
+    # Additional providers that were missing
+    "openai": fetch_models_from_openai,
+    "anthropic": fetch_models_from_anthropic,
+    "clarifai": fetch_models_from_clarifai,
+    "simplismart": fetch_models_from_simplismart,
+    "onerouter": fetch_models_from_onerouter,
+    "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
+    "modelz": fetch_models_from_modelz,
+    "cohere": fetch_models_from_cohere,
 }
 
 
@@ -75,7 +92,7 @@ def safe_decimal(value: Any) -> Decimal | None:
             return Decimal(str(value))
         if isinstance(value, str):
             # Remove any non-numeric characters except decimal point and minus
-            cleaned = ''.join(c for c in value if c.isdigit() or c in '.-')
+            cleaned = "".join(c for c in value if c.isdigit() or c in ".-")
             if cleaned:
                 return Decimal(cleaned)
         return None
@@ -143,9 +160,7 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
 
 def transform_normalized_model_to_db_schema(
-    normalized_model: dict[str, Any],
-    provider_id: int,
-    provider_slug: str
+    normalized_model: dict[str, Any], provider_id: int, provider_slug: str
 ) -> dict[str, Any] | None:
     """
     Transform a normalized model (from fetch functions) to database schema
@@ -161,10 +176,10 @@ def transform_normalized_model_to_db_schema(
     try:
         # Extract model ID - try various fields
         model_id = (
-            normalized_model.get("id") or
-            normalized_model.get("slug") or
-            normalized_model.get("canonical_slug") or
-            normalized_model.get("model_id")
+            normalized_model.get("id")
+            or normalized_model.get("slug")
+            or normalized_model.get("canonical_slug")
+            or normalized_model.get("model_id")
         )
 
         if not model_id:
@@ -233,7 +248,8 @@ def transform_normalized_model_to_db_schema(
         # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
         provider_model_id = normalized_model.get("provider_model_id") or model_id
 
-        return {
+        # Build model data - pricing is stored separately in model_pricing table
+        model_data = {
             "provider_id": provider_id,
             "model_id": str(model_id),
             "model_name": str(model_name),
@@ -244,25 +260,30 @@ def transform_normalized_model_to_db_schema(
             "architecture": architecture_str,
             "top_provider": top_provider,
             "per_request_limits": per_request_limits,
-
-            # Pricing
-            "pricing_prompt": pricing["prompt"],
-            "pricing_completion": pricing["completion"],
-            "pricing_image": pricing["image"],
-            "pricing_request": pricing["request"],
-
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
             "supports_vision": capabilities["supports_vision"],
-
             # Status
             "is_active": True,
             "metadata": metadata,
         }
 
+        # Store pricing info in metadata for later sync to model_pricing table
+        if any(pricing.values()):
+            model_data["metadata"]["pricing_raw"] = {
+                "prompt": str(pricing["prompt"]) if pricing["prompt"] else None,
+                "completion": str(pricing["completion"]) if pricing["completion"] else None,
+                "image": str(pricing["image"]) if pricing["image"] else None,
+                "request": str(pricing["request"]) if pricing["request"] else None,
+            }
+
+        return model_data
+
     except Exception as e:
-        logger.error(f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}")
+        logger.error(
+            f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}"
+        )
         return None
 
 
@@ -360,14 +381,93 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "site_url": "https://x.ai",
                 "supports_streaming": True,
             },
+            "openai": {
+                "name": "OpenAI",
+                "description": "OpenAI GPT models",
+                "base_url": "https://api.openai.com/v1",
+                "api_key_env_var": "OPENAI_API_KEY",
+                "site_url": "https://openai.com",
+                "supports_streaming": True,
+                "supports_function_calling": True,
+                "supports_vision": True,
+            },
+            "anthropic": {
+                "name": "Anthropic",
+                "description": "Anthropic Claude models",
+                "base_url": "https://api.anthropic.com/v1",
+                "api_key_env_var": "ANTHROPIC_API_KEY",
+                "site_url": "https://anthropic.com",
+                "supports_streaming": True,
+                "supports_function_calling": True,
+                "supports_vision": True,
+            },
+            "clarifai": {
+                "name": "Clarifai",
+                "description": "Clarifai AI platform",
+                "base_url": "https://api.clarifai.com",
+                "api_key_env_var": "CLARIFAI_API_KEY",
+                "site_url": "https://clarifai.com",
+                "supports_streaming": True,
+            },
+            "simplismart": {
+                "name": "SimpliSmart",
+                "description": "SimpliSmart AI inference",
+                "base_url": "https://api.simplismart.ai/v1",
+                "api_key_env_var": "SIMPLISMART_API_KEY",
+                "site_url": "https://simplismart.ai",
+                "supports_streaming": True,
+            },
+            "onerouter": {
+                "name": "Infron AI",
+                "description": "Infron AI (formerly OneRouter) multi-provider gateway",
+                "base_url": "https://api.infron.ai/v1",
+                "api_key_env_var": "ONEROUTER_API_KEY",
+                "site_url": "https://infron.ai",
+                "supports_streaming": True,
+            },
+            "cloudflare-workers-ai": {
+                "name": "Cloudflare Workers AI",
+                "description": "Cloudflare Workers AI inference",
+                "base_url": None,
+                "api_key_env_var": "CLOUDFLARE_API_TOKEN",
+                "site_url": "https://developers.cloudflare.com/workers-ai",
+                "supports_streaming": True,
+            },
+            "nebius": {
+                "name": "Nebius",
+                "description": "Nebius AI Studio",
+                "base_url": "https://api.studio.nebius.ai/v1",
+                "api_key_env_var": "NEBIUS_API_KEY",
+                "site_url": "https://studio.nebius.ai",
+                "supports_streaming": True,
+            },
+            "novita": {
+                "name": "Novita",
+                "description": "Novita AI inference",
+                "base_url": "https://api.novita.ai/v3/openai",
+                "api_key_env_var": "NOVITA_API_KEY",
+                "site_url": "https://novita.ai",
+                "supports_streaming": True,
+            },
+            "modelz": {
+                "name": "Modelz",
+                "description": "Modelz AI model deployment platform",
+                "base_url": "https://backend.alpacanetwork.ai",
+                "api_key_env_var": "MODELZ_API_KEY",
+                "site_url": "https://modelz.ai",
+                "supports_streaming": True,
+            },
         }
 
         # Get metadata for this provider or use defaults
-        metadata = provider_metadata.get(provider_slug, {
-            "name": provider_slug.replace("-", " ").replace("_", " ").title(),
-            "description": f"{provider_slug} AI provider",
-            "supports_streaming": True,
-        })
+        metadata = provider_metadata.get(
+            provider_slug,
+            {
+                "name": provider_slug.replace("-", " ").replace("_", " ").title(),
+                "description": f"{provider_slug} AI provider",
+                "supports_streaming": True,
+            },
+        )
 
         provider_data = {
             "name": metadata.get("name"),
@@ -386,7 +486,9 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
 
         created_provider = create_provider(provider_data)
         if created_provider:
-            logger.info(f"Successfully created provider '{provider_slug}' (ID: {created_provider['id']})")
+            logger.info(
+                f"Successfully created provider '{provider_slug}' (ID: {created_provider['id']})"
+            )
         return created_provider
 
     except Exception as e:
@@ -394,10 +496,7 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
         return None
 
 
-def sync_provider_models(
-    provider_slug: str,
-    dry_run: bool = False
-) -> dict[str, Any]:
+def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str, Any]:
     """
     Sync models for a specific provider
 
@@ -416,7 +515,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"Failed to ensure provider '{provider_slug}' exists",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         if not provider.get("is_active"):
@@ -424,7 +523,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"Provider '{provider_slug}' is inactive",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         # Get fetch function for this provider
@@ -434,7 +533,7 @@ def sync_provider_models(
                 "success": False,
                 "error": f"No fetch function configured for '{provider_slug}'",
                 "models_fetched": 0,
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         logger.info(f"Fetching models from {provider_slug}...")
@@ -450,7 +549,7 @@ def sync_provider_models(
                 "provider_id": provider["id"],
                 "models_fetched": 0,
                 "models_synced": 0,
-                "message": "No models fetched (may be API error or empty catalog)"
+                "message": "No models fetched (may be API error or empty catalog)",
             }
 
         logger.info(f"Fetched {len(normalized_models)} models from {provider_slug}")
@@ -461,9 +560,7 @@ def sync_provider_models(
         for model in normalized_models:
             try:
                 db_model = transform_normalized_model_to_db_schema(
-                    model,
-                    provider["id"],
-                    provider_slug
+                    model, provider["id"], provider_slug
                 )
                 if db_model:
                     db_models.append(db_model)
@@ -481,7 +578,7 @@ def sync_provider_models(
                 "provider": provider_slug,
                 "provider_id": provider["id"],
                 "models_fetched": len(normalized_models),
-                "models_synced": 0
+                "models_synced": 0,
             }
 
         logger.info(f"Transformed {len(db_models)} models for {provider_slug} ({skipped} skipped)")
@@ -492,6 +589,39 @@ def sync_provider_models(
             synced_models = bulk_upsert_models(db_models)
             models_synced = len(synced_models) if synced_models else 0
             logger.info(f"Successfully synced {models_synced} models for {provider_slug}")
+
+            # Sync pricing for the synced models
+            if synced_models:
+                try:
+                    from src.services.pricing_sync_background import sync_pricing_on_model_update
+
+                    # Extract model IDs from synced models
+                    model_ids = [m.get("id") for m in synced_models if m.get("id")]
+
+                    if model_ids:
+                        logger.info(f"Syncing pricing for {len(model_ids)} models...")
+                        pricing_stats = sync_pricing_on_model_update(model_ids)
+                        logger.info(f"Pricing sync complete: {pricing_stats}")
+                except Exception as pricing_e:
+                    logger.warning(f"Pricing sync failed for {provider_slug}: {pricing_e}")
+
+                # Invalidate caches to ensure fresh data is served immediately
+                try:
+                    from src.cache import clear_models_cache
+                    from src.services.model_catalog_cache import (
+                        invalidate_full_catalog,
+                        invalidate_provider_catalog,
+                    )
+
+                    # Invalidate in-memory cache for this provider
+                    clear_models_cache(provider_slug)
+                    # Invalidate Redis provider-specific cache
+                    invalidate_provider_catalog(provider_slug)
+                    # Then invalidate Redis full catalog (aggregated view)
+                    invalidate_full_catalog()
+                    logger.info(f"Cache invalidated for {provider_slug} after model sync")
+                except Exception as cache_e:
+                    logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
         else:
             models_synced = 0
             logger.info(f"DRY RUN: Would sync {len(db_models)} models for {provider_slug}")
@@ -504,7 +634,7 @@ def sync_provider_models(
             "models_transformed": len(db_models),
             "models_skipped": skipped,
             "models_synced": models_synced,
-            "dry_run": dry_run
+            "dry_run": dry_run,
         }
 
     except Exception as e:
@@ -514,13 +644,12 @@ def sync_provider_models(
             "error": str(e),
             "provider": provider_slug,
             "models_fetched": 0,
-            "models_synced": 0
+            "models_synced": 0,
         }
 
 
 def sync_all_providers(
-    provider_slugs: list[str] | None = None,
-    dry_run: bool = False
+    provider_slugs: list[str] | None = None, dry_run: bool = False
 ) -> dict[str, Any]:
     """
     Sync models from all providers (or specified list)
@@ -560,10 +689,7 @@ def sync_all_providers(
                 total_skipped += result.get("models_skipped", 0)
                 total_synced += result.get("models_synced", 0)
             else:
-                errors.append({
-                    "provider": provider_slug,
-                    "error": result.get("error")
-                })
+                errors.append({"provider": provider_slug, "error": result.get("error")})
 
         success = len(errors) == 0
 
@@ -588,7 +714,7 @@ def sync_all_providers(
             "errors": errors,
             "results": results,
             "dry_run": dry_run,
-            "synced_at": datetime.now(timezone.utc).isoformat()
+            "synced_at": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
@@ -598,5 +724,5 @@ def sync_all_providers(
             "error": str(e),
             "providers_processed": 0,
             "total_models_fetched": 0,
-            "total_models_synced": 0
+            "total_models_synced": 0,
         }

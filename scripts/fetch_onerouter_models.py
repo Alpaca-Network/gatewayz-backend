@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Fetch all available models from OneRouter API and display pricing information.
-This script helps populate the manual_pricing.json file with current OneRouter models.
+Fetch all available models from Infron AI API and display pricing information.
+This script helps populate the manual_pricing.json file with current Infron AI models.
+
+Note: Infron AI was formerly known as OneRouter. Internal identifiers still use 'onerouter'.
 """
 
 import sys
@@ -15,16 +17,16 @@ from src.config import Config
 
 
 def fetch_onerouter_models():
-    """Fetch all models from OneRouter API using the public display_models endpoint"""
+    """Fetch all models from Infron AI API using the public display_models endpoint"""
     headers = {
         "Content-Type": "application/json",
     }
 
     try:
         # Use the public display_models endpoint (no auth required)
-        print("📡 Fetching models from OneRouter API...")
+        print("📡 Fetching models from Infron AI API...")
         response = httpx.get(
-            "https://app.onerouter.pro/api/display_models/",
+            "https://app.infron.ai/api/display_models/",
             headers=headers,
             timeout=15.0,
             follow_redirects=True
@@ -34,7 +36,7 @@ def fetch_onerouter_models():
         models_data = response.json()
         models = models_data.get("data", [])
 
-        print(f"✅ Fetched {len(models)} models from OneRouter\n")
+        print(f"✅ Fetched {len(models)} models from Infron AI\n")
         return models
 
     except httpx.HTTPStatusError as e:
@@ -93,14 +95,14 @@ def parse_pricing(value):
 
 def main():
     print("=" * 80)
-    print("OneRouter Models Fetcher")
+    print("Infron AI Models Fetcher")
     print("=" * 80)
 
     # Fetch models from public display_models endpoint
     models = fetch_onerouter_models()
 
     if not models:
-        print("\n❌ Could not fetch models from OneRouter API")
+        print("\n❌ Could not fetch models from Infron AI API")
         return
 
     print("\n" + "=" * 80)

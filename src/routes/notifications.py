@@ -5,7 +5,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.supabase_config import get_supabase_client
-from src.services.user_lookup_cache import get_user
 from src.enhanced_notification_service import enhanced_notification_service
 from src.schemas.notification import (
     NotificationChannel,
@@ -17,6 +16,7 @@ from src.schemas.notification import (
 )
 from src.security.deps import get_api_key, require_admin
 from src.services.notification import notification_service
+from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
 

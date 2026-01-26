@@ -715,3 +715,213 @@ class TestToolIntegration:
             tool = tool_class()
             assert hasattr(tool, "execute")
             assert inspect.iscoroutinefunction(tool.execute)
+
+
+# =============================================================================
+# SEARCH AUGMENTATION TESTS
+# =============================================================================
+
+
+class TestSearchAugmentRoute:
+    """Tests for the search augmentation endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create test client with mocked auth."""
+        from fastapi.testclient import TestClient
+        from src.routes.tools import router
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(router)
+
+        # Override auth dependency for testing
+        from src.security.deps import get_optional_api_key
+        app.dependency_overrides[get_optional_api_key] = lambda: None
+
+        return TestClient(app)
+
+    def test_search_augment_success(self, client):
+        """Test successful search augmentation."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=True,
+                result={
+                    "results": [
+                        {
+                            "title": "Test Title",
+                            "content": "Test content about the query",
+                            "url": "https://example.com/test"
+                        }
+                    ],
+                    "answer": "This is a summary of the search results"
+                },
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "test query",
+                "max_results": 5,
+                "include_answer": True
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["results_count"] == 1
+            assert "[Web Search Results]" in data["context"]
+            assert "Summary:" in data["context"]
+            assert "Test Title" in data["context"]
+            assert "[End of Search Results]" in data["context"]
+
+    def test_search_augment_with_parameters(self, client):
+        """Test search augmentation passes correct parameters."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=True,
+                result={"results": [], "answer": None},
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "specific query",
+                "max_results": 3,
+                "include_answer": False
+            })
+
+            mock_execute.assert_called_once_with("web_search", {
+                "query": "specific query",
+                "max_results": 3,
+                "include_answer": False,
+                "search_depth": "basic",
+            })
+
+    def test_search_augment_no_results(self, client):
+        """Test search augmentation with no results."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=True,
+                result={"results": [], "answer": None},
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "obscure query with no results"
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["context"] is None
+            assert data["results_count"] == 0
+            assert data["error"] == "No results found"
+
+    def test_search_augment_tool_failure(self, client):
+        """Test search augmentation when tool execution fails."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=False,
+                error="Search service unavailable",
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "test query"
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert data["error"] == "Search service unavailable"
+            assert data["results_count"] == 0
+
+    def test_search_augment_validation_empty_query(self, client):
+        """Test search augmentation with empty query."""
+        response = client.post("/tools/search/augment", json={
+            "query": ""
+        })
+
+        assert response.status_code == 422  # Validation error
+
+    def test_search_augment_validation_invalid_max_results(self, client):
+        """Test search augmentation with invalid max_results."""
+        response = client.post("/tools/search/augment", json={
+            "query": "test",
+            "max_results": 100  # Too high, max is 10
+        })
+
+        assert response.status_code == 422  # Validation error
+
+    def test_search_augment_truncates_long_content(self, client):
+        """Test that search augmentation truncates long content."""
+        long_content = "x" * 500  # Longer than 300 char limit
+
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=True,
+                result={
+                    "results": [
+                        {
+                            "title": "Test Title",
+                            "content": long_content,
+                            "url": "https://example.com/test"
+                        }
+                    ],
+                    "answer": None
+                },
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "test query"
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            # Content should be truncated with "..."
+            assert "..." in data["context"]
+            # The full long content should not be there
+            assert long_content not in data["context"]
+
+    def test_search_augment_multiple_results(self, client):
+        """Test search augmentation formats multiple results correctly."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.return_value = ToolResult(
+                success=True,
+                result={
+                    "results": [
+                        {"title": "First Result", "content": "First content", "url": "https://first.com"},
+                        {"title": "Second Result", "content": "Second content", "url": "https://second.com"},
+                        {"title": "Third Result", "content": "Third content", "url": "https://third.com"},
+                    ],
+                    "answer": "Combined answer"
+                },
+                metadata={}
+            )
+
+            response = client.post("/tools/search/augment", json={
+                "query": "test query"
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["results_count"] == 3
+            assert "1. First Result" in data["context"]
+            assert "2. Second Result" in data["context"]
+            assert "3. Third Result" in data["context"]
+
+    def test_search_augment_exception_handling(self, client):
+        """Test search augmentation handles exceptions gracefully."""
+        with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
+            mock_execute.side_effect = RuntimeError("Unexpected error")
+
+            response = client.post("/tools/search/augment", json={
+                "query": "test query"
+            })
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert data["error"] == "An unexpected error occurred during search"
+            assert data["results_count"] == 0

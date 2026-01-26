@@ -16,11 +16,13 @@ import logging
 import time
 import uuid
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import src.db.chat_completion_requests as chat_completion_requests_module
+from src.db.users import deduct_credits, get_user, record_usage
+from src.security.deps import get_api_key
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai,
     make_ai_sdk_request_openai_stream_async,
@@ -33,6 +35,9 @@ from src.services.openrouter_client import (
     make_openrouter_request_openai_stream_async,
     process_openrouter_response,
 )
+from src.services.pricing import calculate_cost
+from src.services.trial_validation import track_trial_usage, validate_trial_access
+from src.utils.sentry_context import capture_payment_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -149,6 +154,47 @@ def _build_request_kwargs(request: AISDKChatRequest) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
+def _check_trial_override(trial: dict, user: dict | None) -> bool:
+    """Check if trial status should be overridden for users with active subscriptions.
+
+    Defense-in-depth: Override is_trial flag if user has active subscription.
+    This protects against webhook delays or failures that leave is_trial=TRUE
+    for paid users.
+
+    Args:
+        trial: Trial status dictionary containing 'is_trial' flag
+        user: User dictionary with subscription details
+
+    Returns:
+        bool: True if user should be treated as trial user, False if they should be billed
+    """
+    is_trial = trial.get("is_trial", False)
+
+    # If not a trial user, no override needed
+    if not is_trial:
+        return False
+
+    # Check for active subscription that should override trial status
+    if user:
+        has_active_subscription = (
+            user.get("stripe_subscription_id") is not None
+            and user.get("subscription_status") == "active"
+        ) or user.get("tier") in ("pro", "max", "admin")
+
+        if has_active_subscription:
+            logger.warning(
+                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
+                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path.",
+                user.get("id"),
+                user.get("tier"),
+                user.get("subscription_status"),
+                user.get("stripe_subscription_id"),
+            )
+            return False  # Override: user should be billed
+
+    return True  # User is a legitimate trial user
+
+
 def _is_openrouter_model(model: str) -> bool:
     """Check if the model should be routed through OpenRouter.
 
@@ -174,9 +220,15 @@ def _is_openrouter_model(model: str) -> bool:
 
 @router.post("/api/chat/ai-sdk-completions", tags=["ai-sdk"], response_model=AISDKChatResponse)
 @router.post("/api/chat/ai-sdk", tags=["ai-sdk"], response_model=AISDKChatResponse)
-async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: BackgroundTasks):
+async def ai_sdk_chat_completion(
+    request: AISDKChatRequest,
+    background_tasks: BackgroundTasks,
+    api_key: str = Depends(get_api_key),
+):
     """
     Vercel AI SDK compatible chat completion endpoint.
+
+    **AUTHENTICATION REQUIRED:** This endpoint requires a valid Gatewayz API key.
 
     This endpoint provides compatibility with the Vercel AI SDK by accepting
     requests in the standard OpenAI chat completion format and routing them
@@ -228,7 +280,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
     For complete model list: https://vercel.com/ai-gateway/models
 
     **Raises:**
-        HTTPException: If AI_SDK_API_KEY is not configured or request fails
+        HTTPException: If authentication fails, API_SDK_API_KEY is not configured, or request fails
 
     **Returns:**
         AISDKChatResponse: Chat completion response with choices and usage
@@ -236,6 +288,16 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
     # Generate request correlation ID for distributed tracing
     request_id = str(uuid.uuid4())
     start_time = time.monotonic()
+
+    # Get user and validate
+    user = await asyncio.to_thread(get_user, api_key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # Validate trial access
+    trial = await asyncio.to_thread(validate_trial_access, api_key)
+    if not trial.get("is_valid", False):
+        raise HTTPException(status_code=403, detail=trial.get("error", "Access denied"))
 
     logger.info(
         f"ai_sdk_chat_completion start (request_id={request_id}, model={request.model}, stream={request.stream})"
@@ -254,7 +316,9 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
 
             # Handle streaming requests via OpenRouter
             if request.stream:
-                return await _handle_openrouter_stream(request, messages, kwargs)
+                return await _handle_openrouter_stream(
+                    request, messages, kwargs, api_key, user, trial
+                )
 
             # Make request directly to OpenRouter
             response = await asyncio.to_thread(
@@ -267,21 +331,75 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
             # Calculate processing time and extract usage
             elapsed_ms = int((time.monotonic() - start_time) * 1000)
             usage = processed.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = prompt_tokens + completion_tokens
+
+            # Calculate cost and handle credit deduction
+            cost = await asyncio.to_thread(
+                calculate_cost, request.model, prompt_tokens, completion_tokens
+            )
+            # Defense-in-depth: Override trial status if user has active subscription
+            is_trial = _check_trial_override(trial, user)
+
+            # Track trial usage
+            if is_trial and not trial.get("is_expired"):
+                try:
+                    await asyncio.to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=request.model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to track trial usage: {e}")
+
+            # Deduct credits for non-trial users
+            if not is_trial:
+                try:
+                    await asyncio.to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"AI SDK usage - {request.model}",
+                        {
+                            "model": request.model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "cost_usd": cost,
+                        },
+                    )
+                    await asyncio.to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        request.model,
+                        total_tokens,
+                        cost,
+                        elapsed_ms,
+                    )
+                except Exception as e:
+                    logger.error(f"Credit deduction error: {e}")
+                    raise
 
             # Save chat completion request metadata - run as background task
             background_tasks.add_task(
                 chat_completion_requests_module.save_chat_completion_request,
                 request_id=request_id,
                 model_name=request.model,
-                input_tokens=usage.get("prompt_tokens", 0),
-                output_tokens=usage.get("completion_tokens", 0),
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
                 processing_time_ms=elapsed_ms,
                 status="completed",
                 error_message=None,
-                user_id=None,  # AI SDK endpoint doesn't require authentication
+                user_id=user["id"],
                 provider_name="openrouter",
                 model_id=None,
-                api_key_id=None,  # AI SDK endpoint doesn't require authentication
+                api_key_id=user.get("key_id"),
             )
 
             return processed
@@ -292,7 +410,7 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
 
         # Handle streaming requests via AI SDK
         if request.stream:
-            return await _handle_ai_sdk_stream(request, request.model)
+            return await _handle_ai_sdk_stream(request, request.model, api_key, user, trial)
 
         # Make request to AI SDK endpoint
         response = await asyncio.to_thread(
@@ -305,6 +423,60 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
         # Calculate processing time and extract usage
         elapsed_ms = int((time.monotonic() - start_time) * 1000)
         usage = processed.get("usage", {})
+        prompt_tokens = usage.get("prompt_tokens", 0)
+        completion_tokens = usage.get("completion_tokens", 0)
+        total_tokens = prompt_tokens + completion_tokens
+
+        # Calculate cost and handle credit deduction
+        cost = await asyncio.to_thread(
+            calculate_cost, request.model, prompt_tokens, completion_tokens
+        )
+        # Defense-in-depth: Override trial status if user has active subscription
+        is_trial = _check_trial_override(trial, user)
+
+        # Track trial usage
+        if is_trial and not trial.get("is_expired"):
+            try:
+                await asyncio.to_thread(
+                    track_trial_usage,
+                    api_key,
+                    total_tokens,
+                    1,
+                    model_id=request.model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to track trial usage: {e}")
+
+        # Deduct credits for non-trial users
+        if not is_trial:
+            try:
+                await asyncio.to_thread(
+                    deduct_credits,
+                    api_key,
+                    cost,
+                    f"AI SDK usage - {request.model}",
+                    {
+                        "model": request.model,
+                        "total_tokens": total_tokens,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "cost_usd": cost,
+                    },
+                )
+                await asyncio.to_thread(
+                    record_usage,
+                    user["id"],
+                    api_key,
+                    request.model,
+                    total_tokens,
+                    cost,
+                    elapsed_ms,
+                )
+            except Exception as e:
+                logger.error(f"Credit deduction error: {e}")
+                raise
 
         # Extract provider from model (format: provider/model)
         provider_name = "vercel-ai-gateway"
@@ -316,20 +488,48 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
             chat_completion_requests_module.save_chat_completion_request,
             request_id=request_id,
             model_name=request.model,
-            input_tokens=usage.get("prompt_tokens", 0),
-            output_tokens=usage.get("completion_tokens", 0),
+            input_tokens=prompt_tokens,
+            output_tokens=completion_tokens,
             processing_time_ms=elapsed_ms,
             status="completed",
             error_message=None,
-            user_id=None,  # AI SDK endpoint doesn't require authentication
+            user_id=user["id"],
             provider_name=provider_name,
             model_id=None,
-            api_key_id=None,  # AI SDK endpoint doesn't require authentication
+            api_key_id=user.get("key_id"),
         )
 
         return processed
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        # Save failed request for HTTPException errors
+        if request_id:
+            try:
+                # Calculate elapsed time
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
+
+                # Save failed request to database
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,  # Unknown at error time
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
+                    model_id=None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
+                    is_anonymous=False,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
         # Re-raise HTTPExceptions without modification (e.g., from _handle_openrouter_stream)
         raise
     except ValueError as e:
@@ -341,27 +541,89 @@ async def ai_sdk_chat_completion(request: AISDKChatRequest, background_tasks: Ba
         else:
             logger.error(f"AI SDK configuration error: {e}", exc_info=True)
             detail = "AI SDK service is not configured. Please contact support."
+
+        # Save failed request
+        if request_id:
+            try:
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"ValueError: {str(e)[:500]}",
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
+                    model_id=None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
+                    is_anonymous=False,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         # Capture configuration errors to Sentry (503 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)
         raise HTTPException(status_code=503, detail=detail)
     except Exception as e:
         logger.error(f"AI SDK chat completion error: {e}", exc_info=True)
+
+        # Save failed request for unexpected errors
+        if request_id:
+            try:
+                error_elapsed = (
+                    int((time.monotonic() - start_time) * 1000) if "start_time" in dir() else 0
+                )
+                background_tasks.add_task(
+                    chat_completion_requests_module.save_chat_completion_request,
+                    request_id=request_id,
+                    model_name=request.model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    processing_time_ms=error_elapsed,
+                    status="failed",
+                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
+                    user_id=user.get("id") if "user" in locals() and user else None,
+                    provider_name=(
+                        "openrouter" if "/" not in request.model else request.model.split("/")[0]
+                    ),
+                    model_id=None,
+                    api_key_id=user.get("key_id") if "user" in locals() and user else None,
+                    is_anonymous=False,
+                )
+            except Exception as save_err:
+                logger.debug(f"Failed to save failed request metadata: {save_err}")
+
         # Capture all other errors to Sentry (500 errors)
         if SENTRY_AVAILABLE:
             sentry_sdk.capture_exception(e)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to process AI SDK request: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to process AI SDK request: {str(e)}")
 
 
-async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, kwargs: dict):
+async def _handle_openrouter_stream(
+    request: AISDKChatRequest,
+    messages: list,
+    kwargs: dict,
+    api_key: str,
+    user: dict,
+    trial: dict,
+):
     """Handle streaming responses routed directly through OpenRouter.
 
     Args:
         request: AISDKChatRequest with stream=True
         messages: Pre-converted messages list
         kwargs: Pre-built kwargs dictionary
+        api_key: User's API key for credit deduction
+        user: User object with id and other details
+        trial: Trial validation result
 
     Returns:
         StreamingResponse with server-sent events
@@ -369,6 +631,11 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
     Raises:
         HTTPException: If OpenRouter API key is not configured (503)
     """
+    # Track tokens for credit deduction
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    accumulated_content = ""  # For token estimation fallback
+    start_time_stream = time.monotonic()
     # Validate OpenRouter API key before starting the stream
     # This ensures we return HTTP 503 instead of streaming an error
     try:
@@ -383,6 +650,7 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
         )
 
     async def stream_response():
+        nonlocal total_prompt_tokens, total_completion_tokens, accumulated_content
         try:
             # Make async streaming request directly to OpenRouter
             # PERF: Using async client prevents blocking the event loop while waiting
@@ -403,23 +671,115 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
                         delta_response, has_content = _extract_delta_content(delta)
                         if has_content:
                             has_any_content = True
+                            # Accumulate content for token estimation fallback
+                            if "content" in delta_response:
+                                accumulated_content += delta_response["content"]
 
                         # Only yield if we have content to send
                         if delta_response:
                             # Format as SSE (Server-Sent Events)
-                            data = {
-                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
-                            }
+                            data = {"choices": [{"delta": {"role": "assistant", **delta_response}}]}
                             yield f"data: {json.dumps(data)}\n\n"
+
+                # Extract usage if available (OpenRouter provides this in the final chunk)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    total_prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0)
+                    total_completion_tokens = getattr(chunk.usage, "completion_tokens", 0)
 
             # If no content was streamed, log a warning for debugging
             if not has_any_content:
-                logger.warning(f"OpenRouter stream completed with no content for model {request.model}")
+                logger.warning(
+                    f"OpenRouter stream completed with no content for model {request.model}"
+                )
 
             # Send completion signal
             completion_data = {"choices": [{"finish_reason": "stop"}]}
             yield f"data: {json.dumps(completion_data)}\n\n"
             yield "data: [DONE]\n\n"
+
+            # After streaming completes, deduct credits
+            # Token estimation fallback: if provider didn't return usage data,
+            # estimate tokens based on content length (1 token ≈ 4 characters)
+            if total_prompt_tokens == 0 and total_completion_tokens == 0:
+                # Estimate completion tokens from accumulated content
+                total_completion_tokens = max(1, len(accumulated_content) // 4)
+                # Estimate prompt tokens from messages
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                total_prompt_tokens = max(1, prompt_chars // 4)
+                logger.info(
+                    f"OpenRouter stream: No usage data, estimated {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens"
+                )
+
+            try:
+                total_tokens = total_prompt_tokens + total_completion_tokens
+                elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+
+                # Calculate cost
+                cost = await asyncio.to_thread(
+                    calculate_cost, request.model, total_prompt_tokens, total_completion_tokens
+                )
+                # Defense-in-depth: Override trial status if user has active subscription
+                is_trial = _check_trial_override(trial, user)
+
+                # Track trial usage
+                if is_trial and not trial.get("is_expired"):
+                    await asyncio.to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=request.model,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                    )
+
+                # Deduct credits for non-trial users
+                if not is_trial:
+                    await asyncio.to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"AI SDK streaming - {request.model}",
+                        {
+                            "model": request.model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": total_prompt_tokens,
+                            "completion_tokens": total_completion_tokens,
+                            "cost_usd": cost,
+                        },
+                    )
+                    await asyncio.to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        request.model,
+                        total_tokens,
+                        cost,
+                        elapsed_ms,
+                    )
+
+                logger.info(
+                    f"OpenRouter stream complete: {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                )
+            except Exception as e:
+                logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                # Capture payment errors for monitoring and alerting
+                capture_payment_error(
+                    e,
+                    operation="streaming_credit_deduction",
+                    user_id=user.get("id"),
+                    amount=0.0,  # Cost unknown at this point
+                    details={
+                        "model": request.model,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "endpoint": "ai_sdk_openrouter_stream",
+                    },
+                )
 
         except ValueError as e:
             error_message = str(e).lower()
@@ -450,21 +810,39 @@ async def _handle_openrouter_stream(request: AISDKChatRequest, messages: list, k
         "Connection": "keep-alive",
     }
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
+    return StreamingResponse(
+        stream_response(), media_type="text/event-stream", headers=stream_headers
+    )
 
 
-async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
+async def _handle_ai_sdk_stream(
+    request: AISDKChatRequest,
+    model: str,
+    api_key: str,
+    user: dict,
+    trial: dict,
+):
     """Handle streaming responses for AI SDK endpoint.
 
     Args:
         request: AISDKChatRequest with stream=True
         model: The transformed model ID to use
+        api_key: User's API key for credit deduction
+        user: User object with id and other details
+        trial: Trial validation result
 
     Returns:
         StreamingResponse with server-sent events
     """
+    # Track tokens for credit deduction
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    accumulated_content = ""  # For token estimation fallback
+    start_time_stream = time.monotonic()
 
     async def stream_response():
+        nonlocal total_prompt_tokens, total_completion_tokens, accumulated_content
+        messages = []  # Will be populated inside the try block
         try:
             # Validate API key is configured
             validate_ai_sdk_api_key()
@@ -492,14 +870,20 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
                         delta_response, has_content = _extract_delta_content(delta)
                         if has_content:
                             has_any_content = True
+                            # Accumulate content for token estimation fallback
+                            if "content" in delta_response:
+                                accumulated_content += delta_response["content"]
 
                         # Only yield if we have content to send
                         if delta_response:
                             # Format as SSE (Server-Sent Events)
-                            data = {
-                                "choices": [{"delta": {"role": "assistant", **delta_response}}]
-                            }
+                            data = {"choices": [{"delta": {"role": "assistant", **delta_response}}]}
                             yield f"data: {json.dumps(data)}\n\n"
+
+                # Extract usage if available (AI SDK provides this in the final chunk)
+                if hasattr(chunk, "usage") and chunk.usage:
+                    total_prompt_tokens = getattr(chunk.usage, "prompt_tokens", 0)
+                    total_completion_tokens = getattr(chunk.usage, "completion_tokens", 0)
 
             # If no content was streamed, log a warning for debugging
             if not has_any_content:
@@ -509,6 +893,90 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
             completion_data = {"choices": [{"finish_reason": "stop"}]}
             yield f"data: {json.dumps(completion_data)}\n\n"
             yield "data: [DONE]\n\n"
+
+            # After streaming completes, deduct credits
+            # Token estimation fallback: if provider didn't return usage data,
+            # estimate tokens based on content length (1 token ≈ 4 characters)
+            if total_prompt_tokens == 0 and total_completion_tokens == 0:
+                # Estimate completion tokens from accumulated content
+                total_completion_tokens = max(1, len(accumulated_content) // 4)
+                # Estimate prompt tokens from messages
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                total_prompt_tokens = max(1, prompt_chars // 4)
+                logger.info(
+                    f"AI SDK stream: No usage data, estimated {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens"
+                )
+
+            try:
+                total_tokens = total_prompt_tokens + total_completion_tokens
+                elapsed_ms = int((time.monotonic() - start_time_stream) * 1000)
+
+                # Calculate cost
+                cost = await asyncio.to_thread(
+                    calculate_cost, model, total_prompt_tokens, total_completion_tokens
+                )
+                # Defense-in-depth: Override trial status if user has active subscription
+                is_trial = _check_trial_override(trial, user)
+
+                # Track trial usage
+                if is_trial and not trial.get("is_expired"):
+                    await asyncio.to_thread(
+                        track_trial_usage,
+                        api_key,
+                        total_tokens,
+                        1,
+                        model_id=model,
+                        prompt_tokens=total_prompt_tokens,
+                        completion_tokens=total_completion_tokens,
+                    )
+
+                # Deduct credits for non-trial users
+                if not is_trial:
+                    await asyncio.to_thread(
+                        deduct_credits,
+                        api_key,
+                        cost,
+                        f"AI SDK streaming - {model}",
+                        {
+                            "model": model,
+                            "total_tokens": total_tokens,
+                            "prompt_tokens": total_prompt_tokens,
+                            "completion_tokens": total_completion_tokens,
+                            "cost_usd": cost,
+                        },
+                    )
+                    await asyncio.to_thread(
+                        record_usage,
+                        user["id"],
+                        api_key,
+                        model,
+                        total_tokens,
+                        cost,
+                        elapsed_ms,
+                    )
+
+                logger.info(
+                    f"AI SDK stream complete: {total_prompt_tokens} prompt + "
+                    f"{total_completion_tokens} completion tokens, cost=${cost:.6f}"
+                )
+            except Exception as e:
+                logger.error(f"Error deducting credits after stream: {e}", exc_info=True)
+                # Capture payment errors for monitoring and alerting
+                capture_payment_error(
+                    e,
+                    operation="streaming_credit_deduction",
+                    user_id=user.get("id"),
+                    amount=0.0,  # Cost unknown at this point
+                    details={
+                        "model": model,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "endpoint": "ai_sdk_stream",
+                    },
+                )
 
         except ValueError as e:
             # This handler only processes AI SDK models (non-OpenRouter)
@@ -533,4 +1001,6 @@ async def _handle_ai_sdk_stream(request: AISDKChatRequest, model: str):
         "Connection": "keep-alive",
     }
 
-    return StreamingResponse(stream_response(), media_type="text/event-stream", headers=stream_headers)
+    return StreamingResponse(
+        stream_response(), media_type="text/event-stream", headers=stream_headers
+    )

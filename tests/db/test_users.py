@@ -487,9 +487,182 @@ def test_update_and_get_user_profile(sb):
     assert out["username"] == "z"
     prof = users.get_user_profile("k9")
     assert prof["api_key"].endswith("...")
-    assert prof["credits"] == 4
+    assert prof["credits"] == 400  # 4 dollars * 100 = 400 cents
     assert prof["username"] == "z"
     assert prof["email"] == "z@x.com"
+
+
+# ============================================================================
+# CREDITS CENTS CONVERSION TESTS
+# ============================================================================
+
+def test_get_user_profile_returns_credits_in_cents(sb):
+    """Test that get_user_profile returns credits in cents, not dollars.
+
+    The frontend TIER_CONFIG uses cents (e.g., monthlyAllowance: 15000 = $150.00),
+    so the backend API must return subscription_allowance, purchased_credits,
+    and total_credits in cents for consistency.
+    """
+    import src.db.users as users
+
+    # Create a user with tiered credits in dollars (as stored in DB)
+    sb.table("users").insert({
+        "id": 1001,
+        "username": "cents_test_user",
+        "email": "cents@test.com",
+        "api_key": "key_cents_test",
+        "subscription_allowance": 150.0,  # $150.00 in dollars (Max tier)
+        "purchased_credits": 25.50,       # $25.50 in dollars
+        "tier": "max",
+        "subscription_status": "active"
+    }).execute()
+
+    prof = users.get_user_profile("key_cents_test")
+
+    # Verify values are returned in cents
+    assert prof["subscription_allowance"] == 15000, "subscription_allowance should be in cents (150.0 * 100)"
+    assert prof["purchased_credits"] == 2550, "purchased_credits should be in cents (25.50 * 100)"
+    assert prof["total_credits"] == 17550, "total_credits should be sum in cents"
+    assert prof["credits"] == 17550, "credits should also be in cents for backward compatibility"
+
+
+def test_get_user_profile_pro_tier_allowance_in_cents(sb):
+    """Test Pro tier user returns $15.00 allowance as 1500 cents."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1002,
+        "username": "pro_user",
+        "email": "pro@test.com",
+        "api_key": "key_pro_test",
+        "subscription_allowance": 15.0,  # $15.00 Pro tier
+        "purchased_credits": 0.0,
+        "tier": "pro",
+        "subscription_status": "active"
+    }).execute()
+
+    prof = users.get_user_profile("key_pro_test")
+
+    assert prof["subscription_allowance"] == 1500, "Pro tier allowance should be 1500 cents ($15.00)"
+    assert prof["purchased_credits"] == 0
+    assert prof["total_credits"] == 1500
+    assert prof["tier"] == "pro"
+    assert prof["tier_display_name"] == "Pro"
+
+
+def test_get_user_profile_max_tier_allowance_in_cents(sb):
+    """Test Max tier user returns $150.00 allowance as 15000 cents."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1003,
+        "username": "max_user",
+        "email": "max@test.com",
+        "api_key": "key_max_test",
+        "subscription_allowance": 150.0,  # $150.00 Max tier
+        "purchased_credits": 0.0,
+        "tier": "max",
+        "subscription_status": "active"
+    }).execute()
+
+    prof = users.get_user_profile("key_max_test")
+
+    assert prof["subscription_allowance"] == 15000, "Max tier allowance should be 15000 cents ($150.00)"
+    assert prof["purchased_credits"] == 0
+    assert prof["total_credits"] == 15000
+    assert prof["tier"] == "max"
+    assert prof["tier_display_name"] == "MAX"
+
+
+def test_get_user_profile_basic_tier_zero_allowance(sb):
+    """Test Basic tier user returns zero allowance correctly."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1004,
+        "username": "basic_user",
+        "email": "basic@test.com",
+        "api_key": "key_basic_test",
+        "subscription_allowance": 0.0,  # Basic tier has no allowance
+        "purchased_credits": 10.0,      # $10.00 purchased
+        "tier": "basic",
+        "subscription_status": None
+    }).execute()
+
+    prof = users.get_user_profile("key_basic_test")
+
+    assert prof["subscription_allowance"] == 0
+    assert prof["purchased_credits"] == 1000, "purchased_credits should be 1000 cents ($10.00)"
+    assert prof["total_credits"] == 1000
+    assert prof["tier"] == "basic"
+    assert prof["tier_display_name"] == "Basic"
+
+
+def test_get_user_profile_fractional_cents(sb):
+    """Test that fractional dollar amounts are correctly converted to integer cents."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1005,
+        "username": "fraction_user",
+        "email": "fraction@test.com",
+        "api_key": "key_fraction_test",
+        "subscription_allowance": 12.34,  # $12.34
+        "purchased_credits": 5.67,        # $5.67
+        "tier": "pro",
+        "subscription_status": "active"
+    }).execute()
+
+    prof = users.get_user_profile("key_fraction_test")
+
+    # 12.34 * 100 = 1234, 5.67 * 100 = 567
+    assert prof["subscription_allowance"] == 1234
+    assert prof["purchased_credits"] == 567
+    assert prof["total_credits"] == 1801  # 1234 + 567 = 1801
+
+
+def test_get_user_profile_null_credit_fields(sb):
+    """Test that null/missing credit fields default to 0 cents."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1006,
+        "username": "null_credits_user",
+        "email": "null@test.com",
+        "api_key": "key_null_test",
+        # subscription_allowance and purchased_credits are not set (None)
+        "tier": "basic"
+    }).execute()
+
+    prof = users.get_user_profile("key_null_test")
+
+    assert prof["subscription_allowance"] == 0
+    assert prof["purchased_credits"] == 0
+    assert prof["total_credits"] == 0
+    assert prof["credits"] == 0
+
+
+def test_get_user_profile_large_credits_in_cents(sb):
+    """Test that large credit amounts are correctly converted to cents."""
+    import src.db.users as users
+
+    sb.table("users").insert({
+        "id": 1007,
+        "username": "whale_user",
+        "email": "whale@test.com",
+        "api_key": "key_whale_test",
+        "subscription_allowance": 150.0,   # $150.00 Max tier
+        "purchased_credits": 1000.0,       # $1000.00 purchased
+        "tier": "max",
+        "subscription_status": "active"
+    }).execute()
+
+    prof = users.get_user_profile("key_whale_test")
+
+    assert prof["subscription_allowance"] == 15000  # $150 = 15000 cents
+    assert prof["purchased_credits"] == 100000      # $1000 = 100000 cents
+    assert prof["total_credits"] == 115000          # $1150 = 115000 cents
+
 
 def test_mark_welcome_email_sent_and_delete_user_account(sb):
     import src.db.users as users

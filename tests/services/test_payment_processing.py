@@ -1286,3 +1286,204 @@ class TestPaymentIntegration:
             stripe_payment_intent_id='pi_missing_payment',
             stripe_session_id='cs_missing_payment'
         )
+
+
+class TestCheckoutCompletedSubscriptionStatus:
+    """Test that checkout completed sets subscription_status correctly"""
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    @patch('src.config.supabase_config.get_supabase_client')
+    def test_checkout_completed_sets_inactive_status_for_trial_user(
+        self,
+        mock_get_supabase_client,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Test that checkout completed sets subscription_status to 'inactive' for trial users.
+
+        This test verifies the fix for the bug where credit purchases were setting
+        subscription_status to 'active', causing a mismatch with tier='basic'.
+
+        Credit purchasers should have:
+        - subscription_status: 'inactive' (not 'active' which implies a Pro/Max subscription)
+        - tier: 'basic' (pay-per-use, not subscribed)
+        """
+
+        mock_get_payment.return_value = None
+
+        # Mock session
+        session = Mock()
+        session.metadata = {
+            'user_id': '1',
+            'payment_id': '1',
+            'credits': '1000',
+        }
+        session.id = 'cs_test_trial_user'
+        session.payment_intent = 'pi_test_trial_user'
+        session.amount_total = 1000
+        session.amount_subtotal = None
+        session.currency = 'usd'
+
+        # Mock Supabase client
+        mock_client = Mock()
+        mock_get_supabase_client.return_value = mock_client
+
+        # User is on trial with basic tier
+        mock_client.table().select().eq().execute.return_value = Mock(
+            data=[{'subscription_status': 'trial', 'tier': 'basic'}]
+        )
+        mock_client.table().update().eq().execute.return_value = Mock(data=[{}])
+
+        stripe_service._handle_checkout_completed(session)
+
+        # Verify that subscription_status is updated to 'inactive', NOT 'active'
+        # The log confirms: "User 1 subscription_status updated to 'inactive' after credit purchase"
+        # Find the update call that contains subscription_status
+        update_calls = mock_client.table.return_value.update.call_args_list
+        found_inactive_update = False
+        for call in update_calls:
+            # call is either call((arg,), {}) or call(key=value)
+            if call.args:
+                update_data = call.args[0]
+            elif call.kwargs:
+                update_data = call.kwargs
+            else:
+                continue
+            if isinstance(update_data, dict) and update_data.get('subscription_status') == 'inactive':
+                found_inactive_update = True
+                break
+        assert found_inactive_update, \
+            f"Expected subscription_status='inactive' update, but got calls: {update_calls}"
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    @patch('src.config.supabase_config.get_supabase_client')
+    def test_checkout_completed_preserves_active_subscription_status(
+        self,
+        mock_get_supabase_client,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Test that checkout completed does NOT change subscription_status for users with active subscriptions.
+
+        Users with Pro/Max subscriptions who purchase additional credits should
+        keep their 'active' subscription_status and their pro/max tier.
+        """
+
+        mock_get_payment.return_value = None
+
+        # Mock session
+        session = Mock()
+        session.metadata = {
+            'user_id': '2',
+            'payment_id': '2',
+            'credits': '2000',
+        }
+        session.id = 'cs_test_pro_user'
+        session.payment_intent = 'pi_test_pro_user'
+        session.amount_total = 2000
+        session.amount_subtotal = None
+        session.currency = 'usd'
+
+        # Mock Supabase client
+        mock_client = Mock()
+        mock_get_supabase_client.return_value = mock_client
+
+        # User already has active subscription with pro tier
+        mock_client.table().select().eq().execute.return_value = Mock(
+            data=[{'subscription_status': 'active', 'tier': 'pro'}]
+        )
+        mock_client.table().update().eq().execute.return_value = Mock(data=[{}])
+
+        stripe_service._handle_checkout_completed(session)
+
+        # Verify that NO update contains subscription_status for Pro/Max users
+        # Both users table and api_keys_new should preserve the 'active' status
+        for call in mock_client.table.return_value.update.call_args_list:
+            update_data = call[0][0] if call[0] else {}
+            if isinstance(update_data, dict) and 'subscription_status' in update_data:
+                assert False, \
+                    f"Should not update subscription_status for pro users, but got: {update_data}"
+
+        # Verify that api_keys_new WAS updated with is_trial=False and trial_converted=True
+        # but NOT with subscription_status
+        found_api_key_update = False
+        for call in mock_client.table.return_value.update.call_args_list:
+            update_data = call[0][0] if call[0] else {}
+            if isinstance(update_data, dict):
+                if update_data.get('is_trial') is False and update_data.get('trial_converted') is True:
+                    found_api_key_update = True
+                    # Ensure subscription_status is NOT in this update
+                    assert 'subscription_status' not in update_data, \
+                        f"api_keys_new should not have subscription_status for pro users, but got: {update_data}"
+        assert found_api_key_update, \
+            "Expected api_keys_new to be updated with is_trial=False and trial_converted=True"
+
+    @patch('src.services.payments.get_payment_by_stripe_intent')
+    @patch('src.services.payments.add_credits_to_user')
+    @patch('src.services.payments.update_payment_status')
+    @patch('src.config.supabase_config.get_supabase_client')
+    def test_checkout_completed_sets_inactive_for_expired_trial_user(
+        self,
+        mock_get_supabase_client,
+        mock_update_payment,
+        mock_add_credits,
+        mock_get_payment,
+        stripe_service
+    ):
+        """Test that checkout completed sets subscription_status to 'inactive' for expired trial users.
+
+        Users with expired trials who purchase credits should transition to 'inactive'
+        (not 'active' which would incorrectly indicate a subscription).
+        """
+
+        mock_get_payment.return_value = None
+
+        # Mock session
+        session = Mock()
+        session.metadata = {
+            'user_id': '3',
+            'payment_id': '3',
+            'credits': '500',
+        }
+        session.id = 'cs_test_expired_user'
+        session.payment_intent = 'pi_test_expired_user'
+        session.amount_total = 500
+        session.amount_subtotal = None
+        session.currency = 'usd'
+
+        # Mock Supabase client
+        mock_client = Mock()
+        mock_get_supabase_client.return_value = mock_client
+
+        # User has expired trial
+        mock_client.table().select().eq().execute.return_value = Mock(
+            data=[{'subscription_status': 'expired', 'tier': 'basic'}]
+        )
+        mock_client.table().update().eq().execute.return_value = Mock(data=[{}])
+
+        stripe_service._handle_checkout_completed(session)
+
+        # Verify that subscription_status is updated to 'inactive'
+        # The log confirms: "User 3 subscription_status updated to 'inactive' after credit purchase"
+        update_calls = mock_client.table.return_value.update.call_args_list
+        found_inactive_update = False
+        for call in update_calls:
+            if call.args:
+                update_data = call.args[0]
+            elif call.kwargs:
+                update_data = call.kwargs
+            else:
+                continue
+            if isinstance(update_data, dict) and update_data.get('subscription_status') == 'inactive':
+                found_inactive_update = True
+                break
+        assert found_inactive_update, \
+            f"Expected subscription_status='inactive' update, but got calls: {update_calls}"

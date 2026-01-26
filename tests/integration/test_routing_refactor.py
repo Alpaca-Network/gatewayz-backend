@@ -395,7 +395,7 @@ class TestModelTransformation:
         from src.services.model_transformations import detect_provider_from_model_id
 
         test_cases = [
-            ("google/gemini-2.0-flash-001", "openrouter"),  # Without credentials
+            ("google/gemini-2.0-flash-001", "google-vertex"),  # Gemini models route to Google Vertex
             ("gpt-4", None),  # No specific provider
             ("openai/gpt-4", "openrouter"),
         ]

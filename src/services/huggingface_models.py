@@ -21,6 +21,7 @@ FEATURES:
   - Supports full-text search and filtering
 """
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -189,7 +190,14 @@ def fetch_models_from_huggingface_api(
                         continue
                     raise
 
-            batch_models = response.json()
+            try:
+                batch_models = response.json()
+            except json.JSONDecodeError as json_err:
+                logger.error(
+                    f"Failed to parse JSON response for sort={sort_method}: {json_err}. "
+                    f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+                )
+                continue
 
             if not batch_models:
                 logger.warning(f"No models returned for sort={sort_method}")
@@ -472,7 +480,15 @@ def search_huggingface_models(query: str, limit: int = 50) -> list:
         response = httpx.get(url, params=params, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
-        models = response.json()
+        try:
+            models = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response when searching for '{query}': {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return []
+
         logger.info(f"Found {len(models)} models matching '{query}'")
 
         # Normalize results
@@ -509,7 +525,15 @@ def get_huggingface_model_info(model_id: str) -> dict:
         response = httpx.get(url, headers=headers, timeout=request_timeout)
         response.raise_for_status()
 
-        model_data = response.json()
+        try:
+            model_data = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response for model '{model_id}': {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return None
+
         logger.info(f"Retrieved model info for {model_id}")
 
         return normalize_huggingface_model(model_data)
@@ -529,9 +553,67 @@ def create_fallback_models() -> list:
     """
     Create minimal model entries for fallback models when HF API is unavailable.
 
+    Tries database fallback first (from last successful sync), then falls back
+    to static hardcoded list.
+
     Returns:
         List of minimal normalized model dictionaries
     """
+    # Try database fallback first (dynamic, from last successful sync)
+    try:
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = get_fallback_models_from_db("huggingface")
+        if db_fallback:
+            from src.services.pricing_lookup import enrich_model_with_pricing
+
+            fallback_models = []
+            for db_model in db_fallback:
+                model_id = db_model.get("id") or db_model.get("model_id")
+                if not model_id:
+                    continue
+
+                display_name = db_model.get("name") or model_id.split("/")[-1].replace("-", " ").title()
+
+                model = {
+                    "id": model_id,
+                    "slug": model_id,
+                    "canonical_slug": model_id,
+                    "hugging_face_id": model_id,
+                    "name": display_name,
+                    "description": db_model.get("description") or f"HuggingFace model: {model_id}",
+                    "context_length": db_model.get("context_length") or 8192,
+                    "architecture": {
+                        "modality": "text->text",
+                        "input_modalities": ["text"],
+                        "output_modalities": ["text"],
+                        "tokenizer": None,
+                        "instruct_type": None,
+                    },
+                    "pricing": db_model.get("pricing") or {
+                        "prompt": None, "completion": None, "request": None,
+                        "image": None, "web_search": None, "internal_reasoning": None,
+                    },
+                    "top_provider": None,
+                    "per_request_limits": None,
+                    "supported_parameters": [],
+                    "default_parameters": {},
+                    "provider_slug": model_id.split("/")[0] if "/" in model_id else "Unknown",
+                    "provider_site_url": f"https://huggingface.co/{model_id}",
+                    "model_logo_url": None,
+                    "source_gateway": "hug",
+                }
+                enriched = enrich_model_with_pricing(model, "huggingface")
+                fallback_models.append(enriched)
+
+            if fallback_models:
+                logger.info(f"Using {len(fallback_models)} HuggingFace models from database fallback")
+                return fallback_models
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for HuggingFace: {e}")
+
+    # Static fallback as last resort
+    logger.warning("Database fallback empty, using static fallback for HuggingFace")
     fallback_models = []
 
     for model_id in FALLBACK_HUGGINGFACE_MODELS:

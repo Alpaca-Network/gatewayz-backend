@@ -20,6 +20,7 @@ __pycache__
 *.pyw
 *.pyz
 
+
 # Vercel
 .vercel
 
@@ -47,6 +48,7 @@ gatewayz/
 !SECURITY_INCIDENT_RESPONSE.md
 !FAILOVER_TESTING_GUIDE.md
 !LIVE_API_TESTING_GUIDE.md
+!SYNC_QUICKSTART.md
 
 # Temp and output files
 tmp/
@@ -110,3 +112,4 @@ performance_summary*.txt
 comprehensive_performance_test*.py
 rate_limit_monitor.py
 gatewayz/
+archived_pricing_scripts/

@@ -12,7 +12,11 @@ import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client, is_connection_error, refresh_supabase_client
+from src.config.supabase_config import (
+    get_supabase_client,
+    is_connection_error,
+    refresh_supabase_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -331,9 +335,9 @@ def track_trial_usage(
                 pricing = get_model_pricing(model_id)
 
                 if pricing.get("found", False):
-                    # Model found in catalog - use per-1M-token pricing
-                    prompt_cost = (prompt_tokens * pricing["prompt"]) / 1_000_000
-                    completion_cost = (completion_tokens * pricing["completion"]) / 1_000_000
+                    # FIXED: Pricing is per single token, so just multiply (no division)
+                    prompt_cost = prompt_tokens * pricing["prompt"]
+                    completion_cost = completion_tokens * pricing["completion"]
                     credit_cost = prompt_cost + completion_cost
                     logger.info(
                         f"Trial usage: Using model-specific pricing for {model_id}: "
@@ -351,7 +355,7 @@ def track_trial_usage(
                 logger.warning(f"Failed to get model pricing for {model_id}, using flat rate: {e}")
                 credit_cost = tokens_used * 0.00002
         else:
-            # Fallback: standard pricing ($20 for 1M tokens = $0.00002 per token)
+            # Fallback: standard pricing ($0.00002 per token)
             credit_cost = tokens_used * 0.00002
             logger.info(
                 f"Trial usage: Using flat-rate pricing (no model info): "

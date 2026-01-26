@@ -151,15 +151,14 @@ def test_get_model_pricing_handles_multiple_provider_suffixes(monkeypatch, mod):
 # -------------------- calculate_cost --------------------
 
 def test_calculate_cost_happy(monkeypatch, mod):
-    # Force a specific pricing (pricing is per 1M tokens)
-    # 10 per 1M tokens = $0.00001 per token
-    # 20 per 1M tokens = $0.00002 per token
+    # Force a specific pricing (pricing is per token)
+    # $0.00001 per prompt token, $0.00002 per completion token
     monkeypatch.setattr(
         mod, "get_model_pricing",
-        lambda model_id: {"prompt": 10, "completion": 20, "found": True}
+        lambda model_id: {"prompt": 0.00001, "completion": 0.00002, "found": True}
     )
     cost = mod.calculate_cost("any/model", prompt_tokens=1000, completion_tokens=500)
-    # (1000 * 10 + 500 * 20) / 1_000_000 = (10_000 + 10_000) / 1_000_000 = 0.02
+    # 1000 * 0.00001 + 500 * 0.00002 = 0.01 + 0.01 = 0.02
     assert math.isclose(cost, 0.02)
 
 
@@ -180,3 +179,104 @@ def test_calculate_cost_uses_fallback_on_exception(monkeypatch, mod):
     cost = mod.calculate_cost("x", prompt_tokens=10, completion_tokens=5)
     # total_tokens = 15; 15 * 0.00002 = 0.0003
     assert math.isclose(cost, 0.0003)
+
+
+# -------------------- Free Model Pricing Tests --------------------
+
+
+def test_calculate_cost_free_model_returns_zero(monkeypatch, mod):
+    """Test that models ending with :free return $0 cost"""
+    # Even if pricing would return non-zero, :free suffix should return $0
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00001, "completion": 0.00002, "found": True}
+    )
+
+    cost = mod.calculate_cost("meta-llama/llama-2-7b:free", prompt_tokens=1000, completion_tokens=500)
+    assert cost == 0.0
+
+
+def test_calculate_cost_free_model_openrouter_format(monkeypatch, mod):
+    """Test that OpenRouter free models (ending with :free) return $0 cost"""
+    # OpenRouter uses :free suffix for free models
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00005, "completion": 0.00010, "found": True}
+    )
+
+    cost = mod.calculate_cost("mistralai/mistral-7b-instruct:free", prompt_tokens=2000, completion_tokens=1000)
+    assert cost == 0.0
+
+
+def test_calculate_cost_free_model_with_zero_tokens(monkeypatch, mod):
+    """Test that free models with zero tokens return $0"""
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00001, "completion": 0.00002, "found": True}
+    )
+
+    cost = mod.calculate_cost("model:free", prompt_tokens=0, completion_tokens=0)
+    assert cost == 0.0
+
+
+def test_calculate_cost_non_free_model_normal_pricing(monkeypatch, mod):
+    """Test that non-free models are charged normally"""
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00001, "completion": 0.00002, "found": True}
+    )
+
+    # Model without :free suffix should be charged
+    cost = mod.calculate_cost("openai/gpt-4", prompt_tokens=1000, completion_tokens=500)
+    # 1000 * 0.00001 + 500 * 0.00002 = 0.01 + 0.01 = 0.02
+    assert math.isclose(cost, 0.02)
+
+
+def test_calculate_cost_free_model_fallback_on_exception(monkeypatch, mod):
+    """Test that free models return $0 even in fallback/exception case"""
+    # If pricing lookup explodes, free models should still return $0
+    def boom(_):
+        raise RuntimeError("err")
+    monkeypatch.setattr(mod, "get_model_pricing", boom)
+
+    cost = mod.calculate_cost("model:free", prompt_tokens=100, completion_tokens=50)
+    assert cost == 0.0
+
+
+def test_calculate_cost_free_suffix_case_sensitive(monkeypatch, mod):
+    """Test that :free suffix detection is case sensitive (lowercase only)"""
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00001, "completion": 0.00002, "found": True}
+    )
+
+    # :FREE (uppercase) should NOT be treated as free
+    cost_upper = mod.calculate_cost("model:FREE", prompt_tokens=1000, completion_tokens=500)
+    assert cost_upper > 0  # Should be charged
+
+    # :Free (mixed case) should NOT be treated as free
+    cost_mixed = mod.calculate_cost("model:Free", prompt_tokens=1000, completion_tokens=500)
+    assert cost_mixed > 0  # Should be charged
+
+    # :free (lowercase) should be free
+    cost_lower = mod.calculate_cost("model:free", prompt_tokens=1000, completion_tokens=500)
+    assert cost_lower == 0.0
+
+
+def test_calculate_cost_multiple_free_models(monkeypatch, mod):
+    """Test various free model formats"""
+    monkeypatch.setattr(
+        mod, "get_model_pricing",
+        lambda _: {"prompt": 0.00001, "completion": 0.00002, "found": True}
+    )
+
+    free_models = [
+        "google/gemma-7b-it:free",
+        "nousresearch/nous-hermes-llama2-13b:free",
+        "huggingfaceh4/zephyr-7b-beta:free",
+        "openchat/openchat-7b:free",
+    ]
+
+    for model in free_models:
+        cost = mod.calculate_cost(model, prompt_tokens=1000, completion_tokens=500)
+        assert cost == 0.0, f"Model {model} should return $0 cost"

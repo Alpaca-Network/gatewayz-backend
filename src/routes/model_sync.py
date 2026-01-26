@@ -4,13 +4,14 @@ Dynamically fetches and syncs models from provider APIs to database
 """
 
 import logging
+
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from src.services.model_catalog_sync import (
-    sync_provider_models,
-    sync_all_providers,
     PROVIDER_FETCH_FUNCTIONS,
+    sync_all_providers,
+    sync_provider_models,
 )
 
 logger = logging.getLogger(__name__)
@@ -200,8 +201,8 @@ async def get_sync_status():
     - Current database statistics
     """
     try:
-        from src.db.providers_db import get_all_providers, get_providers_stats
         from src.db.models_catalog_db import get_models_stats
+        from src.db.providers_db import get_all_providers, get_providers_stats
 
         # Get database stats
         provider_stats = get_providers_stats()

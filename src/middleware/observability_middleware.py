@@ -18,6 +18,7 @@ Metrics exposed:
 
 import logging
 import time
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.services.prometheus_metrics import (
