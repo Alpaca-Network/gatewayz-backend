@@ -106,17 +106,17 @@ AS $$
 DECLARE
     v_enabled BOOLEAN;
 BEGIN
-    SELECT COALESCE((preferences->>'enable_butter_cache')::boolean, false)
+    SELECT COALESCE((preferences->>'enable_butter_cache')::boolean, true)
     INTO v_enabled
     FROM public.users
     WHERE id = p_user_id;
 
-    RETURN COALESCE(v_enabled, false);
+    RETURN COALESCE(v_enabled, true);
 END;
 $$;
 
 COMMENT ON FUNCTION public.get_user_cache_preference IS
-    'Returns whether Butter.dev caching is enabled for a user. Defaults to false if not set.';
+    'Returns whether Butter.dev caching is enabled for a user. Defaults to true if not set.';
 
 -- ============================================================================
 -- 5. Create function to get cache savings for a user

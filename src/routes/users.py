@@ -303,7 +303,7 @@ async def get_cache_settings_endpoint(api_key: str = Depends(get_api_key)):
 
         # Get user preferences
         preferences = user.get("preferences") or {}
-        enable_butter_cache = preferences.get("enable_butter_cache", False)
+        enable_butter_cache = preferences.get("enable_butter_cache", True)  # Enabled by default
 
         # Import here to avoid circular imports
         from src.config.config import Config
