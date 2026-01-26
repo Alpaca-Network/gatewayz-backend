@@ -13,7 +13,12 @@ from src.config import Config
 
 # Initialize logging with Loki integration
 from src.config.logging_config import configure_logging
-from src.constants import FRONTEND_BETA_URL, FRONTEND_STAGING_URL, TAURI_DESKTOP_URL, TAURI_DESKTOP_PROTOCOL_URL
+from src.constants import (
+    FRONTEND_BETA_URL,
+    FRONTEND_STAGING_URL,
+    TAURI_DESKTOP_URL,
+    TAURI_DESKTOP_PROTOCOL_URL,
+)
 from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
@@ -604,10 +609,16 @@ def create_app() -> FastAPI:
             try:
                 from src.config.opentelemetry_config import OpenTelemetryConfig
 
-                OpenTelemetryConfig.initialize()
-                OpenTelemetryConfig.instrument_fastapi(app)
+                init_result = OpenTelemetryConfig.initialize()
+                if init_result:
+                    OpenTelemetryConfig.instrument_fastapi(app)
+                    logger.info("  [OK] OpenTelemetry tracing initialized")
+                else:
+                    logger.warning(
+                        "  [WARN] OpenTelemetry initialization returned False - tracing disabled"
+                    )
             except Exception as otel_e:
-                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}")
+                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}", exc_info=True)
 
             # Validate configuration
             logger.info("    Validating configuration...")
@@ -694,7 +705,9 @@ def create_app() -> FastAPI:
                     if initialize_braintrust(project="Gatewayz Backend"):
                         logger.info("   Braintrust tracing initialized (async_flush=False)")
                     else:
-                        logger.warning("   Braintrust tracing not available (check BRAINTRUST_API_KEY)")
+                        logger.warning(
+                            "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
+                        )
                 except Exception as bt_e:
                     logger.warning(f"    Braintrust initialization warning: {bt_e}")
 
