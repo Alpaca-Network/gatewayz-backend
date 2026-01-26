@@ -129,16 +129,12 @@ def init_tempo_otlp():
 
     # Delegate to OpenTelemetryConfig for consistent initialization
     # This ensures we use the same code path with resilient span processor
+    # Note: initialize() is idempotent and thread-safe, so we don't need
+    # to check _initialized externally (which would be a TOCTOU race)
     from src.config.opentelemetry_config import OpenTelemetryConfig
 
-    if OpenTelemetryConfig._initialized:
-        logger.debug("OpenTelemetry already initialized via OpenTelemetryConfig")
-        return OpenTelemetryConfig._tracer_provider
-
     success = OpenTelemetryConfig.initialize()
-    if success:
-        return OpenTelemetryConfig._tracer_provider
-    return None
+    return OpenTelemetryConfig._tracer_provider if success else None
 
 
 def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
