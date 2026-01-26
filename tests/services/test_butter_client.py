@@ -103,19 +103,19 @@ class TestShouldUseButterCache:
         assert use_cache is False
         assert reason == "user_preference_disabled"
 
-        # User with no preferences (defaults to disabled)
+        # User with no preferences (defaults to enabled)
         user = {"id": 1, "preferences": {}}
         use_cache, reason = should_use_butter_cache(user, "openrouter")
 
-        assert use_cache is False
-        assert reason == "user_preference_disabled"
+        assert use_cache is True
+        assert reason == "enabled"
 
-        # User with None preferences
+        # User with None preferences (defaults to enabled)
         user = {"id": 1, "preferences": None}
         use_cache, reason = should_use_butter_cache(user, "openrouter")
 
-        assert use_cache is False
-        assert reason == "user_preference_disabled"
+        assert use_cache is True
+        assert reason == "enabled"
 
     @patch("src.services.butter_client.Config")
     def test_incompatible_provider_returns_false(self, mock_config):
@@ -282,14 +282,14 @@ class TestGetUserCachePreference:
         user = {"id": 1, "preferences": {"enable_butter_cache": False}}
         assert get_user_cache_preference(user) is False
 
-    def test_returns_false_for_missing_preference(self):
-        """Test that False is returned when preference is not set."""
+    def test_returns_true_for_missing_preference(self):
+        """Test that True is returned when preference is not set (enabled by default)."""
         from src.services.butter_client import get_user_cache_preference
 
-        # No preferences
-        assert get_user_cache_preference({"id": 1}) is False
-        assert get_user_cache_preference({"id": 1, "preferences": {}}) is False
-        assert get_user_cache_preference({"id": 1, "preferences": None}) is False
+        # No preferences - defaults to enabled
+        assert get_user_cache_preference({"id": 1}) is True
+        assert get_user_cache_preference({"id": 1, "preferences": {}}) is True
+        assert get_user_cache_preference({"id": 1, "preferences": None}) is True
 
     def test_returns_false_for_none_user(self):
         """Test that False is returned for None user."""

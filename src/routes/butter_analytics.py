@@ -142,7 +142,7 @@ async def get_cache_analytics(
             "total_savings_usd": round(total_savings, 6),
             "estimated_monthly_savings_usd": round(estimated_monthly_savings, 2),
             "top_cached_models": top_cached_models,
-            "cache_enabled": (user.get("preferences") or {}).get("enable_butter_cache", False),
+            "cache_enabled": (user.get("preferences") or {}).get("enable_butter_cache", True),  # Enabled by default
             "system_enabled": Config.BUTTER_DEV_ENABLED,
         }
 
@@ -174,7 +174,7 @@ async def get_cache_summary(
 
         user_id = user.get("id")
         preferences = user.get("preferences") or {}
-        cache_enabled = preferences.get("enable_butter_cache", False)
+        cache_enabled = preferences.get("enable_butter_cache", True)  # Enabled by default
 
         # If cache is not enabled, return minimal response
         if not cache_enabled or not Config.BUTTER_DEV_ENABLED:

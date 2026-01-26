@@ -123,7 +123,7 @@ def should_use_butter_cache(
 
     # Check user preference
     preferences = user.get("preferences") or {}
-    enable_cache = preferences.get("enable_butter_cache", False)
+    enable_cache = preferences.get("enable_butter_cache", True)  # Enabled by default
 
     if not enable_cache:
         return False, "user_preference_disabled"
@@ -153,7 +153,7 @@ def get_user_cache_preference(user: dict[str, Any] | None) -> bool:
         return False
 
     preferences = user.get("preferences") or {}
-    return preferences.get("enable_butter_cache", False)
+    return preferences.get("enable_butter_cache", True)  # Enabled by default
 
 
 def detect_cache_hit(response_time_seconds: float, threshold: float = 0.5) -> bool:
