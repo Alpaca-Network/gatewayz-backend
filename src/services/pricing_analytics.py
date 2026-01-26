@@ -1,25 +1,16 @@
 """
 Pricing Analytics Service
-Integrates pricing_calculator.py with request tracking for admin analytics
+Provides admin analytics for model usage and costs using the model_pricing table.
+
+Note: The original pricing_calculator.py module was removed as part of the
+pricing consolidation (commit d3f6c5b7). Pricing is now stored in the
+model_pricing database table.
 """
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-# Import the pricing calculator
-import sys
-from pathlib import Path
-
-# Add project root to path to import pricing_calculator
-project_root = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from pricing_calculator import (
-    calculate_model_cost,
-    get_provider_standard,
-    normalize_to_per_token,
-)
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -32,11 +23,14 @@ def calculate_request_cost_with_standard(
     completion_tokens: int
 ) -> Dict[str, Any]:
     """
-    Calculate cost for a request using provider pricing standards
+    Calculate cost for a request using model pricing data.
+
+    Uses pricing from model_data if available, otherwise falls back to
+    a default rate.
 
     Args:
         provider: Provider name (e.g., 'openrouter', 'deepinfra')
-        model_data: Model data including pricing and modality
+        model_data: Model data including pricing fields
         prompt_tokens: Number of prompt tokens
         completion_tokens: Number of completion tokens
 
@@ -52,30 +46,43 @@ def calculate_request_cost_with_standard(
         }
     """
     try:
-        # Use pricing calculator
-        usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens
-        }
+        # Try to get pricing from model_data (from model_pricing table)
+        input_price = model_data.get("input_price_per_token") or model_data.get("price_per_input_token")
+        output_price = model_data.get("output_price_per_token") or model_data.get("price_per_output_token")
 
-        cost_data = calculate_model_cost(provider, model_data, usage)
+        if input_price is not None and output_price is not None:
+            input_cost = prompt_tokens * float(input_price)
+            output_cost = completion_tokens * float(output_price)
+            return {
+                "total_cost": input_cost + output_cost,
+                "input_cost": input_cost,
+                "output_cost": output_cost,
+                "pricing_source": "model_pricing",
+                "provider": provider,
+                "modality": model_data.get("modality", "text")
+            }
 
+        # Fallback to default rate if no pricing data available
+        default_rate = 0.00002  # $0.02 per 1K tokens
+        input_cost = prompt_tokens * default_rate
+        output_cost = completion_tokens * default_rate
         return {
-            "total_cost": cost_data.get("total_cost", 0.0),
-            "input_cost": cost_data.get("prompt_cost", 0.0),
-            "output_cost": cost_data.get("completion_cost", 0.0),
-            "pricing_source": "pricing_calculator",
+            "total_cost": input_cost + output_cost,
+            "input_cost": input_cost,
+            "output_cost": output_cost,
+            "pricing_source": "default",
             "provider": provider,
-            "modality": cost_data.get("modality", "unknown")
+            "modality": model_data.get("modality", "unknown")
         }
 
     except Exception as e:
-        logger.error(f"Error calculating cost with pricing standard: {e}")
+        logger.error(f"Error calculating cost: {e}")
         # Fallback to simple calculation
+        default_rate = 0.00002
         return {
-            "total_cost": (prompt_tokens + completion_tokens) * 0.00002,
-            "input_cost": prompt_tokens * 0.00002,
-            "output_cost": completion_tokens * 0.00002,
+            "total_cost": (prompt_tokens + completion_tokens) * default_rate,
+            "input_cost": prompt_tokens * default_rate,
+            "output_cost": completion_tokens * default_rate,
             "pricing_source": "fallback",
             "provider": provider,
             "modality": "unknown"
