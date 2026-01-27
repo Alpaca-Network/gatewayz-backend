@@ -1164,20 +1164,14 @@ async def get_models(
             offset_int = 0
             limit_int = None
 
+        # Apply pagination (offset and limit)
         if offset_int:
             models = models[offset_int:]
             logger.info(f"Applied offset {offset_int}: {len(models)} models remaining")
-        if limit_int and gateway_value != "all":
-            logger.debug(
-                "Ignoring limit=%s for gateway '%s' to return full catalog",
-                limit_int,
-                gateway_value,
-            )
-            limit_int = None
 
         if limit_int:
             models = models[:limit_int]
-            logger.info(f"Applied limit {limit_int}: {len(models)} models remaining")
+            logger.info(f"Applied limit {limit_int}: returning {len(models)} models (total available: {total_models})")
 
         # Optimize model enhancement for fast response
         # Only enhance with provider info (fast operation)
@@ -1226,12 +1220,18 @@ async def get_models(
             "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, Anannas, AiHubMix, Infron AI, Vercel AI Gateway, and Simplismart catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
+        # Calculate pagination metadata
+        has_more = (offset_int + len(enhanced_models)) < total_models
+        next_offset = offset_int + len(enhanced_models) if has_more else None
+
         result = {
             "data": enhanced_models,
             "total": total_models,
             "returned": len(enhanced_models),
             "offset": offset_int,
             "limit": limit_int,
+            "has_more": has_more,
+            "next_offset": next_offset,
             "include_huggingface": include_huggingface,
             "gateway": gateway_value,
             "note": note,
@@ -2049,7 +2049,7 @@ async def get_all_models(
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
     limit: int | None = Query(
-        50, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 50 for fast load)"
+        100, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 100, max recommended: 1000)"
     ),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
