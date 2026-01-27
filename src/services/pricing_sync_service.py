@@ -36,7 +36,7 @@ class PricingFormat:
 
 # Provider format mapping
 PROVIDER_FORMATS = {
-    "openrouter": PricingFormat.PER_1M_TOKENS,
+    "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing
     "featherless": PricingFormat.PER_1M_TOKENS,
     "deepinfra": PricingFormat.PER_1M_TOKENS,
     "together": PricingFormat.PER_1M_TOKENS,
