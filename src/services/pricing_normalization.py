@@ -121,8 +121,10 @@ def normalize_pricing_dict(
 # Provider-specific format mappings
 # This maps each provider to their native API pricing format
 PROVIDER_PRICING_FORMATS = {
+    # Per-token format (already normalized)
+    "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing, not per-1M
+
     # Per-1M tokens (most common)
-    "openrouter": PricingFormat.PER_1M_TOKENS,
     "deepinfra": PricingFormat.PER_1M_TOKENS,
     "featherless": PricingFormat.PER_1M_TOKENS,
     "together": PricingFormat.PER_1M_TOKENS,
