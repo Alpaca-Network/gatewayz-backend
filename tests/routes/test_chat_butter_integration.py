@@ -50,6 +50,35 @@ class TestButterProviderConfig:
         assert BUTTER_PROVIDER_CONFIG["groq"]["api_key_attr"] == "GROQ_API_KEY"
         assert "groq.com" in BUTTER_PROVIDER_CONFIG["groq"]["base_url"]
 
+    def test_onerouter_config_exists(self):
+        """Test that OneRouter/Infron config is defined - this is the default provider."""
+        from src.routes.chat import BUTTER_PROVIDER_CONFIG
+
+        assert "onerouter" in BUTTER_PROVIDER_CONFIG
+        assert BUTTER_PROVIDER_CONFIG["onerouter"]["api_key_attr"] == "ONEROUTER_API_KEY"
+        assert "infron.ai" in BUTTER_PROVIDER_CONFIG["onerouter"]["base_url"]
+
+    def test_all_compatible_providers_have_config(self):
+        """Test that all providers in BUTTER_COMPATIBLE_PROVIDERS have a config entry."""
+        from src.routes.chat import BUTTER_PROVIDER_CONFIG
+        from src.services.butter_client import BUTTER_COMPATIBLE_PROVIDERS
+
+        # These providers are in compatible list but may not have Butter proxy config
+        # because they use special authentication or non-OpenAI API formats
+        providers_without_config = {
+            "cloudflare-workers-ai",  # Uses account-specific URL
+            "alpaca-network",  # Uses special auth
+            "vercel-ai-gateway",  # Uses Vercel-specific auth
+            "perplexity",  # Not commonly used
+        }
+
+        for provider in BUTTER_COMPATIBLE_PROVIDERS:
+            if provider not in providers_without_config:
+                assert provider in BUTTER_PROVIDER_CONFIG, (
+                    f"Provider '{provider}' is in BUTTER_COMPATIBLE_PROVIDERS "
+                    f"but missing from BUTTER_PROVIDER_CONFIG"
+                )
+
     def test_all_configs_have_required_fields(self):
         """Test that all provider configs have required fields."""
         from src.routes.chat import BUTTER_PROVIDER_CONFIG
