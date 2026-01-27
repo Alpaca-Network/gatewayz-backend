@@ -1241,14 +1241,16 @@ async def get_models(
             f"Returning /models response with keys: {list(result.keys())}, gateway={gateway_value}, first_model={enhanced_models[0]['id'] if enhanced_models else 'none'}"
         )
 
-        # Return response with cache headers for browser/CDN caching
-        # Cache for 5 minutes since data changes infrequently (1 hour TTL on backend)
+        # Return response with cache headers
+        # Use private caching to prevent CDN issues after deployments
+        # Cache for 60 seconds in browser only (not CDN)
         return Response(
             content=json.dumps(result),
             media_type="application/json",
             headers={
-                "Cache-Control": "public, max-age=300",  # 5 minute browser cache
+                "Cache-Control": "private, max-age=60, must-revalidate",  # Browser cache only
                 "ETag": f'"{hash(json.dumps(enhanced_models[:5]))}"',  # Simple ETag for validation
+                "Vary": "Accept-Encoding",  # Vary cache by encoding
             },
         )
 
