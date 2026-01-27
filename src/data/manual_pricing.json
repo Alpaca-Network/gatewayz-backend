@@ -674,9 +674,65 @@
     }
   },
   "anthropic": {
+    "anthropic/claude-opus-4": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4-1": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-opus-4.5": {
+      "prompt": "5.00",
+      "completion": "25.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-sonnet-4": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-haiku-4.5": {
+      "prompt": "1.00",
+      "completion": "5.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-7-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
     "anthropic/claude-3-5-sonnet-20241022": {
       "prompt": "3.00",
       "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-5-haiku": {
+      "prompt": "0.80",
+      "completion": "4.00",
       "request": "0",
       "image": "0",
       "context_length": 200000
@@ -688,6 +744,13 @@
       "image": "0",
       "context_length": 200000
     },
+    "anthropic/claude-3-opus": {
+      "prompt": "15.00",
+      "completion": "75.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
     "anthropic/claude-3-opus-20240229": {
       "prompt": "15.00",
       "completion": "75.00",
@@ -695,9 +758,23 @@
       "image": "0",
       "context_length": 200000
     },
+    "anthropic/claude-3-sonnet": {
+      "prompt": "3.00",
+      "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
     "anthropic/claude-3-sonnet-20240229": {
       "prompt": "3.00",
       "completion": "15.00",
+      "request": "0",
+      "image": "0",
+      "context_length": 200000
+    },
+    "anthropic/claude-3-haiku": {
+      "prompt": "0.25",
+      "completion": "1.25",
       "request": "0",
       "image": "0",
       "context_length": 200000
