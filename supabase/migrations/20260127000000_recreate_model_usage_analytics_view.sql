@@ -165,3 +165,15 @@ BEGIN
         RAISE EXCEPTION 'Failed to create model_usage_analytics view';
     END IF;
 END $$;
+
+-- ============================================================================
+-- DOWN MIGRATION (for rollback)
+-- ============================================================================
+-- To rollback this migration, run the following:
+--
+-- DROP VIEW IF EXISTS "public"."model_usage_analytics";
+--
+-- Note: This will remove the analytics view. The /admin/model-usage-analytics
+-- endpoint and /model-analytics dashboard page will stop working until
+-- the view is recreated.
+-- ============================================================================
