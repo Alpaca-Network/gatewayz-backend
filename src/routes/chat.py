@@ -595,6 +595,50 @@ BUTTER_PROVIDER_CONFIG = {
         "api_key_attr": "CHUTES_API_KEY",
         "base_url": "https://llm.chutes.ai/v1",
     },
+    "onerouter": {
+        "api_key_attr": "ONEROUTER_API_KEY",
+        "base_url": "https://llm.infron.ai/v1",
+    },
+    "aihubmix": {
+        "api_key_attr": "AIHUBMIX_API_KEY",
+        "base_url": "https://aihubmix.com/v1",
+    },
+    "near": {
+        "api_key_attr": "NEAR_API_KEY",
+        "base_url": "https://cloud-api.near.ai/v1",
+    },
+    "morpheus": {
+        "api_key_attr": "MORPHEUS_API_KEY",
+        "base_url": "https://api.mor.org/api/v1",
+    },
+    "simplismart": {
+        "api_key_attr": "SIMPLISMART_API_KEY",
+        "base_url": "https://api.simplismart.live",
+    },
+    "sybil": {
+        "api_key_attr": "SYBIL_API_KEY",
+        "base_url": "https://api.sybil.com/v1",
+    },
+    "nosana": {
+        "api_key_attr": "NOSANA_API_KEY",
+        "base_url": "https://dashboard.k8s.prd.nos.ci/api/v1",
+    },
+    "akash": {
+        "api_key_attr": "AKASH_API_KEY",
+        "base_url": "https://api.akashml.com/v1",
+    },
+    "anannas": {
+        "api_key_attr": "ANANNAS_API_KEY",
+        "base_url": "https://api.anannas.ai/v1",
+    },
+    "helicone": {
+        "api_key_attr": "HELICONE_API_KEY",
+        "base_url": "https://ai-gateway.helicone.ai/v1",
+    },
+    "aimo": {
+        "api_key_attr": "AIMO_API_KEY",
+        "base_url": "https://beta.aimo.network/api/v1",
+    },
 }
 
 
