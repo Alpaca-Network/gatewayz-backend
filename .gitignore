@@ -49,6 +49,8 @@ gatewayz/
 !FAILOVER_TESTING_GUIDE.md
 !LIVE_API_TESTING_GUIDE.md
 !SYNC_QUICKSTART.md
+!PRODUCTION_VERIFICATION_CHECKLIST.md
+!scripts/README_VERIFICATION.md
 
 # Temp and output files
 tmp/
@@ -58,8 +60,12 @@ response.json
 *.log
 gateway_test_results_*.json
 production_test_results_*.json
+production_verification_report_*.json
 model_format_validation_results.json
 models_export_*.csv
+
+# Admin keys and sensitive credentials
+.admin_key_*
 
 # OS files
 .DS_Store

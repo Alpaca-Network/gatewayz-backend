@@ -55,6 +55,11 @@ from src.services.butter_client import (
 )
 from src.services.connection_pool import get_butter_pooled_async_client
 
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
+from src.adapters.chat import OpenAIChatAdapter
+from src.schemas.internal.chat import InternalChatRequest
+
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Braintrust tracing - use centralized service for proper project association
@@ -2271,7 +2276,308 @@ async def chat_completions(
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
-            last_http_exc = None
+            # Streaming path
+            # Use unified handler for authenticated streaming requests
+            if not is_anonymous:
+                try:
+                    logger.info(
+                        f"[Unified Handler] Processing authenticated streaming request for model {original_model}"
+                    )
+
+                    # Convert external OpenAI format to internal format
+                    adapter = OpenAIChatAdapter()
+                    internal_request = adapter.to_internal_request({
+                        "messages": messages,
+                        "model": original_model,
+                        "stream": True,
+                        **optional
+                    })
+
+                    # Create unified handler with user context
+                    handler = ChatInferenceHandler(api_key, background_tasks)
+
+                    # Process stream through unified pipeline
+                    internal_stream = handler.process_stream(internal_request)
+
+                    # Convert internal stream to SSE format
+                    sse_stream = adapter.from_internal_stream(internal_stream)
+
+                    # Prepare response headers
+                    stream_headers = {}
+                    if rl_pre is not None:
+                        stream_headers.update(get_rate_limit_headers(rl_pre))
+
+                    # PERF: Add timing headers
+                    if tracker:
+                        prep_time_ms = tracker.get_total_duration() * 1000
+                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                    stream_headers["X-Provider"] = "unified"
+                    stream_headers["X-Model"] = original_model
+                    stream_headers["X-Requested-Model"] = original_model
+
+                    # SSE streaming headers to prevent buffering by proxies/nginx
+                    stream_headers["X-Accel-Buffering"] = "no"
+                    stream_headers["Cache-Control"] = "no-cache, no-transform"
+                    stream_headers["Connection"] = "keep-alive"
+
+                    logger.info(
+                        f"[Unified Handler] Returning SSE streaming response for model {original_model}"
+                    )
+
+                    return StreamingResponse(
+                        sse_stream,
+                        media_type="text/event-stream",
+                        headers=stream_headers,
+                    )
+
+                except Exception as exc:
+                    # Map any errors to HTTPException
+                    logger.error(f"[Unified Handler] Streaming error: {type(exc).__name__}: {exc}", exc_info=True)
+                    if isinstance(exc, HTTPException):
+                        raise
+                    # Map provider-specific errors
+                    from src.services.provider_failover import map_provider_error
+                    http_exc = map_provider_error(
+                        "onerouter",  # Default provider for error mapping
+                        original_model,
+                        exc
+                    )
+                    raise http_exc
+            else:
+                # Anonymous users: keep existing provider routing logic
+                last_http_exc = None
+                for idx, attempt_provider in enumerate(provider_chain):
+                    attempt_model = transform_model_id(original_model, attempt_provider)
+                    if attempt_model != original_model:
+                        logger.info(
+                            f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
+                        )
+
+                    request_model = attempt_model
+                    is_async_stream = False  # Default to sync, only OpenRouter uses async currently
+                    try:
+                        # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
+                        # Note: Streaming tracing is handled in stream_generator to capture final token counts
+                        if attempt_provider == "fal":
+                            # FAL models are for image/video generation, not chat completions
+                            raise HTTPException(
+                                status_code=400,
+                                detail={
+                                    "error": {
+                                        "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                        "and is not available through the chat completions endpoint. "
+                                        "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                        "type": "invalid_request_error",
+                                        "code": "model_not_supported_for_chat",
+                                    }
+                                },
+                            )
+                        elif attempt_provider in PROVIDER_ROUTING:
+                            # Use registry for all registered providers
+                            stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
+                            stream = await _to_thread(stream_func, messages, request_model, **optional)
+                        else:
+                            # Default to OpenRouter with async streaming for performance
+                            try:
+                                stream = await make_openrouter_request_openai_stream_async(
+                                    messages, request_model, **optional
+                                )
+                                is_async_stream = True
+                                logger.debug(
+                                    f"Using async streaming for OpenRouter model {request_model}"
+                                )
+                            except Exception as async_err:
+                                # Fallback to sync streaming if async fails
+                                logger.warning(
+                                    f"Async streaming failed, falling back to sync: {async_err}"
+                                )
+                                stream = await _to_thread(
+                                    make_openrouter_request_openai_stream,
+                                    messages,
+                                    request_model,
+                                    **optional,
+                                )
+                                is_async_stream = False
+
+                        provider = attempt_provider
+                        model = request_model
+                        # Get rate limit headers if available (pre-stream check)
+                        stream_headers = {}
+                        if rl_pre is not None:
+                            stream_headers.update(get_rate_limit_headers(rl_pre))
+
+                        # PERF: Add timing headers for debugging stream startup latency
+                        if tracker:
+                            prep_time_ms = tracker.get_total_duration() * 1000
+                            stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                        stream_headers["X-Provider"] = provider
+                        stream_headers["X-Model"] = model
+                        stream_headers["X-Requested-Model"] = original_model
+
+                        # SSE streaming headers to prevent buffering by proxies/nginx
+                        stream_headers["X-Accel-Buffering"] = "no"
+                        stream_headers["Cache-Control"] = "no-cache, no-transform"
+                        stream_headers["Connection"] = "keep-alive"
+
+                        return StreamingResponse(
+                            stream_generator(
+                                stream,
+                                user,
+                                api_key,
+                                model,
+                                trial,
+                                environment_tag,
+                                session_id,
+                                messages,
+                                rate_limit_mgr,
+                                provider,
+                                tracker,
+                                is_anonymous,
+                                is_async_stream=is_async_stream,
+                                request_id=request_id,
+                                api_key_id=api_key_id,
+                                client_ip=client_ip if is_anonymous else None,
+                            ),
+                            media_type="text/event-stream",
+                            headers=stream_headers,
+                        )
+                    except Exception as exc:
+                        if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
+                            logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
+                            # Capture timeout to Sentry
+                            capture_provider_error(
+                                exc,
+                                provider=attempt_provider,
+                                model=request_model,
+                                endpoint="/v1/chat/completions",
+                                request_id=request_id_var.get(),
+                            )
+                        elif isinstance(exc, httpx.RequestError):
+                            logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
+                            # Capture network error to Sentry
+                            capture_provider_error(
+                                exc,
+                                provider=attempt_provider,
+                                model=request_model,
+                                endpoint="/v1/chat/completions",
+                                request_id=request_id_var.get(),
+                            )
+                        elif isinstance(exc, httpx.HTTPStatusError):
+                            logger.debug(
+                                "Upstream HTTP error (%s): %s",
+                                attempt_provider,
+                                exc.response.status_code,
+                            )
+                            # Capture HTTP errors to Sentry (except 4xx client errors)
+                            if exc.response.status_code >= 500:
+                                capture_provider_error(
+                                    exc,
+                                    provider=attempt_provider,
+                                    model=request_model,
+                                    endpoint="/v1/chat/completions",
+                                    request_id=request_id_var.get(),
+                                )
+                        else:
+                            logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                            # Capture unexpected errors to Sentry
+                            capture_provider_error(
+                                exc,
+                                provider=attempt_provider,
+                                model=request_model,
+                                endpoint="/v1/chat/completions",
+                                request_id=request_id_var.get(),
+                            )
+                        http_exc = map_provider_error(attempt_provider, request_model, exc)
+
+                        last_http_exc = http_exc
+                        if idx < len(provider_chain) - 1 and should_failover(http_exc):
+                            next_provider = provider_chain[idx + 1]
+                            logger.warning(
+                                "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
+                                attempt_provider,
+                                http_exc.status_code,
+                                http_exc.detail,
+                                next_provider,
+                            )
+                            continue
+
+                        # If this is a 402 (Payment Required) error and we've exhausted the chain,
+                        # rebuild the chain allowing payment failover to try alternative providers
+                        if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
+                            extended_chain = build_provider_failover_chain(provider)
+                            extended_chain = enforce_model_failover_rules(
+                                original_model, extended_chain, allow_payment_failover=True
+                            )
+                            extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                            # Find providers we haven't tried yet
+                            new_providers = [p for p in extended_chain if p not in provider_chain]
+                            if new_providers:
+                                logger.warning(
+                                    "Provider '%s' returned 402 (Payment Required). "
+                                    "Extending failover chain with: %s",
+                                    attempt_provider,
+                                    new_providers,
+                                )
+                                provider_chain.extend(new_providers)
+                                continue
+
+                        raise http_exc
+
+                raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+
+        # Non-streaming response
+        start = time.monotonic()
+        processed = None
+        last_http_exc = None
+
+        # Use unified handler for authenticated non-streaming requests
+        if not is_anonymous:
+            try:
+                logger.info(
+                    f"[Unified Handler] Processing authenticated non-streaming request for model {original_model}"
+                )
+
+                # Convert external OpenAI format to internal format
+                adapter = OpenAIChatAdapter()
+                internal_request = adapter.to_internal_request({
+                    "messages": messages,
+                    "model": original_model,
+                    "stream": False,
+                    **optional
+                })
+
+                # Create unified handler with user context
+                handler = ChatInferenceHandler(api_key, background_tasks)
+
+                # Process request through unified pipeline (includes provider routing, failover, tracing)
+                internal_response = await handler.process(internal_request)
+
+                # Convert internal response back to OpenAI format
+                processed = adapter.from_internal_response(internal_response)
+
+                # Extract values for postprocessing (maintain compatibility with existing code)
+                provider = internal_response.provider_used or "onerouter"
+                model = internal_response.model or original_model
+
+                logger.info(
+                    f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
+                )
+
+            except Exception as exc:
+                # Map any errors to HTTPException
+                logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
+                if isinstance(exc, HTTPException):
+                    raise
+                # Map provider-specific errors
+                from src.services.provider_failover import map_provider_error
+                http_exc = map_provider_error(
+                    provider if 'provider' in locals() else "onerouter",
+                    model if 'model' in locals() else original_model,
+                    exc
+                )
+                raise http_exc
+        else:
+            # Anonymous users: keep existing provider routing logic
             for idx, attempt_provider in enumerate(provider_chain):
                 attempt_model = transform_model_id(original_model, attempt_provider)
                 if attempt_model != original_model:
@@ -2280,187 +2586,103 @@ async def chat_completions(
                     )
 
                 request_model = attempt_model
-                is_async_stream = False  # Default to sync, only OpenRouter uses async currently
-                use_butter_cache = False  # Track if we're using Butter.dev
-                butter_reason = "not_checked"
-
-                # Check if we should use Butter.dev caching for this request
-                butter_check = should_use_butter_cache(user, attempt_provider, request_model)
-                use_butter_cache = butter_check[0]
-                butter_reason = butter_check[1]
-
-                if use_butter_cache:
-                    logger.info(
-                        f"Butter.dev: Cache enabled for {attempt_provider}/{request_model} (reason={butter_reason})"
-                    )
-                else:
+                request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
+                if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
                     logger.debug(
-                        f"Butter.dev: Cache disabled for {attempt_provider}/{request_model} (reason={butter_reason})"
+                        "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
                     )
 
                 try:
                     # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
-                    # Note: Streaming tracing is handled in stream_generator to capture final token counts
-                    if attempt_provider == "fal":
-                        # FAL models are for image/video generation, not chat completions
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "error": {
-                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                    "and is not available through the chat completions endpoint. "
-                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                    "type": "invalid_request_error",
-                                    "code": "model_not_supported_for_chat",
-                                }
-                            },
+                    # Wrap provider calls with distributed tracing for Tempo
+                    async with AITracer.trace_inference(
+                        provider=attempt_provider,
+                        model=request_model,
+                        request_type=AIRequestType.CHAT_COMPLETION,
+                    ) as trace_ctx:
+                        if attempt_provider == "fal":
+                            # FAL models are for image/video generation, not chat completions
+                            raise HTTPException(
+                                status_code=400,
+                                detail={
+                                    "error": {
+                                        "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
+                                        "and is not available through the chat completions endpoint. "
+                                        "Please use the /v1/images/generations endpoint with provider='fal' instead.",
+                                        "type": "invalid_request_error",
+                                        "code": "model_not_supported_for_chat",
+                                    }
+                                },
+                            )
+                        elif attempt_provider in PROVIDER_ROUTING:
+                            # Use registry for all registered providers
+                            request_func = PROVIDER_ROUTING[attempt_provider]["request"]
+                            process_func = PROVIDER_ROUTING[attempt_provider]["process"]
+                            resp_raw = await asyncio.wait_for(
+                                _to_thread(request_func, messages, request_model, **optional),
+                                timeout=request_timeout,
+                            )
+                            processed = await _to_thread(process_func, resp_raw)
+                        else:
+                            # Default to OpenRouter
+                            resp_raw = await asyncio.wait_for(
+                                _to_thread(
+                                    make_openrouter_request_openai, messages, request_model, **optional
+                                ),
+                                timeout=request_timeout,
+                            )
+                            processed = await _to_thread(process_openrouter_response, resp_raw)
+
+                        # Extract token usage from response for tracing
+                        usage = processed.get("usage", {}) or {}
+                        trace_prompt_tokens = usage.get("prompt_tokens", 0)
+                        trace_completion_tokens = usage.get("completion_tokens", 0)
+                        trace_total_tokens = usage.get("total_tokens", 0)
+
+                        # Calculate cost for tracing
+                        trace_cost = calculate_cost(
+                            request_model, trace_prompt_tokens, trace_completion_tokens
                         )
-                    elif use_butter_cache and attempt_provider in BUTTER_PROVIDER_CONFIG:
-                        # Route through Butter.dev caching proxy for eligible requests
-                        try:
-                            stream = await make_butter_proxied_stream(
-                                messages, request_model, attempt_provider, **optional
+
+                        # Set token usage and cost on trace span
+                        trace_ctx.set_token_usage(
+                            input_tokens=trace_prompt_tokens,
+                            output_tokens=trace_completion_tokens,
+                            total_tokens=trace_total_tokens,
+                        )
+                        trace_ctx.set_cost(trace_cost)
+
+                        # Set model parameters if available
+                        if optional:
+                            trace_ctx.set_model_parameters(
+                                temperature=optional.get("temperature"),
+                                max_tokens=optional.get("max_tokens"),
+                                top_p=optional.get("top_p"),
+                                frequency_penalty=optional.get("frequency_penalty"),
+                                presence_penalty=optional.get("presence_penalty"),
                             )
-                            is_async_stream = True
-                            logger.info(
-                                f"Using Butter.dev cached streaming for {attempt_provider}/{request_model}"
+
+                        # Set user info if authenticated
+                        if not is_anonymous and user:
+                            trace_ctx.set_user_info(
+                                user_id=str(user.get("id")),
+                                tier="trial" if trial.get("is_trial") else "paid",
                             )
-                        except Exception as butter_err:
-                            # Fallback to direct provider if Butter fails
-                            logger.warning(
-                                f"Butter.dev streaming failed, falling back to direct: {butter_err}"
-                            )
-                            use_butter_cache = False
-                            # Fall through to normal provider routing below
-                            if attempt_provider in PROVIDER_ROUTING:
-                                stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
-                                stream = await _to_thread(stream_func, messages, request_model, **optional)
-                            else:
-                                stream = await make_openrouter_request_openai_stream_async(
-                                    messages, request_model, **optional
-                                )
-                                is_async_stream = True
-                    elif attempt_provider in PROVIDER_ROUTING:
-                        # Use registry for all registered providers
-                        stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
-                        stream = await _to_thread(stream_func, messages, request_model, **optional)
-                    else:
-                        # Default to OpenRouter with async streaming for performance
-                        try:
-                            stream = await make_openrouter_request_openai_stream_async(
-                                messages, request_model, **optional
-                            )
-                            is_async_stream = True
-                            logger.debug(
-                                f"Using async streaming for OpenRouter model {request_model}"
-                            )
-                        except Exception as async_err:
-                            # Fallback to sync streaming if async fails
-                            logger.warning(
-                                f"Async streaming failed, falling back to sync: {async_err}"
-                            )
-                            stream = await _to_thread(
-                                make_openrouter_request_openai_stream,
-                                messages,
-                                request_model,
-                                **optional,
-                            )
-                            is_async_stream = False
 
                     provider = attempt_provider
                     model = request_model
-                    # Get rate limit headers if available (pre-stream check)
-                    stream_headers = {}
-                    if rl_pre is not None:
-                        stream_headers.update(get_rate_limit_headers(rl_pre))
-
-                    # PERF: Add timing headers for debugging stream startup latency
-                    if tracker:
-                        prep_time_ms = tracker.get_total_duration() * 1000
-                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
-                    stream_headers["X-Provider"] = provider
-                    stream_headers["X-Model"] = model
-                    stream_headers["X-Requested-Model"] = original_model
-
-                    # Add Butter.dev caching headers
-                    if use_butter_cache:
-                        stream_headers["X-Butter-Cache"] = "enabled"
-                    else:
-                        stream_headers["X-Butter-Cache"] = f"disabled:{butter_reason}"
-
-                    # SSE streaming headers to prevent buffering by proxies/nginx
-                    stream_headers["X-Accel-Buffering"] = "no"
-                    stream_headers["Cache-Control"] = "no-cache, no-transform"
-                    stream_headers["Connection"] = "keep-alive"
-
-                    return StreamingResponse(
-                        stream_generator(
-                            stream,
-                            user,
-                            api_key,
-                            model,
-                            trial,
-                            environment_tag,
-                            session_id,
-                            messages,
-                            rate_limit_mgr,
-                            provider,
-                            tracker,
-                            is_anonymous,
-                            is_async_stream=is_async_stream,
-                            request_id=request_id,
-                            api_key_id=api_key_id,
-                            client_ip=client_ip if is_anonymous else None,
-                        ),
-                        media_type="text/event-stream",
-                        headers=stream_headers,
-                    )
+                    break
                 except Exception as exc:
                     if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
                         logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
-                        # Capture timeout to Sentry
-                        capture_provider_error(
-                            exc,
-                            provider=attempt_provider,
-                            model=request_model,
-                            endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get(),
-                        )
                     elif isinstance(exc, httpx.RequestError):
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
-                        # Capture network error to Sentry
-                        capture_provider_error(
-                            exc,
-                            provider=attempt_provider,
-                            model=request_model,
-                            endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get(),
-                        )
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
-                            "Upstream HTTP error (%s): %s",
-                            attempt_provider,
-                            exc.response.status_code,
+                            "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
                         )
-                        # Capture HTTP errors to Sentry (except 4xx client errors)
-                        if exc.response.status_code >= 500:
-                            capture_provider_error(
-                                exc,
-                                provider=attempt_provider,
-                                model=request_model,
-                                endpoint="/v1/chat/completions",
-                                request_id=request_id_var.get(),
-                            )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
-                        # Capture unexpected errors to Sentry
-                        capture_provider_error(
-                            exc,
-                            provider=attempt_provider,
-                            model=request_model,
-                            endpoint="/v1/chat/completions",
-                            request_id=request_id_var.get(),
-                        )
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                     last_http_exc = http_exc
@@ -2496,154 +2718,6 @@ async def chat_completions(
                             continue
 
                     raise http_exc
-
-            raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
-
-        # Non-streaming response
-        start = time.monotonic()
-        processed = None
-        last_http_exc = None
-
-        for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
-            if attempt_model != original_model:
-                logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
-                )
-
-            request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
-                logger.debug(
-                    "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
-                )
-
-            try:
-                # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
-                # Wrap provider calls with distributed tracing for Tempo
-                async with AITracer.trace_inference(
-                    provider=attempt_provider,
-                    model=request_model,
-                    request_type=AIRequestType.CHAT_COMPLETION,
-                ) as trace_ctx:
-                    if attempt_provider == "fal":
-                        # FAL models are for image/video generation, not chat completions
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "error": {
-                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                    "and is not available through the chat completions endpoint. "
-                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                    "type": "invalid_request_error",
-                                    "code": "model_not_supported_for_chat",
-                                }
-                            },
-                        )
-                    elif attempt_provider in PROVIDER_ROUTING:
-                        # Use registry for all registered providers
-                        request_func = PROVIDER_ROUTING[attempt_provider]["request"]
-                        process_func = PROVIDER_ROUTING[attempt_provider]["process"]
-                        resp_raw = await asyncio.wait_for(
-                            _to_thread(request_func, messages, request_model, **optional),
-                            timeout=request_timeout,
-                        )
-                        processed = await _to_thread(process_func, resp_raw)
-                    else:
-                        # Default to OpenRouter
-                        resp_raw = await asyncio.wait_for(
-                            _to_thread(
-                                make_openrouter_request_openai, messages, request_model, **optional
-                            ),
-                            timeout=request_timeout,
-                        )
-                        processed = await _to_thread(process_openrouter_response, resp_raw)
-
-                    # Extract token usage from response for tracing
-                    usage = processed.get("usage", {}) or {}
-                    trace_prompt_tokens = usage.get("prompt_tokens", 0)
-                    trace_completion_tokens = usage.get("completion_tokens", 0)
-                    trace_total_tokens = usage.get("total_tokens", 0)
-
-                    # Calculate cost for tracing
-                    trace_cost = calculate_cost(
-                        request_model, trace_prompt_tokens, trace_completion_tokens
-                    )
-
-                    # Set token usage and cost on trace span
-                    trace_ctx.set_token_usage(
-                        input_tokens=trace_prompt_tokens,
-                        output_tokens=trace_completion_tokens,
-                        total_tokens=trace_total_tokens,
-                    )
-                    trace_ctx.set_cost(trace_cost)
-
-                    # Set model parameters if available
-                    if optional:
-                        trace_ctx.set_model_parameters(
-                            temperature=optional.get("temperature"),
-                            max_tokens=optional.get("max_tokens"),
-                            top_p=optional.get("top_p"),
-                            frequency_penalty=optional.get("frequency_penalty"),
-                            presence_penalty=optional.get("presence_penalty"),
-                        )
-
-                    # Set user info if authenticated
-                    if not is_anonymous and user:
-                        trace_ctx.set_user_info(
-                            user_id=str(user.get("id")),
-                            tier="trial" if trial.get("is_trial") else "paid",
-                        )
-
-                provider = attempt_provider
-                model = request_model
-                break
-            except Exception as exc:
-                if isinstance(exc, httpx.TimeoutException | asyncio.TimeoutError):
-                    logger.warning("Upstream timeout (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.RequestError):
-                    logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
-                elif isinstance(exc, httpx.HTTPStatusError):
-                    logger.debug(
-                        "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
-                    )
-                else:
-                    logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
-                http_exc = map_provider_error(attempt_provider, request_model, exc)
-
-                last_http_exc = http_exc
-                if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                    next_provider = provider_chain[idx + 1]
-                    logger.warning(
-                        "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
-                        attempt_provider,
-                        http_exc.status_code,
-                        http_exc.detail,
-                        next_provider,
-                    )
-                    continue
-
-                # If this is a 402 (Payment Required) error and we've exhausted the chain,
-                # rebuild the chain allowing payment failover to try alternative providers
-                if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
-                    extended_chain = build_provider_failover_chain(provider)
-                    extended_chain = enforce_model_failover_rules(
-                        original_model, extended_chain, allow_payment_failover=True
-                    )
-                    extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
-                    # Find providers we haven't tried yet
-                    new_providers = [p for p in extended_chain if p not in provider_chain]
-                    if new_providers:
-                        logger.warning(
-                            "Provider '%s' returned 402 (Payment Required). "
-                            "Extending failover chain with: %s",
-                            attempt_provider,
-                            new_providers,
-                        )
-                        provider_chain.extend(new_providers)
-                        continue
-
-                raise http_exc
 
         if processed is None:
             raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
@@ -3784,100 +3858,55 @@ async def unified_responses(
         # Non-streaming response
         start = time.monotonic()
         processed = None
-        last_http_exc = None
+        model = original_model
+        provider = "onerouter"  # Default, will be updated by handler
 
-        for idx, attempt_provider in enumerate(provider_chain):
-            attempt_model = transform_model_id(original_model, attempt_provider)
-            if attempt_model != original_model:
-                logger.info(
-                    f"Transformed model ID from '{original_model}' to '{attempt_model}' for provider {attempt_provider}"
-                )
+        try:
+            logger.info(
+                f"[Unified Handler] Processing Responses API request for model {original_model}"
+            )
 
-            request_model = attempt_model
-            request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
-            if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
-                logger.debug(
-                    "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
-                )
+            # Convert to OpenAI format for adapter
+            adapter = OpenAIChatAdapter()
+            internal_request = adapter.to_internal_request({
+                "messages": messages,
+                "model": original_model,
+                "stream": False,
+                **optional
+            })
 
-            http_exc = None
-            try:
-                # Registry-based provider dispatch
-                if attempt_provider == "fal":
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                "and is not available through the chat completions endpoint. "
-                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                "type": "invalid_request_error",
-                                "code": "model_not_supported_for_chat",
-                            }
-                        },
-                    )
-                elif attempt_provider in PROVIDER_ROUTING:
-                    request_func = PROVIDER_ROUTING[attempt_provider]["request"]
-                    process_func = PROVIDER_ROUTING[attempt_provider]["process"]
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(request_func, messages, request_model, **optional),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_func, resp_raw)
-                else:
-                    resp_raw = await asyncio.wait_for(
-                        _to_thread(
-                            make_openrouter_request_openai, messages, request_model, **optional
-                        ),
-                        timeout=request_timeout,
-                    )
-                    processed = await _to_thread(process_openrouter_response, resp_raw)
+            # Create unified handler with user context
+            handler = ChatInferenceHandler(api_key, background_tasks)
 
-                provider = attempt_provider
-                model = request_model
-                break
-            except Exception as exc:
-                http_exc = map_provider_error(attempt_provider, request_model, exc)
+            # Process request through unified pipeline
+            internal_response = await handler.process(internal_request)
 
-            if http_exc is None:
-                continue
+            # Convert internal response back to OpenAI format
+            processed = adapter.from_internal_response(internal_response)
 
-            last_http_exc = http_exc
-            if idx < len(provider_chain) - 1 and should_failover(http_exc):
-                next_provider = provider_chain[idx + 1]
-                logger.warning(
-                    "Provider '%s' failed with status %s (%s). Falling back to '%s'.",
-                    attempt_provider,
-                    http_exc.status_code,
-                    http_exc.detail,
-                    next_provider,
-                )
-                continue
+            # Extract values for postprocessing (maintain compatibility)
+            provider = internal_response.provider_used or "onerouter"
+            model = internal_response.model or original_model
 
-            # If this is a 402 (Payment Required) error and we've exhausted the chain,
-            # rebuild the chain allowing payment failover to try alternative providers
-            if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
-                extended_chain = build_provider_failover_chain(provider)
-                extended_chain = enforce_model_failover_rules(
-                    original_model, extended_chain, allow_payment_failover=True
-                )
-                extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
-                # Find providers we haven't tried yet
-                new_providers = [p for p in extended_chain if p not in provider_chain]
-                if new_providers:
-                    logger.warning(
-                        "Provider '%s' returned 402 (Payment Required). "
-                        "Extending failover chain with: %s",
-                        attempt_provider,
-                        new_providers,
-                    )
-                    provider_chain.extend(new_providers)
-                    continue
+            logger.info(
+                f"[Unified Handler] Successfully processed Responses request: provider={provider}, model={model}"
+            )
 
+        except Exception as exc:
+            # Map any errors to HTTPException
+            logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
+            if isinstance(exc, HTTPException):
+                raise
+            # Map provider-specific errors
+            http_exc = map_provider_error(
+                provider if 'provider' in locals() else "onerouter",
+                model if 'model' in locals() else original_model,
+                exc
+            )
             raise http_exc
 
         if processed is None:
-            raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+            raise HTTPException(status_code=502, detail="Upstream error")
 
         elapsed = max(0.001, time.monotonic() - start)
 

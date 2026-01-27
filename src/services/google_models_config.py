@@ -40,8 +40,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-3-pro-preview",  # Preview models require -preview suffix
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.00125,  # $1.25/1M tokens
-                    cost_per_1k_output=0.01,  # $10.00/1M tokens
+                    cost_per_1k_input=0.002,  # $2.00/1M tokens
+                    cost_per_1k_output=0.012,  # $12.00/1M tokens
                     max_tokens=65536,
                     features=["streaming", "multimodal", "function_calling", "thinking", "grounding"],
                 ),
@@ -99,8 +99,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-2.5-flash",  # Use stable GA version for production
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.075,
-                    cost_per_1k_output=0.30,
+                    cost_per_1k_input=0.0003,  # $0.30/1M tokens
+                    cost_per_1k_output=0.0025,  # $2.50/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal", "function_calling", "thinking"],
                 ),
@@ -128,8 +128,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-2.5-flash-lite",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.03,
-                    cost_per_1k_output=0.12,
+                    cost_per_1k_input=0.0001,  # $0.10/1M tokens
+                    cost_per_1k_output=0.0004,  # $0.40/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal"],
                 ),
@@ -157,8 +157,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-2.5-pro",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=1.25,
-                    cost_per_1k_output=5.00,
+                    cost_per_1k_input=0.00125,  # $1.25/1M tokens
+                    cost_per_1k_output=0.01,  # $10.00/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal", "function_calling"],
                 ),
@@ -216,8 +216,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-2.0-flash",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.075,
-                    cost_per_1k_output=0.30,
+                    cost_per_1k_input=0.0001,  # $0.10/1M tokens
+                    cost_per_1k_output=0.0004,  # $0.40/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal", "function_calling"],
                 ),
@@ -245,8 +245,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemini-2.0-flash-lite",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.0375,  # $0.0375/1k tokens
-                    cost_per_1k_output=0.15,  # $0.15/1k tokens
+                    cost_per_1k_input=0.000075,  # $0.075/1M tokens
+                    cost_per_1k_output=0.0003,  # $0.30/1M tokens
                     max_tokens=8192,
                     features=["streaming", "multimodal"],
                 ),
@@ -286,8 +286,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemma-2-9b-it",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.03,
-                    cost_per_1k_output=0.06,
+                    cost_per_1k_input=0.00,  # Free of charge
+                    cost_per_1k_output=0.00,
                     max_tokens=8192,
                     features=["streaming"],
                 ),
@@ -315,8 +315,8 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="gemma-2-27b-it",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.10,
-                    cost_per_1k_output=0.20,
+                    cost_per_1k_input=0.00,  # Free of charge
+                    cost_per_1k_output=0.00,
                     max_tokens=8192,
                     features=["streaming"],
                 ),
@@ -345,7 +345,7 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="text-embedding-004",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.00001,  # $0.00001/1k tokens
+                    cost_per_1k_input=0.00015,  # $0.15/1M tokens
                     cost_per_1k_output=0.0,  # Embeddings don't have output tokens
                     max_tokens=2048,
                     features=["embeddings"],
@@ -364,7 +364,7 @@ def get_google_models() -> list[MultiProviderModel]:
                     model_id="text-multilingual-embedding-002",
                     priority=1,
                     requires_credentials=True,
-                    cost_per_1k_input=0.00001,
+                    cost_per_1k_input=0.00015,  # $0.15/1M tokens (same as text-embedding-004)
                     cost_per_1k_output=0.0,
                     max_tokens=2048,
                     features=["embeddings", "multilingual"],

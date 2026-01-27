@@ -86,6 +86,11 @@ from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
 
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
+from src.adapters.chat import AnthropicChatAdapter
+from src.schemas.internal.chat import InternalChatRequest
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -503,15 +508,81 @@ async def anthropic_messages(
                             break
                     # Otherwise default to onerouter (already set)
 
+        # === 3) Call upstream using unified handler ===
+        start = time.monotonic()
+        processed = None
+        model = original_model
+        provider = "onerouter"  # Default, will be updated by handler
+
+        try:
+            logger.info(
+                f"[Unified Handler] Processing Messages API request for model {original_model}"
+            )
+
+            # Prepare Anthropic-format request for adapter
+            anthropic_request = {
+                "model": req.model,
+                "messages": messages_data,
+                "max_tokens": req.max_tokens,
+                "temperature": req.temperature,
+                "top_p": req.top_p,
+                "top_k": req.top_k,
+                "stop_sequences": req.stop_sequences,
+                "system": system_param,
+                "tools": tools_param,
+                "tool_choice": tool_choice_param,
+                "stream": False,
+            }
+
+            # Convert Anthropic format to internal format
+            adapter = AnthropicChatAdapter()
+            internal_request = adapter.to_internal_request(anthropic_request)
+
+            # Create unified handler with user context
+            handler = ChatInferenceHandler(api_key, background_tasks)
+
+            # Process request through unified pipeline
+            internal_response = await handler.process(internal_request)
+
+            # Convert internal response back to OpenAI format (for compatibility with existing postprocessing)
+            from src.adapters.chat import OpenAIChatAdapter
+            openai_adapter = OpenAIChatAdapter()
+            processed = openai_adapter.from_internal_response(internal_response)
+
+            # Extract values for postprocessing (maintain compatibility)
+            provider = internal_response.provider_used or "onerouter"
+            model = internal_response.model or original_model
+
+            logger.info(
+                f"[Unified Handler] Successfully processed Messages request: provider={provider}, model={model}"
+            )
+
+        except Exception as exc:
+            # Map any errors to HTTPException
+            logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
+            if isinstance(exc, HTTPException):
+                raise
+            # Map provider-specific errors
+            from src.services.provider_failover import map_provider_error
+            http_exc = map_provider_error(
+                provider if 'provider' in locals() else "onerouter",
+                model if 'model' in locals() else original_model,
+                exc
+            )
+            raise http_exc
+
+        # Keep old failover code for reference (removed in production)
+        """
+        OLD CODE: Provider routing with manual failover (replaced by unified handler)
+
         provider_chain = build_provider_failover_chain(provider)
         provider_chain = enforce_model_failover_rules(original_model, provider_chain)
         model = original_model
 
-        # === 3) Call upstream with failover ===
         start = time.monotonic()
         processed = None
         last_http_exc = None
-        request_start_time = None  # Track individual request start time
+        request_start_time = None
 
         for idx, attempt_provider in enumerate(provider_chain):
             logger.debug("Messages failover iteration %s provider=%s", idx, attempt_provider)
@@ -759,6 +830,11 @@ async def anthropic_messages(
 
         if processed is None:
             raise last_http_exc or HTTPException(status_code=502, detail="Upstream error")
+        """
+
+        # Verify we have a response
+        if processed is None:
+            raise HTTPException(status_code=502, detail="Upstream error")
 
         elapsed = max(0.001, time.monotonic() - start)
 

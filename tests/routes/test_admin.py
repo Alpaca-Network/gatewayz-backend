@@ -421,3 +421,334 @@ class TestAdminEdgeCases:
 
         # Should succeed
         assert response.status_code == 200
+
+
+# ============================================================================
+# Phase 3: Admin Pricing Scheduler Endpoints Tests
+# ============================================================================
+
+
+class TestPricingSchedulerStatus:
+    """Test GET /admin/pricing/scheduler/status endpoint (Phase 3)"""
+
+    @patch('src.services.pricing_sync_scheduler.get_scheduler_status')
+    def test_get_scheduler_status_success(self, mock_get_status, client, admin_user, auth_headers):
+        """Admin can get scheduler status"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        mock_get_status.return_value = {
+            'enabled': True,
+            'interval_hours': 6,
+            'running': True,
+            'providers': ['openrouter', 'featherless'],
+            'last_syncs': {
+                'openrouter': {
+                    'timestamp': '2026-01-26T12:00:00Z',
+                    'seconds_ago': 3600
+                }
+            }
+        }
+
+        response = client.get('/admin/pricing/scheduler/status', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert 'scheduler' in data
+        assert data['scheduler']['enabled'] is True
+        assert data['scheduler']['interval_hours'] == 6
+
+    def test_get_scheduler_status_requires_admin(self, client, regular_user, auth_headers):
+        """Scheduler status requires admin role"""
+        # Override dependency with regular user
+        async def mock_get_current_user():
+            return regular_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        response = client.get('/admin/pricing/scheduler/status', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        # Should reject non-admin
+        assert response.status_code == 403
+
+    def test_get_scheduler_status_requires_authentication(self, client):
+        """Scheduler status requires authentication"""
+        response = client.get('/admin/pricing/scheduler/status')
+
+        # Should reject unauthenticated request
+        assert response.status_code in [401, 403, 422]
+
+    @patch('src.services.pricing_sync_scheduler.get_scheduler_status')
+    def test_get_scheduler_status_handles_error(self, mock_get_status, client, admin_user, auth_headers):
+        """Scheduler status handles errors gracefully"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Simulate error
+        mock_get_status.side_effect = RuntimeError('Scheduler not initialized')
+
+        response = client.get('/admin/pricing/scheduler/status', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        # Should return 500 with error message
+        assert response.status_code == 500
+        data = response.json()
+        assert 'error' in data
+        assert 'detail' in data['error']
+
+
+class TestPricingSchedulerTrigger:
+    """Test POST /admin/pricing/scheduler/trigger endpoint (Phase 3)"""
+
+    @patch('src.services.pricing_sync_scheduler.trigger_manual_sync')
+    def test_trigger_manual_sync_success(self, mock_trigger, client, admin_user, auth_headers):
+        """Admin can trigger manual pricing sync"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Mock successful sync
+        async def mock_sync_result():
+            return {
+                'status': 'success',
+                'duration_seconds': 12.5,
+                'total_models_updated': 150,
+                'total_models_skipped': 0,
+                'total_errors': 0,
+                'results': {
+                    'openrouter': {
+                        'status': 'success',
+                        'models_updated': 50
+                    }
+                }
+            }
+
+        mock_trigger.side_effect = mock_sync_result
+
+        response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is True
+        assert data['status'] == 'success'
+        assert data['total_models_updated'] == 150
+        assert 'triggered_by' in data
+        assert 'triggered_at' in data
+
+    @patch('src.services.pricing_sync_scheduler.trigger_manual_sync')
+    def test_trigger_manual_sync_failure(self, mock_trigger, client, admin_user, auth_headers):
+        """Manual sync handles failure gracefully"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Mock failed sync
+        async def mock_sync_result():
+            return {
+                'status': 'failed',
+                'duration_seconds': 5.2,
+                'error_message': 'Provider API timeout'
+            }
+
+        mock_trigger.side_effect = mock_sync_result
+
+        response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['success'] is False
+        assert data['status'] == 'failed'
+        assert 'error_message' in data
+
+    def test_trigger_manual_sync_requires_admin(self, client, regular_user, auth_headers):
+        """Manual sync trigger requires admin role"""
+        # Override dependency with regular user
+        async def mock_get_current_user():
+            return regular_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        # Should reject non-admin
+        assert response.status_code == 403
+
+    def test_trigger_manual_sync_requires_authentication(self, client):
+        """Manual sync trigger requires authentication"""
+        response = client.post('/admin/pricing/scheduler/trigger')
+
+        # Should reject unauthenticated request
+        assert response.status_code in [401, 403, 422]
+
+    @patch('src.services.pricing_sync_scheduler.trigger_manual_sync')
+    def test_trigger_manual_sync_logs_admin_user(self, mock_trigger, client, admin_user, auth_headers):
+        """Manual sync logs the admin user who triggered it"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Mock successful sync
+        async def mock_sync_result():
+            return {
+                'status': 'success',
+                'total_models_updated': 100
+            }
+
+        mock_trigger.side_effect = mock_sync_result
+
+        response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'triggered_by' in data
+        assert data['triggered_by'] == 'admin@gatewayz.ai'
+
+    @patch('src.services.pricing_sync_scheduler.trigger_manual_sync')
+    def test_trigger_manual_sync_handles_exception(self, mock_trigger, client, admin_user, auth_headers):
+        """Manual sync handles unexpected exceptions"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Simulate exception
+        async def mock_sync_error():
+            raise RuntimeError('Database connection lost')
+
+        mock_trigger.side_effect = mock_sync_error
+
+        response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+        # Should return 500 with error message
+        assert response.status_code == 500
+        data = response.json()
+        assert 'error' in data
+        assert 'detail' in data['error']
+
+
+class TestPricingSchedulerIntegration:
+    """Integration tests for pricing scheduler endpoints"""
+
+    @patch('src.services.pricing_sync_scheduler.get_scheduler_status')
+    @patch('src.services.pricing_sync_scheduler.trigger_manual_sync')
+    def test_status_after_manual_trigger(
+        self, mock_trigger, mock_get_status, client, admin_user, auth_headers
+    ):
+        """Status endpoint shows updated state after manual trigger"""
+        # Override dependency
+        async def mock_get_current_user():
+            return admin_user
+
+        app.dependency_overrides[get_current_user] = mock_get_current_user
+
+        # Initial status
+        mock_get_status.return_value = {
+            'enabled': True,
+            'interval_hours': 6,
+            'running': True,
+            'providers': ['openrouter']
+        }
+
+        # Get initial status
+        status_response = client.get('/admin/pricing/scheduler/status', headers=auth_headers)
+        assert status_response.status_code == 200
+
+        # Trigger manual sync
+        async def mock_sync_result():
+            return {
+                'status': 'success',
+                'total_models_updated': 50
+            }
+
+        mock_trigger.side_effect = mock_sync_result
+
+        trigger_response = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+        assert trigger_response.status_code == 200
+
+        # Get status again
+        status_response2 = client.get('/admin/pricing/scheduler/status', headers=auth_headers)
+        assert status_response2.status_code == 200
+
+        # Cleanup
+        app.dependency_overrides = {}
+
+    def test_multiple_admin_users_can_trigger(self, client, auth_headers):
+        """Multiple admin users can trigger manual sync"""
+        admin1 = {
+            'id': 1,
+            'email': 'admin1@gatewayz.ai',
+            'is_admin': True,
+            'role': 'admin'
+        }
+
+        admin2 = {
+            'id': 2,
+            'email': 'admin2@gatewayz.ai',
+            'is_admin': True,
+            'role': 'admin'
+        }
+
+        async def mock_sync_result():
+            return {
+                'status': 'success',
+                'total_models_updated': 50
+            }
+
+        with patch('src.services.pricing_sync_scheduler.trigger_manual_sync') as mock_trigger:
+            mock_trigger.side_effect = mock_sync_result
+
+            # Admin 1 triggers
+            async def mock_get_admin1():
+                return admin1
+
+            app.dependency_overrides[get_current_user] = mock_get_admin1
+            response1 = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+            assert response1.status_code == 200
+
+            # Admin 2 triggers
+            async def mock_get_admin2():
+                return admin2
+
+            app.dependency_overrides[get_current_user] = mock_get_admin2
+            response2 = client.post('/admin/pricing/scheduler/trigger', headers=auth_headers)
+            assert response2.status_code == 200
+
+            # Cleanup
+            app.dependency_overrides = {}

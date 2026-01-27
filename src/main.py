@@ -207,6 +207,12 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
     logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
 
+    # Add request ID middleware for error tracking and correlation
+    from src.middleware.request_id_middleware import RequestIDMiddleware
+
+    app.add_middleware(RequestIDMiddleware)
+    logger.info("  🆔 Request ID middleware enabled (unique ID for all requests)")
+
     # Add trace context middleware for distributed tracing
     from src.middleware.trace_context_middleware import TraceContextMiddleware
 
@@ -558,11 +564,32 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
 
-    # ==================== Exception Handler ====================
+    # ==================== Exception Handlers ====================
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        """
+        Handle HTTPException with detailed error responses.
+
+        Converts basic HTTPExceptions to detailed error responses with
+        suggestions, context, and documentation links.
+        """
+        from src.utils.error_handlers import detailed_http_exception_handler
+
+        return await detailed_http_exception_handler(request, exc)
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
+        """
+        Handle unexpected exceptions with detailed error responses.
+
+        Captures exceptions in monitoring tools (PostHog, Sentry) and returns
+        a detailed internal error response to the client.
+        """
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
+
+        # Get request ID from request state
+        request_id = getattr(request.state, "request_id", None)
 
         # Capture exception in PostHog for error tracking
         try:
@@ -575,6 +602,7 @@ def create_app() -> FastAPI:
                 "method": request.method,
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
+                "request_id": request_id,
             }
 
             # Try to get user ID from request state or headers
@@ -595,7 +623,20 @@ def create_app() -> FastAPI:
         except Exception as posthog_error:
             logger.warning(f"Failed to capture exception in PostHog: {posthog_error}")
 
-        return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+        # Return detailed internal error response
+        from src.utils.error_factory import DetailedErrorFactory
+
+        error_response = DetailedErrorFactory.internal_error(
+            operation="request_processing",
+            error=exc,
+            request_id=request_id,
+        )
+
+        return JSONResponse(
+            status_code=500,
+            content=error_response.dict(exclude_none=True),
+            headers={"X-Request-ID": request_id} if request_id else None,
+        )
 
     # ==================== Startup Event ====================
 

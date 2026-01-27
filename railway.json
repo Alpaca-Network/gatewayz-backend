@@ -14,18 +14,19 @@
           "liveness": {
             "enabled": true,
             "interval": 30,
-            "timeout": 30,
+            "timeout": 60,
             "initialDelay": 60,
             "path": "/health"
           },
           "readiness": {
             "enabled": true,
             "interval": 10,
-            "timeout": 30,
+            "timeout": 60,
             "initialDelay": 45,
             "path": "/health"
           }
         },
+        "requestTimeout": 240,
         "environments": {
           "production": {
             "replicas": 1,

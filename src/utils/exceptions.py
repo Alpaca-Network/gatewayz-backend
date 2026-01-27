@@ -4,18 +4,26 @@ HTTP Exception Factories
 Centralized exception creation with consistent error messages and status codes.
 Eliminates 308+ duplicate HTTPException patterns across the codebase.
 
+Supports both simple and detailed error modes:
+- Simple mode: Traditional HTTPException with string detail
+- Detailed mode: Rich error responses with context, suggestions, and documentation
+
 Usage:
     from src.utils.exceptions import APIExceptions
 
-    # Instead of:
-    raise HTTPException(status_code=401, detail="Invalid API key")
-
-    # Use:
+    # Simple mode (backward compatible):
     raise APIExceptions.unauthorized()
+
+    # Detailed mode:
+    raise APIExceptions.model_not_found_detailed(
+        model_id="gpt-5",
+        suggested_models=["gpt-4", "gpt-4-turbo"],
+        request_id="req_123"
+    )
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
@@ -256,6 +264,293 @@ class APIExceptions:
                 "field": field,
                 "message": message
             }
+        )
+
+    # ==================== Detailed Error Methods ====================
+    # These methods use the DetailedErrorFactory for rich error responses
+
+    @staticmethod
+    def model_not_found_detailed(
+        model_id: str,
+        provider: Optional[str] = None,
+        suggested_models: Optional[List[str]] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        404 Model Not Found - Detailed version with suggestions.
+
+        Args:
+            model_id: The requested model ID
+            provider: Optional provider name
+            suggested_models: Optional list of similar models
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.model_not_found(
+            model_id=model_id,
+            provider=provider,
+            suggested_models=suggested_models,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def insufficient_credits_detailed(
+        current_credits: float,
+        required_credits: float,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        402 Insufficient Credits - Detailed version with amounts.
+
+        Args:
+            current_credits: User's current credit balance
+            required_credits: Credits required for request
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.insufficient_credits(
+            current_credits=current_credits,
+            required_credits=required_credits,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def insufficient_credits_for_reservation(
+        current_credits: float,
+        max_cost: float,
+        model_id: str,
+        max_tokens: int,
+        input_tokens: Optional[int] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        402 Insufficient Credits - Pre-flight check version with max cost details.
+
+        This error is raised BEFORE making a provider request when the user doesn't
+        have enough credits to cover the maximum possible cost (based on max_tokens).
+
+        Args:
+            current_credits: User's current credit balance
+            max_cost: Maximum possible cost for the request
+            model_id: Model being requested
+            max_tokens: Maximum output tokens parameter
+            input_tokens: Optional estimated input tokens
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response including:
+            - Maximum possible cost
+            - Current balance
+            - Shortfall amount
+            - Actionable suggestions (reduce max_tokens, add credits)
+            - Calculated recommended max_tokens
+
+        Example:
+            >>> raise APIExceptions.insufficient_credits_for_reservation(
+            ...     current_credits=0.05,
+            ...     max_cost=0.20,
+            ...     model_id="gpt-4o",
+            ...     max_tokens=4096,
+            ...     input_tokens=100
+            ... )
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.insufficient_credits_for_reservation(
+            current_credits=current_credits,
+            max_cost=max_cost,
+            model_id=model_id,
+            max_tokens=max_tokens,
+            input_tokens=input_tokens,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def invalid_api_key_detailed(
+        reason: Optional[str] = None,
+        key_prefix: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        401 Invalid API Key - Detailed version.
+
+        Args:
+            reason: Optional reason for invalidity
+            key_prefix: First few characters of the key
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.invalid_api_key(
+            reason=reason,
+            key_prefix=key_prefix,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def rate_limit_exceeded_detailed(
+        limit_type: str,
+        retry_after: Optional[int] = None,
+        limit_value: Optional[int] = None,
+        current_usage: Optional[int] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        429 Rate Limit Exceeded - Detailed version with retry info.
+
+        Args:
+            limit_type: Type of rate limit
+            retry_after: Seconds until retry is allowed
+            limit_value: Rate limit threshold
+            current_usage: Current usage count
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.rate_limit_exceeded(
+            limit_type=limit_type,
+            retry_after=retry_after,
+            limit_value=limit_value,
+            current_usage=current_usage,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def provider_error_detailed(
+        provider: str,
+        model: str,
+        provider_message: Optional[str] = None,
+        status_code: int = 502,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        502 Provider Error - Detailed version.
+
+        Args:
+            provider: Provider name
+            model: Model ID
+            provider_message: Original provider error message
+            status_code: HTTP status code
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.provider_error(
+            provider=provider,
+            model=model,
+            provider_message=provider_message,
+            status_code=status_code,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
+        )
+
+    @staticmethod
+    def invalid_parameter_detailed(
+        parameter_name: str,
+        parameter_value: Any,
+        expected_type: Optional[str] = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+        allowed_values: Optional[List[Any]] = None,
+        request_id: Optional[str] = None,
+    ) -> HTTPException:
+        """
+        400 Invalid Parameter - Detailed version.
+
+        Args:
+            parameter_name: Name of invalid parameter
+            parameter_value: The invalid value
+            expected_type: Expected type (for type mismatches)
+            min_value: Minimum allowed value
+            max_value: Maximum allowed value
+            allowed_values: List of allowed values
+            request_id: Optional request ID
+
+        Returns:
+            HTTPException with detailed error response
+        """
+        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.error_handlers import create_error_response_dict
+
+        error = DetailedErrorFactory.invalid_parameter(
+            parameter_name=parameter_name,
+            parameter_value=parameter_value,
+            expected_type=expected_type,
+            min_value=min_value,
+            max_value=max_value,
+            allowed_values=allowed_values,
+            request_id=request_id,
+        )
+        response_dict, headers = create_error_response_dict(error)
+
+        return HTTPException(
+            status_code=error.error.status,
+            detail=response_dict,
+            headers=headers,
         )
 
 

@@ -199,9 +199,86 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
         return None
 
 
+def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
+    """
+    Get pricing from database (Phase 2: database-first approach).
+
+    Args:
+        model_id: Model identifier (e.g., "nosana/meta-llama/Llama-3.3-70B-Instruct")
+
+    Returns:
+        Pricing dictionary normalized to per-1M format (for backward compatibility):
+        {
+            "prompt": "0.90",  # per-1M
+            "completion": "0.90",  # per-1M
+            "request": "0",
+            "image": "0"
+        }
+        or None if not found
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Query models table with JOIN to model_pricing table
+        result = (
+            client.table("models")
+            .select("id, model_id, model_pricing(price_per_input_token, price_per_output_token)")
+            .eq("model_id", model_id)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+
+        if not result.data or not result.data[0]:
+            return None
+
+        row = result.data[0]
+
+        if not row.get("model_pricing"):
+            return None
+
+        pricing_data = row["model_pricing"]
+        if isinstance(pricing_data, list):
+            if not pricing_data:
+                return None
+            pricing_data = pricing_data[0]
+
+        prompt_price = pricing_data.get("price_per_input_token")
+        completion_price = pricing_data.get("price_per_output_token")
+
+        if prompt_price is None or completion_price is None:
+            return None
+
+        # Convert per-token to per-1M for backward compatibility
+        # Database stores per-token (e.g., 0.0000009)
+        # API returns per-1M (e.g., "0.90")
+        prompt_per_1m = float(prompt_price) * 1_000_000
+        completion_per_1m = float(completion_price) * 1_000_000
+
+        return {
+            "prompt": str(prompt_per_1m),
+            "completion": str(completion_per_1m),
+            "request": "0",
+            "image": "0"
+        }
+
+    except Exception as e:
+        logger.error(f"Database pricing lookup failed for {model_id}: {e}")
+        return None
+
+
 def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[str, Any] | None:
     """
-    Enrich model data with manual pricing if available
+    Enrich model data with pricing information.
+
+    Phase 2 Update: Database-first approach with JSON fallback.
+
+    Lookup priority:
+    1. Database (model_pricing table) ← NEW
+    2. Manual pricing JSON (fallback)
+    3. Cross-reference (for gateway providers)
 
     Args:
         model_data: Model dictionary
@@ -241,7 +318,15 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
             if has_real_pricing:
                 return model_data
 
-        # Try to get manual pricing first
+        # PHASE 2: Try database first (NEW)
+        db_pricing = _get_pricing_from_database(model_id)
+        if db_pricing:
+            model_data["pricing"] = db_pricing
+            model_data["pricing_source"] = "database"
+            logger.debug(f"[Phase 2] Enriched {model_id} with database pricing")
+            return model_data
+
+        # Fallback to manual pricing JSON
         manual_pricing = get_model_pricing(gateway, model_id)
         if manual_pricing:
             model_data["pricing"] = manual_pricing

@@ -396,6 +396,22 @@ class Config:
     REDIS_SOCKET_TIMEOUT = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
     REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
 
+    # Pricing Sync Scheduler Configuration (Phase 2.5)
+    PRICING_SYNC_ENABLED = os.environ.get("PRICING_SYNC_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    PRICING_SYNC_INTERVAL_HOURS = int(os.environ.get("PRICING_SYNC_INTERVAL_HOURS", "6"))
+    PRICING_SYNC_PROVIDERS = [
+        p.strip()
+        for p in os.environ.get(
+            "PRICING_SYNC_PROVIDERS",
+            "openrouter,featherless,nearai,alibaba-cloud"
+        ).split(",")
+        if p.strip()
+    ]
+
     # Metrics Aggregation Configuration
     METRICS_AGGREGATION_ENABLED = os.environ.get("METRICS_AGGREGATION_ENABLED", "true").lower() in {
         "1",

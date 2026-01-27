@@ -39,6 +39,11 @@ from src.services.pricing import calculate_cost
 from src.services.trial_validation import track_trial_usage, validate_trial_access
 from src.utils.sentry_context import capture_payment_error
 
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
+from src.adapters.chat import AISDKChatAdapter
+from src.schemas.internal.chat import InternalChatRequest
+
 # Initialize logging
 logger = logging.getLogger(__name__)
 
@@ -304,120 +309,59 @@ async def ai_sdk_chat_completion(
     )
 
     try:
-        # Build kwargs for API request
-        kwargs = _build_request_kwargs(request)
-
-        # Convert messages to dict format
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
-
-        # Check if this is an openrouter/* model - route directly through OpenRouter
-        if _is_openrouter_model(request.model):
-            logger.info(f"Routing '{request.model}' directly through OpenRouter")
-
-            # Handle streaming requests via OpenRouter
-            if request.stream:
-                return await _handle_openrouter_stream(
-                    request, messages, kwargs, api_key, user, trial
-                )
-
-            # Make request directly to OpenRouter
-            response = await asyncio.to_thread(
-                make_openrouter_request_openai, messages, request.model, **kwargs
-            )
-
-            # Process and return response
-            processed = await asyncio.to_thread(process_openrouter_response, response)
-
-            # Calculate processing time and extract usage
-            elapsed_ms = int((time.monotonic() - start_time) * 1000)
-            usage = processed.get("usage", {})
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
-            total_tokens = prompt_tokens + completion_tokens
-
-            # Calculate cost and handle credit deduction
-            cost = await asyncio.to_thread(
-                calculate_cost, request.model, prompt_tokens, completion_tokens
-            )
-            # Defense-in-depth: Override trial status if user has active subscription
-            is_trial = _check_trial_override(trial, user)
-
-            # Track trial usage
-            if is_trial and not trial.get("is_expired"):
-                try:
-                    await asyncio.to_thread(
-                        track_trial_usage,
-                        api_key,
-                        total_tokens,
-                        1,
-                        model_id=request.model,
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to track trial usage: {e}")
-
-            # Deduct credits for non-trial users
-            if not is_trial:
-                try:
-                    await asyncio.to_thread(
-                        deduct_credits,
-                        api_key,
-                        cost,
-                        f"AI SDK usage - {request.model}",
-                        {
-                            "model": request.model,
-                            "total_tokens": total_tokens,
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "cost_usd": cost,
-                        },
-                    )
-                    await asyncio.to_thread(
-                        record_usage,
-                        user["id"],
-                        api_key,
-                        request.model,
-                        total_tokens,
-                        cost,
-                        elapsed_ms,
-                    )
-                except Exception as e:
-                    logger.error(f"Credit deduction error: {e}")
-                    raise
-
-            # Save chat completion request metadata - run as background task
-            background_tasks.add_task(
-                chat_completion_requests_module.save_chat_completion_request,
-                request_id=request_id,
-                model_name=request.model,
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                processing_time_ms=elapsed_ms,
-                status="completed",
-                error_message=None,
-                user_id=user["id"],
-                provider_name="openrouter",
-                model_id=None,
-                api_key_id=user.get("key_id"),
-            )
-
-            return processed
-
-        # Default path: Use Vercel AI Gateway
-        # Validate API key is configured
-        validate_ai_sdk_api_key()
-
-        # Handle streaming requests via AI SDK
-        if request.stream:
-            return await _handle_ai_sdk_stream(request, request.model, api_key, user, trial)
-
-        # Make request to AI SDK endpoint
-        response = await asyncio.to_thread(
-            make_ai_sdk_request_openai, messages, request.model, **kwargs
+        logger.info(
+            f"[Unified Handler] Processing AI SDK request for model {request.model}, stream={request.stream}"
         )
 
-        # Process and return response
+        # Convert AI SDK format request to dict for adapter
+        ai_sdk_request = {
+            "model": request.model,
+            "messages": [{"role": msg.role, "content": msg.content} for msg in request.messages],
+            "max_tokens": getattr(request, "max_tokens", None),
+            "temperature": getattr(request, "temperature", None),
+            "top_p": getattr(request, "top_p", None),
+            "stream": request.stream or False,
+        }
+
+        # Convert AI SDK format to internal format
+        adapter = AISDKChatAdapter()
+        internal_request = adapter.to_internal_request(ai_sdk_request)
+
+        # Create unified handler with user context
+        handler = ChatInferenceHandler(api_key, background_tasks)
+
+        # Handle streaming requests
+        if request.stream:
+            logger.info(f"[Unified Handler] Starting AI SDK streaming for model {request.model}")
+
+            # Process stream through unified pipeline
+            internal_stream = handler.process_stream(internal_request)
+
+            # Convert internal stream to AI SDK SSE format
+            sse_stream = adapter.from_internal_stream(internal_stream)
+
+            return StreamingResponse(
+                sse_stream,
+                media_type="text/event-stream",
+                headers={
+                    "X-Accel-Buffering": "no",
+                    "Cache-Control": "no-cache, no-transform",
+                    "Connection": "keep-alive",
+                },
+            )
+
+        # Handle non-streaming requests
+        # Process request through unified pipeline
+        internal_response = await handler.process(internal_request)
+
+        # Convert internal response back to AI SDK format
+        processed = adapter.from_internal_response(internal_response)
+
+        logger.info(
+            f"[Unified Handler] Successfully processed AI SDK request: model={internal_response.model}"
+        )
+
+        return processed
         processed = await asyncio.to_thread(process_ai_sdk_response, response)
 
         # Calculate processing time and extract usage
