@@ -138,6 +138,8 @@ PROVIDER_PRICING_FORMATS = {
     "nebius": PricingFormat.PER_1M_TOKENS,
     "alibaba-cloud": PricingFormat.PER_1M_TOKENS,
     "morpheus": PricingFormat.PER_1M_TOKENS,
+    "helicone": PricingFormat.PER_1M_TOKENS,  # Helicone API returns per-1M pricing
+    "vercel-ai-gateway": PricingFormat.PER_1M_TOKENS,  # Vercel API returns per-token, but we convert to per-1M in client
 
     # Per-1K tokens
     "aihubmix": PricingFormat.PER_1K_TOKENS,
