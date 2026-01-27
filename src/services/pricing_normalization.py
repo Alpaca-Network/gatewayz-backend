@@ -125,6 +125,7 @@ PROVIDER_PRICING_FORMATS = {
     "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing, not per-1M
 
     # Per-1M tokens (most common)
+    "anthropic": PricingFormat.PER_1M_TOKENS,  # Anthropic manual pricing is per-1M
     "deepinfra": PricingFormat.PER_1M_TOKENS,
     "featherless": PricingFormat.PER_1M_TOKENS,
     "together": PricingFormat.PER_1M_TOKENS,

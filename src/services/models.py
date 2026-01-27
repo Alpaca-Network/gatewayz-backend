@@ -3999,7 +3999,7 @@ def normalize_helicone_model(model) -> dict | None:
 def get_helicone_model_pricing(model_id: str) -> dict:
     """Get pricing for a Helicone AI Gateway model
 
-    Fetches pricing from Helicone or the underlying provider.
+    Fetches pricing from Helicone's public API or the underlying provider.
     Falls back to default zero pricing if unavailable.
 
     Args:
@@ -4008,29 +4008,43 @@ def get_helicone_model_pricing(model_id: str) -> dict:
     Returns:
         dict with 'prompt', 'completion', 'request', and 'image' pricing fields
     """
-    # If we're building the catalog, return default pricing to avoid circular dependency
-    if _is_building_catalog():
-        return {
-            "prompt": "0",
-            "completion": "0",
-            "request": "0",
-            "image": "0",
-        }
-
     try:
-        from src.services.helicone_client import fetch_model_pricing_from_helicone
+        from src.services.helicone_client import fetch_helicone_pricing_from_public_api
 
-        # Attempt to fetch pricing from Helicone or underlying provider
-        pricing_data = fetch_model_pricing_from_helicone(model_id)
+        # Fetch pricing from Helicone's public API (no circular dependency)
+        pricing_map = fetch_helicone_pricing_from_public_api()
 
-        if pricing_data:
-            # Normalize to standard schema with default zeros for missing fields
-            return {
-                "prompt": str(pricing_data.get("prompt", "0")),
-                "completion": str(pricing_data.get("completion", "0")),
-                "request": str(pricing_data.get("request", "0")),
-                "image": str(pricing_data.get("image", "0")),
-            }
+        if pricing_map:
+            # Try exact match first
+            if model_id in pricing_map:
+                return {
+                    "prompt": str(pricing_map[model_id].get("prompt", "0")),
+                    "completion": str(pricing_map[model_id].get("completion", "0")),
+                    "request": str(pricing_map[model_id].get("request", "0")),
+                    "image": str(pricing_map[model_id].get("image", "0")),
+                }
+
+            # Try without provider prefix
+            model_name = model_id.split("/")[-1] if "/" in model_id else model_id
+            if model_name in pricing_map:
+                return {
+                    "prompt": str(pricing_map[model_name].get("prompt", "0")),
+                    "completion": str(pricing_map[model_name].get("completion", "0")),
+                    "request": str(pricing_map[model_name].get("request", "0")),
+                    "image": str(pricing_map[model_name].get("image", "0")),
+                }
+
+            # Try with common provider prefixes
+            for prefix in ["anthropic", "openai", "google", "meta-llama"]:
+                prefixed_id = f"{prefix}/{model_name}"
+                if prefixed_id in pricing_map:
+                    return {
+                        "prompt": str(pricing_map[prefixed_id].get("prompt", "0")),
+                        "completion": str(pricing_map[prefixed_id].get("completion", "0")),
+                        "request": str(pricing_map[prefixed_id].get("request", "0")),
+                        "image": str(pricing_map[prefixed_id].get("image", "0")),
+                    }
+
     except Exception as e:
         logger.debug(
             "Failed to fetch Helicone pricing for %s: %s",

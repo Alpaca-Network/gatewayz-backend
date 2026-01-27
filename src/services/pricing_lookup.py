@@ -18,6 +18,7 @@ GATEWAY_PROVIDERS = {
     "akash",
     "alibaba-cloud",
     "anannas",
+    "anthropic",  # Direct Anthropic API - needs cross-reference for model ID matching
     "clarifai",
     "cloudflare-workers-ai",
     "deepinfra",
