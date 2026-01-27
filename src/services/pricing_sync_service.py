@@ -155,6 +155,15 @@ class PricingSyncService:
         Returns:
             Sync stats dict
         """
+        from src.services.prometheus_metrics import (
+            track_pricing_sync,
+            record_pricing_sync_models_updated,
+            record_pricing_sync_models_skipped,
+            record_pricing_sync_models_fetched,
+            record_pricing_sync_price_changes,
+            record_pricing_sync_error,
+        )
+
         logger.info(f"Starting pricing sync for provider: {provider_slug} (dry_run={dry_run})")
 
         sync_started_at = datetime.now(timezone.utc)
@@ -188,103 +197,136 @@ class PricingSyncService:
             except Exception as e:
                 logger.warning(f"Could not log sync start: {e}")
 
-        try:
-            # Fetch pricing from provider API
-            api_data = await self._fetch_provider_pricing(provider_slug)
+        # Track sync operation with Prometheus metrics
+        with track_pricing_sync(provider_slug, triggered_by):
+            try:
+                # Fetch pricing from provider API
+                api_data = await self._fetch_provider_pricing(provider_slug)
 
-            if not api_data or not api_data.get("models"):
-                raise Exception(f"No models returned from {provider_slug} API")
+                if not api_data or not api_data.get("models"):
+                    raise Exception(f"No models returned from {provider_slug} API")
 
-            stats["models_fetched"] = len(api_data["models"])
-            logger.info(f"Fetched {stats['models_fetched']} models from {provider_slug}")
+                stats["models_fetched"] = len(api_data["models"])
+                logger.info(f"Fetched {stats['models_fetched']} models from {provider_slug}")
 
-            # Get provider format
-            provider_format = get_provider_format(provider_slug)
+                # Record models fetched metric
+                record_pricing_sync_models_fetched(provider_slug, stats["models_fetched"])
 
-            # Process each model
-            for model_id, pricing in api_data["models"].items():
-                try:
-                    result = await self._process_model_pricing(
-                        model_id,
-                        pricing,
-                        provider_format,
-                        provider_slug,
-                        dry_run
-                    )
+                # Get provider format
+                provider_format = get_provider_format(provider_slug)
 
-                    if result["status"] == "updated":
-                        stats["models_updated"] += 1
-                        stats["price_changes"].append(result)
-                    elif result["status"] == "skipped":
-                        stats["models_skipped"] += 1
-                        stats["error_details"].append(result)
-                    elif result["status"] == "unchanged":
-                        stats["models_unchanged"] += 1
+                # Track skipped models by reason
+                skip_reasons = {}
 
-                except Exception as e:
-                    logger.error(f"Error processing {model_id}: {e}")
-                    stats["errors"] += 1
-                    stats["error_details"].append({
-                        "model_id": model_id,
-                        "error": str(e)
-                    })
+                # Process each model
+                for model_id, pricing in api_data["models"].items():
+                    try:
+                        result = await self._process_model_pricing(
+                            model_id,
+                            pricing,
+                            provider_format,
+                            provider_slug,
+                            dry_run
+                        )
 
-            # Clear pricing cache (force reload from database)
-            if not dry_run and stats["models_updated"] > 0:
-                self._clear_pricing_cache()
+                        if result["status"] == "updated":
+                            stats["models_updated"] += 1
+                            stats["price_changes"].append(result)
+                        elif result["status"] == "skipped":
+                            stats["models_skipped"] += 1
+                            stats["error_details"].append(result)
+                            # Track skip reason
+                            reason = result.get("reason", "unknown")
+                            skip_reasons[reason] = skip_reasons.get(reason, 0) + 1
+                        elif result["status"] == "unchanged":
+                            stats["models_unchanged"] += 1
 
-            # Log completion
-            sync_completed_at = datetime.now(timezone.utc)
-            stats["completed_at"] = sync_completed_at.isoformat()
-            stats["duration_ms"] = int((sync_completed_at - sync_started_at).total_seconds() * 1000)
-            stats["status"] = "success"
+                    except Exception as e:
+                        logger.error(f"Error processing {model_id}: {e}")
+                        stats["errors"] += 1
+                        stats["error_details"].append({
+                            "model_id": model_id,
+                            "error": str(e)
+                        })
+                        # Record error metric
+                        error_type = type(e).__name__
+                        record_pricing_sync_error(provider_slug, error_type)
 
-            # Update sync log
-            if not dry_run and sync_log_id:
-                try:
-                    self.client.table("pricing_sync_log").update({
-                        "sync_completed_at": sync_completed_at.isoformat(),
-                        "status": "success",
-                        "models_fetched": stats["models_fetched"],
-                        "models_updated": stats["models_updated"],
-                        "models_skipped": stats["models_skipped"],
-                        "errors": stats["errors"]
-                    }).eq("id", sync_log_id).execute()
-                except Exception as e:
-                    logger.warning(f"Could not update sync log: {e}")
+                # Record metrics after processing
+                record_pricing_sync_models_updated(provider_slug, stats["models_updated"])
+                record_pricing_sync_price_changes(provider_slug, len(stats["price_changes"]))
 
-            logger.info(
-                f"Pricing sync completed for {provider_slug}: "
-                f"{stats['models_updated']} updated, "
-                f"{stats['models_unchanged']} unchanged, "
-                f"{stats['models_skipped']} skipped, "
-                f"{stats['errors']} errors"
-            )
+                # Record skipped models by reason
+                for reason, count in skip_reasons.items():
+                    record_pricing_sync_models_skipped(provider_slug, reason, count)
 
-            return stats
+                # Clear pricing cache (force reload from database)
+                if not dry_run and stats["models_updated"] > 0:
+                    self._clear_pricing_cache()
 
-        except Exception as e:
-            logger.error(f"Pricing sync failed for {provider_slug}: {e}")
+                # Log completion
+                sync_completed_at = datetime.now(timezone.utc)
+                stats["completed_at"] = sync_completed_at.isoformat()
+                stats["duration_ms"] = int((sync_completed_at - sync_started_at).total_seconds() * 1000)
+                stats["status"] = "success"
 
-            sync_completed_at = datetime.now(timezone.utc)
-            stats["completed_at"] = sync_completed_at.isoformat()
-            stats["duration_ms"] = int((sync_completed_at - sync_started_at).total_seconds() * 1000)
-            stats["status"] = "failed"
-            stats["error_message"] = str(e)
+                # Update sync log
+                if not dry_run and sync_log_id:
+                    try:
+                        self.client.table("pricing_sync_log").update({
+                            "sync_completed_at": sync_completed_at.isoformat(),
+                            "status": "success",
+                            "models_fetched": stats["models_fetched"],
+                            "models_updated": stats["models_updated"],
+                            "models_skipped": stats["models_skipped"],
+                            "errors": stats["errors"]
+                        }).eq("id", sync_log_id).execute()
+                    except Exception as e:
+                        logger.warning(f"Could not update sync log: {e}")
 
-            # Update sync log with failure
-            if not dry_run and sync_log_id:
-                try:
-                    self.client.table("pricing_sync_log").update({
-                        "sync_completed_at": sync_completed_at.isoformat(),
-                        "status": "failed",
-                        "error_message": str(e),
-                        "errors": stats["errors"]
-                    }).eq("id", sync_log_id).execute()
-                except Exception as log_error:
-                    logger.warning(f"Could not update sync log: {log_error}")
+                logger.info(
+                    f"Pricing sync completed for {provider_slug}: "
+                    f"{stats['models_updated']} updated, "
+                    f"{stats['models_unchanged']} unchanged, "
+                    f"{stats['models_skipped']} skipped, "
+                    f"{stats['errors']} errors"
+                )
 
-            return stats
+                return stats
+
+            except Exception as e:
+                logger.error(f"Pricing sync failed for {provider_slug}: {e}")
+
+                # Classify error type for metrics
+                error_type = type(e).__name__
+                if "API" in str(e) or "fetch" in str(e).lower():
+                    error_type = "api_error"
+                elif "database" in str(e).lower() or "supabase" in str(e).lower():
+                    error_type = "database_error"
+                elif "timeout" in str(e).lower():
+                    error_type = "timeout_error"
+
+                record_pricing_sync_error(provider_slug, error_type)
+
+                sync_completed_at = datetime.now(timezone.utc)
+                stats["completed_at"] = sync_completed_at.isoformat()
+                stats["duration_ms"] = int((sync_completed_at - sync_started_at).total_seconds() * 1000)
+                stats["status"] = "failed"
+                stats["error_message"] = str(e)
+
+                # Update sync log with failure
+                if not dry_run and sync_log_id:
+                    try:
+                        self.client.table("pricing_sync_log").update({
+                            "sync_completed_at": sync_completed_at.isoformat(),
+                            "status": "failed",
+                            "error_message": str(e),
+                            "errors": stats["errors"]
+                        }).eq("id", sync_log_id).execute()
+                    except Exception as log_error:
+                        logger.warning(f"Could not update sync log: {log_error}")
+
+                return stats
 
     async def _process_model_pricing(
         self,

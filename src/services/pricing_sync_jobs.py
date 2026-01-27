@@ -53,6 +53,8 @@ async def create_pricing_sync_job(triggered_by: str) -> str:
         PricingSyncJobError: If job creation fails
     """
     try:
+        from src.services.prometheus_metrics import set_pricing_sync_job_queue_size
+
         supabase = get_supabase_client()
         job_id = str(uuid.uuid4())
 
@@ -67,6 +69,10 @@ async def create_pricing_sync_job(triggered_by: str) -> str:
 
         if result.data:
             logger.info(f"Created pricing sync job: {job_id} (triggered by: {triggered_by})")
+
+            # Update queue size metrics
+            await _update_queue_metrics()
+
             return job_id
 
         raise PricingSyncJobError("Failed to create job - no data returned")
@@ -117,6 +123,10 @@ async def update_job_status(
             raise JobNotFoundError(f"Job not found: {job_id}")
 
         logger.info(f"Updated job {job_id} status to: {status}")
+
+        # Update queue size metrics after status change
+        await _update_queue_metrics()
+
         return True
 
     except JobNotFoundError:
@@ -143,6 +153,8 @@ async def complete_job(
         True if updated successfully
     """
     try:
+        from src.services.prometheus_metrics import pricing_sync_job_duration_seconds
+
         supabase = get_supabase_client()
 
         status = "completed" if success else "failed"
@@ -166,6 +178,15 @@ async def complete_job(
 
         if not result.data:
             raise JobNotFoundError(f"Job not found: {job_id}")
+
+        # Record job duration metric
+        job_data = result.data[0]
+        if job_data.get("duration_seconds"):
+            duration = float(job_data["duration_seconds"])
+            pricing_sync_job_duration_seconds.labels(status=status).observe(duration)
+
+        # Update queue size metrics
+        await _update_queue_metrics()
 
         logger.info(
             f"Completed job {job_id}: {status}, "
@@ -333,3 +354,29 @@ async def get_active_jobs() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error getting active jobs: {str(e)}")
         return []
+
+
+async def _update_queue_metrics() -> None:
+    """
+    Update Prometheus job queue size metrics.
+
+    Counts jobs by status and updates gauge metrics.
+    """
+    try:
+        from src.services.prometheus_metrics import set_pricing_sync_job_queue_size
+
+        supabase = get_supabase_client()
+
+        # Count jobs by status
+        statuses = ["queued", "running", "completed", "failed"]
+
+        for status in statuses:
+            result = supabase.table("pricing_sync_jobs").select(
+                "job_id", count="exact"
+            ).eq("status", status).execute()
+
+            count = result.count if result.count is not None else 0
+            set_pricing_sync_job_queue_size(status, count)
+
+    except Exception as e:
+        logger.warning(f"Failed to update queue metrics: {str(e)}")

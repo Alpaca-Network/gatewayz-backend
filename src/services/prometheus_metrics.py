@@ -878,6 +878,150 @@ def track_connection_pool_stats(pool_name: str, stats: dict):
         logger.warning(f"Failed to track connection pool stats: {e}")
 
 
+# ==================== Pricing Sync Metrics ====================
+# Metrics for monitoring pricing sync scheduler operations
+
+pricing_sync_duration_seconds = get_or_create_metric(
+    Histogram,
+    "pricing_sync_duration_seconds",
+    "Duration of pricing sync operations by provider",
+    ["provider", "status"],  # status: success, failed
+    buckets=(1, 5, 10, 20, 30, 45, 60, 90, 120, 180),
+)
+
+pricing_sync_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_total",
+    "Total number of pricing sync operations",
+    ["provider", "status", "triggered_by"],  # triggered_by: manual, scheduler, api
+)
+
+pricing_sync_models_updated_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_models_updated_total",
+    "Total number of models with updated pricing",
+    ["provider"],
+)
+
+pricing_sync_models_skipped_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_models_skipped_total",
+    "Total number of models skipped during sync",
+    ["provider", "reason"],  # reason: zero_pricing, dynamic_pricing, unchanged, error
+)
+
+pricing_sync_errors_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_errors_total",
+    "Total number of pricing sync errors",
+    ["provider", "error_type"],  # error_type: api_fetch_failed, db_error, validation_error
+)
+
+pricing_sync_last_success_timestamp = get_or_create_metric(
+    Gauge,
+    "pricing_sync_last_success_timestamp",
+    "Unix timestamp of last successful pricing sync",
+    ["provider"],
+)
+
+pricing_sync_job_duration_seconds = get_or_create_metric(
+    Histogram,
+    "pricing_sync_job_duration_seconds",
+    "Duration of background pricing sync jobs",
+    ["status"],  # status: completed, failed
+    buckets=(1, 5, 10, 20, 30, 45, 60, 90, 120, 180, 300),
+)
+
+pricing_sync_job_queue_size = get_or_create_metric(
+    Gauge,
+    "pricing_sync_job_queue_size",
+    "Current number of pricing sync jobs in queue",
+    ["status"],  # status: queued, running, completed, failed
+)
+
+pricing_sync_models_fetched_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_models_fetched_total",
+    "Total number of models fetched from provider APIs",
+    ["provider"],
+)
+
+pricing_sync_price_changes_total = get_or_create_metric(
+    Counter,
+    "pricing_sync_price_changes_total",
+    "Total number of detected price changes",
+    ["provider"],
+)
+
+
+# ==================== Helper Functions for Pricing Sync ====================
+
+
+@contextmanager
+def track_pricing_sync(provider: str, triggered_by: str = "scheduler"):
+    """
+    Context manager to track pricing sync operations.
+
+    Usage:
+        with track_pricing_sync("openrouter", triggered_by="manual"):
+            # Perform sync
+            result = sync_pricing()
+    """
+    start_time = time.time()
+    status = "success"
+    try:
+        yield
+    except Exception:
+        status = "failed"
+        raise
+    finally:
+        duration = time.time() - start_time
+        pricing_sync_duration_seconds.labels(provider=provider, status=status).observe(duration)
+        pricing_sync_total.labels(provider=provider, status=status, triggered_by=triggered_by).inc()
+
+        if status == "success":
+            pricing_sync_last_success_timestamp.labels(provider=provider).set(time.time())
+
+
+def record_pricing_sync_models_updated(provider: str, count: int):
+    """Record number of models updated during sync."""
+    if count > 0:
+        pricing_sync_models_updated_total.labels(provider=provider).inc(count)
+
+
+def record_pricing_sync_models_skipped(provider: str, reason: str, count: int):
+    """Record number of models skipped during sync."""
+    if count > 0:
+        pricing_sync_models_skipped_total.labels(provider=provider, reason=reason).inc(count)
+
+
+def record_pricing_sync_error(provider: str, error_type: str):
+    """Record pricing sync error."""
+    pricing_sync_errors_total.labels(provider=provider, error_type=error_type).inc()
+
+
+def record_pricing_sync_models_fetched(provider: str, count: int):
+    """Record number of models fetched from provider API."""
+    if count > 0:
+        pricing_sync_models_fetched_total.labels(provider=provider).inc(count)
+
+
+def record_pricing_sync_price_changes(provider: str, count: int):
+    """Record number of price changes detected."""
+    if count > 0:
+        pricing_sync_price_changes_total.labels(provider=provider).inc(count)
+
+
+def set_pricing_sync_job_queue_size(status: str, count: int):
+    """Set current job queue size."""
+    pricing_sync_job_queue_size.labels(status=status).set(count)
+
+
+def track_pricing_sync_job(duration: float, status: str):
+    """Track pricing sync background job duration."""
+    pricing_sync_job_duration_seconds.labels(status=status).observe(duration)
+
+
 def get_metrics_summary() -> dict:
     """Get a summary of key metrics for monitoring."""
     # This function returns a summary of metrics collected.
