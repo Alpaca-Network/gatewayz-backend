@@ -155,7 +155,7 @@ BEGIN
         RAISE NOTICE '';
         RAISE NOTICE 'Summary:';
         RAISE NOTICE '  • View now uses model_pricing table for costs';
-        RAISE NOTICE '  • Pricing displayed as per-1K tokens';
+        RAISE NOTICE '  • Pricing displayed as per-1M tokens';
         RAISE NOTICE '  • Models with usage data: %', model_count;
         RAISE NOTICE '';
         RAISE NOTICE 'API Endpoint: GET /admin/model-usage-analytics';
