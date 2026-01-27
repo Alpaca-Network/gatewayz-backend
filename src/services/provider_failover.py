@@ -47,6 +47,7 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "onerouter",
     "openai",  # Native OpenAI - try first for openai/* models
     "anthropic",  # Native Anthropic - try first for anthropic/* models
+    "google-vertex",
     "openrouter",  # Fallback for OpenAI/Anthropic models
     "cerebras",
     "huggingface",
@@ -57,7 +58,6 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "alibaba-cloud",
     "fireworks",
     "together",
-    "google-vertex",
 )
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 # Include 402 (Payment Required) to allow failover when provider credits are exhausted
