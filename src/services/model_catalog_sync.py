@@ -618,25 +618,17 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                 try:
                     from src.cache import clear_models_cache
                     from src.services.model_catalog_cache import (
-                        invalidate_db_cache,  # NEW: Database-first cache (Issue #980)
                         invalidate_full_catalog,
                         invalidate_provider_catalog,
                     )
 
                     # Invalidate in-memory cache for this provider
                     clear_models_cache(provider_slug)
-
-                    # NEW: Invalidate database-first cache (Issue #980)
-                    # This is the primary cache used by the new get_models_from_db() function
-                    invalidate_db_cache(provider_slug)
-                    logger.info(f"Database-first cache invalidated for {provider_slug}")
-
-                    # LEGACY: Invalidate old-style caches (kept for backward compatibility)
-                    # These can be removed once migration is complete
+                    # Invalidate Redis provider-specific cache
                     invalidate_provider_catalog(provider_slug)
+                    # Then invalidate Redis full catalog (aggregated view)
                     invalidate_full_catalog()
-
-                    logger.info(f"All caches invalidated for {provider_slug} after model sync")
+                    logger.info(f"Cache invalidated for {provider_slug} after model sync")
                 except Exception as cache_e:
                     logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
         else:
@@ -720,17 +712,6 @@ def sync_all_providers(
         if errors:
             for error in errors:
                 logger.error(f"  - {error['provider']}: {error['error']}")
-
-        # Invalidate aggregated "all" cache after syncing multiple providers (Issue #980)
-        if not dry_run and total_synced > 0:
-            try:
-                from src.services.model_catalog_cache import invalidate_db_cache
-
-                # Invalidate the "all models" cache since we synced multiple providers
-                invalidate_db_cache(gateway_slug=None)  # None = invalidate all
-                logger.info("Invalidated aggregated 'all models' cache after batch sync")
-            except Exception as cache_e:
-                logger.warning(f"Failed to invalidate aggregated cache: {cache_e}")
 
         return {
             "success": success,
