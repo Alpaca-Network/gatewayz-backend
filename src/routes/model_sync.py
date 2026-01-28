@@ -5,9 +5,10 @@ Dynamically fetches and syncs models from provider APIs to database
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.security.deps import get_admin_key
 from src.services.model_catalog_sync import (
     PROVIDER_FETCH_FUNCTIONS,
     sync_all_providers,
@@ -44,7 +45,9 @@ class ProviderListResponse(BaseModel):
 
 
 @router.get("/providers", response_model=ProviderListResponse)
-async def list_available_providers():
+async def list_available_providers(
+    _admin_key: str = Depends(get_admin_key)
+):
     """
     Get list of providers that can be synced
 
@@ -60,7 +63,8 @@ async def list_available_providers():
 @router.post("/provider/{provider_slug}", response_model=SyncResponse)
 async def sync_single_provider(
     provider_slug: str,
-    dry_run: bool = Query(False, description="Fetch but don't write to database")
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
+    _admin_key: str = Depends(get_admin_key)
 ):
     """
     Sync models from a specific provider's API to database
@@ -125,7 +129,8 @@ async def sync_all_provider_models(
         None,
         description="Specific providers to sync (comma-separated). If not provided, syncs all providers."
     ),
-    dry_run: bool = Query(False, description="Fetch but don't write to database")
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
+    _admin_key: str = Depends(get_admin_key)
 ):
     """
     Sync models from all providers (or specified list)
@@ -199,7 +204,9 @@ async def sync_all_provider_models(
 
 
 @router.get("/status", response_model=dict)
-async def get_sync_status():
+async def get_sync_status(
+    _admin_key: str = Depends(get_admin_key)
+):
     """
     Get current sync status and statistics
 
@@ -253,7 +260,8 @@ async def get_sync_status():
 
 @router.post("/full", response_model=SyncResponse)
 async def trigger_full_provider_and_model_sync(
-    dry_run: bool = Query(False, description="Fetch but don't write to database")
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
+    _admin_key: str = Depends(get_admin_key)
 ):
     """
     Trigger a complete sync of providers and models
@@ -333,7 +341,9 @@ async def trigger_full_provider_and_model_sync(
 
 
 @router.post("/providers-only", response_model=SyncResponse)
-async def sync_providers_only():
+async def sync_providers_only(
+    _admin_key: str = Depends(get_admin_key)
+):
     """
     Sync only providers from GATEWAY_REGISTRY to database
 
@@ -380,7 +390,8 @@ async def sync_providers_only():
 
 @router.delete("/flush-models", response_model=SyncResponse)
 async def flush_models(
-    confirm: str = Query(..., description="Must be 'DELETE_ALL_MODELS' to confirm")
+    confirm: str = Query(..., description="Must be 'DELETE_ALL_MODELS' to confirm"),
+    _admin_key: str = Depends(get_admin_key)
 ):
     """
     Flush (delete all records from) the models table
@@ -463,7 +474,8 @@ async def flush_models(
 
 @router.delete("/flush-providers", response_model=SyncResponse)
 async def flush_providers(
-    confirm: str = Query(..., description="Must be 'DELETE_EVERYTHING' to confirm")
+    confirm: str = Query(..., description="Must be 'DELETE_EVERYTHING' to confirm"),
+    _admin_key: str = Depends(get_admin_key)
 ):
     """
     Flush (delete all records from) the providers table (cascades to models)
@@ -554,7 +566,9 @@ async def flush_providers(
 
 
 @router.post("/reset-and-resync", response_model=SyncResponse)
-async def reset_and_resync():
+async def reset_and_resync(
+    _admin_key: str = Depends(get_admin_key)
+):
     """
     Atomic operation: Flush models table and immediately resync from providers
 
