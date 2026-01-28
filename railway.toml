@@ -15,3 +15,36 @@ healthcheckPath = "/health"
 healthcheckTimeout = 120
 healthcheckInterval = 30
 initialDelaySeconds = 30
+
+# ============================================
+# Cron Jobs - Automated Model & Pricing Sync
+# ============================================
+# Railway native cron jobs for automated synchronization
+# Docs: https://docs.railway.app/reference/config-as-code#crons
+
+# Full model sync every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+[[crons]]
+schedule = "0 */6 * * *"
+command = "curl -X POST http://localhost:$PORT/admin/model-sync/all"
+
+# Alternative schedules (uncomment to use instead):
+
+# Daily at 2 AM UTC
+# [[crons]]
+# schedule = "0 2 * * *"
+# command = "curl -X POST http://localhost:$PORT/admin/model-sync/all"
+
+# Twice daily (2 AM and 2 PM UTC)
+# [[crons]]
+# schedule = "0 2,14 * * *"
+# command = "curl -X POST http://localhost:$PORT/admin/model-sync/all"
+
+# Every 4 hours
+# [[crons]]
+# schedule = "0 */4 * * *"
+# command = "curl -X POST http://localhost:$PORT/admin/model-sync/all"
+
+# Health monitoring every hour (optional)
+# [[crons]]
+# schedule = "0 * * * *"
+# command = "python scripts/monitor_sync_health.py"

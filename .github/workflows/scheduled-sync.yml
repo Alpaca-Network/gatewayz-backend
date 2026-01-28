@@ -1,0 +1,238 @@
+name: Scheduled Model & Pricing Sync
+
+on:
+  schedule:
+    # Run every 6 hours at :00 (00:00, 06:00, 12:00, 18:00 UTC)
+    - cron: '0 */6 * * *'
+
+    # Additional schedules (uncomment to use):
+    # - cron: '0 2 * * *'        # Daily at 2 AM UTC
+    # - cron: '0 2,14 * * *'     # Twice daily (2 AM and 2 PM UTC)
+    # - cron: '0 */4 * * *'      # Every 4 hours
+    # - cron: '0 0,6,12,18 * * *' # Four times daily
+
+  workflow_dispatch:
+    inputs:
+      sync_type:
+        description: 'Sync type'
+        required: false
+        default: 'full'
+        type: choice
+        options:
+          - full
+          - models_only
+          - pricing_only
+
+env:
+  API_URL: ${{ secrets.API_URL || 'https://api.gatewayz.ai' }}
+  ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+
+jobs:
+  sync-models:
+    name: Sync Models & Pricing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install requests jq
+
+      - name: Check API health
+        id: health_check
+        run: |
+          echo "🔍 Checking API health..."
+          if curl -sf "$API_URL/health" > /dev/null; then
+            echo "✅ API is healthy"
+            echo "api_healthy=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ API is not reachable at $API_URL"
+            echo "api_healthy=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Get pre-sync database count
+        id: pre_sync
+        if: steps.health_check.outputs.api_healthy == 'true'
+        run: |
+          echo "📊 Getting current database status..."
+          STATUS=$(curl -s "$API_URL/admin/model-sync/status")
+          PRE_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
+          echo "pre_count=$PRE_COUNT" >> $GITHUB_OUTPUT
+          echo "   Current database models: $PRE_COUNT"
+
+      - name: Trigger full model sync
+        id: model_sync
+        if: |
+          steps.health_check.outputs.api_healthy == 'true' &&
+          (github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'models_only' || github.event.inputs.sync_type == '')
+        run: |
+          echo "🔄 Starting full model sync..."
+          echo "   This may take 3-5 minutes..."
+
+          START_TIME=$(date +%s)
+          RESPONSE=$(curl -s -X POST "$API_URL/admin/model-sync/all")
+          END_TIME=$(date +%s)
+          DURATION=$((END_TIME - START_TIME))
+
+          echo "Response:"
+          echo "$RESPONSE" | jq '.'
+
+          # Check if successful
+          SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+          if [ "$SUCCESS" = "true" ]; then
+            MODELS_SYNCED=$(echo "$RESPONSE" | jq -r '.details.total_models_synced // 0')
+            PROVIDERS=$(echo "$RESPONSE" | jq -r '.details.providers_processed // 0')
+
+            echo "✅ Model sync completed"
+            echo "   Duration: ${DURATION}s"
+            echo "   Providers: $PROVIDERS"
+            echo "   Models synced: $MODELS_SYNCED"
+
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "models_synced=$MODELS_SYNCED" >> $GITHUB_OUTPUT
+            echo "providers=$PROVIDERS" >> $GITHUB_OUTPUT
+            echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          else
+            ERROR=$(echo "$RESPONSE" | jq -r '.message // "Unknown error"')
+            echo "❌ Model sync failed: $ERROR"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Trigger pricing sync
+        id: pricing_sync
+        if: |
+          steps.health_check.outputs.api_healthy == 'true' &&
+          steps.model_sync.outputs.success == 'true' &&
+          (github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'pricing_only' || github.event.inputs.sync_type == '')
+        run: |
+          echo "🔄 Starting pricing sync..."
+
+          if [ -z "$ADMIN_KEY" ]; then
+            echo "⚠️  ADMIN_KEY not configured, skipping pricing sync"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          RESPONSE=$(curl -s -X POST "$API_URL/admin/pricing/sync/$ADMIN_KEY")
+          echo "$RESPONSE" | jq '.'
+
+          # Extract sync ID
+          SYNC_ID=$(echo "$RESPONSE" | jq -r '.sync_id // empty')
+          if [ -n "$SYNC_ID" ]; then
+            echo "✅ Pricing sync queued"
+            echo "   Sync ID: $SYNC_ID"
+            echo "sync_id=$SYNC_ID" >> $GITHUB_OUTPUT
+            echo "skipped=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Could not queue pricing sync"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for pricing sync completion
+        if: |
+          steps.pricing_sync.outputs.sync_id != '' &&
+          steps.pricing_sync.outputs.skipped != 'true'
+        timeout-minutes: 5
+        run: |
+          SYNC_ID="${{ steps.pricing_sync.outputs.sync_id }}"
+          echo "⏳ Waiting for pricing sync $SYNC_ID to complete..."
+
+          for i in {1..30}; do
+            sleep 10
+
+            STATUS_RESPONSE=$(curl -s "$API_URL/admin/pricing/sync/$ADMIN_KEY/status/$SYNC_ID")
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // "unknown"')
+            PROGRESS=$(echo "$STATUS_RESPONSE" | jq -r '.progress_percent // 0')
+
+            echo "   Check $i/30: $STATUS ($PROGRESS%)"
+
+            if [ "$STATUS" = "completed" ]; then
+              MODELS_UPDATED=$(echo "$STATUS_RESPONSE" | jq -r '.models_updated // 0')
+              echo "✅ Pricing sync completed: $MODELS_UPDATED models updated"
+              exit 0
+            elif [ "$STATUS" = "failed" ]; then
+              ERROR=$(echo "$STATUS_RESPONSE" | jq -r '.error_message // "Unknown error"')
+              echo "❌ Pricing sync failed: $ERROR"
+              exit 1
+            fi
+          done
+
+          echo "⚠️  Pricing sync still running after 5 minutes"
+          echo "   This is normal for large syncs. Check logs later."
+
+      - name: Get post-sync database count
+        id: post_sync
+        if: always() && steps.health_check.outputs.api_healthy == 'true'
+        run: |
+          echo "📊 Getting post-sync database status..."
+          sleep 3  # Wait for database to update
+
+          STATUS=$(curl -s "$API_URL/admin/model-sync/status")
+          POST_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
+          echo "post_count=$POST_COUNT" >> $GITHUB_OUTPUT
+
+          PRE_COUNT="${{ steps.pre_sync.outputs.pre_count }}"
+          ADDED=$((POST_COUNT - PRE_COUNT))
+
+          echo "   Database models: $POST_COUNT"
+          echo "   Models added: $ADDED"
+
+          if [ "$POST_COUNT" -ge 17000 ]; then
+            echo "✅ Database is fully synced"
+            echo "sync_status=healthy" >> $GITHUB_OUTPUT
+          elif [ "$POST_COUNT" -ge 15000 ]; then
+            echo "⚠️  Database is mostly synced"
+            echo "sync_status=warning" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Database needs attention"
+            echo "sync_status=critical" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## 🔄 Scheduled Sync Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "**API URL**: $API_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.model_sync.outputs.success }}" = "true" ]; then
+            echo "### ✅ Model Sync" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status**: Success" >> $GITHUB_STEP_SUMMARY
+            echo "- **Duration**: ${{ steps.model_sync.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
+            echo "- **Providers**: ${{ steps.model_sync.outputs.providers }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Models Synced**: ${{ steps.model_sync.outputs.models_synced }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Model Sync" >> $GITHUB_STEP_SUMMARY
+            echo "- **Status**: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Database Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Before**: ${{ steps.pre_sync.outputs.pre_count }} models" >> $GITHUB_STEP_SUMMARY
+          echo "- **After**: ${{ steps.post_sync.outputs.post_count }} models" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ steps.post_sync.outputs.sync_status }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Scheduled sync failed!"
+          echo "Check workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          # Optional: Add Slack/Discord/Email notification here
+          # Example for Slack:
+          # curl -X POST "${{ secrets.SLACK_WEBHOOK }}" \
+          #   -H "Content-Type: application/json" \
+          #   -d '{"text":"🚨 Gatewayz sync failed! Check GitHub Actions."}'
