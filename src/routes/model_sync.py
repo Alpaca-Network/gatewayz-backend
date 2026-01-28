@@ -13,6 +13,10 @@ from src.services.model_catalog_sync import (
     sync_all_providers,
     sync_provider_models,
 )
+from src.services.provider_model_sync_service import (
+    sync_providers_to_database,
+    trigger_full_sync,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +241,133 @@ async def get_sync_status():
 
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/full", response_model=SyncResponse)
+async def trigger_full_provider_and_model_sync(
+    dry_run: bool = Query(False, description="Fetch but don't write to database")
+):
+    """
+    Trigger a complete sync of providers and models
+
+    This endpoint performs a full synchronization in two phases:
+    1. **Provider Sync**: Syncs all providers from GATEWAY_REGISTRY to database
+       - Ensures providers table matches the code configuration
+       - Creates/updates provider records
+       - Sets metadata like colors, priority, site URLs
+
+    2. **Model Sync**: Syncs models from all configured providers
+       - Fetches latest model catalogs from each provider's API
+       - Transforms and upserts models to database
+       - Updates pricing, capabilities, and metadata
+
+    This is the recommended way to fully refresh the catalog.
+
+    Args:
+        dry_run: If True, performs sync operations but doesn't write to DB
+
+    Returns:
+        Combined sync results from both providers and models
+
+    Example:
+        POST /admin/model-sync/full
+        POST /admin/model-sync/full?dry_run=true
+    """
+    try:
+        logger.info("🚀 Starting full provider and model sync...")
+
+        if dry_run:
+            # For dry run, just call the sync functions without writing
+            provider_result = await sync_providers_to_database()
+
+            # Note: sync_all_providers already supports dry_run
+            model_result = sync_all_providers(dry_run=True)
+
+            result = {
+                "success": True,
+                "providers": provider_result,
+                "models": model_result,
+                "dry_run": True
+            }
+        else:
+            # Use the existing full sync function
+            result = await trigger_full_sync()
+
+        provider_success = result.get("providers", {}).get("success", False)
+        model_success = result.get("models", {}).get("success", False)
+        overall_success = provider_success and model_success
+
+        providers_synced = result.get("providers", {}).get("synced_count", 0)
+        models_synced = result.get("models", {}).get("total_models_synced", 0)
+        providers_processed = result.get("models", {}).get("providers_processed", 0)
+
+        message = (
+            f"{'[DRY RUN] ' if dry_run else ''}"
+            f"Full sync completed. "
+            f"Providers: {providers_synced} synced, "
+            f"Models: {models_synced} synced from {providers_processed} providers. "
+            f"Provider sync: {'✓' if provider_success else '✗'}, "
+            f"Model sync: {'✓' if model_success else '✗'}"
+        )
+
+        return SyncResponse(
+            success=overall_success,
+            message=message,
+            details=result
+        )
+
+    except Exception as e:
+        logger.error(f"Error in full sync endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/providers-only", response_model=SyncResponse)
+async def sync_providers_only():
+    """
+    Sync only providers from GATEWAY_REGISTRY to database
+
+    This endpoint syncs providers without syncing models, useful when:
+    - You only need to update provider metadata
+    - You want to add new providers to the database first
+    - You're testing provider configuration changes
+
+    This operation is fast (< 1 second) as it only updates provider records.
+
+    Returns:
+        Provider sync results
+
+    Example:
+        POST /admin/model-sync/providers-only
+    """
+    try:
+        logger.info("🔄 Syncing providers only...")
+
+        result = await sync_providers_to_database()
+
+        synced_count = result.get("synced_count", 0)
+        success = result.get("success", False)
+
+        message = (
+            f"Provider sync completed. "
+            f"Synced {synced_count} providers from GATEWAY_REGISTRY. "
+            f"Status: {'✓ Success' if success else '✗ Failed'}"
+        )
+
+        return SyncResponse(
+            success=success,
+            message=message,
+            details=result
+        )
+
+    except Exception as e:
+        logger.error(f"Error in provider sync endpoint: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
