@@ -826,47 +826,46 @@ def get_models_from_db(gateway: str | None = None, include_inactive: bool = Fals
         }
         gateway_normalized = gateway_map.get(gateway_normalized, gateway_normalized)
 
-    try:
-        # PRIORITY 1: Try cache + database (fast path)
-        logger.info(f"Attempting cache/database fetch for gateway='{gateway or 'all'}'")
+    # Special handling for gateway=all: skip database for now due to performance issues
+    # The database query for ALL models (thousands of rows with JOINs) times out
+    # TODO: Optimize database query with pagination and indexes
+    if gateway == "all" or gateway is None:
+        logger.info("gateway=all: Using parallel fetch (database query optimization pending)")
+        # Use the existing multi-provider catalog build (with 45s timeout fix)
+        models = _refresh_multi_provider_catalog_cache()
+        # TODO: Write models to database for future cache hits
+        return models
 
-        if gateway == "all" or gateway is None:
-            models = get_models_from_db_cached(gateway_slug=None, include_inactive=include_inactive)
-        else:
-            models = get_models_from_db_cached(gateway_slug=gateway_normalized, include_inactive=include_inactive)
+    # For single gateways, use cache + database fallback (works fine)
+    try:
+        # PRIORITY 1: Try cache + database (fast path for single gateway)
+        logger.info(f"Attempting cache/database fetch for gateway='{gateway_normalized}'")
+
+        models = get_models_from_db_cached(gateway_slug=gateway_normalized, include_inactive=include_inactive)
 
         # If we got models, return them (cache hit or database success)
         if models:
-            logger.info(f"Cache/database returned {len(models)} models for gateway='{gateway or 'all'}'")
+            logger.info(f"Cache/database returned {len(models)} models for gateway='{gateway_normalized}'")
             return models
 
-        # PRIORITY 2: Database returned empty - fall back to provider APIs
+        # PRIORITY 2: Database returned empty - fall back to provider API
         logger.warning(
-            f"Database returned 0 models for gateway='{gateway or 'all'}'. "
-            "Falling back to provider API fetch (this will update database)."
-        )
-
-    except Exception as e:
-        # PRIORITY 3: Database/cache error - fall back to provider APIs
-        logger.error(
-            f"Database fetch failed for gateway='{gateway or 'all'}': {e}. "
+            f"Database returned 0 models for gateway='{gateway_normalized}'. "
             "Falling back to provider API fetch."
         )
 
-    # FALLBACK: Call provider APIs and update database
-    logger.info(f"Fetching from provider APIs for gateway='{gateway or 'all'}'")
+    except Exception as e:
+        # PRIORITY 3: Database/cache error - fall back to provider API
+        logger.error(
+            f"Database fetch failed for gateway='{gateway_normalized}': {e}. "
+            "Falling back to provider API fetch."
+        )
 
-    if gateway == "all" or gateway is None:
-        # For "all", use the existing multi-provider catalog build (with 45s timeout)
-        models = _refresh_multi_provider_catalog_cache()
-        # TODO: Write models to database for future cache hits
-        # This will be implemented in next iteration to keep database in sync
-        return models
-    else:
-        # For single gateway, use the existing get_cached_models (writes to in-memory cache)
-        models = get_cached_models(gateway)
-        # TODO: Write models to database for future cache hits
-        return models
+    # FALLBACK: Call provider API for single gateway
+    logger.info(f"Fetching from provider API for gateway='{gateway_normalized}'")
+    models = get_cached_models(gateway)
+    # TODO: Write models to database for future cache hits
+    return models
 
 
 def get_cached_models(gateway: str = "openrouter"):
