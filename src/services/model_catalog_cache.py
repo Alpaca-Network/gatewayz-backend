@@ -536,3 +536,162 @@ def clear_all_model_caches() -> int:
     """Clear all model-related caches"""
     cache = get_model_catalog_cache()
     return cache.invalidate_all_models()
+
+
+# ============================================================================
+# DATABASE-FIRST CACHING FUNCTIONS (Issue #980)
+# These functions cache database reads instead of provider API responses.
+# ============================================================================
+
+
+def get_models_from_db_cached(
+    gateway_slug: str | None = None,
+    include_inactive: bool = False
+) -> list[dict]:
+    """
+    Get models from database with Redis caching.
+
+    This is the new database-first approach that replaces direct provider API calls.
+    Instead of calling provider APIs, we read from the database (single source of truth)
+    and cache the results in Redis.
+
+    Flow:
+    1. Check Redis cache
+    2. If cache miss, query database
+    3. Transform database models to API format
+    4. Cache results in Redis
+    5. Return data
+
+    Args:
+        gateway_slug: Optional gateway/provider slug filter (e.g., 'openrouter')
+        include_inactive: Include inactive models (default: False)
+
+    Returns:
+        List of models in API format (ready for response)
+
+    Example:
+        >>> # Get all models from database (cached)
+        >>> all_models = get_models_from_db_cached()
+        >>> len(all_models)
+        5432
+        >>>
+        >>> # Get OpenRouter models only
+        >>> openrouter_models = get_models_from_db_cached('openrouter')
+        >>> len(openrouter_models)
+        234
+    """
+    from src.db.models_catalog_db import (
+        get_all_models_for_catalog,
+        get_models_by_gateway_for_catalog,
+        transform_db_model_to_api_format,
+    )
+
+    # Build cache key
+    gateway_key = gateway_slug or "all"
+    cache_key = f"models:db:{gateway_key}:active={not include_inactive}"
+
+    # Try to get from cache first
+    cache = get_model_catalog_cache()
+    cached_data = cache.redis_client.get(cache_key) if cache.redis_client else None
+
+    if cached_data:
+        try:
+            models = json.loads(cached_data)
+            cache._stats["hits"] += 1
+            logger.info(f"Cache HIT: Database models for {gateway_key} ({len(models)} models)")
+            return models
+        except Exception as e:
+            logger.warning(f"Failed to deserialize cached models: {e}")
+            cache._stats["errors"] += 1
+
+    # Cache miss - query database
+    cache._stats["misses"] += 1
+    logger.info(f"Cache MISS: Querying database for {gateway_key} models")
+
+    try:
+        # Query database
+        if gateway_slug:
+            db_models = get_models_by_gateway_for_catalog(gateway_slug, include_inactive)
+        else:
+            db_models = get_all_models_for_catalog(include_inactive)
+
+        # Transform to API format
+        api_models = [transform_db_model_to_api_format(m) for m in db_models]
+
+        # Cache the result (TTL: 15 minutes for full catalog, 30 minutes for single gateway)
+        ttl = 900 if not gateway_slug else 1800
+        if cache.redis_client:
+            try:
+                cache.redis_client.setex(cache_key, ttl, json.dumps(api_models))
+                cache._stats["sets"] += 1
+                logger.info(f"Cached {len(api_models)} models for {gateway_key} (TTL: {ttl}s)")
+            except Exception as e:
+                logger.warning(f"Failed to cache models: {e}")
+                cache._stats["errors"] += 1
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error fetching models from database for {gateway_key}: {e}")
+        cache._stats["errors"] += 1
+        return []
+
+
+def invalidate_db_cache(gateway_slug: str | None = None) -> int:
+    """
+    Invalidate database-based model caches.
+
+    This should be called after database updates (e.g., after syncing models).
+
+    Args:
+        gateway_slug: Optional gateway to invalidate (None = invalidate all)
+
+    Returns:
+        Number of cache keys deleted
+
+    Example:
+        >>> # Invalidate OpenRouter cache after syncing
+        >>> invalidate_db_cache('openrouter')
+        2  # Deleted active and inactive caches
+        >>>
+        >>> # Invalidate all caches after full sync
+        >>> invalidate_db_cache()
+        15  # Deleted all gateway caches
+    """
+    cache = get_model_catalog_cache()
+    if not cache.redis_client or not is_redis_available():
+        return 0
+
+    try:
+        deleted_count = 0
+
+        if gateway_slug:
+            # Invalidate specific gateway caches
+            patterns = [
+                f"models:db:{gateway_slug}:active=True",
+                f"models:db:{gateway_slug}:active=False",
+            ]
+            for pattern in patterns:
+                if cache.redis_client.delete(pattern):
+                    deleted_count += 1
+                    logger.info(f"Invalidated cache: {pattern}")
+        else:
+            # Invalidate all database caches
+            pattern = "models:db:*"
+            keys = cache.redis_client.keys(pattern)
+            if keys:
+                deleted_count = cache.redis_client.delete(*keys)
+                logger.info(f"Invalidated {deleted_count} database cache keys")
+
+        # Also invalidate old-style caches for consistency
+        cache.invalidate_full_catalog()
+        if gateway_slug:
+            cache.invalidate_provider_catalog(gateway_slug)
+
+        cache._stats["invalidations"] += deleted_count
+        return deleted_count
+
+    except Exception as e:
+        logger.error(f"Error invalidating database caches: {e}")
+        cache._stats["errors"] += 1
+        return 0
