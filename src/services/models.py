@@ -2,7 +2,7 @@ import csv
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -630,30 +630,45 @@ def get_all_models_parallel():
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
         # Since get_cached_models uses synchronous httpx, we use threads
-        # Reduced max_workers from 16 to 8 to prevent thread exhaustion
-        # in case of recursive calls or errors
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        # Increased max_workers from 8 to 12 for better parallelism with 30 gateways
+        # (allows ~3 rounds instead of ~4 rounds of execution)
+        with ThreadPoolExecutor(max_workers=12) as executor:
             futures = {executor.submit(get_cached_models, gw): gw for gw in active_gateways}
             all_models = []
 
-            for future in futures:
-                try:
-                    models = future.result(timeout=30)
-                    if models:
-                        all_models.extend(models)
-                except TimeoutError:
+            # Use as_completed() to process results as they arrive instead of
+            # waiting for each future in submission order. This prevents slow
+            # gateways from blocking processing of faster ones.
+            # Overall timeout of 60s ensures we don't wait indefinitely.
+            try:
+                for future in as_completed(futures, timeout=60):
                     gateway_name = futures[future]
-                    logger.warning(
-                        "Timeout fetching models from %s after 30s",
-                        sanitize_for_logging(gateway_name),
-                    )
-                except Exception as e:
-                    gateway_name = futures[future]
-                    logger.warning(
-                        "Failed to fetch models from %s: %s",
-                        sanitize_for_logging(gateway_name),
-                        sanitize_for_logging(str(e)),
-                    )
+                    try:
+                        models = future.result(timeout=5)  # Short timeout since future is already complete
+                        if models:
+                            all_models.extend(models)
+                            logger.debug(
+                                "Fetched %d models from %s",
+                                len(models),
+                                sanitize_for_logging(gateway_name),
+                            )
+                    except TimeoutError:
+                        logger.warning(
+                            "Timeout fetching models from %s",
+                            sanitize_for_logging(gateway_name),
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to fetch models from %s: %s",
+                            sanitize_for_logging(gateway_name),
+                            sanitize_for_logging(str(e)),
+                        )
+            except FuturesTimeoutError:
+                logger.warning(
+                    "Overall timeout (60s) reached for parallel model fetching; "
+                    "returning %d models collected so far",
+                    len(all_models),
+                )
 
             return all_models
     except Exception as e:
