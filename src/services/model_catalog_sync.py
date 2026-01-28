@@ -37,6 +37,7 @@ from src.services.models import (
     fetch_models_from_openrouter,
     fetch_models_from_together,
     fetch_models_from_vercel_ai_gateway,
+    fetch_models_from_zai,
 )
 from src.services.modelz_client import fetch_models_from_modelz
 from src.services.nebius_client import fetch_models_from_nebius
@@ -44,6 +45,9 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.xai_client import fetch_models_from_xai
+from src.services.morpheus_client import fetch_models_from_morpheus
+from src.services.sybil_client import fetch_models_from_sybil
+from src.services.canopywave_client import fetch_models_from_canopywave
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +84,11 @@ PROVIDER_FETCH_FUNCTIONS = {
     "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
     "modelz": fetch_models_from_modelz,
     "cohere": fetch_models_from_cohere,
+    # Recently added providers
+    "zai": fetch_models_from_zai,
+    "morpheus": fetch_models_from_morpheus,
+    "sybil": fetch_models_from_sybil,
+    "canopywave": fetch_models_from_canopywave,
 }
 
 
