@@ -22,8 +22,8 @@ _models_cache = {
 _multi_provider_catalog_cache = {
     "data": [],
     "timestamp": None,
-    "ttl": 900,  # 15 minutes TTL for aggregated catalog snapshots
-    "stale_ttl": 1800,
+    "ttl": 3600,  # 1 hour TTL for aggregated catalog snapshots (increased from 15min to reduce expensive rebuilds)
+    "stale_ttl": 7200,  # 2 hours stale-while-revalidate
 }
 
 _featherless_models_cache = {
