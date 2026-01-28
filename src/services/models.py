@@ -641,32 +641,34 @@ def get_all_models_parallel():
             # gateways from blocking processing of faster ones.
             # Overall timeout of 60s ensures we don't wait indefinitely.
             try:
-                completed_futures = as_completed(futures, timeout=60)
-            except FuturesTimeoutError:
-                logger.warning("Overall timeout (60s) reached for parallel model fetching")
-                completed_futures = []
-            for future in completed_futures:
-                gateway_name = futures[future]
-                try:
-                    models = future.result(timeout=5)  # Short timeout since future is already complete
-                    if models:
-                        all_models.extend(models)
-                        logger.debug(
-                            "Fetched %d models from %s",
-                            len(models),
+                for future in as_completed(futures, timeout=60):
+                    gateway_name = futures[future]
+                    try:
+                        models = future.result(timeout=5)  # Short timeout since future is already complete
+                        if models:
+                            all_models.extend(models)
+                            logger.debug(
+                                "Fetched %d models from %s",
+                                len(models),
+                                sanitize_for_logging(gateway_name),
+                            )
+                    except TimeoutError:
+                        logger.warning(
+                            "Timeout fetching models from %s",
                             sanitize_for_logging(gateway_name),
                         )
-                except TimeoutError:
-                    logger.warning(
-                        "Timeout fetching models from %s",
-                        sanitize_for_logging(gateway_name),
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to fetch models from %s: %s",
-                        sanitize_for_logging(gateway_name),
-                        sanitize_for_logging(str(e)),
-                    )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to fetch models from %s: %s",
+                            sanitize_for_logging(gateway_name),
+                            sanitize_for_logging(str(e)),
+                        )
+            except FuturesTimeoutError:
+                logger.warning(
+                    "Overall timeout (60s) reached for parallel model fetching; "
+                    "returning %d models collected so far",
+                    len(all_models),
+                )
 
             return all_models
     except Exception as e:
