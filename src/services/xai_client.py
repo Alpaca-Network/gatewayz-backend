@@ -3,6 +3,7 @@ import logging
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_xai_pooled_client
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -222,11 +223,15 @@ def fetch_models_from_xai():
                 if not model_id:
                     continue
 
+                # Get and clean model name from database
+                raw_name = db_model.get("name") or model_id.replace("-", " ").title()
+                cleaned_name = clean_model_name(raw_name)
+
                 model = {
                     "id": model_id,
                     "slug": model_id,
                     "canonical_slug": model_id,
-                    "name": db_model.get("name") or model_id.replace("-", " ").title(),
+                    "name": cleaned_name,
                     "description": db_model.get("description") or f"xAI Grok model: {model_id}",
                     "context_length": db_model.get("context_length") or 131072,
                     "architecture": db_model.get("metadata", {}).get("architecture") or {
@@ -300,7 +305,7 @@ def fetch_models_from_xai():
             "id": "grok-2-1212",
             "slug": "grok-2-1212",
             "canonical_slug": "grok-2-1212",
-            "name": "Grok 2 (December 2024)",
+            "name": "Grok 2 1212",
             "description": "xAI's Grok 2 model from December 2024",
             "context_length": 131072,
             "architecture": {

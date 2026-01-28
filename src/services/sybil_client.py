@@ -31,6 +31,7 @@ import httpx
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_sybil_pooled_client
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -170,9 +171,13 @@ def fetch_models_from_sybil():
             model_type = model.get("type", "chat")
             is_embedding = model_type == "embedding"
 
+            # Get and clean model name (remove colons, parentheses, etc.)
+            raw_name = model.get("name", model_id)
+            clean_name = clean_model_name(raw_name)
+
             model_data = {
                 "id": model_id,
-                "name": model.get("name", model_id),
+                "name": clean_name,
                 "description": model.get("description", ""),
                 "provider": "sybil",
                 "provider_name": "Sybil",

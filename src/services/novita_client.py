@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.cache import _novita_models_cache
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -267,7 +268,9 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
     )
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "novita"
 
-    display_name = payload.get("display_name") or payload.get("name") or model_id
+    # Get and clean display name (remove colons, parentheses, etc.)
+    raw_display_name = payload.get("display_name") or payload.get("name") or model_id
+    display_name = clean_model_name(raw_display_name)
     description = payload.get("description") or f"Novita hosted model '{display_name}'."
     context_length = (
         payload.get("context_length")

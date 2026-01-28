@@ -72,6 +72,7 @@ from src.services.canopywave_client import fetch_models_from_canopywave
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.sybil_client import fetch_models_from_sybil
 from src.services.xai_client import fetch_models_from_xai
+from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -1136,7 +1137,7 @@ def fetch_models_from_openrouter():
             "Content-Type": "application/json",
         }
 
-        response = httpx.get("https://openrouter.ai/api/v1/models", headers=headers)
+        response = httpx.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=30.0)
         response.raise_for_status()
 
         try:
@@ -2057,10 +2058,13 @@ def normalize_together_model(together_model: dict) -> dict:
     slug = model_id
     provider_slug = "together"
 
-    display_name = (
+    # Get display name from API or generate from model ID
+    raw_display_name = (
         together_model.get("display_name")
         or model_id.replace("/", " / ").replace("-", " ").replace("_", " ").title()
     )
+    # Clean malformed model names (remove parentheses with size info, etc.)
+    display_name = clean_model_name(raw_display_name)
     owned_by = together_model.get("owned_by") or together_model.get("organization")
     base_description = together_model.get("description") or f"Together hosted model {model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
@@ -2320,7 +2324,10 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     # This allows the model to be grouped with same models from other providers
     canonical_slug = model_name_normalized.lower()
 
-    display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    # Get display name from API or generate from model name
+    raw_display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    # Clean malformed model names (remove company prefix with colon, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     base_description = (
         f"AIMO Network decentralized model {model_name_normalized} provided by {provider_name}."
     )
