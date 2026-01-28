@@ -16,7 +16,8 @@ from src.services.models import (
     enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
     fetch_specific_model,
-    get_cached_models,
+    get_cached_models,  # DEPRECATED - kept for backward compat during migration
+    get_models_from_db,  # NEW - database-first approach (Issue #980)
     get_model_count_by_provider,
 )
 from src.services.modelz_client import (
@@ -682,294 +683,32 @@ async def get_models(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
 
-        openrouter_models: list[dict] = []
-        onerouter_models: list[dict] = []
-        featherless_models: list[dict] = []
-        deepinfra_models: list[dict] = []
-        chutes_models: list[dict] = []
-        groq_models: list[dict] = []
-        fireworks_models: list[dict] = []
-        together_models: list[dict] = []
-        google_models: list[dict] = []
-        cerebras_models: list[dict] = []
-        nebius_models: list[dict] = []
-        xai_models: list[dict] = []
-        novita_models: list[dict] = []
-        hug_models: list[dict] = []
-        aimo_models: list[dict] = []
-        near_models: list[dict] = []
-        fal_models: list[dict] = []
-        helicone_models: list[dict] = []
-        anannas_models: list[dict] = []
-        aihubmix_models: list[dict] = []
-        vercel_ai_gateway_models: list[dict] = []
-        alibaba_models: list[dict] = []
-        simplismart_models: list[dict] = []
-        openai_models: list[dict] = []
-        anthropic_models: list[dict] = []
-        clarifai_models: list[dict] = []
-        sybil_models: list[dict] = []
-        morpheus_models: list[dict] = []
+        # ========================================================================
+        # DATABASE-FIRST APPROACH (Issue #980)
+        # Instead of calling provider APIs individually, we fetch from database
+        # which acts as the single source of truth. This eliminates duplicate
+        # API calls and ensures consistency with the sync system.
+        # ========================================================================
 
-        if gateway_value in ("openrouter", "all"):
-            openrouter_models = get_cached_models("openrouter") or []
-            if not openrouter_models:
-                logger.warning(
-                    "OpenRouter models unavailable (gateway=%s) - possible causes: "
-                    "API key not configured, API is down, network issues, or cache warming incomplete. "
-                    "Continuing with other providers if available.",
-                    gateway_value,
-                )
-                # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
-                # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
+        # Get models from database (with Redis caching)
+        # This replaces 30+ individual get_cached_models() calls
+        models = get_models_from_db(gateway=gateway_value if gateway_value != "all" else None)
 
-        if gateway_value in ("onerouter", "all"):
-            onerouter_models = get_cached_models("onerouter") or []
-            if not onerouter_models and gateway_value == "onerouter":
-                logger.warning("Infron AI models unavailable - continuing without them")
-
-        if gateway_value in ("featherless", "all"):
-            featherless_models = get_cached_models("featherless") or []
-            if not featherless_models and gateway_value == "featherless":
-                logger.warning("Featherless models unavailable - continuing without them")
-
-        if gateway_value in ("deepinfra", "all"):
-            deepinfra_models = get_cached_models("deepinfra") or []
-            if not deepinfra_models and gateway_value == "deepinfra":
-                logger.warning("DeepInfra models unavailable - continuing without them")
-
-        if gateway_value in ("chutes", "all"):
-            chutes_models = get_cached_models("chutes") or []
-            if not chutes_models and gateway_value == "chutes":
-                logger.warning("Chutes models unavailable - continuing without them")
-
-        if gateway_value in ("groq", "all"):
-            groq_models = get_cached_models("groq") or []
-            if not groq_models and gateway_value == "groq":
-                logger.warning("Groq models unavailable - continuing without them")
-
-        if gateway_value in ("fireworks", "all"):
-            fireworks_models = get_cached_models("fireworks") or []
-            if not fireworks_models and gateway_value == "fireworks":
-                logger.warning("Fireworks models unavailable - continuing without them")
-
-        if gateway_value in ("together", "all"):
-            together_models = get_cached_models("together") or []
-            if not together_models and gateway_value == "together":
-                logger.warning("Together models unavailable - continuing without them")
-
-        if gateway_value in ("cerebras", "all"):
-            cerebras_models = get_cached_models("cerebras") or []
-            if not cerebras_models and gateway_value == "cerebras":
-                logger.warning("Cerebras models unavailable - continuing without them")
-
-        if gateway_value in ("nebius", "all"):
-            nebius_models = get_cached_models("nebius") or []
-            if gateway_value == "nebius" and not nebius_models:
-                logger.info(
-                    "Nebius gateway requested but no cached catalog is available; "
-                    "returning an empty list because Nebius does not publish a public model listing"
-                )
-
-        if gateway_value in ("xai", "all"):
-            xai_models = get_cached_models("xai") or []
-            if gateway_value == "xai" and not xai_models:
-                logger.info(
-                    "xAI gateway requested but no cached catalog is available; "
-                    "returning an empty list because xAI does not publish a public model listing"
-                )
-
-        if gateway_value in ("novita", "all"):
-            novita_models = get_cached_models("novita") or []
-            if not novita_models and gateway_value == "novita":
-                logger.warning("Novita models unavailable - continuing without them")
-
-        if gateway_value in ("hug", "all"):
-            hug_models = get_cached_models("hug") or []
-            if not hug_models and gateway_value == "hug":
-                logger.warning("Hugging Face models unavailable - continuing without them")
-
-        if gateway_value in ("aimo", "all"):
-            aimo_models = get_cached_models("aimo") or []
-            if not aimo_models and gateway_value == "aimo":
-                logger.warning("AIMO models unavailable - continuing without them")
-
-        if gateway_value in ("near", "all"):
-            near_models = get_cached_models("near") or []
-            if not near_models and gateway_value == "near":
-                logger.warning("Near models unavailable - continuing without them")
-
-        if gateway_value in ("fal", "all"):
-            fal_models = get_cached_models("fal") or []
-            if not fal_models and gateway_value == "fal":
-                logger.warning("Fal models unavailable - continuing without them")
-
-        if gateway_value in ("helicone", "all"):
-            helicone_models = get_cached_models("helicone") or []
-            if not helicone_models and gateway_value == "helicone":
-                logger.warning("Helicone models unavailable - continuing without them")
-
-        if gateway_value in ("anannas", "all"):
-            anannas_models = get_cached_models("anannas") or []
-            if not anannas_models and gateway_value == "anannas":
-                logger.warning("Anannas models unavailable - continuing without them")
-
-        if gateway_value in ("aihubmix", "all"):
-            aihubmix_models = get_cached_models("aihubmix") or []
-            if not aihubmix_models and gateway_value == "aihubmix":
-                logger.warning("AiHubMix models unavailable - continuing without them")
-
-        if gateway_value in ("vercel-ai-gateway", "all"):
-            vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
-            if not vercel_ai_gateway_models and gateway_value == "vercel-ai-gateway":
-                logger.warning("Vercel AI Gateway models unavailable - continuing without them")
-
-        if gateway_value in ("alibaba", "all"):
-            alibaba_models = get_cached_models("alibaba") or []
-            if not alibaba_models and gateway_value == "alibaba":
-                logger.warning("Alibaba Cloud models unavailable - continuing without them")
-
-        if gateway_value in ("google-vertex", "all"):
-            google_models = get_cached_models("google-vertex") or []
-            if not google_models and gateway_value == "google-vertex":
-                logger.warning("Google Vertex AI models unavailable - continuing without them")
-
-        if gateway_value in ("simplismart", "all"):
-            simplismart_models = get_cached_models("simplismart") or []
-            if not simplismart_models and gateway_value == "simplismart":
-                logger.warning("Simplismart models unavailable - continuing without them")
-
-        if gateway_value in ("openai", "all"):
-            openai_models = get_cached_models("openai") or []
-            if not openai_models and gateway_value == "openai":
-                logger.warning("OpenAI models unavailable - continuing without them")
-
-        if gateway_value in ("anthropic", "all"):
-            anthropic_models = get_cached_models("anthropic") or []
-            if not anthropic_models and gateway_value == "anthropic":
-                logger.warning("Anthropic models unavailable - continuing without them")
-
-        if gateway_value in ("clarifai", "all"):
-            clarifai_models = get_cached_models("clarifai") or []
-            if not clarifai_models and gateway_value == "clarifai":
-                logger.warning("Clarifai models unavailable - continuing without them")
-
-        if gateway_value in ("sybil", "all"):
-            sybil_models = get_cached_models("sybil") or []
-            if not sybil_models and gateway_value == "sybil":
-                logger.warning("Sybil models unavailable - continuing without them")
-
-        if gateway_value in ("morpheus", "all"):
-            morpheus_models = get_cached_models("morpheus") or []
-            if not morpheus_models and gateway_value == "morpheus":
-                logger.warning("Morpheus models unavailable - continuing without them")
-
-        if gateway_value == "openrouter":
-            models = openrouter_models
-        elif gateway_value == "onerouter":
-            models = onerouter_models
-        elif gateway_value == "featherless":
-            models = featherless_models
-        elif gateway_value == "deepinfra":
-            models = deepinfra_models
-        elif gateway_value == "chutes":
-            models = chutes_models
-        elif gateway_value == "groq":
-            models = groq_models
-        elif gateway_value == "fireworks":
-            models = fireworks_models
-        elif gateway_value == "together":
-            models = together_models
-        elif gateway_value == "cerebras":
-            models = cerebras_models
-        elif gateway_value == "nebius":
-            models = nebius_models
-        elif gateway_value == "xai":
-            models = xai_models
-        elif gateway_value == "novita":
-            models = novita_models
-        elif gateway_value == "hug":
-            models = hug_models
-        elif gateway_value == "aimo":
-            models = aimo_models
-        elif gateway_value == "near":
-            models = near_models
-        elif gateway_value == "fal":
-            models = fal_models
-        elif gateway_value == "helicone":
-            models = helicone_models
-        elif gateway_value == "anannas":
-            models = anannas_models
-        elif gateway_value == "aihubmix":
-            models = aihubmix_models
-        elif gateway_value == "vercel-ai-gateway":
-            models = vercel_ai_gateway_models
-        elif gateway_value == "alibaba":
-            models = alibaba_models
-        elif gateway_value == "google-vertex":
-            models = google_models
-        elif gateway_value == "simplismart":
-            models = simplismart_models
-        elif gateway_value == "openai":
-            models = openai_models
-        elif gateway_value == "anthropic":
-            models = anthropic_models
-        elif gateway_value == "clarifai":
-            models = clarifai_models
-        elif gateway_value == "sybil":
-            models = sybil_models
-        elif gateway_value == "morpheus":
-            models = morpheus_models
-        else:
-            # For "all" gateway, merge all models avoiding duplicates
-            models = merge_models_by_slug(
-                openrouter_models,
-                onerouter_models,
-                featherless_models,
-                deepinfra_models,
-                chutes_models,
-                groq_models,
-                fireworks_models,
-                together_models,
-                google_models,
-                cerebras_models,
-                nebius_models,
-                xai_models,
-                novita_models,
-                hug_models,
-                aimo_models,
-                near_models,
-                fal_models,
-                helicone_models,
-                anannas_models,
-                aihubmix_models,
-                vercel_ai_gateway_models,
-                alibaba_models,
-                simplismart_models,
-                openai_models,
-                anthropic_models,
-                clarifai_models,
-                sybil_models,
-                morpheus_models,
-            )
-
+        # Log if no models found (but continue with empty list)
         if not models:
-            if gateway_value == "nebius":
+            if gateway_value in ("nebius", "xai"):
                 logger.info(
-                    "Returning empty Nebius catalog response because no public model listing exists"
-                )
-            elif gateway_value == "xai":
-                logger.info(
-                    "Returning empty xAI catalog response because no public model listing exists"
+                    f"No models found for {gateway_value} - this is expected as "
+                    "they don't publish public model listings. Database may not be synced."
                 )
             else:
                 logger.warning(
-                    "No models available for gateway=%s. Returning empty response. "
-                    "This may indicate provider API keys not configured or all providers are down.",
-                    gateway_value,
+                    f"No models found in database for gateway='{gateway_value}'. "
+                    "This could mean: (1) Database not synced yet, (2) No active models for this gateway, "
+                    "or (3) Gateway name not recognized. Run model sync to populate database."
                 )
-                # Instead of raising 503, return an empty but valid response
-                # This prevents the entire API from failing when a single provider is unavailable
+            # Don't raise 503 - return empty list to prevent API failure
+            models = []
 
         provider_groups: list[list[dict]] = []
 
