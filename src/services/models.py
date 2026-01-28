@@ -640,9 +640,9 @@ def get_all_models_parallel():
             # Use as_completed() to process results as they arrive instead of
             # waiting for each future in submission order. This prevents slow
             # gateways from blocking processing of faster ones.
-            # Overall timeout of 60s ensures we don't wait indefinitely.
+            # Overall timeout of 45s ensures we stay well under Cloudflare's 100s limit
             try:
-                for future in as_completed(futures, timeout=60):
+                for future in as_completed(futures, timeout=45):
                     gateway_name = futures[future]
                     try:
                         models = future.result(timeout=5)  # Short timeout since future is already complete
@@ -666,9 +666,10 @@ def get_all_models_parallel():
                         )
             except FuturesTimeoutError:
                 logger.warning(
-                    "Overall timeout (60s) reached for parallel model fetching; "
-                    "returning %d models collected so far",
+                    "Overall timeout (45s) reached for parallel model fetching; "
+                    "returning %d models collected so far from %d gateways",
                     len(all_models),
+                    len([f for f in futures if f.done()]),
                 )
 
             return all_models
@@ -1185,6 +1186,11 @@ def fetch_models_from_openrouter():
         clear_gateway_error("openrouter")
 
         return _models_cache["data"]
+    except httpx.TimeoutException as e:
+        error_msg = f"Request timeout after 30s: {sanitize_for_logging(str(e))}"
+        logger.error("OpenRouter timeout error: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("OpenRouter HTTP error: %s", error_msg)
