@@ -781,19 +781,24 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
 
 def get_models_from_db(gateway: str | None = None, include_inactive: bool = False) -> list[dict]:
     """
-    Get models with cache-first, database fallback, API fallback architecture.
+    Get models from database (single source of truth).
 
-    Priority Flow:
-    1. Check cache (Redis) - FASTEST (5-20ms)
-    2. If cache miss, check database - FAST (50-200ms)
-    3. If database empty/error, fetch from provider APIs - SLOW (30-45s)
-    4. Write-through: When fetching from APIs, update BOTH cache AND database
+    This is the NEW database-first approach that replaces get_cached_models().
+    Instead of calling provider APIs directly, it reads from the database which
+    was populated by the sync system.
 
-    This ensures:
-    - Maximum performance (cache-first)
-    - High availability (database fallback)
-    - Data freshness (API fallback with write-through)
-    - Consistency (database always synced when APIs are called)
+    Benefits:
+    - No duplicate provider API calls
+    - Consistent data between sync and catalog
+    - Faster response times (5-20ms cached vs 50-500ms API calls)
+    - Works even when provider APIs are down
+
+    Flow:
+    1. Check Redis cache for database models
+    2. If cache miss, query database with optimized indexes
+    3. Transform database format to API format
+    4. Cache results in Redis (TTL: 15-30 min)
+    5. Return models
 
     Args:
         gateway: Gateway name (e.g., "openrouter", "hug", "groq", "all", None)
@@ -804,7 +809,7 @@ def get_models_from_db(gateway: str | None = None, include_inactive: bool = Fals
         List of models in API format
 
     Examples:
-        >>> # Get all models (cache → database → APIs)
+        >>> # Get all models from database
         >>> all_models = get_models_from_db()
         >>> len(all_models)
         5432
@@ -813,60 +818,42 @@ def get_models_from_db(gateway: str | None = None, include_inactive: bool = Fals
         >>> openrouter_models = get_models_from_db("openrouter")
         >>> len(openrouter_models)
         234
+
+        >>> # Get all models including inactive
+        >>> all_with_inactive = get_models_from_db(include_inactive=True)
+        >>> len(all_with_inactive)
+        6891
+
+    Note:
+        This function is part of the database-first architecture (Issue #980).
+        It replaces direct provider API calls with database reads.
     """
     from src.services.model_catalog_cache import get_models_from_db_cached
 
-    # Normalize gateway name
-    gateway_normalized = gateway
-    if gateway and gateway != "all":
-        gateway_normalized = gateway.lower().strip()
-        # Handle name variations
-        gateway_map = {
-            "hug": "huggingface",
-        }
-        gateway_normalized = gateway_map.get(gateway_normalized, gateway_normalized)
-
     try:
-        # PRIORITY 1: Try cache + database (fast path)
-        logger.info(f"Attempting cache/database fetch for gateway='{gateway or 'all'}'")
-
+        # Handle "all" or None → get all models from all providers
         if gateway == "all" or gateway is None:
-            models = get_models_from_db_cached(gateway_slug=None, include_inactive=include_inactive)
-        else:
-            models = get_models_from_db_cached(gateway_slug=gateway_normalized, include_inactive=include_inactive)
+            logger.info("Fetching all models from database")
+            return get_models_from_db_cached(gateway_slug=None, include_inactive=include_inactive)
 
-        # If we got models, return them (cache hit or database success)
-        if models:
-            logger.info(f"Cache/database returned {len(models)} models for gateway='{gateway or 'all'}'")
-            return models
+        # Normalize gateway name
+        gateway = gateway.lower().strip()
 
-        # PRIORITY 2: Database returned empty - fall back to provider APIs
-        logger.warning(
-            f"Database returned 0 models for gateway='{gateway or 'all'}'. "
-            "Falling back to provider API fetch (this will update database)."
-        )
+        # Handle name variations (some gateways have different names in frontend vs database)
+        gateway_map = {
+            "hug": "huggingface",  # Frontend uses "hug", database has "huggingface"
+        }
+        gateway_slug = gateway_map.get(gateway, gateway)
+
+        logger.info(f"Fetching models for gateway '{gateway_slug}' from database")
+
+        # Call the database-first cache function
+        return get_models_from_db_cached(gateway_slug=gateway_slug, include_inactive=include_inactive)
 
     except Exception as e:
-        # PRIORITY 3: Database/cache error - fall back to provider APIs
-        logger.error(
-            f"Database fetch failed for gateway='{gateway or 'all'}': {e}. "
-            "Falling back to provider API fetch."
-        )
-
-    # FALLBACK: Call provider APIs and update database
-    logger.info(f"Fetching from provider APIs for gateway='{gateway or 'all'}'")
-
-    if gateway == "all" or gateway is None:
-        # For "all", use the existing multi-provider catalog build (with 45s timeout)
-        models = _refresh_multi_provider_catalog_cache()
-        # TODO: Write models to database for future cache hits
-        # This will be implemented in next iteration to keep database in sync
-        return models
-    else:
-        # For single gateway, use the existing get_cached_models (writes to in-memory cache)
-        models = get_cached_models(gateway)
-        # TODO: Write models to database for future cache hits
-        return models
+        logger.error(f"Error fetching models from database for gateway '{gateway}': {e}")
+        # Return empty list on error to avoid breaking the API
+        return []
 
 
 def get_cached_models(gateway: str = "openrouter"):
