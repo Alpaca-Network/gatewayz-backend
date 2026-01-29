@@ -195,10 +195,10 @@ def backfill_request_costs(
     try:
         client = get_supabase_client()
 
-        # Get requests without cost data
+        # Get requests without cost data - now using model_pricing table
         result = (
             client.table("chat_completion_requests")
-            .select("request_id, model_id, input_tokens, output_tokens, models(pricing_prompt, pricing_completion)")
+            .select("request_id, model_id, input_tokens, output_tokens")
             .is_("cost_usd", "null")
             .eq("status", "completed")
             .range(offset, offset + limit - 1)
@@ -210,16 +210,30 @@ def backfill_request_costs(
         total_cost_calculated = 0.0
 
         for req in requests:
-            model = req.get("models", {})
-            if not model:
+            model_id = req.get("model_id")
+            if not model_id:
                 continue
 
+            # Fetch pricing from model_pricing table
+            pricing_result = (
+                client.table("model_pricing")
+                .select("price_per_input_token, price_per_output_token")
+                .eq("model_id", model_id)
+                .single()
+                .execute()
+            )
+
+            if not pricing_result.data:
+                logger.debug(f"No pricing data found for model_id={model_id}, skipping cost backfill")
+                continue
+
+            pricing_data = pricing_result.data
             input_tokens = req.get("input_tokens", 0)
             output_tokens = req.get("output_tokens", 0)
 
-            # Get pricing (assuming per-token format)
-            prompt_price = float(model.get("pricing_prompt", 0) or 0)
-            completion_price = float(model.get("pricing_completion", 0) or 0)
+            # Get per-token pricing from model_pricing table
+            prompt_price = float(pricing_data.get("price_per_input_token", 0) or 0)
+            completion_price = float(pricing_data.get("price_per_output_token", 0) or 0)
 
             # Calculate costs
             input_cost = input_tokens * prompt_price

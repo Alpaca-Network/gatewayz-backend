@@ -47,8 +47,8 @@ def get_providers_for_model(
         #     "model_id": "gpt-4",
         #     "health_status": "healthy",
         #     "average_response_time_ms": 150,
-        #     "pricing_prompt": 0.000030,
-        #     "pricing_completion": 0.000060,
+        #     "pricing_prompt": 0.000030,  # per-token from model_pricing table
+        #     "pricing_completion": 0.000060,  # per-token from model_pricing table
         #     "success_rate": 98.5,
         #     "is_active": true
         #   },
@@ -58,16 +58,12 @@ def get_providers_for_model(
     try:
         supabase = get_supabase_client()
 
-        # Query models table with provider join
+        # Query models table with provider join and pricing from model_pricing table
         query = supabase.table("models").select(
             """
             id,
             model_id,
             provider_model_id,
-            pricing_prompt,
-            pricing_completion,
-            pricing_image,
-            pricing_request,
             average_response_time_ms,
             health_status,
             success_rate,
@@ -76,6 +72,12 @@ def get_providers_for_model(
             supports_function_calling,
             supports_vision,
             context_length,
+            model_pricing(
+                price_per_input_token,
+                price_per_output_token,
+                price_per_image,
+                price_per_request
+            ),
             providers!inner(
                 id,
                 slug,
@@ -112,6 +114,7 @@ def get_providers_for_model(
         providers = []
         for row in response.data:
             provider_info = row["providers"]
+            pricing_info = row.get("model_pricing") or {}
 
             # Build combined provider dict
             provider = {
@@ -128,11 +131,11 @@ def get_providers_for_model(
                 "model_id": row["model_id"],  # Canonical ID
                 "provider_model_id": row["provider_model_id"],  # Provider-specific ID
 
-                # Pricing
-                "pricing_prompt": float(row["pricing_prompt"]) if row["pricing_prompt"] else 0.0,
-                "pricing_completion": float(row["pricing_completion"]) if row["pricing_completion"] else 0.0,
-                "pricing_image": float(row["pricing_image"]) if row["pricing_image"] else 0.0,
-                "pricing_request": float(row["pricing_request"]) if row["pricing_request"] else 0.0,
+                # Pricing from model_pricing table (per-token pricing)
+                "pricing_prompt": float(pricing_info.get("price_per_input_token", 0)) if pricing_info.get("price_per_input_token") else 0.0,
+                "pricing_completion": float(pricing_info.get("price_per_output_token", 0)) if pricing_info.get("price_per_output_token") else 0.0,
+                "pricing_image": float(pricing_info.get("price_per_image", 0)) if pricing_info.get("price_per_image") else 0.0,
+                "pricing_request": float(pricing_info.get("price_per_request", 0)) if pricing_info.get("price_per_request") else 0.0,
 
                 # Health
                 "model_health_status": row["health_status"],

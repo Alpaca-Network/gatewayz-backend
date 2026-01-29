@@ -163,7 +163,13 @@ async def fetch_modelz_tokens(
             status_code=504, detail="Timeout while fetching data from Modelz API"
         ) from None
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error from Modelz API: {e.response.status_code} - {e.response.text}")
+        # 502/503/522 errors are common when the provider is temporarily down
+        if e.response.status_code in (502, 503, 522):
+            logger.warning(
+                f"Modelz API temporarily unavailable: {e.response.status_code} - {e.response.text[:200]}"
+            )
+        else:
+            logger.error(f"HTTP error from Modelz API: {e.response.status_code} - {e.response.text}")
         raise HTTPException(
             status_code=e.response.status_code,
             detail=f"Error fetching data from Modelz API: {e.response.text}",
@@ -368,7 +374,11 @@ def fetch_models_from_modelz() -> list[dict[str, Any]]:
         logger.error("Timeout while fetching Modelz models for catalog sync")
         return []
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error from Modelz API: {e.response.status_code}")
+        # 502/503/522 errors are common when the provider is temporarily down
+        if e.response.status_code in (502, 503, 522):
+            logger.warning(f"Modelz API temporarily unavailable: {e.response.status_code}")
+        else:
+            logger.error(f"HTTP error from Modelz API: {e.response.status_code}")
         return []
     except Exception as e:
         logger.error(f"Failed to fetch models from Modelz: {str(e)}")
