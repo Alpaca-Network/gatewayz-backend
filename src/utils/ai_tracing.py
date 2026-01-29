@@ -93,19 +93,29 @@ class AISpanContext:
         output_tokens: int = 0,
         total_tokens: Optional[int] = None,
     ) -> "AISpanContext":
-        """Set token usage attributes on the span."""
+        """Set token usage attributes on the span.
+
+        Sets both custom ai.* attributes (for backward compatibility) and
+        standardized gen_ai.* semantic conventions (for observability tools).
+        """
         if self.span and OTEL_AVAILABLE:
+            total = total_tokens or (input_tokens + output_tokens)
+            # Custom attributes (backward compatibility)
             self.span.set_attribute("ai.tokens.input", input_tokens)
             self.span.set_attribute("ai.tokens.output", output_tokens)
-            self.span.set_attribute(
-                "ai.tokens.total", total_tokens or (input_tokens + output_tokens)
-            )
+            self.span.set_attribute("ai.tokens.total", total)
+            # Standardized gen_ai.* semantic conventions (OpenLLMetry compatible)
+            self.span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+            self.span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+            self.span.set_attribute("gen_ai.usage.total_tokens", total)
         return self
 
     def set_cost(self, cost_usd: float) -> "AISpanContext":
         """Set the cost of this inference call in USD."""
         if self.span and OTEL_AVAILABLE:
             self.span.set_attribute("ai.cost.usd", cost_usd)
+            # Also set gen_ai.* convention for compatibility
+            self.span.set_attribute("gen_ai.usage.cost", cost_usd)
         return self
 
     def set_model_parameters(
@@ -176,10 +186,15 @@ class AISpanContext:
         api_key_hash: Optional[str] = None,
         tier: Optional[str] = None,
     ) -> "AISpanContext":
-        """Set user context information (redacted for privacy)."""
+        """Set user context information (redacted for privacy).
+
+        Sets both custom user.* attributes and customer.id for model popularity tracking.
+        """
         if self.span and OTEL_AVAILABLE:
             if user_id:
                 self.span.set_attribute("user.id", user_id)
+                # Also set customer.id for popularity tracking (OpenLLMetry convention)
+                self.span.set_attribute("customer.id", user_id)
             if api_key_hash:
                 self.span.set_attribute("user.api_key_hash", api_key_hash)
             if tier:
@@ -276,10 +291,15 @@ class AITracer:
                 span_name,
                 kind=SpanKind.CLIENT,
                 attributes={
+                    # Custom attributes (backward compatibility)
                     "ai.provider": provider,
                     "ai.model": model,
                     "ai.request_type": request_type.value,
                     "service.operation": "model_inference",
+                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                    "gen_ai.system": provider,
+                    "gen_ai.request.model": model,
+                    "gen_ai.operation.name": request_type.value,
                 },
             ) as span:
                 ctx = AISpanContext(span=span, provider=provider, model=model)
@@ -319,10 +339,15 @@ class AITracer:
                 span_name,
                 kind=SpanKind.CLIENT,
                 attributes={
+                    # Custom attributes (backward compatibility)
                     "ai.provider": provider,
                     "ai.model": model,
                     "ai.request_type": request_type.value,
                     "service.operation": "model_inference",
+                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                    "gen_ai.system": provider,
+                    "gen_ai.request.model": model,
+                    "gen_ai.operation.name": request_type.value,
                 },
             ) as span:
                 ctx = AISpanContext(span=span, provider=provider, model=model)

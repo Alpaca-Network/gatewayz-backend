@@ -47,6 +47,7 @@ from src.services.anonymous_rate_limiter import (
     ANONYMOUS_ALLOWED_MODELS,
 )
 from src.utils.ai_tracing import AITracer, AIRequestType
+from src.config.traceloop_config import set_association_properties as set_traceloop_properties
 from src.services.butter_client import (
     should_use_butter_cache,
     ButterCacheTimer,
@@ -1816,6 +1817,14 @@ async def chat_completions(
                         pass
 
                 environment_tag = user.get("environment_tag", "live")
+
+                # Set Traceloop association properties for customer tracking (OpenLLMetry)
+                # This enables model popularity tracking by user/customer ID
+                set_traceloop_properties(
+                    user_id=str(user.get("id", "")),
+                    api_key_id=str(api_key_id) if api_key_id else None,
+                    model=req.model,
+                )
 
                 # Step 2: Only validate trial access (plan limits checked after token usage known)
                 trial = await _to_thread(validate_trial_access, api_key)

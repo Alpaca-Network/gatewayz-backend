@@ -52,6 +52,10 @@ python-logging-loki>=0.3.1
 arize-otel>=0.11.0
 openinference-instrumentation-openai>=0.1.41
 
+# OpenLLMetry (Traceloop SDK) - Standardized LLM Observability
+# Auto-instruments OpenAI, Anthropic SDKs with gen_ai.* semantic conventions
+traceloop-sdk>=0.36.0
+
 # Testing dependencies
 pytest==7.4.3
 pytest-cov==4.1.0
