@@ -47,7 +47,14 @@ from src.services.anonymous_rate_limiter import (
     ANONYMOUS_ALLOWED_MODELS,
 )
 from src.utils.ai_tracing import AITracer, AIRequestType
-from src.config.traceloop_config import set_association_properties as set_traceloop_properties
+
+# Optional Traceloop integration - gracefully handle if not installed
+try:
+    from src.config.traceloop_config import set_association_properties as set_traceloop_properties
+except ImportError:
+    # Traceloop not available - provide no-op function
+    def set_traceloop_properties(**kwargs):
+        pass
 from src.services.butter_client import (
     should_use_butter_cache,
     ButterCacheTimer,
