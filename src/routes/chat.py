@@ -1129,6 +1129,12 @@ async def _process_stream_completion_background(
             )
             trace_ctx.set_cost(cost)
 
+            # Set response model (for streaming, use requested model as we don't capture response model)
+            trace_ctx.set_response_model(
+                response_model=model,
+                finish_reason="stop",  # Streaming completed successfully
+            )
+
             # Set user info if authenticated
             if not is_anonymous and user:
                 trace_ctx.set_user_info(
@@ -2660,6 +2666,18 @@ async def chat_completions(
                             total_tokens=trace_total_tokens,
                         )
                         trace_ctx.set_cost(trace_cost)
+
+                        # Set actual response model (may differ from requested model)
+                        response_model = processed.get("model", request_model)
+                        # Extract finish reason from first choice if available
+                        choices = processed.get("choices", [])
+                        finish_reason = choices[0].get("finish_reason") if choices else None
+                        response_id = processed.get("id")
+                        trace_ctx.set_response_model(
+                            response_model=response_model,
+                            finish_reason=finish_reason,
+                            response_id=response_id,
+                        )
 
                         # Set model parameters if available
                         if optional:
