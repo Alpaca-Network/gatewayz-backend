@@ -114,7 +114,7 @@ def get_models_by_provider_slug(
 
         query = (
             supabase.table("models")
-            .select("*, providers!inner(*)")
+            .select("*, providers!inner(*), model_pricing(price_per_input_token, price_per_output_token)")
             .eq("providers.slug", provider_slug)
         )
 

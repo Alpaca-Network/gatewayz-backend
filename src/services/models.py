@@ -141,9 +141,15 @@ def _convert_db_model_to_raw(db_model: dict, provider_slug: str) -> dict | None:
         if not provider_model_id:
             return None
 
-        # Extract pricing from database (stored as per-token pricing)
-        pricing_prompt = db_model.get("pricing_prompt")
-        pricing_completion = db_model.get("pricing_completion")
+        # Extract pricing from model_pricing relationship if available
+        # (model_pricing is a LEFT JOIN, so it may be None)
+        pricing_data = db_model.get("model_pricing")
+        pricing_prompt = None
+        pricing_completion = None
+
+        if pricing_data:
+            pricing_prompt = pricing_data.get("price_per_input_token")
+            pricing_completion = pricing_data.get("price_per_output_token")
 
         # Build base raw model that works for most providers
         raw_model = {
@@ -4348,7 +4354,7 @@ def fetch_models_from_openai():
     """Fetch models from OpenAI API and normalize to the catalog schema"""
     try:
         if not Config.OPENAI_API_KEY:
-            logger.error("OpenAI API key not configured")
+            logger.debug("OpenAI API key not configured - skipping OpenAI models")
             return None
 
         headers = {
@@ -4509,7 +4515,7 @@ def fetch_models_from_anthropic():
     """
     try:
         if not Config.ANTHROPIC_API_KEY:
-            logger.error("Anthropic API key not configured")
+            logger.debug("Anthropic API key not configured - skipping Anthropic models")
             return None
 
         headers = {
