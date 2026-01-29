@@ -3,6 +3,13 @@ import logging
 import os
 import secrets
 
+# CRITICAL: Initialize Traceloop SDK (OpenLLMetry) BEFORE any LLM SDK imports
+# This enables automatic instrumentation of OpenAI, Anthropic, etc.
+# Must be at the very top of the application entry point.
+from src.config.traceloop_config import initialize_traceloop
+
+initialize_traceloop()
+
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -804,6 +811,14 @@ def create_app() -> FastAPI:
             OpenTelemetryConfig.shutdown()
         except Exception as e:
             logger.warning(f"    OpenTelemetry shutdown warning: {e}")
+
+        # Shutdown Traceloop SDK (OpenLLMetry)
+        try:
+            from src.config.traceloop_config import shutdown as traceloop_shutdown
+
+            traceloop_shutdown()
+        except Exception as e:
+            logger.warning(f"    Traceloop shutdown warning: {e}")
 
         # Shutdown analytics services gracefully
         try:
