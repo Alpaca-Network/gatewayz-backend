@@ -711,7 +711,29 @@ async def get_models(
         sybil_models: list[dict] = []
         morpheus_models: list[dict] = []
 
-        if gateway_value in ("openrouter", "all"):
+        # OPTIMIZATION: For gateway=all, use the aggregated multi-provider cache
+        # This uses the parallel fetch with 45s timeout and proper caching
+        # Instead of calling each provider individually (slow!)
+        if gateway_value == "all":
+            logger.info("Using aggregated multi-provider catalog cache for gateway=all")
+            all_models_from_cache = get_cached_models("all") or []
+            # The aggregated catalog is returned directly without individual provider calls
+            # We still need to populate all_models dict for the response structure
+            # The models already have source_gateway field populated
+            # Return early to skip individual provider fetches
+            if all_models_from_cache:
+                logger.info(f"Returning {len(all_models_from_cache)} models from aggregated cache")
+                # For gateway=all, we skip the individual provider logic and filter/paginate
+                # the aggregated result directly
+                all_models_list = all_models_from_cache
+            else:
+                logger.warning("Aggregated cache returned empty, falling through to individual provider fetches")
+                all_models_list = []
+        else:
+            all_models_list = []
+
+        # Individual provider fetches (only used when gateway != "all" OR cache is empty)
+        if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
             openrouter_models = get_cached_models("openrouter") or []
             if not openrouter_models:
                 logger.warning(
@@ -921,37 +943,44 @@ async def get_models(
         elif gateway_value == "morpheus":
             models = morpheus_models
         else:
-            # For "all" gateway, merge all models avoiding duplicates
-            models = merge_models_by_slug(
-                openrouter_models,
-                onerouter_models,
-                featherless_models,
-                deepinfra_models,
-                chutes_models,
-                groq_models,
-                fireworks_models,
-                together_models,
-                google_models,
-                cerebras_models,
-                nebius_models,
-                xai_models,
-                novita_models,
-                hug_models,
-                aimo_models,
-                near_models,
-                fal_models,
-                helicone_models,
-                anannas_models,
-                aihubmix_models,
-                vercel_ai_gateway_models,
-                alibaba_models,
-                simplismart_models,
-                openai_models,
-                anthropic_models,
-                clarifai_models,
-                sybil_models,
-                morpheus_models,
-            )
+            # For "all" gateway, use aggregated cache if available
+            # This is much faster than merging individual provider models
+            if all_models_list:
+                logger.info(f"Using aggregated cache for gateway=all ({len(all_models_list)} models)")
+                models = all_models_list
+            else:
+                # Fallback: merge individual provider models (slow path)
+                logger.warning("Aggregated cache unavailable, merging individual provider models")
+                models = merge_models_by_slug(
+                    openrouter_models,
+                    onerouter_models,
+                    featherless_models,
+                    deepinfra_models,
+                    chutes_models,
+                    groq_models,
+                    fireworks_models,
+                    together_models,
+                    google_models,
+                    cerebras_models,
+                    nebius_models,
+                    xai_models,
+                    novita_models,
+                    hug_models,
+                    aimo_models,
+                    near_models,
+                    fal_models,
+                    helicone_models,
+                    anannas_models,
+                    aihubmix_models,
+                    vercel_ai_gateway_models,
+                    alibaba_models,
+                    simplismart_models,
+                    openai_models,
+                    anthropic_models,
+                    clarifai_models,
+                    sybil_models,
+                    morpheus_models,
+                )
 
         if not models:
             if gateway_value == "nebius":
