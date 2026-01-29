@@ -118,6 +118,33 @@ class AISpanContext:
             self.span.set_attribute("gen_ai.usage.cost", cost_usd)
         return self
 
+    def set_response_model(
+        self,
+        response_model: str,
+        finish_reason: Optional[str] = None,
+        response_id: Optional[str] = None,
+    ) -> "AISpanContext":
+        """Set the actual model returned by the provider.
+
+        This captures the response model which may differ from the requested model
+        (e.g., requesting "gpt-4" but getting "gpt-4-0613").
+
+        Args:
+            response_model: The actual model name/ID from the provider response
+            finish_reason: Why the generation stopped (stop, length, end_turn, etc.)
+            response_id: The provider's response/completion ID
+        """
+        if self.span and OTEL_AVAILABLE:
+            # Standardized gen_ai.* semantic conventions
+            self.span.set_attribute("gen_ai.response.model", response_model)
+            if finish_reason:
+                self.span.set_attribute("gen_ai.response.finish_reason", finish_reason)
+            if response_id:
+                self.span.set_attribute("gen_ai.response.id", response_id)
+            # Also set custom attribute for backward compatibility
+            self.span.set_attribute("ai.response.model", response_model)
+        return self
+
     def set_model_parameters(
         self,
         temperature: Optional[float] = None,
@@ -126,18 +153,27 @@ class AISpanContext:
         frequency_penalty: Optional[float] = None,
         presence_penalty: Optional[float] = None,
     ) -> "AISpanContext":
-        """Set model generation parameters."""
+        """Set model generation parameters.
+
+        Sets both custom ai.params.* attributes (for backward compatibility) and
+        standardized gen_ai.request.* semantic conventions (for observability tools).
+        """
         if self.span and OTEL_AVAILABLE:
             if temperature is not None:
                 self.span.set_attribute("ai.params.temperature", temperature)
+                self.span.set_attribute("gen_ai.request.temperature", temperature)
             if max_tokens is not None:
                 self.span.set_attribute("ai.params.max_tokens", max_tokens)
+                self.span.set_attribute("gen_ai.request.max_tokens", max_tokens)
             if top_p is not None:
                 self.span.set_attribute("ai.params.top_p", top_p)
+                self.span.set_attribute("gen_ai.request.top_p", top_p)
             if frequency_penalty is not None:
                 self.span.set_attribute("ai.params.frequency_penalty", frequency_penalty)
+                self.span.set_attribute("gen_ai.request.frequency_penalty", frequency_penalty)
             if presence_penalty is not None:
                 self.span.set_attribute("ai.params.presence_penalty", presence_penalty)
+                self.span.set_attribute("gen_ai.request.presence_penalty", presence_penalty)
         return self
 
     def set_routing_info(
