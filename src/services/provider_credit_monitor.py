@@ -187,21 +187,27 @@ async def send_low_credit_alert(provider: str, balance: float, status: str) -> N
         if status == "critical":
             # For critical alerts, also try to send email notification
             try:
-                from src.services.notification import send_email
+                from src.services.notification import notification_service
 
-                await send_email(
-                    to_email=Config.ADMIN_EMAIL if hasattr(Config, 'ADMIN_EMAIL') else None,
-                    subject=f"URGENT: {provider} credits critically low",
-                    body=f"""
-                    <h2>Provider Credit Alert</h2>
-                    <p><strong>Provider:</strong> {provider}</p>
-                    <p><strong>Balance:</strong> ${balance:.2f}</p>
-                    <p><strong>Status:</strong> {status}</p>
-                    <p><strong>Action Required:</strong> Add credits immediately to prevent service disruption</p>
-                    <p><a href="https://openrouter.ai/settings/credits">Add Credits</a></p>
-                    """,
-                )
-                logger.info(f"Sent email alert for {provider} low credits")
+                admin_email = getattr(Config, 'ADMIN_EMAIL', None)
+                if not admin_email:
+                    logger.warning("ADMIN_EMAIL not configured, skipping email alert for critical credit balance")
+                elif notification_service:
+                    notification_service.send_email_notification(
+                        to_email=admin_email,
+                        subject=f"URGENT: {provider} credits critically low",
+                        html_content=f"""
+                        <h2>Provider Credit Alert</h2>
+                        <p><strong>Provider:</strong> {provider}</p>
+                        <p><strong>Balance:</strong> ${balance:.2f}</p>
+                        <p><strong>Status:</strong> {status}</p>
+                        <p><strong>Action Required:</strong> Add credits immediately to prevent service disruption</p>
+                        <p><a href="https://openrouter.ai/settings/credits">Add Credits</a></p>
+                        """,
+                    )
+                    logger.info(f"Sent email alert for {provider} low credits")
+                else:
+                    logger.warning("Notification service not initialized, skipping email alert")
             except Exception as email_err:
                 logger.warning(f"Failed to send email alert for {provider}: {email_err}")
 
