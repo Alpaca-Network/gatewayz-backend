@@ -23,9 +23,10 @@ initialDelaySeconds = 30
 # Docs: https://docs.railway.app/reference/config-as-code#crons
 
 # Full model sync every 6 hours (00:00, 06:00, 12:00, 18:00 UTC)
+# Using background=true to prevent timeouts
 [[crons]]
 schedule = "0 */6 * * *"
-command = "curl -X POST http://localhost:$PORT/admin/model-sync/all"
+command = "curl -X POST 'http://localhost:$PORT/admin/model-sync/full?background=true'"
 
 # Alternative schedules (uncomment to use instead):
 

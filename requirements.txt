@@ -35,6 +35,9 @@ python-snappy>=0.7.0
 protobuf>=4.24.0
 sentry-sdk[fastapi]>=2.0.0
 
+# Scheduled Jobs (Phase 3 - Issue #996)
+APScheduler==3.10.4
+
 # OpenTelemetry
 opentelemetry-api>=1.28.0
 opentelemetry-sdk>=1.28.0

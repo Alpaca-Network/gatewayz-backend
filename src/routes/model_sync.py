@@ -1,6 +1,8 @@
 """
 API routes for model catalog synchronization
 Dynamically fetches and syncs models from provider APIs to database
+
+Phase 3 (Issue #997): Added health monitoring endpoint for scheduled sync
 """
 
 import logging
@@ -661,4 +663,83 @@ async def reset_and_resync():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
+        )
+
+
+# ============================================================================
+# SCHEDULED SYNC HEALTH MONITORING (Phase 3 - Issue #997)
+# ============================================================================
+
+
+@router.get("/health", tags=["Health"])
+async def get_scheduled_sync_health():
+    """
+    Get health status of scheduled model sync service.
+
+    Returns metrics about the scheduled sync job including:
+    - Last run time
+    - Success rate
+    - Health status
+    - Configuration
+
+    This endpoint is used for monitoring and alerting.
+
+    Example Response:
+    ```json
+    {
+        "is_healthy": true,
+        "health_reason": "Healthy",
+        "enabled": true,
+        "last_success_time": "2024-01-29T10:30:00Z",
+        "minutes_since_last_sync": 15,
+        "success_rate": 100.0,
+        "total_runs": 48,
+        "successful_runs": 48,
+        "failed_runs": 0
+    }
+    ```
+    """
+    try:
+        from src.services.scheduled_sync import get_sync_status
+
+        status = get_sync_status()
+        return status
+
+    except Exception as e:
+        logger.error(f"Error getting sync health status: {e}", exc_info=True)
+        return {
+            "is_healthy": False,
+            "health_reason": f"Error retrieving status: {str(e)}",
+            "enabled": False,
+            "error": str(e),
+        }
+
+
+@router.post("/trigger", tags=["Admin"])
+async def trigger_manual_sync():
+    """
+    Manually trigger a model sync job.
+
+    This endpoint allows admins to manually trigger a sync outside of the
+    scheduled interval. Useful for:
+    - Immediate updates after provider changes
+    - Testing the sync process
+    - Recovery after errors
+
+    The sync runs in the background - check logs for progress.
+
+    Returns:
+        Status message and timestamp
+    """
+    try:
+        from src.services.scheduled_sync import trigger_manual_sync as trigger_sync
+
+        result = trigger_sync()
+        return result
+
+    except Exception as e:
+        logger.error(f"Error triggering manual sync: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to trigger manual sync: {str(e)}"
         )

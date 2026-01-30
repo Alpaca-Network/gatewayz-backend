@@ -6,8 +6,12 @@ Provides high-performance Redis-backed caching for model catalog data.
 This module significantly improves catalog endpoint performance by:
 - Reducing catalog build time from 500ms-2s to 5-20ms (96-99% improvement)
 - Caching provider model lists with background refresh
-- Reducing load on external provider APIs
+- Reducing load on database queries
 - Supporting distributed caching across multiple instances
+
+Database-first architecture:
+Cache misses fetch from database (kept fresh by scheduled background sync)
+instead of directly calling provider APIs.
 """
 
 import json
@@ -493,9 +497,46 @@ def cache_full_catalog(catalog: list[dict[str, Any]], ttl: int | None = None) ->
 
 
 def get_cached_full_catalog() -> list[dict[str, Any]] | None:
-    """Get cached full model catalog"""
+    """
+    Get cached full model catalog.
+
+    On cache miss, fetches from database (kept fresh by scheduled sync).
+
+    Returns:
+        Cached catalog or empty list on error
+    """
     cache = get_model_catalog_cache()
-    return cache.get_full_catalog()
+    cached = cache.get_full_catalog()
+
+    # If in cache, return it
+    if cached is not None:
+        return cached
+
+    # Cache miss - fetch from database
+    logger.info("Cache MISS: Fetching full catalog from database")
+
+    try:
+        from src.db.models_catalog_db import (
+            get_all_models_for_catalog,
+            transform_db_models_batch,
+        )
+
+        # Fetch from database
+        db_models = get_all_models_for_catalog(include_inactive=False)
+
+        # Transform to API format
+        api_models = transform_db_models_batch(db_models)
+
+        # Cache for next time (15 minutes)
+        cache.set_full_catalog(api_models, ttl=900)
+
+        logger.info(f"Fetched {len(api_models)} models from database and cached")
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error fetching catalog from database: {e}")
+        return []
 
 
 def invalidate_full_catalog() -> bool:
@@ -515,9 +556,52 @@ def cache_provider_catalog(
 
 
 def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
-    """Get cached provider catalog"""
+    """
+    Get cached provider catalog.
+
+    On cache miss, fetches from database (kept fresh by scheduled sync).
+
+    Args:
+        provider_name: Provider slug (e.g., "openrouter", "anthropic")
+
+    Returns:
+        Cached provider catalog or empty list on error
+    """
     cache = get_model_catalog_cache()
-    return cache.get_provider_catalog(provider_name)
+    cached = cache.get_provider_catalog(provider_name)
+
+    # If in cache, return it
+    if cached is not None:
+        return cached
+
+    # Cache miss - fetch from database
+    logger.info(f"Cache MISS: Fetching {provider_name} catalog from database")
+
+    try:
+        from src.db.models_catalog_db import (
+            get_models_by_gateway_for_catalog,
+            transform_db_models_batch,
+        )
+
+        # Fetch from database
+        db_models = get_models_by_gateway_for_catalog(
+            gateway_slug=provider_name,
+            include_inactive=False
+        )
+
+        # Transform to API format
+        api_models = transform_db_models_batch(db_models)
+
+        # Cache for next time (30 minutes)
+        cache.set_provider_catalog(provider_name, api_models, ttl=1800)
+
+        logger.info(f"Fetched {len(api_models)} models for {provider_name} from database and cached")
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error fetching {provider_name} catalog from database: {e}")
+        return []
 
 
 def invalidate_provider_catalog(provider_name: str) -> bool:

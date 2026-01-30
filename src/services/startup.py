@@ -407,10 +407,29 @@ async def lifespan(app):
         logger.error(f"Failed to start monitoring services: {e}")
         # Don't fail startup if monitoring fails
 
+    # Start scheduled model sync (Phase 3 - Issue #996)
+    try:
+        from src.services.scheduled_sync import start_scheduler
+
+        start_scheduler()
+        logger.info("Scheduled model sync service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start scheduled model sync: {e}")
+        # Don't fail startup if scheduled sync fails to start
+
     yield
 
     # Shutdown
     logger.info("Shutting down monitoring and observability services...")
+
+    # Stop scheduled model sync (Phase 3 - Issue #996)
+    try:
+        from src.services.scheduled_sync import stop_scheduler
+
+        stop_scheduler()
+        logger.info("Scheduled model sync service stopped")
+    except Exception as e:
+        logger.warning(f"Scheduled model sync shutdown warning: {e}")
 
     # Cancel any pending background tasks
     if _background_tasks:

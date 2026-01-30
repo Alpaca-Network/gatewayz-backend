@@ -1,0 +1,61 @@
+Pricing Scheduler Performance Test Results
+=========================================
+Date: Mon Jan 26 12:16:35 PST 2026
+Environment: Staging (https://gatewayz-staging.up.railway.app)
+
+
+=== 1. Baseline Connection Pool Status ===
+Checking baseline connection pool metrics...
+Baseline Pool Size: 0
+Baseline Active Connections: 0
+Baseline Idle Connections: 0
+
+=== 2. Single Sync Duration Test ===
+Triggering manual sync...
+HTTP Status Code: 200
+API Response Time: 38s
+Sync Duration: 37.91969656944275s
+Sync Status: success
+Models Updated: 0
+Providers Synced: 1
+✓ Sync duration < 60s
+⚠ API response time >= 5s
+
+=== 3. Connection Pool Usage After Sync ===
+Checking connection pool after sync...
+Pool Size: 0
+Active Connections: 0
+Idle Connections: 0
+Pool Errors: 0
+No active connections (expected after sync completes)
+✓ No connection pool errors
+
+=== 4. Database Query Performance ===
+Checking database query metrics...
+Total Database Queries: 5.0
+Average Query Time: .0540s
+✓ Average query time < 100ms
+
+=== 5. Cache Performance ===
+Checking cache metrics...
+Cache Hits: 0
+Cache Misses: 0
+
+=== 6. Load Test - 10 Consecutive Syncs ===
+Sync 1/10...
+✗   ✗ Sync 1 failed - HTTP 502
+Sync 2/10...
+  ✓ API Time: 38s, Sync Time: 38.17852520942688s, Status: success
+Sync 3/10...
+  ✓ API Time: 37s, Sync Time: 35.83237648010254s, Status: success
+Sync 4/10...
+✗   ✗ Sync 4 failed - HTTP 502
+Sync 5/10...
+✗   ✗ Sync 5 failed - HTTP 504
+Sync 6/10...
+  ✓ API Time: 108s, Sync Time: 52.26179814338684s, Status: success
+Sync 7/10...
+✗   ✗ Sync 7 failed - HTTP 504
+Sync 8/10...
+✗   ✗ Sync 8 failed - HTTP 504
+Sync 9/10...

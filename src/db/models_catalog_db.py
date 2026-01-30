@@ -877,3 +877,269 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
             "source_gateway": "unknown",
             "provider_slug": "unknown",
         }
+
+
+# ============================================================================
+# ENHANCED CATALOG FUNCTIONS (Phase 1 - Issue #990)
+# Additional query capabilities for DB-first architecture
+# ============================================================================
+
+
+def get_models_for_catalog_with_filters(
+    gateway_slug: str | None = None,
+    modality: str | None = None,
+    search_query: str | None = None,
+    include_inactive: bool = False,
+    limit: int | None = None,
+    offset: int = 0
+) -> list[dict[str, Any]]:
+    """
+    Get models from database with advanced filtering for catalog endpoints.
+
+    This is the main query function for DB-first catalog architecture,
+    supporting all common filtering patterns.
+
+    Args:
+        gateway_slug: Filter by provider (e.g., 'openrouter', 'anthropic')
+        modality: Filter by modality (e.g., 'text->text', 'text->image')
+        search_query: Search in model name, ID, or description
+        include_inactive: Include inactive models (default: False)
+        limit: Maximum number of results (None = unlimited)
+        offset: Offset for pagination (default: 0)
+
+    Returns:
+        List of model dictionaries with provider information
+
+    Example:
+        >>> # Get all text models from OpenRouter
+        >>> models = get_models_for_catalog_with_filters(
+        ...     gateway_slug='openrouter',
+        ...     modality='text->text',
+        ...     limit=100
+        ... )
+        >>> len(models)
+        100
+
+        >>> # Search for GPT models across all providers
+        >>> models = get_models_for_catalog_with_filters(
+        ...     search_query='gpt-4'
+        ... )
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # Build base query with provider join
+        query = (
+            supabase.table("models")
+            .select("*, providers!inner(*)")
+        )
+
+        # Apply filters
+        if not include_inactive:
+            query = query.eq("is_active", True)
+
+        if gateway_slug:
+            query = query.eq("providers.slug", gateway_slug)
+
+        if modality:
+            query = query.eq("modality", modality)
+
+        if search_query:
+            # Search in model_id, model_name, or description
+            search_pattern = f"%{search_query}%"
+            query = query.or_(
+                f"model_id.ilike.{search_pattern},"
+                f"model_name.ilike.{search_pattern},"
+                f"description.ilike.{search_pattern}"
+            )
+
+        # Order by model name for consistent results
+        query = query.order("model_name")
+
+        # Apply pagination
+        if limit is not None:
+            query = query.range(offset, offset + limit - 1)
+
+        response = query.execute()
+        models = response.data or []
+
+        logger.info(
+            f"Fetched {len(models)} models from database "
+            f"(gateway={gateway_slug}, modality={modality}, "
+            f"search={search_query}, limit={limit}, offset={offset})"
+        )
+
+        return models
+
+    except Exception as e:
+        logger.error(f"Error fetching models with filters: {e}")
+        return []
+
+
+def get_models_count_by_filters(
+    gateway_slug: str | None = None,
+    modality: str | None = None,
+    search_query: str | None = None,
+    include_inactive: bool = False
+) -> int:
+    """
+    Get count of models matching filters (for pagination).
+
+    Args:
+        gateway_slug: Filter by provider
+        modality: Filter by modality
+        search_query: Search query
+        include_inactive: Include inactive models
+
+    Returns:
+        Total count of matching models
+
+    Example:
+        >>> count = get_models_count_by_filters(gateway_slug='openrouter')
+        >>> print(f"OpenRouter has {count} models")
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # Build query (same filters as get_models_for_catalog_with_filters)
+        query = supabase.table("models").select("id", count="exact")
+
+        if not include_inactive:
+            query = query.eq("is_active", True)
+
+        if gateway_slug:
+            # Need to join with providers for slug filter
+            query = (
+                supabase.table("models")
+                .select("id, providers!inner(slug)", count="exact")
+                .eq("providers.slug", gateway_slug)
+            )
+            if not include_inactive:
+                query = query.eq("is_active", True)
+
+        if modality:
+            query = query.eq("modality", modality)
+
+        if search_query:
+            search_pattern = f"%{search_query}%"
+            query = query.or_(
+                f"model_id.ilike.{search_pattern},"
+                f"model_name.ilike.{search_pattern},"
+                f"description.ilike.{search_pattern}"
+            )
+
+        response = query.execute()
+        return response.count or 0
+
+    except Exception as e:
+        logger.error(f"Error counting models: {e}")
+        return 0
+
+
+def transform_db_models_batch(
+    db_models: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """
+    Transform multiple database models to API format efficiently.
+
+    This is a convenience function for batch transformations,
+    used by catalog endpoints to convert DB results.
+
+    Args:
+        db_models: List of model dictionaries from database
+
+    Returns:
+        List of models in API format
+
+    Example:
+        >>> db_models = get_all_models_for_catalog()
+        >>> api_models = transform_db_models_batch(db_models)
+        >>> len(api_models) == len(db_models)
+        True
+    """
+    return [transform_db_model_to_api_format(model) for model in db_models]
+
+
+def get_catalog_statistics() -> dict[str, Any]:
+    """
+    Get statistics about the model catalog in the database.
+
+    Useful for monitoring and health checks.
+
+    Returns:
+        Dictionary with catalog statistics
+
+    Example:
+        >>> stats = get_catalog_statistics()
+        >>> print(f"Total models: {stats['total_models']}")
+        >>> print(f"Providers: {stats['total_providers']}")
+    """
+    try:
+        supabase = get_supabase_client()
+
+        # Get total model count
+        models_response = (
+            supabase.table("models")
+            .select("id", count="exact")
+            .eq("is_active", True)
+            .execute()
+        )
+        total_models = models_response.count or 0
+
+        # Get provider count
+        providers_response = (
+            supabase.table("providers")
+            .select("id", count="exact")
+            .eq("is_active", True)
+            .execute()
+        )
+        total_providers = providers_response.count or 0
+
+        # Get count by modality
+        modalities_response = (
+            supabase.table("models")
+            .select("modality")
+            .eq("is_active", True)
+            .execute()
+        )
+
+        modality_counts = {}
+        for model in modalities_response.data or []:
+            modality = model.get("modality", "unknown")
+            modality_counts[modality] = modality_counts.get(modality, 0) + 1
+
+        # Get models per provider
+        provider_models_response = (
+            supabase.table("models")
+            .select("provider_id, providers!inner(slug)")
+            .eq("is_active", True)
+            .execute()
+        )
+
+        provider_counts = {}
+        for model in provider_models_response.data or []:
+            provider = model.get("providers", {})
+            slug = provider.get("slug", "unknown")
+            provider_counts[slug] = provider_counts.get(slug, 0) + 1
+
+        return {
+            "total_models": total_models,
+            "total_providers": total_providers,
+            "models_by_modality": modality_counts,
+            "models_by_provider": provider_counts,
+            "top_providers": sorted(
+                provider_counts.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )[:10]
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching catalog statistics: {e}")
+        return {
+            "total_models": 0,
+            "total_providers": 0,
+            "models_by_modality": {},
+            "models_by_provider": {},
+            "top_providers": []
+        }

@@ -615,6 +615,9 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     logger.warning(f"Pricing sync failed for {provider_slug}: {pricing_e}")
 
                 # Invalidate caches to ensure fresh data is served immediately
+                # Phase 2 (Issue #995): After DB sync, invalidate caches so next
+                # request fetches from fresh database (in DB-first mode) or
+                # re-fetches from provider API (in legacy mode)
                 try:
                     from src.cache import clear_models_cache
                     from src.services.model_catalog_cache import (
@@ -624,11 +627,21 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
 
                     # Invalidate in-memory cache for this provider
                     clear_models_cache(provider_slug)
+
                     # Invalidate Redis provider-specific cache
+                    # Next request will:
+                    # - DB-first mode: Read from fresh database
+                    # - Legacy mode: Re-fetch from provider API
                     invalidate_provider_catalog(provider_slug)
-                    # Then invalidate Redis full catalog (aggregated view)
+
+                    # Invalidate Redis full catalog (aggregated view)
+                    # This ensures 'all' requests get fresh data too
                     invalidate_full_catalog()
-                    logger.info(f"Cache invalidated for {provider_slug} after model sync")
+
+                    logger.info(
+                        f"Cache invalidated for {provider_slug} after model sync. "
+                        f"Next request will fetch from database (DB-first) or API (legacy)."
+                    )
                 except Exception as cache_e:
                     logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
         else:

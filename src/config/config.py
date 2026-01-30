@@ -402,6 +402,26 @@ class Config:
         "true",
         "yes",
     }
+
+    # ============================================================================
+    # MODEL SYNC CONFIGURATION
+    # ============================================================================
+
+    # Model Sync Configuration
+    # Controls scheduled background sync of models from provider APIs to database
+    ENABLE_SCHEDULED_MODEL_SYNC: bool = os.environ.get(
+        "ENABLE_SCHEDULED_MODEL_SYNC", "true"
+    ).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    # How often to sync models from provider APIs (in minutes)
+    # Recommended: 15-30 minutes for balance between freshness and API rate limits
+    MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
+
+    # ============================================================================
     PRICING_SYNC_INTERVAL_HOURS = int(os.environ.get("PRICING_SYNC_INTERVAL_HOURS", "6"))
     PRICING_SYNC_PROVIDERS = [
         p.strip()

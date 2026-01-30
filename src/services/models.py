@@ -772,358 +772,56 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
 
 
 def get_cached_models(gateway: str = "openrouter"):
-    """Get cached models or fetch from the requested gateway if cache is expired"""
+    """
+    Get cached models from database-first architecture.
+
+    Flow:
+    1. Check Redis cache
+    2. On miss, fetch from database (not provider API)
+    3. Cache result
+
+    The database is kept fresh by scheduled background sync (see scheduled_sync.py).
+
+    Args:
+        gateway: Gateway/provider name (e.g., "openrouter", "all")
+
+    Returns:
+        List of models from cache or database
+    """
+    from src.services.model_catalog_cache import (
+        get_cached_full_catalog,
+        get_cached_provider_catalog,
+    )
+
+    gateway = (gateway or "openrouter").lower()
+
+    logger.info(f"get_cached_models: gateway={gateway}")
+
     try:
-        gateway = (gateway or "openrouter").lower()
-
-        if gateway == "featherless":
-            cached = _get_fresh_or_stale_cached_models(_featherless_models_cache, "featherless")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_featherless()
-            _register_canonical_records("featherless", result)
-            return result if result is not None else []
-
-        if gateway == "chutes":
-            cached = _get_fresh_or_stale_cached_models(_chutes_models_cache, "chutes")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_chutes()
-            _register_canonical_records("chutes", result)
-            return result if result is not None else []
-
-        if gateway == "groq":
-            cached = _get_fresh_or_stale_cached_models(_groq_models_cache, "groq")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_groq()
-            _register_canonical_records("groq", result)
-            return result if result is not None else []
-
-        if gateway == "fireworks":
-            cached = _get_fresh_or_stale_cached_models(_fireworks_models_cache, "fireworks")
-            if cached is not None:
-                return cached
-
-            # Check if gateway is in error state (exponential backoff)
-            if is_gateway_in_error_state("fireworks"):
-                error_msg = get_gateway_error_message("fireworks")
-                logger.warning(
-                    "Skipping Fireworks fetch - gateway in error state: %s",
-                    sanitize_for_logging(error_msg or "unknown error")
-                )
-                return []
-
-            result = fetch_models_from_fireworks()
-            _register_canonical_records("fireworks", result)
-            return result if result is not None else []
-
-        if gateway == "together":
-            cached = _get_fresh_or_stale_cached_models(_together_models_cache, "together")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_together()
-            _register_canonical_records("together", result)
-            return result if result is not None else []
-
-        if gateway == "deepinfra":
-            cached = _get_fresh_or_stale_cached_models(_deepinfra_models_cache, "deepinfra")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_deepinfra()
-            _register_canonical_records("deepinfra", result)
-            return result if result is not None else []
-
-        if gateway == "google-vertex":
-            cached = _get_fresh_or_stale_cached_models(_google_vertex_models_cache, "google-vertex")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_google_vertex()
-            _register_canonical_records("google-vertex", result)
-            return result if result is not None else []
-
-        if gateway == "cerebras":
-            cached = _get_fresh_or_stale_cached_models(_cerebras_models_cache, "cerebras")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_cerebras()
-            _register_canonical_records("cerebras", result)
-            return result if result is not None else []
-
-        if gateway == "nebius":
-            cached = _get_fresh_or_stale_cached_models(_nebius_models_cache, "nebius")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_nebius()
-            _register_canonical_records("nebius", result)
-            return result if result is not None else []
-
-        if gateway == "xai":
-            cached = _get_fresh_or_stale_cached_models(_xai_models_cache, "xai")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_xai()
-            _register_canonical_records("xai", result)
-            return result if result is not None else []
-
-        if gateway == "novita":
-            cached = _get_fresh_or_stale_cached_models(_novita_models_cache, "novita")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_novita()
-            _register_canonical_records("novita", result)
-            return result if result is not None else []
-
-        if gateway == "onerouter":
-            cached = _get_fresh_or_stale_cached_models(_onerouter_models_cache, "onerouter")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_onerouter()
-            _register_canonical_records("onerouter", result)
-            return result if result is not None else []
-
-        if gateway == "hug" or gateway == "huggingface":
-            from src.services.huggingface_models import ESSENTIAL_MODELS
-
-            cache = _huggingface_models_cache
-            if cache["data"] and cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
-                if cache_age < cache["ttl"]:
-                    # Validate cache has reasonable number of models (should be 500+, not just 9)
-                    cache_size = len(cache["data"])
-                    if cache_size < 100:
-                        logger.warning(
-                            f"⚠️  Hugging Face cache is suspiciously small ({cache_size} models). This might indicate a failed fetch or incomplete data. Refetching..."
-                        )
-                    else:
-                        cached_ids = {model.get("id", "").lower() for model in cache["data"]}
-                        essential_missing = any(
-                            model_id.lower() not in cached_ids for model_id in ESSENTIAL_MODELS
-                        )
-                        if not essential_missing:
-                            logger.debug(
-                                f"Using cached Hugging Face models ({cache_size} models, age: {cache_age:.0f}s)"
-                            )
-                            _register_canonical_records("huggingface", cache["data"])
-                            return cache["data"]
-                        logger.info(
-                            "Hugging Face cache missing essential models; refetching catalog"
-                        )
-
-            logger.info("Fetching fresh Hugging Face models catalog...")
-            result = fetch_models_from_hug()
-
-            # Validate result
-            if result:
-                logger.info(f"✅ Successfully loaded {len(result)} Hugging Face models")
-            else:
-                logger.error(
-                    "❌ Failed to fetch Hugging Face models - API may be unavailable or rate limited"
-                )
-
-            # WORKAROUND: Explicitly update cache in case of module import issues
-            if result and not cache["data"]:
-                logger.info("Manually updating HuggingFace cache after fetch")
-                _huggingface_models_cache["data"] = result
-                _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-            _register_canonical_records("huggingface", result)
-            return result
-
-        if gateway == "aimo":
-            # Try fresh cache first
-            cached = _fresh_cached_models(_aimo_models_cache, "aimo")
-            if cached is not None:
-                return cached
-
-            # Fetch fresh data (with resilience features)
-            result = fetch_models_from_aimo()
-
-            # If fetch succeeded, use fresh data
-            if result:
-                return result
-
-            # Fetch failed - fall back to stale-while-revalidate cache if available
-            stale_cached = _get_fresh_or_stale_cached_models(_aimo_models_cache, "aimo")
-            if stale_cached is not None:
-                logger.warning("AIMO fetch failed, returning stale cache")
-                return stale_cached
-
+        if gateway == "all":
+            # Full aggregated catalog
+            models = get_cached_full_catalog()
+            if models is not None:
+                logger.info(f"Returning {len(models)} models for 'all'")
+                return models
+            # get_cached_full_catalog already fetched from DB on miss
+            logger.warning("Failed to get catalog from cache or database")
+            return []
+        else:
+            # Single provider catalog
+            models = get_cached_provider_catalog(gateway)
+            if models is not None:
+                logger.info(f"Returning {len(models)} models for '{gateway}'")
+                return models
+            # get_cached_provider_catalog already fetched from DB on miss
+            logger.warning(f"Failed to get {gateway} catalog from cache or database")
             return []
 
-        if gateway == "near":
-            cached = _get_fresh_or_stale_cached_models(_near_models_cache, "near")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_near()
-            _register_canonical_records("near", result)
-            return result if result is not None else []
-
-        if gateway == "fal":
-            cached = _get_fresh_or_stale_cached_models(_fal_models_cache, "fal")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_fal()
-            _register_canonical_records("fal", result)
-            return result if result is not None else []
-
-        if gateway == "vercel-ai-gateway":
-            cached = _get_fresh_or_stale_cached_models(_vercel_ai_gateway_models_cache, "vercel-ai-gateway")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_vercel_ai_gateway()
-            _register_canonical_records("vercel-ai-gateway", result)
-            return result if result is not None else []
-
-        if gateway == "helicone":
-            cached = _get_fresh_or_stale_cached_models(_helicone_models_cache, "helicone")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_helicone()
-            _register_canonical_records("helicone", result)
-            return result if result is not None else []
-
-        if gateway == "anannas":
-            cached = _get_fresh_or_stale_cached_models(_anannas_models_cache, "anannas")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_anannas()
-            _register_canonical_records("anannas", result)
-            return result if result is not None else []
-
-        if gateway == "aihubmix":
-            cached = _get_fresh_or_stale_cached_models(_aihubmix_models_cache, "aihubmix")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_aihubmix()
-            _register_canonical_records("aihubmix", result)
-            return result if result is not None else []
-
-        if gateway == "alibaba":
-            cached = _get_fresh_or_stale_cached_models(_alibaba_models_cache, "alibaba")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_alibaba()
-            _register_canonical_records("alibaba", result)
-            return result if result is not None else []
-
-        if gateway == "cloudflare-workers-ai":
-            cached = _get_fresh_or_stale_cached_models(
-                _cloudflare_workers_ai_models_cache, "cloudflare-workers-ai"
-            )
-            if cached is not None:
-                return cached
-            result = fetch_models_from_cloudflare_workers_ai()
-            _register_canonical_records("cloudflare-workers-ai", result)
-            return result if result is not None else []
-
-        if gateway == "clarifai":
-            cached = _get_fresh_or_stale_cached_models(_clarifai_models_cache, "clarifai")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_clarifai()
-            _register_canonical_records("clarifai", result)
-            return result if result is not None else []
-
-        if gateway == "openai":
-            from src.cache import _openai_models_cache
-            cached = _get_fresh_or_stale_cached_models(_openai_models_cache, "openai")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_openai()
-            _register_canonical_records("openai", result)
-            return result if result is not None else []
-
-        if gateway == "anthropic":
-            from src.cache import _anthropic_models_cache
-            cached = _get_fresh_or_stale_cached_models(_anthropic_models_cache, "anthropic")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_anthropic()
-            _register_canonical_records("anthropic", result)
-            return result if result is not None else []
-
-        if gateway == "simplismart":
-            cached = _get_fresh_or_stale_cached_models(_simplismart_models_cache, "simplismart")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_simplismart()
-            _register_canonical_records("simplismart", result)
-            return result if result is not None else []
-
-        if gateway == "sybil":
-            cached = _get_fresh_or_stale_cached_models(_sybil_models_cache, "sybil")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_sybil()
-            _register_canonical_records("sybil", result)
-            return result if result is not None else []
-
-        if gateway == "canopywave":
-            cached = _get_fresh_or_stale_cached_models(_canopywave_models_cache, "canopywave")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_canopywave()
-            _register_canonical_records("canopywave", result)
-            return result if result is not None else []
-
-        if gateway == "morpheus":
-            cached = _get_fresh_or_stale_cached_models(_morpheus_models_cache, "morpheus")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_morpheus()
-            _register_canonical_records("morpheus", result)
-            return result if result is not None else []
-
-        if gateway == "zai":
-            cached = _get_fresh_or_stale_cached_models(_zai_models_cache, "zai")
-            if cached is not None:
-                return cached
-            result = fetch_models_from_zai()
-            _register_canonical_records("zai", result)
-            return result if result is not None else []
-
-        if gateway == "all":
-            cache = _multi_provider_catalog_cache
-            # Check timestamp only - empty list [] is a valid cached value
-            if cache.get("timestamp") is not None:
-                cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
-                if cache_age < cache["ttl"]:
-                    return cache["data"]
-                if cache_age < cache.get("stale_ttl", cache["ttl"]):
-                    revalidate_cache_in_background(
-                        "multi-provider-catalog", _refresh_multi_provider_catalog_cache
-                    )
-                    return cache["data"]
-
-            return _refresh_multi_provider_catalog_cache()
-
-        # Default to OpenRouter with stale-while-revalidate
-        if is_cache_fresh(_models_cache):
-            data = _models_cache["data"]
-            _register_canonical_records("openrouter", data)
-            return data
-
-        # Check if we can serve stale cache while revalidating
-        if should_revalidate_in_background(_models_cache):
-            logger.info("Serving stale OpenRouter cache while revalidating in background")
-            cached = _models_cache["data"]
-            if cached:
-                _register_canonical_records("openrouter", cached)
-            revalidate_cache_in_background("openrouter", fetch_models_from_openrouter)
-            return cached
-
-        # Cache expired or empty, fetch fresh data synchronously
-        result = fetch_models_from_openrouter()
-        _register_canonical_records("openrouter", result)
-        return result if result is not None else []
     except Exception as e:
-        logger.error(
-            "Error getting cached models for gateway '%s': %s",
-            sanitize_for_logging(gateway),
-            sanitize_for_logging(str(e)),
-        )
+        logger.error(f"Error getting catalog for gateway '{gateway}': {e}")
         return []
+
+
 
 
 def fetch_models_from_openrouter():
