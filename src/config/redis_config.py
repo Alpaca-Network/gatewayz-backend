@@ -23,9 +23,10 @@ class RedisConfig:
         self.redis_port = int(os.environ.get("REDIS_PORT", "6379"))
         self.redis_db = int(os.environ.get("REDIS_DB", "0"))
         self.redis_max_connections = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
-        # Increased timeouts for cloud Redis (Upstash) - 5s was too aggressive
-        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "30"))
-        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "15"))
+        # Timeouts set to fail fast before per-provider timeout (15s)
+        # This ensures circuit breaker triggers properly on slow Redis operations
+        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "10"))
+        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
         self.redis_retry_on_timeout = (
             os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
         )

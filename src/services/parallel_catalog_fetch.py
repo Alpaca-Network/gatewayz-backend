@@ -4,7 +4,7 @@ Parallel Catalog Fetching
 Fetches model catalogs from multiple providers in parallel with:
 - Concurrent execution using ThreadPoolExecutor
 - Circuit breaker integration for failing providers
-- Timeout protection per provider
+- Timeout protection per provider (enforced via nested executor)
 - Graceful degradation on failures
 
 This replaces the sequential provider fetching that caused 499 timeouts.
@@ -13,7 +13,7 @@ This replaces the sequential provider fetching that caused 499 timeouts.
 import asyncio
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, wait, FIRST_COMPLETED
 from typing import Any
 
 from src.services.models import get_cached_models
@@ -67,16 +67,24 @@ def get_executor() -> ThreadPoolExecutor:
     return _executor
 
 
+def _fetch_models_sync(provider: str) -> list[dict[str, Any]]:
+    """
+    Synchronous helper to fetch models for a provider.
+    This is wrapped by fetch_provider_with_circuit_breaker for timeout enforcement.
+    """
+    return get_cached_models(provider) or []
+
+
 def fetch_provider_with_circuit_breaker(
     provider: str,
-    timeout: float = 30.0,
+    timeout: float = 15.0,
 ) -> tuple[str, list[dict[str, Any]]]:
     """
-    Fetch models for a single provider with circuit breaker protection.
+    Fetch models for a single provider with circuit breaker protection and timeout.
 
     Args:
         provider: Provider slug
-        timeout: Maximum time to wait for this provider
+        timeout: Maximum time to wait for this provider (ENFORCED)
 
     Returns:
         Tuple of (provider, models) - models is empty list on failure
@@ -89,38 +97,63 @@ def fetch_provider_with_circuit_breaker(
         return provider, []
 
     start_time = time.time()
+    timeout_executor = None
 
     try:
-        models = get_cached_models(provider)
-        elapsed = time.time() - start_time
+        # Use a separate single-thread executor to enforce timeout
+        # IMPORTANT: Don't use context manager - it waits for threads to complete!
+        # Instead, use shutdown(wait=False) on timeout to return immediately
+        timeout_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"fetch_{provider}")
+        future = timeout_executor.submit(_fetch_models_sync, provider)
 
-        if models:
-            breaker.record_success(provider)
-            logger.debug(f"Fetched {len(models)} models from {provider} in {elapsed:.2f}s")
-            return provider, models
-        else:
-            # Empty result is not necessarily a failure (some providers have no models)
-            logger.debug(f"No models from {provider} (elapsed: {elapsed:.2f}s)")
+        try:
+            # Wait with timeout - this will raise TimeoutError if exceeded
+            models = future.result(timeout=timeout)
+            elapsed = time.time() - start_time
+
+            # Success - clean up executor properly
+            timeout_executor.shutdown(wait=True)
+
+            if models:
+                breaker.record_success(provider)
+                logger.debug(f"Fetched {len(models)} models from {provider} in {elapsed:.2f}s")
+                return provider, models
+            else:
+                # Empty result is not necessarily a failure
+                logger.debug(f"No models from {provider} (elapsed: {elapsed:.2f}s)")
+                return provider, []
+
+        except FuturesTimeoutError:
+            elapsed = time.time() - start_time
+            breaker.record_failure(provider, f"timeout after {timeout}s")
+            logger.warning(f"Provider {provider} timed out after {elapsed:.2f}s (limit: {timeout}s)")
+            # Cancel the future and shutdown WITHOUT waiting
+            # This allows us to return immediately instead of blocking
+            future.cancel()
+            timeout_executor.shutdown(wait=False)
             return provider, []
 
     except Exception as e:
         elapsed = time.time() - start_time
         breaker.record_failure(provider, str(e))
         logger.warning(f"Error fetching {provider} (elapsed: {elapsed:.2f}s): {e}")
+        # Clean up executor if it was created
+        if timeout_executor:
+            timeout_executor.shutdown(wait=False)
         return provider, []
 
 
 async def fetch_all_providers_parallel(
     providers: list[str] | None = None,
-    timeout_per_provider: float = 30.0,
-    overall_timeout: float = 45.0,
+    timeout_per_provider: float = 15.0,  # Reduced from 30s - faster failure detection
+    overall_timeout: float = 30.0,  # Reduced from 45s - faster overall response
 ) -> dict[str, list[dict[str, Any]]]:
     """
     Fetch catalogs from all providers in parallel.
 
     Args:
         providers: List of providers to fetch (defaults to ALL_PROVIDERS)
-        timeout_per_provider: Max time per provider fetch
+        timeout_per_provider: Max time per provider fetch (enforced per provider)
         overall_timeout: Max total time for all fetches
 
     Returns:
@@ -131,7 +164,7 @@ async def fetch_all_providers_parallel(
     results: dict[str, list[dict[str, Any]]] = {}
 
     start_time = time.time()
-    logger.info(f"Starting parallel fetch for {len(providers)} providers")
+    logger.info(f"Starting parallel fetch for {len(providers)} providers (timeout: {overall_timeout}s)")
 
     # Create futures for all providers
     # Use get_running_loop() instead of deprecated get_event_loop()
@@ -164,12 +197,12 @@ async def fetch_all_providers_parallel(
                     provider_name, models = future.result()
                     results[provider_name] = models
                 else:
-                    # Task didn't complete in time
-                    logger.warning(f"Provider {provider} timed out after {overall_timeout}s")
+                    # Task didn't complete in time (shouldn't happen with per-provider timeout)
+                    logger.warning(f"Provider {provider} still pending after {overall_timeout}s overall timeout")
                     results[provider] = []
                     # Record as failure for circuit breaker
                     breaker = get_provider_circuit_breaker()
-                    breaker.record_failure(provider, "timeout")
+                    breaker.record_failure(provider, "overall_timeout")
             except Exception as e:
                 logger.warning(f"Error getting result for {provider}: {e}")
                 results[provider] = []
@@ -177,6 +210,10 @@ async def fetch_all_providers_parallel(
         # Cancel any remaining pending tasks
         for future in pending:
             future.cancel()
+
+        # Log how many didn't complete
+        if pending:
+            logger.warning(f"{len(pending)} provider fetches did not complete within timeout")
 
     except asyncio.TimeoutError:
         logger.error(f"Overall timeout ({overall_timeout}s) exceeded for parallel fetch")
@@ -216,7 +253,7 @@ def merge_provider_results(results: dict[str, list[dict[str, Any]]]) -> list[dic
 
 
 async def fetch_and_merge_all_providers(
-    timeout: float = 45.0,
+    timeout: float = 30.0,
 ) -> list[dict[str, Any]]:
     """
     Convenience function to fetch all providers and merge results.
@@ -229,7 +266,7 @@ async def fetch_and_merge_all_providers(
     """
     results = await fetch_all_providers_parallel(
         providers=ALL_PROVIDERS,
-        timeout_per_provider=30.0,
+        timeout_per_provider=15.0,  # Per-provider timeout enforced with nested executor
         overall_timeout=timeout,
     )
     return merge_provider_results(results)

@@ -120,7 +120,10 @@ def get_supabase_client() -> Client:
                 "apikey": Config.SUPABASE_KEY,
                 "Authorization": f"Bearer {Config.SUPABASE_KEY}",
             },
-            timeout=httpx.Timeout(60.0, connect=10.0),  # Increased for large catalog queries; prevents 499 timeouts
+            # Timeout set to 30s for general database queries
+            # Catalog fetches have their own per-provider timeout (15s) enforced at app level
+            # Admin queries need longer for large dataset fetches
+            timeout=httpx.Timeout(30.0, connect=10.0),
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
@@ -133,8 +136,8 @@ def get_supabase_client() -> Client:
             supabase_url=Config.SUPABASE_URL,
             supabase_key=Config.SUPABASE_KEY,
             options=ClientOptions(
-                postgrest_client_timeout=60,  # Increased for large catalog queries
-                storage_client_timeout=30,  # Storage operations may need longer
+                postgrest_client_timeout=30,  # General queries - catalog has app-level timeout
+                storage_client_timeout=30,  # Storage operations
                 schema="public",
                 headers={"X-Client-Info": "gatewayz-backend/1.0"},
             ),

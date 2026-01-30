@@ -736,11 +736,12 @@ async def get_models(
                 all_models_list = all_models_from_cache
             else:
                 # PERFORMANCE FIX: Use parallel fetching instead of sequential
-                # This reduces fetch time from 25*60s = 1500s to ~45s max
+                # This reduces fetch time from 25*60s = 1500s to ~30s max
+                # Each provider has 15s timeout enforced via nested executor
                 logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
                 try:
                     from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
-                    all_models_list = await fetch_and_merge_all_providers(timeout=45.0)
+                    all_models_list = await fetch_and_merge_all_providers(timeout=30.0)
                     logger.info(f"Parallel fetch returned {len(all_models_list)} models")
                 except Exception as e:
                     logger.error(f"Parallel fetch failed: {e}")
