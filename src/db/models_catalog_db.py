@@ -1143,3 +1143,289 @@ def get_catalog_statistics() -> dict[str, Any]:
             "models_by_provider": {},
             "top_providers": []
         }
+
+
+def get_all_unique_models_for_catalog(
+    include_inactive: bool = False
+) -> list[dict[str, Any]]:
+    """
+    Fetch unique models with provider relationships from the database.
+
+    This function queries the unique_models table and joins with the
+    unique_models_provider and models tables to get all providers that
+    offer each unique model.
+
+    Args:
+        include_inactive: If True, includes inactive models. Default: False.
+
+    Returns:
+        List of unique models with aggregated provider information:
+        [
+            {
+                'unique_model_id': 123,
+                'model_name': 'GPT-4',
+                'model_count': 3,
+                'sample_model_id': 'openai/gpt-4',
+                'providers': [
+                    {
+                        'provider_id': 1,
+                        'provider_slug': 'openrouter',
+                        'provider_name': 'OpenRouter',
+                        'model_id': 456,
+                        'model_api_id': 'openai/gpt-4',
+                        'provider_model_id': 'openai/gpt-4',
+                        'pricing_prompt': 0.03,
+                        'pricing_completion': 0.06,
+                        'pricing_image': 0,
+                        'pricing_request': 0,
+                        'context_length': 8192,
+                        'health_status': 'healthy',
+                        'average_response_time_ms': 1200,
+                        'modality': 'text->text',
+                        'supports_streaming': True,
+                        'supports_function_calling': True,
+                        'supports_vision': False
+                    },
+                    ...
+                ]
+            }
+        ]
+    """
+    from src.config.supabase_config import get_supabase_client
+    import time
+
+    supabase = get_supabase_client()
+
+    try:
+        start_time = time.time()
+        logger.info(f"Fetching unique models (include_inactive={include_inactive})")
+
+        # Get all unique models
+        um_query = supabase.table("unique_models").select("*")
+        um_response = um_query.execute()
+        unique_models_data = um_response.data or []
+
+        # For each unique model, get its providers
+        result = []
+        for um in unique_models_data:
+            # Get provider mappings
+            ump_query = (
+                supabase.table("unique_models_provider")
+                .select("*, models!inner(*), providers!inner(*)")
+                .eq("unique_model_id", um["id"])
+            )
+
+            if not include_inactive:
+                ump_query = ump_query.eq("models.is_active", True)
+
+            ump_response = ump_query.execute()
+
+            if ump_response.data:
+                providers = []
+                for ump in ump_response.data:
+                    model = ump.get("models", {})
+                    provider = ump.get("providers", {})
+
+                    providers.append({
+                        'provider_id': provider.get('id'),
+                        'provider_slug': provider.get('slug'),
+                        'provider_name': provider.get('name'),
+                        'model_id': model.get('id'),
+                        'model_api_id': model.get('model_id'),
+                        'provider_model_id': model.get('provider_model_id'),
+                        'pricing_prompt': model.get('pricing_prompt'),
+                        'pricing_completion': model.get('pricing_completion'),
+                        'pricing_image': model.get('pricing_image'),
+                        'pricing_request': model.get('pricing_request'),
+                        'context_length': model.get('context_length'),
+                        'health_status': model.get('health_status'),
+                        'average_response_time_ms': model.get('average_response_time_ms'),
+                        'modality': model.get('modality'),
+                        'supports_streaming': model.get('supports_streaming'),
+                        'supports_function_calling': model.get('supports_function_calling'),
+                        'supports_vision': model.get('supports_vision'),
+                        'description': model.get('description'),
+                        'architecture': model.get('architecture'),
+                        'top_provider': model.get('top_provider')
+                    })
+
+                # Sort providers by price (cheapest first)
+                providers.sort(
+                    key=lambda p: p['pricing_prompt'] if p['pricing_prompt'] is not None else float('inf')
+                )
+
+                result.append({
+                    'unique_model_id': um['id'],
+                    'model_name': um['model_name'],
+                    'model_count': um['model_count'],
+                    'sample_model_id': um['sample_model_id'],
+                    'providers': providers
+                })
+
+        query_time = time.time() - start_time
+        logger.info(f"Fetched {len(result)} unique models in {query_time:.2f}s")
+
+        if query_time > 1.0:
+            logger.warning(
+                f"Slow unique models query: {query_time:.2f}s "
+                f"(threshold: 1.0s, include_inactive={include_inactive})"
+            )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error fetching unique models: {e}")
+        return []
+
+
+def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]:
+    """
+    Transform unique_models database record to API format.
+
+    Args:
+        db_model: Database record from get_all_unique_models_for_catalog()
+
+    Returns:
+        API-formatted model with provider array:
+        {
+            'id': 'gpt-4',
+            'name': 'GPT-4',
+            'providers': [
+                {
+                    'slug': 'openrouter',
+                    'name': 'OpenRouter',
+                    'pricing': {
+                        'prompt': '0.03',
+                        'completion': '0.06',
+                        'image': '0',
+                        'request': '0'
+                    },
+                    'context_length': 8192,
+                    'health_status': 'healthy',
+                    'average_response_time_ms': 1200,
+                    'modality': 'text->text',
+                    'supports_streaming': True,
+                    'supports_function_calling': True,
+                    'supports_vision': False
+                },
+                ...
+            ],
+            'provider_count': 3,
+            'cheapest_provider': 'groq',
+            'fastest_provider': 'openrouter',
+            'cheapest_prompt_price': 0.025,
+            'fastest_response_time': 950
+        }
+    """
+    from decimal import Decimal
+
+    try:
+        providers_data = db_model.get('providers', [])
+
+        # Transform provider data
+        transformed_providers = []
+        for provider in providers_data:
+            # Format pricing
+            pricing_prompt = provider.get('pricing_prompt')
+            pricing_completion = provider.get('pricing_completion')
+            pricing_image = provider.get('pricing_image')
+            pricing_request = provider.get('pricing_request')
+
+            # Convert Decimal to string for JSON serialization
+            def format_price(price):
+                if price is None:
+                    return "0"
+                if isinstance(price, Decimal):
+                    return str(price)
+                return str(price)
+
+            transformed_provider = {
+                'slug': provider.get('provider_slug', 'unknown'),
+                'name': provider.get('provider_name', 'Unknown'),
+                'pricing': {
+                    'prompt': format_price(pricing_prompt),
+                    'completion': format_price(pricing_completion),
+                    'image': format_price(pricing_image),
+                    'request': format_price(pricing_request)
+                },
+                'context_length': provider.get('context_length'),
+                'health_status': provider.get('health_status', 'unknown'),
+                'average_response_time_ms': provider.get('average_response_time_ms'),
+                'modality': provider.get('modality', 'text->text'),
+                'supports_streaming': provider.get('supports_streaming', False),
+                'supports_function_calling': provider.get('supports_function_calling', False),
+                'supports_vision': provider.get('supports_vision', False),
+                'description': provider.get('description'),
+                'architecture': provider.get('architecture'),
+                'model_id': provider.get('model_api_id')  # Include original model_id
+            }
+
+            transformed_providers.append(transformed_provider)
+
+        # Calculate cheapest provider
+        cheapest_provider = None
+        cheapest_prompt_price = None
+        for provider in providers_data:
+            price = provider.get('pricing_prompt')
+            if price is not None:
+                if cheapest_prompt_price is None or price < cheapest_prompt_price:
+                    cheapest_prompt_price = price
+                    cheapest_provider = provider.get('provider_slug')
+
+        # Calculate fastest provider
+        fastest_provider = None
+        fastest_response_time = None
+        for provider in providers_data:
+            response_time = provider.get('average_response_time_ms')
+            if response_time is not None:
+                if fastest_response_time is None or response_time < fastest_response_time:
+                    fastest_response_time = response_time
+                    fastest_provider = provider.get('provider_slug')
+
+        # Generate normalized model ID (use sample_model_id or model_name as fallback)
+        model_id = db_model.get('sample_model_id') or db_model.get('model_name', 'unknown')
+
+        # Try to normalize the ID (remove provider prefix if exists)
+        if '/' in model_id:
+            # Format like "openai/gpt-4" -> "gpt-4"
+            model_id = model_id.split('/')[-1]
+
+        api_model = {
+            'id': model_id,
+            'name': db_model.get('model_name', 'Unknown'),
+            'providers': transformed_providers,
+            'provider_count': len(transformed_providers),
+            'cheapest_provider': cheapest_provider,
+            'fastest_provider': fastest_provider,
+            'cheapest_prompt_price': float(cheapest_prompt_price) if cheapest_prompt_price is not None else None,
+            'fastest_response_time': fastest_response_time
+        }
+
+        return api_model
+
+    except Exception as e:
+        logger.error(f"Error transforming unique model to API format: {e}")
+        # Return minimal valid structure
+        return {
+            'id': db_model.get('sample_model_id', 'unknown'),
+            'name': db_model.get('model_name', 'Unknown'),
+            'providers': [],
+            'provider_count': 0,
+            'cheapest_provider': None,
+            'fastest_provider': None,
+            'cheapest_prompt_price': None,
+            'fastest_response_time': None
+        }
+
+
+def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Batch transform unique models from database format to API format.
+
+    Args:
+        db_models: List of database records from get_all_unique_models_for_catalog()
+
+    Returns:
+        List of API-formatted models
+    """
+    return [transform_unique_model_to_api_format(model) for model in db_models]

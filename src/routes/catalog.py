@@ -668,12 +668,20 @@ async def get_models(
         "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
+    unique_models: bool = Query(
+        False,
+        description=(
+            "Return deduplicated models with provider arrays. "
+            "Only applies when gateway='all'. Default: False (flat catalog). "
+            "When true, each model appears once with an array of providers offering it."
+        ),
+    ),
 ):
     """Get all metric data of available models with optional filtering, pagination, Hugging Face integration, and provider logos"""
 
     try:
         provider = normalize_developer_segment(provider)
-        logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}")
+        logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}")
         gateway_value = (gateway or "all").lower()
         # Support both 'huggingface' and 'hug' as aliases
         if gateway_value == "huggingface":
@@ -715,8 +723,8 @@ async def get_models(
         # This uses the parallel fetch with 45s timeout and proper caching
         # Instead of calling each provider individually (slow!)
         if gateway_value == "all":
-            logger.info("Using aggregated multi-provider catalog cache for gateway=all")
-            all_models_from_cache = get_cached_models("all") or []
+            logger.info(f"Using aggregated multi-provider catalog cache for gateway=all (unique_models={unique_models})")
+            all_models_from_cache = get_cached_models("all", use_unique_models=unique_models) or []
             # The aggregated catalog is returned directly without individual provider calls
             # We still need to populate all_models dict for the response structure
             # The models already have source_gateway field populated
@@ -731,6 +739,12 @@ async def get_models(
                 all_models_list = []
         else:
             all_models_list = []
+            # Log warning if unique_models is requested for non-all gateway
+            if unique_models:
+                logger.debug(
+                    f"unique_models=True ignored for gateway='{gateway_value}' "
+                    "(only applies to gateway='all')"
+                )
 
         # Individual provider fetches (only used when gateway != "all" OR cache is empty)
         if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
@@ -2091,6 +2105,15 @@ async def get_all_models(
         "openrouter",
         description=DESC_GATEWAY_WITH_ALL,
     ),
+    unique_models: bool = Query(
+        False,
+        description=(
+            "Return deduplicated models with provider arrays. "
+            "Only applies when gateway='all'. Default: False (flat catalog). "
+            "When true, each model appears once with an array of providers offering it. "
+            "Example response: {id: 'gpt-4', providers: [{slug: 'openrouter', pricing: {...}}, ...]}"
+        ),
+    ),
 ):
     return await get_models(
         provider=provider,
@@ -2099,6 +2122,7 @@ async def get_all_models(
         offset=offset,
         include_huggingface=include_huggingface,
         gateway=gateway,
+        unique_models=unique_models,
     )
 
 

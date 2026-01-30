@@ -771,7 +771,7 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     return catalog
 
 
-def get_cached_models(gateway: str = "openrouter"):
+def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = False):
     """
     Get cached models from database-first architecture.
 
@@ -784,6 +784,9 @@ def get_cached_models(gateway: str = "openrouter"):
 
     Args:
         gateway: Gateway/provider name (e.g., "openrouter", "all")
+        use_unique_models: If True and gateway='all', returns deduplicated models
+                          with provider arrays. If False, returns flat catalog
+                          (current behavior). Default: False for backward compatibility.
 
     Returns:
         List of models from cache or database
@@ -795,11 +798,20 @@ def get_cached_models(gateway: str = "openrouter"):
 
     gateway = (gateway or "openrouter").lower()
 
-    logger.info(f"get_cached_models: gateway={gateway}")
+    logger.info(f"get_cached_models: gateway={gateway}, use_unique_models={use_unique_models}")
 
     try:
-        if gateway == "all":
-            # Full aggregated catalog
+        if use_unique_models and gateway == "all":
+            # New: Deduplicated unique models with provider arrays
+            logger.info("Fetching unique models catalog (deduplicated)")
+            models = get_cached_unique_models_catalog()
+            if models is not None:
+                logger.info(f"Returning {len(models)} unique models")
+                return models
+            logger.warning("Failed to get unique models catalog")
+            return []
+        elif gateway == "all":
+            # Current: Full aggregated flat catalog
             models = get_cached_full_catalog()
             if models is not None:
                 logger.info(f"Returning {len(models)} models for 'all'")
@@ -808,7 +820,12 @@ def get_cached_models(gateway: str = "openrouter"):
             logger.warning("Failed to get catalog from cache or database")
             return []
         else:
-            # Single provider catalog
+            # Single provider catalog (use_unique_models has no effect here)
+            if use_unique_models:
+                logger.debug(
+                    f"use_unique_models=True ignored for provider-specific gateway '{gateway}' "
+                    "(only applies to gateway='all')"
+                )
             models = get_cached_provider_catalog(gateway)
             if models is not None:
                 logger.info(f"Returning {len(models)} models for '{gateway}'")
@@ -819,6 +836,84 @@ def get_cached_models(gateway: str = "openrouter"):
 
     except Exception as e:
         logger.error(f"Error getting catalog for gateway '{gateway}': {e}")
+        return []
+
+
+def get_cached_unique_models_catalog():
+    """
+    Get cached unique models with provider grouping.
+
+    This function:
+    1. Checks Redis cache first (key: "models:catalog:full")
+    2. If miss, queries database using get_all_unique_models_for_catalog()
+    3. Transforms results to API format
+    4. Caches for 15 minutes
+    5. Returns deduplicated models with provider arrays
+
+    Returns:
+        List of unique models with provider information:
+        [
+            {
+                'id': 'gpt-4',
+                'name': 'GPT-4',
+                'providers': [
+                    {'slug': 'openrouter', 'pricing': {...}},
+                    {'slug': 'groq', 'pricing': {...}}
+                ],
+                'provider_count': 2,
+                'cheapest_provider': 'groq',
+                'fastest_provider': 'openrouter'
+            }
+        ]
+
+    Cache behavior:
+    - Uses same cache key as get_cached_full_catalog() for simplicity
+    - TTL: 900 seconds (15 minutes)
+    - Cache hit rate expected: >95%
+    """
+    from src.services.model_catalog_cache import get_model_catalog_cache
+    from src.db.models_catalog_db import (
+        get_all_unique_models_for_catalog,
+        transform_unique_models_batch,
+    )
+    import time
+
+    cache = get_model_catalog_cache()
+
+    try:
+        # Try cache first
+        cached = cache.get_full_catalog()
+        if cached is not None:
+            # Check if cached data has the unique models structure
+            if cached and isinstance(cached, list) and len(cached) > 0:
+                # If first item has 'providers' array, it's unique models format
+                if 'providers' in cached[0] and isinstance(cached[0]['providers'], list):
+                    logger.info("Cache hit for unique models catalog")
+                    return cached
+
+        # Cache miss or wrong format - fetch from database
+        logger.info("Cache miss - fetching unique models from database")
+        start_time = time.time()
+
+        db_models = get_all_unique_models_for_catalog(include_inactive=False)
+        api_models = transform_unique_models_batch(db_models)
+
+        query_time = time.time() - start_time
+        logger.info(f"Fetched {len(api_models)} unique models in {query_time:.2f}s")
+
+        if query_time > 1.0:
+            logger.warning(
+                f"Slow unique models fetch: {query_time:.2f}s "
+                f"(threshold: 1.0s)"
+            )
+
+        # Cache result (TTL: 900 seconds = 15 minutes)
+        cache.set_full_catalog(api_models, ttl=900)
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error getting unique models catalog: {e}")
         return []
 
 
