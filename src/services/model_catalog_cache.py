@@ -498,22 +498,38 @@ def cache_full_catalog(catalog: list[dict[str, Any]], ttl: int | None = None) ->
 
 def get_cached_full_catalog() -> list[dict[str, Any]] | None:
     """
-    Get cached full model catalog.
+    Get cached full model catalog with multi-tier caching.
 
-    On cache miss, fetches from database (kept fresh by scheduled sync).
+    Cache hierarchy:
+    1. Redis (primary) - distributed cache
+    2. Local memory (fallback) - for when Redis is slow/unavailable
+    3. Database (last resort) - kept fresh by scheduled sync
 
     Returns:
         Cached catalog or empty list on error
     """
-    cache = get_model_catalog_cache()
-    cached = cache.get_full_catalog()
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
 
-    # If in cache, return it
+    cache = get_model_catalog_cache()
+
+    # 1. Try Redis first
+    cached = cache.get_full_catalog()
     if cached is not None:
+        # Also update local cache for fallback
+        set_local_catalog("all", cached)
         return cached
 
-    # Cache miss - fetch from database
-    logger.info("Cache MISS: Fetching full catalog from database")
+    # 2. Try local memory cache (fallback for Redis failures)
+    local_data, is_stale = get_local_catalog("all")
+    if local_data is not None:
+        if is_stale:
+            logger.info("Local cache STALE HIT: full catalog (returning stale data)")
+        else:
+            logger.info("Local cache HIT: full catalog")
+        return local_data
+
+    # 3. Cache miss everywhere - fetch from database
+    logger.info("Cache MISS (all layers): Fetching full catalog from database")
 
     try:
         from src.db.models_catalog_db import (
@@ -527,8 +543,9 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
         # Transform to API format
         api_models = transform_db_models_batch(db_models)
 
-        # Cache for next time (15 minutes)
+        # Cache in both Redis and local memory
         cache.set_full_catalog(api_models, ttl=900)
+        set_local_catalog("all", api_models)
 
         logger.info(f"Fetched {len(api_models)} models from database and cached")
 
@@ -557,9 +574,12 @@ def cache_provider_catalog(
 
 def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
     """
-    Get cached provider catalog.
+    Get cached provider catalog with multi-tier caching.
 
-    On cache miss, fetches from database (kept fresh by scheduled sync).
+    Cache hierarchy:
+    1. Redis (primary) - distributed cache
+    2. Local memory (fallback) - for when Redis is slow/unavailable
+    3. Database (last resort) - kept fresh by scheduled sync
 
     Args:
         provider_name: Provider slug (e.g., "openrouter", "anthropic")
@@ -567,15 +587,28 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
     Returns:
         Cached provider catalog or empty list on error
     """
-    cache = get_model_catalog_cache()
-    cached = cache.get_provider_catalog(provider_name)
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
 
-    # If in cache, return it
+    cache = get_model_catalog_cache()
+
+    # 1. Try Redis first
+    cached = cache.get_provider_catalog(provider_name)
     if cached is not None:
+        # Also update local cache for fallback
+        set_local_catalog(provider_name, cached)
         return cached
 
-    # Cache miss - fetch from database
-    logger.info(f"Cache MISS: Fetching {provider_name} catalog from database")
+    # 2. Try local memory cache (fallback for Redis failures)
+    local_data, is_stale = get_local_catalog(provider_name)
+    if local_data is not None:
+        if is_stale:
+            logger.info(f"Local cache STALE HIT: {provider_name} (returning stale data)")
+        else:
+            logger.info(f"Local cache HIT: {provider_name}")
+        return local_data
+
+    # 3. Cache miss everywhere - fetch from database
+    logger.info(f"Cache MISS (all layers): Fetching {provider_name} catalog from database")
 
     try:
         from src.db.models_catalog_db import (
@@ -592,8 +625,9 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
         # Transform to API format
         api_models = transform_db_models_batch(db_models)
 
-        # Cache for next time (30 minutes)
+        # Cache in both Redis and local memory
         cache.set_provider_catalog(provider_name, api_models, ttl=1800)
+        set_local_catalog(provider_name, api_models)
 
         logger.info(f"Fetched {len(api_models)} models for {provider_name} from database and cached")
 
