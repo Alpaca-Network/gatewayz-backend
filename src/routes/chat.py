@@ -2571,15 +2571,48 @@ async def chat_completions(
                 # Create unified handler with user context
                 handler = ChatInferenceHandler(api_key, background_tasks)
 
-                # Process request through unified pipeline (includes provider routing, failover, tracing)
-                internal_response = await handler.process(internal_request)
+                # Wrap with AITracer for gen_ai.* telemetry
+                async with AITracer.trace_inference(
+                    provider="onerouter",  # Will be updated after response
+                    model=original_model,
+                    request_type=AIRequestType.CHAT_COMPLETION,
+                    operation_name=f"unified_handler/{original_model}",
+                ) as trace_ctx:
+                    # Process request through unified pipeline
+                    internal_response = await handler.process(internal_request)
 
-                # Convert internal response back to OpenAI format
-                processed = adapter.from_internal_response(internal_response)
+                    # Convert internal response back to OpenAI format
+                    processed = adapter.from_internal_response(internal_response)
 
-                # Extract values for postprocessing (maintain compatibility with existing code)
-                provider = internal_response.provider_used or "onerouter"
-                model = internal_response.model or original_model
+                    # Extract values for postprocessing
+                    provider = internal_response.provider_used or "onerouter"
+                    model = internal_response.model or original_model
+
+                    # Set trace attributes with actual values from response
+                    usage = processed.get("usage", {}) or {}
+                    trace_ctx.set_token_usage(
+                        input_tokens=usage.get("prompt_tokens", 0),
+                        output_tokens=usage.get("completion_tokens", 0),
+                        total_tokens=usage.get("total_tokens", 0),
+                    )
+                    trace_ctx.set_response_model(
+                        response_model=model,
+                        finish_reason=processed.get("choices", [{}])[0].get("finish_reason") if processed.get("choices") else None,
+                        response_id=processed.get("id"),
+                    )
+                    if optional:
+                        trace_ctx.set_model_parameters(
+                            temperature=optional.get("temperature"),
+                            max_tokens=optional.get("max_tokens"),
+                            top_p=optional.get("top_p"),
+                            frequency_penalty=optional.get("frequency_penalty"),
+                            presence_penalty=optional.get("presence_penalty"),
+                        )
+                    if user:
+                        trace_ctx.set_user_info(
+                            user_id=str(user.get("id")),
+                            tier="trial" if trial.get("is_trial") else "paid",
+                        )
 
                 logger.info(
                     f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
