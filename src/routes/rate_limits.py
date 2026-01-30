@@ -534,13 +534,17 @@ async def delete_rate_limits(
 
         client = get_supabase_client()
 
-        # Try to delete from rate_limits table
+        # Delete from rate_limit_configs table
+        deleted_from_rate_limit_configs = False
         try:
-            result = client.table("rate_limits").delete().eq("api_key", api_key).execute()
-            deleted_from_rate_limits = len(result.data) > 0 if result.data else False
+            # Get API key ID
+            key_record = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            if key_record.data and len(key_record.data) > 0:
+                api_key_id = key_record.data[0]["id"]
+                result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
+                deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
         except Exception as e:
-            logger.debug(f"Could not delete from rate_limits table: {e}")
-            deleted_from_rate_limits = False
+            logger.debug(f"Could not delete from rate_limit_configs table: {e}")
 
         # Try to reset rate_limit_config in api_keys_new table
         try:
@@ -566,7 +570,7 @@ async def delete_rate_limits(
             "status": "success",
             "message": "Rate limits deleted successfully. Key will use default limits.",
             "api_key": api_key[:15] + "...",
-            "deleted_from_rate_limits": deleted_from_rate_limits,
+            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
             "reset_in_api_keys": reset_in_api_keys,
             "default_config": DEFAULT_RATE_LIMIT_CONFIG,
             "timestamp": datetime.now(timezone.utc).isoformat(),

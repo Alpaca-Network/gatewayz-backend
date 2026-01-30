@@ -42,21 +42,9 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
         except Exception as e:
             logger.warning(f"Failed to get rate limits from new system: {e}")
 
-        # Fallback to old system (rate_limits table)
-        result = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
-
-        if not result.data or len(result.data) == 0:
-            return None
-
-        rate_limits = result.data[0]
-        return {
-            "requests_per_minute": rate_limits.get("requests_per_minute", 60),
-            "requests_per_hour": rate_limits.get("requests_per_hour", 1000),
-            "requests_per_day": rate_limits.get("requests_per_day", 10000),
-            "tokens_per_minute": rate_limits.get("tokens_per_minute", 10000),
-            "tokens_per_hour": rate_limits.get("tokens_per_hour", 100000),
-            "tokens_per_day": rate_limits.get("tokens_per_day", 1000000),
-        }
+        # If we reach here, no rate limits found - return None
+        logger.debug(f"No rate limits found for API key {api_key[:10]}...")
+        return None
 
     except Exception as e:
         logger.error(f"Error getting user rate limits: {e}")
@@ -64,32 +52,62 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
 
 
 def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
+    """
+    Set rate limits for a user's API key using the rate_limit_configs table.
+
+    Args:
+        api_key: The API key to set rate limits for
+        rate_limits: Dictionary containing rate limit values
+
+    Raises:
+        ValueError: If user is not found
+        RuntimeError: If setting rate limits fails
+    """
     try:
         client = get_supabase_client()
 
-        user = get_user(api_key)
-        if not user:
-            raise ValueError(f"User with API key {api_key} not found")
+        # Get the API key record from api_keys_new
+        key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", api_key).execute()
 
-        rate_limit_data = {
-            "api_key": api_key,
-            "user_id": user["id"],
-            "requests_per_minute": rate_limits.get("requests_per_minute", 60),
-            "requests_per_hour": rate_limits.get("requests_per_hour", 1000),
-            "requests_per_day": rate_limits.get("requests_per_day", 10000),
-            "tokens_per_minute": rate_limits.get("tokens_per_minute", 10000),
-            "tokens_per_hour": rate_limits.get("tokens_per_hour", 100000),
-            "tokens_per_day": rate_limits.get("tokens_per_day", 1000000),
-            "created_at": datetime.now(timezone.utc).isoformat(),
+        if not key_record.data or len(key_record.data) == 0:
+            raise ValueError(f"API key not found: {api_key[:10]}...")
+
+        api_key_id = key_record.data[0]["id"]
+        user_id = key_record.data[0]["user_id"]
+
+        # Prepare rate limit config data
+        # Convert per-minute/per-day values to per-hour for storage
+        requests_per_hour = rate_limits.get("requests_per_hour", 1000)
+        tokens_per_hour = rate_limits.get("tokens_per_hour", 100000)
+
+        rate_limit_config = {
+            "api_key_id": api_key_id,
+            "max_requests": requests_per_hour,
+            "max_tokens": tokens_per_hour,
+            "burst_limit": rate_limits.get("burst_limit", 100),
+            "concurrency_limit": rate_limits.get("concurrency_limit", 50),
+            "window_size": 3600,  # 1 hour in seconds
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        existing = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
+        # Check if config already exists
+        existing = (
+            client.table("rate_limit_configs")
+            .select("id")
+            .eq("api_key_id", api_key_id)
+            .execute()
+        )
 
         if existing.data and len(existing.data) > 0:
-            client.table("rate_limits").update(rate_limit_data).eq("api_key", api_key).execute()
+            # Update existing config
+            client.table("rate_limit_configs").update(rate_limit_config).eq(
+                "api_key_id", api_key_id
+            ).execute()
+            logger.info(f"Updated rate limits for API key {api_key[:10]}...")
         else:
-            client.table("rate_limits").insert(rate_limit_data).execute()
+            # Insert new config
+            client.table("rate_limit_configs").insert(rate_limit_config).execute()
+            logger.info(f"Created rate limits for API key {api_key[:10]}...")
 
     except Exception as e:
         logger.error(f"Failed to set user rate limits: {e}")
