@@ -677,3 +677,162 @@ class TestSubscriptionManagementSchemas:
 
         request_immediate = CancelSubscriptionRequest(cancel_at_period_end=False)
         assert request_immediate.cancel_at_period_end is False
+
+
+class TestStripeCustomerIdSave:
+    """Tests for stripe_customer_id save verification during subscription checkout"""
+
+    def test_stripe_customer_id_save_success(self, stripe_service):
+        """Test that stripe_customer_id is saved successfully when creating checkout"""
+        mock_user = {
+            "id": 123,
+            "email": "test@example.com",
+            "tier": "basic",
+            "subscription_status": "trial",
+            "stripe_customer_id": None,
+            "username": "testuser",
+        }
+
+        mock_checkout_session = MagicMock()
+        mock_checkout_session.id = "cs_test_123"
+        mock_checkout_session.url = "https://checkout.stripe.com/test"
+        mock_checkout_session.status = "open"
+
+        mock_customer = MagicMock()
+        mock_customer.id = "cus_new_customer_123"
+
+        from src.schemas.payments import CreateSubscriptionCheckoutRequest
+
+        request = CreateSubscriptionCheckoutRequest(
+            price_id="price_pro_8",
+            product_id="prod_TKOqQPhVRxNp4Q",
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            mode="subscription",
+        )
+
+        with patch("src.services.payments.get_user_by_id", return_value=mock_user):
+            with patch("stripe.Customer.create", return_value=mock_customer) as mock_create_customer:
+                with patch("stripe.checkout.Session.create", return_value=mock_checkout_session):
+                    with patch("src.services.payments.get_tier_from_product_id", return_value="pro"):
+                        with patch("src.config.supabase_config.get_supabase_client") as mock_client:
+                            mock_table = MagicMock()
+                            mock_client.return_value.table.return_value = mock_table
+                            mock_table.update.return_value = mock_table
+                            mock_table.eq.return_value = mock_table
+                            # Simulate successful update
+                            mock_table.execute.return_value = MagicMock(data=[{"id": 123, "stripe_customer_id": "cus_new_customer_123"}])
+
+                            result = stripe_service.create_subscription_checkout(123, request)
+
+                            # Verify customer was created
+                            mock_create_customer.assert_called_once()
+
+                            # Verify update was called with stripe_customer_id
+                            mock_table.update.assert_called()
+                            call_args = mock_table.update.call_args[0][0]
+                            assert "stripe_customer_id" in call_args
+                            assert call_args["stripe_customer_id"] == "cus_new_customer_123"
+
+                            # Verify checkout session was created
+                            assert result.session_id == "cs_test_123"
+                            assert result.customer_id == "cus_new_customer_123"
+
+    def test_stripe_customer_id_save_failure_logs_error(self, stripe_service, caplog):
+        """Test that failed stripe_customer_id save logs an error but doesn't fail checkout"""
+        import logging
+
+        mock_user = {
+            "id": 456,
+            "email": "test@example.com",
+            "tier": "basic",
+            "subscription_status": "trial",
+            "stripe_customer_id": None,
+            "username": "testuser",
+        }
+
+        mock_checkout_session = MagicMock()
+        mock_checkout_session.id = "cs_test_456"
+        mock_checkout_session.url = "https://checkout.stripe.com/test"
+        mock_checkout_session.status = "open"
+
+        mock_customer = MagicMock()
+        mock_customer.id = "cus_test_customer_456"
+
+        from src.schemas.payments import CreateSubscriptionCheckoutRequest
+
+        request = CreateSubscriptionCheckoutRequest(
+            price_id="price_pro_8",
+            product_id="prod_TKOqQPhVRxNp4Q",
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            mode="subscription",
+        )
+
+        with patch("src.services.payments.get_user_by_id", return_value=mock_user):
+            with patch("stripe.Customer.create", return_value=mock_customer):
+                with patch("stripe.checkout.Session.create", return_value=mock_checkout_session):
+                    with patch("src.services.payments.get_tier_from_product_id", return_value="pro"):
+                        with patch("src.config.supabase_config.get_supabase_client") as mock_client:
+                            mock_table = MagicMock()
+                            mock_client.return_value.table.return_value = mock_table
+                            mock_table.update.return_value = mock_table
+                            mock_table.eq.return_value = mock_table
+                            # Simulate failed update (returns no data)
+                            mock_table.execute.return_value = MagicMock(data=None)
+
+                            with caplog.at_level(logging.ERROR):
+                                # Should not raise - checkout should still succeed
+                                result = stripe_service.create_subscription_checkout(456, request)
+
+                            # Verify checkout was still created despite save failure
+                            assert result.session_id == "cs_test_456"
+                            assert result.customer_id == "cus_test_customer_456"
+
+                            # Verify error was logged
+                            assert any(
+                                "Failed to save stripe_customer_id" in record.message
+                                for record in caplog.records
+                            )
+
+    def test_existing_stripe_customer_reused(self, stripe_service):
+        """Test that existing stripe_customer_id is reused and not recreated"""
+        mock_user = {
+            "id": 789,
+            "email": "existing@example.com",
+            "tier": "basic",
+            "subscription_status": "trial",
+            "stripe_customer_id": "cus_existing_789",  # Already has customer ID
+            "username": "existinguser",
+        }
+
+        mock_checkout_session = MagicMock()
+        mock_checkout_session.id = "cs_test_789"
+        mock_checkout_session.url = "https://checkout.stripe.com/test"
+        mock_checkout_session.status = "open"
+
+        from src.schemas.payments import CreateSubscriptionCheckoutRequest
+
+        request = CreateSubscriptionCheckoutRequest(
+            price_id="price_pro_8",
+            product_id="prod_TKOqQPhVRxNp4Q",
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+            mode="subscription",
+        )
+
+        with patch("src.services.payments.get_user_by_id", return_value=mock_user):
+            with patch("stripe.Customer.create") as mock_create_customer:
+                with patch("stripe.checkout.Session.create", return_value=mock_checkout_session) as mock_create_session:
+                    with patch("src.services.payments.get_tier_from_product_id", return_value="pro"):
+                        result = stripe_service.create_subscription_checkout(789, request)
+
+                        # Verify customer was NOT created (reused existing)
+                        mock_create_customer.assert_not_called()
+
+                        # Verify checkout was created with existing customer ID
+                        call_kwargs = mock_create_session.call_args[1]
+                        assert call_kwargs["customer"] == "cus_existing_789"
+
+                        # Verify result has existing customer ID
+                        assert result.customer_id == "cus_existing_789"

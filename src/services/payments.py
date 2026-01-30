@@ -1117,14 +1117,22 @@ class StripeService:
                 from src.config.supabase_config import get_supabase_client
 
                 client = get_supabase_client()
-                client.table("users").update(
+                update_result = client.table("users").update(
                     {
                         "stripe_customer_id": stripe_customer_id,
                         "updated_at": datetime.now(timezone.utc).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
-                logger.info(f"Stripe customer created: {stripe_customer_id} for user {user_id}")
+                # Verify the stripe_customer_id was saved successfully
+                if not update_result.data:
+                    logger.error(
+                        f"Failed to save stripe_customer_id {stripe_customer_id} for user {user_id}. "
+                        f"Update returned no data. This may cause lookup issues later."
+                    )
+                    # Don't fail the checkout - the webhook will also save this as a fallback
+                else:
+                    logger.info(f"Stripe customer created and saved: {stripe_customer_id} for user {user_id}")
 
             # Determine tier from product_id using database configuration
             tier = get_tier_from_product_id(request.product_id)
