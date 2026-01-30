@@ -735,8 +735,16 @@ async def get_models(
                 # the aggregated result directly
                 all_models_list = all_models_from_cache
             else:
-                logger.warning("Aggregated cache returned empty, falling through to individual provider fetches")
-                all_models_list = []
+                # PERFORMANCE FIX: Use parallel fetching instead of sequential
+                # This reduces fetch time from 25*60s = 1500s to ~45s max
+                logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
+                try:
+                    from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
+                    all_models_list = await fetch_and_merge_all_providers(timeout=45.0)
+                    logger.info(f"Parallel fetch returned {len(all_models_list)} models")
+                except Exception as e:
+                    logger.error(f"Parallel fetch failed: {e}")
+                    all_models_list = []
         else:
             all_models_list = []
             # Log warning if unique_models is requested for non-all gateway
@@ -746,18 +754,27 @@ async def get_models(
                     "(only applies to gateway='all')"
                 )
 
+        # Import circuit breaker for individual provider fetches
+        from src.utils.circuit_breaker import get_provider_circuit_breaker
+        breaker = get_provider_circuit_breaker()
+
         # Individual provider fetches (only used when gateway != "all" OR cache is empty)
+        # Skip if parallel fetch already populated all_models_list
         if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
-            openrouter_models = get_cached_models("openrouter") or []
-            if not openrouter_models:
-                logger.warning(
-                    "OpenRouter models unavailable (gateway=%s) - possible causes: "
-                    "API key not configured, API is down, network issues, or cache warming incomplete. "
-                    "Continuing with other providers if available.",
-                    gateway_value,
-                )
-                # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
-                # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
+            if not breaker.should_skip("openrouter"):
+                openrouter_models = get_cached_models("openrouter") or []
+                if openrouter_models:
+                    breaker.record_success("openrouter")
+                else:
+                    breaker.record_failure("openrouter", "empty result")
+                    logger.warning(
+                        "OpenRouter models unavailable (gateway=%s) - possible causes: "
+                        "API key not configured, API is down, network issues, or cache warming incomplete. "
+                        "Continuing with other providers if available.",
+                        gateway_value,
+                    )
+            else:
+                logger.info("Skipping openrouter (circuit breaker open)")
 
         if gateway_value in ("onerouter", "all"):
             onerouter_models = get_cached_models("onerouter") or []
