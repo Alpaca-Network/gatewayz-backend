@@ -134,7 +134,8 @@ async def fetch_all_providers_parallel(
     logger.info(f"Starting parallel fetch for {len(providers)} providers")
 
     # Create futures for all providers
-    loop = asyncio.get_event_loop()
+    # Use get_running_loop() instead of deprecated get_event_loop()
+    loop = asyncio.get_running_loop()
     tasks = []
 
     for provider in providers:

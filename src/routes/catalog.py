@@ -762,17 +762,22 @@ async def get_models(
         # Skip if parallel fetch already populated all_models_list
         if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
             if not breaker.should_skip("openrouter"):
-                openrouter_models = get_cached_models("openrouter") or []
-                if openrouter_models:
+                try:
+                    openrouter_models = get_cached_models("openrouter") or []
+                    # Record success even for empty results - empty is not a failure
                     breaker.record_success("openrouter")
-                else:
-                    breaker.record_failure("openrouter", "empty result")
-                    logger.warning(
-                        "OpenRouter models unavailable (gateway=%s) - possible causes: "
-                        "API key not configured, API is down, network issues, or cache warming incomplete. "
-                        "Continuing with other providers if available.",
-                        gateway_value,
-                    )
+                    if not openrouter_models:
+                        logger.warning(
+                            "OpenRouter models unavailable (gateway=%s) - possible causes: "
+                            "API key not configured, API is down, network issues, or cache warming incomplete. "
+                            "Continuing with other providers if available.",
+                            gateway_value,
+                        )
+                except Exception as e:
+                    # Only record failure for actual exceptions
+                    breaker.record_failure("openrouter", str(e))
+                    logger.error(f"Error fetching openrouter models: {e}")
+                    openrouter_models = []
             else:
                 logger.info("Skipping openrouter (circuit breaker open)")
 
