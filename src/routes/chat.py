@@ -2571,7 +2571,8 @@ async def chat_completions(
                 # Create unified handler with user context
                 handler = ChatInferenceHandler(api_key, background_tasks)
 
-                # Wrap with AITracer for gen_ai.* telemetry
+                # Wrap with AITracer for gen_ai.* telemetry + track duration for Prometheus
+                inference_start = time.time()
                 async with AITracer.trace_inference(
                     provider="onerouter",  # Will be updated after response
                     model=original_model,
@@ -2590,9 +2591,11 @@ async def chat_completions(
 
                     # Set trace attributes with actual values from response
                     usage = processed.get("usage", {}) or {}
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
                     trace_ctx.set_token_usage(
-                        input_tokens=usage.get("prompt_tokens", 0),
-                        output_tokens=usage.get("completion_tokens", 0),
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                         total_tokens=usage.get("total_tokens", 0),
                     )
                     trace_ctx.set_response_model(
@@ -2614,11 +2617,25 @@ async def chat_completions(
                             tier="trial" if trial.get("is_trial") else "paid",
                         )
 
+                # Record Prometheus metrics for model popularity tracking
+                inference_duration = time.time() - inference_start
+                model_inference_requests.labels(provider=provider, model=model, status="success").inc()
+                model_inference_duration.labels(provider=provider, model=model).observe(inference_duration)
+                if input_tokens > 0:
+                    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
+                if output_tokens > 0:
+                    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
+
                 logger.info(
                     f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
                 )
 
             except Exception as exc:
+                # Record error metric for model popularity tracking
+                error_provider = provider if 'provider' in locals() else "onerouter"
+                error_model = model if 'model' in locals() else original_model
+                model_inference_requests.labels(provider=error_provider, model=error_model, status="error").inc()
+
                 # Map any errors to HTTPException
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
                 if isinstance(exc, HTTPException):
@@ -2626,8 +2643,8 @@ async def chat_completions(
                 # Map provider-specific errors
                 from src.services.provider_failover import map_provider_error
                 http_exc = map_provider_error(
-                    provider if 'provider' in locals() else "onerouter",
-                    model if 'model' in locals() else original_model,
+                    error_provider,
+                    error_model,
                     exc
                 )
                 raise http_exc
