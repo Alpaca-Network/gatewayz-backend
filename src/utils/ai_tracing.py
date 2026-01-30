@@ -287,9 +287,13 @@ class AITracer:
     def _get_tracer(cls):
         """Get or create the OpenTelemetry tracer."""
         if not OTEL_AVAILABLE:
+            logger.warning("AITracer: OTEL_AVAILABLE is False - OpenTelemetry not installed")
             return None
         if cls._tracer is None:
             cls._tracer = trace.get_tracer("gatewayz.ai", "2.0.3")
+            # Log tracer info for debugging
+            provider = trace.get_tracer_provider()
+            logger.info(f"AITracer: Created tracer with provider: {type(provider).__name__}")
         return cls._tracer
 
     @classmethod
@@ -323,6 +327,7 @@ class AITracer:
         span_name = operation_name or f"{provider}/{model}"
 
         if tracer:
+            logger.debug(f"AITracer: Creating span '{span_name}' with gen_ai.system={provider}")
             with tracer.start_as_current_span(
                 span_name,
                 kind=SpanKind.CLIENT,
@@ -339,6 +344,7 @@ class AITracer:
                 },
             ) as span:
                 ctx = AISpanContext(span=span, provider=provider, model=model)
+                logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
                 try:
                     yield ctx
                     # Set success status if no error
@@ -346,10 +352,12 @@ class AITracer:
                     # Record total duration
                     duration_ms = (time.time() - ctx.start_time) * 1000
                     span.set_attribute("ai.duration_ms", duration_ms)
+                    logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
                 except Exception as e:
                     ctx.set_error(e)
                     raise
         else:
+            logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
             # OpenTelemetry not available, yield dummy context
             yield AISpanContext(provider=provider, model=model)
 
