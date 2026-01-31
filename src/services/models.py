@@ -1155,7 +1155,9 @@ def normalize_featherless_model(featherless_model: dict) -> dict:
     provider_slug = model_id.split("/")[0] if "/" in model_id else "featherless"
 
     # Model handle is the full ID
-    display_name = model_id.replace("-", " ").replace("_", " ").title()
+    raw_display_name = model_id.replace("-", " ").replace("_", " ").title()
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     description = (
         featherless_model.get("description")
@@ -1320,7 +1322,9 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     # pricing_per_hour / 1,000,000 = per-token price
     prompt_price = str(pricing_per_hour / 1000000) if pricing_per_hour > 0 else "0"
 
-    display_name = chutes_model.get("name", model_id.replace("-", " ").replace("_", " ").title())
+    raw_display_name = chutes_model.get("name", model_id.replace("-", " ").replace("_", " ").title())
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     description = (
         f"Chutes.ai hosted {model_type} model: {model_id}. Pricing: ${pricing_per_hour}/hr."
@@ -1398,9 +1402,11 @@ def normalize_groq_model(groq_model: dict) -> dict:
     slug = f"groq/{model_id}"
     provider_slug = "groq"
 
-    display_name = (
+    raw_display_name = (
         groq_model.get("display_name") or model_id.replace("-", " ").replace("_", " ").title()
     )
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     owned_by = groq_model.get("owned_by")
     base_description = groq_model.get("description") or f"Groq hosted model {model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
@@ -1544,11 +1550,13 @@ def normalize_zai_model(zai_model: dict) -> dict | None:
     slug = f"zai/{model_id}"
     provider_slug = "zai"
 
-    display_name = (
+    raw_display_name = (
         zai_model.get("display_name")
         or zai_model.get("name")
         or model_id.replace("-", " ").replace("_", " ").title()
     )
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     owned_by = zai_model.get("owned_by", "zai")
     base_description = zai_model.get("description") or f"Z.AI GLM model {model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
@@ -1687,10 +1695,12 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     slug = model_id
     provider_slug = "fireworks"
 
-    display_name = (
+    raw_display_name = (
         fireworks_model.get("display_name")
         or model_id.split("/")[-1].replace("-", " ").replace("_", " ").title()
     )
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     owned_by = fireworks_model.get("owned_by")
     base_description = fireworks_model.get("description") or f"Fireworks hosted model {model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
@@ -2343,11 +2353,13 @@ def normalize_near_model(near_model: dict) -> dict:
 
     # Extract metadata from Near AI API response
     metadata = near_model.get("metadata") or {}
-    display_name = (
+    raw_display_name = (
         metadata.get("displayName")
         or near_model.get("display_name")
         or model_id.replace("-", " ").replace("_", " ").title()
     )
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     near_model.get("owned_by", "Near Protocol")
 
     # Highlight security features in description
@@ -2502,7 +2514,9 @@ def normalize_fal_model(fal_model: dict) -> dict | None:
     provider_slug = model_id.split("/")[0] if "/" in model_id else "fal-ai"
 
     # Use title (API) or name (catalog) or derive from ID
-    display_name = fal_model.get("title") or fal_model.get("name") or model_id.split("/")[-1]
+    raw_display_name = fal_model.get("title") or fal_model.get("name") or model_id.split("/")[-1]
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     # Get description
     description = fal_model.get("description", f"Fal.ai {display_name} model")
@@ -2625,10 +2639,12 @@ def normalize_vercel_model(model) -> dict | None:
     # Models come in formats like "openai/gpt-4", "google/gemini-pro", etc.
     if "/" in model_id:
         provider_slug = model_id.split("/")[0]
-        display_name = model_id.split("/")[1]
+        raw_display_name = model_id.split("/")[1]
     else:
         provider_slug = "vercel"
-        display_name = model_id
+        raw_display_name = model_id
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     # Get description - Vercel doesn't provide this, so we create one
     description = getattr(model, "description", None) or "Model available through Vercel AI Gateway"
@@ -2824,7 +2840,9 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
         return {"source_gateway": "deepinfra", "raw_deepinfra": deepinfra_model or {}}
 
     provider_slug = model_id.split("/")[0] if "/" in model_id else "deepinfra"
-    display_name = model_id.replace("-", " ").replace("_", " ").title()
+    raw_display_name = model_id.replace("-", " ").replace("_", " ").title()
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     # Get model type to determine modality
     model_type = deepinfra_model.get("type") or deepinfra_model.get("reported_type") or "text"
@@ -3654,13 +3672,13 @@ def normalize_aihubmix_model(model) -> dict | None:
     # Support both attribute and dict access, and both 'id' and 'model_id' field names
     if isinstance(model, dict):
         model_id = model.get("id") or model.get("model_id")
-        model_name = model.get("name") or model_id
+        raw_model_name = model.get("name") or model_id
         created_at = model.get("created_at")
         description = model.get("description") or model.get("desc") or "Model from AiHubMix"
         context_length = model.get("context_length") or 4096
     else:
         model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
-        model_name = getattr(model, "name", model_id)
+        raw_model_name = getattr(model, "name", model_id)
         created_at = getattr(model, "created_at", None)
         description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
         context_length = getattr(model, "context_length", 4096)
@@ -3669,6 +3687,9 @@ def normalize_aihubmix_model(model) -> dict | None:
         # Use debug level to avoid excessive logging during catalog refresh
         logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
+
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
 
     try:
         normalized = {
@@ -3761,18 +3782,21 @@ def normalize_helicone_model(model) -> dict | None:
     # Determine provider from model ID
     # Models typically come in standard formats like "gpt-4o-mini", "claude-3-sonnet", etc.
     provider_slug = "helicone"
-    display_name = model_id
+    raw_display_name = model_id
 
     # Try to detect provider from model name
     if "/" in model_id:
         provider_slug = model_id.split("/")[0]
-        display_name = model_id.split("/")[1]
+        raw_display_name = model_id.split("/")[1]
     elif "gpt" in model_id.lower() or "o1" in model_id.lower():
         provider_slug = "openai"
     elif "claude" in model_id.lower():
         provider_slug = "anthropic"
     elif "gemini" in model_id.lower():
         provider_slug = "google"
+
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     # Get description - Helicone doesn't provide this, so we create one
     description = (
@@ -3927,13 +3951,17 @@ def normalize_anannas_model(model) -> dict | None:
         logger.warning("Anannas model missing 'id': %s", sanitize_for_logging(str(model)))
         return None
 
+    raw_model_name = getattr(model, "name", model_id)
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
+
     try:
         normalized = {
             "id": model_id,
             "slug": f"anannas/{model_id}",
             "canonical_slug": f"anannas/{model_id}",
             "hugging_face_id": None,
-            "name": getattr(model, "name", model_id),
+            "name": model_name,
             "created": getattr(model, "created_at", None),
             "description": getattr(model, "description", "Model from Anannas"),
             "context_length": getattr(model, "context_length", 4096),
@@ -4108,13 +4136,17 @@ def normalize_alibaba_model(model) -> dict | None:
         logger.warning("Alibaba Cloud model missing 'id': %s", sanitize_for_logging(str(model)))
         return None
 
+    raw_model_name = getattr(model, "name", model_id)
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
+
     try:
         normalized = {
             "id": model_id,
             "slug": f"alibaba/{model_id}",
             "canonical_slug": f"alibaba/{model_id}",
             "hugging_face_id": None,
-            "name": getattr(model, "name", model_id),
+            "name": model_name,
             "created": getattr(model, "created_at", None),
             "description": getattr(model, "description", "Model from Alibaba Cloud"),
             "context_length": getattr(model, "context_length", 4096),
@@ -4218,11 +4250,13 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         provider_slug = "openai"
 
         # Generate display name
-        display_name = model_id.replace("-", " ").replace("_", " ").title()
+        raw_display_name = model_id.replace("-", " ").replace("_", " ").title()
         # Clean up common patterns
-        display_name = display_name.replace("Gpt ", "GPT-")
-        display_name = display_name.replace("O1 ", "o1-")
-        display_name = display_name.replace("O3 ", "o3-")
+        raw_display_name = raw_display_name.replace("Gpt ", "GPT-")
+        raw_display_name = raw_display_name.replace("O1 ", "o1-")
+        raw_display_name = raw_display_name.replace("O3 ", "o3-")
+        # Clean malformed model names (remove company prefix, parentheses, etc.)
+        display_name = clean_model_name(raw_display_name)
 
         description = f"OpenAI {model_id} model."
 
@@ -4406,7 +4440,9 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
         provider_slug = "anthropic"
 
         # Use display_name from API, fall back to formatted model_id
-        display_name = anthropic_model.get("display_name") or anthropic_model.get("name", model_id)
+        raw_display_name = anthropic_model.get("display_name") or anthropic_model.get("name", model_id)
+        # Clean malformed model names (remove company prefix, parentheses, etc.)
+        display_name = clean_model_name(raw_display_name)
         created_at = anthropic_model.get("created_at")
 
         # Generate description based on model

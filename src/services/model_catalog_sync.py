@@ -18,7 +18,9 @@ from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.cohere_client import fetch_models_from_cohere
 from src.services.google_vertex_client import fetch_models_from_google_vertex
+from src.services.groq_client import fetch_models_from_groq
 from src.services.huggingface_models import fetch_models_from_huggingface_api
+from src.services.openrouter_client import fetch_models_from_openrouter
 from src.services.models import (
     fetch_models_from_aihubmix,
     fetch_models_from_aimo,
@@ -30,11 +32,9 @@ from src.services.models import (
     fetch_models_from_fal,
     fetch_models_from_featherless,
     fetch_models_from_fireworks,
-    fetch_models_from_groq,
     fetch_models_from_helicone,
     fetch_models_from_near,
     fetch_models_from_openai,
-    fetch_models_from_openrouter,
     fetch_models_from_together,
     fetch_models_from_vercel_ai_gateway,
     fetch_models_from_zai,
@@ -197,6 +197,11 @@ def transform_normalized_model_to_db_schema(
 
         # Extract model name
         model_name = normalized_model.get("name") or model_id
+
+        # Safety validation: ensure name is clean even if normalization missed it
+        from src.utils.model_name_validator import clean_model_name
+
+        model_name = clean_model_name(model_name)
 
         # Extract description
         description = normalized_model.get("description")
@@ -623,9 +628,11 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     from src.services.model_catalog_cache import (
                         invalidate_full_catalog,
                         invalidate_provider_catalog,
+                        invalidate_unique_models,
+                        invalidate_catalog_stats,
                     )
 
-                    # Invalidate in-memory cache for this provider
+                    # Invalidate in-memory cache for this provider (deprecated, will be removed)
                     clear_models_cache(provider_slug)
 
                     # Invalidate Redis provider-specific cache
@@ -637,6 +644,12 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     # Invalidate Redis full catalog (aggregated view)
                     # This ensures 'all' requests get fresh data too
                     invalidate_full_catalog()
+
+                    # Invalidate unique models cache (since provider changes affect unique models)
+                    invalidate_unique_models()
+
+                    # Invalidate catalog statistics cache
+                    invalidate_catalog_stats()
 
                     logger.info(
                         f"Cache invalidated for {provider_slug} after model sync. "

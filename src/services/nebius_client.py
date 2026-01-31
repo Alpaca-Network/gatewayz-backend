@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.cache import _nebius_models_cache
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -351,13 +352,16 @@ def _normalize_nebius_model(model: Any) -> dict[str, Any] | None:
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "nebius"
 
     # Generate display name from model ID
-    display_name = payload.get("display_name") or payload.get("name")
-    if not display_name:
+    raw_display_name = payload.get("display_name") or payload.get("name")
+    if not raw_display_name:
         # Convert "deepseek-ai/DeepSeek-R1-0528" to "DeepSeek R1 0528"
         if "/" in model_id:
-            display_name = model_id.split("/")[-1].replace("-", " ")
+            raw_display_name = model_id.split("/")[-1].replace("-", " ")
         else:
-            display_name = model_id.replace("-", " ")
+            raw_display_name = model_id.replace("-", " ")
+
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
 
     description = payload.get("description") or f"Nebius hosted model '{display_name}'."
     context_length = (

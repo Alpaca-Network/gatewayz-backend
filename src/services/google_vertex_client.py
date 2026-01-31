@@ -31,6 +31,7 @@ import httpx
 
 from src.config import Config
 from datetime import UTC
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -1499,7 +1500,9 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
 
         # Get version info
         version_info = api_model.get("versionId", "")
-        display_name = api_model.get("openSourceCategory", "") or model_id
+        raw_display_name = api_model.get("openSourceCategory", "") or model_id
+        # Clean malformed model names (remove company prefix, parentheses, etc.)
+        display_name = clean_model_name(raw_display_name)
 
         # Extract from publisherModelTemplate if available
         template = api_model.get("publisherModelTemplate", {})
