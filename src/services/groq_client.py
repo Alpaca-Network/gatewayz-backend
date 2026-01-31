@@ -151,20 +151,20 @@ def normalize_groq_model(groq_model: dict) -> dict:
     """Normalize Groq catalog entries to resemble OpenRouter model shape"""
     from src.services.pricing_lookup import enrich_model_with_pricing
 
-    model_id = groq_model.get("id")
-    if not model_id:
+    provider_model_id = groq_model.get("id")
+    if not provider_model_id:
         return {"source_gateway": "groq", "raw_groq": groq_model or {}}
 
-    slug = f"groq/{model_id}"
+    slug = f"groq/{provider_model_id}"
     provider_slug = "groq"
 
     raw_display_name = (
-        groq_model.get("display_name") or model_id.replace("-", " ").replace("_", " ").title()
+        groq_model.get("display_name") or provider_model_id.replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = groq_model.get("owned_by")
-    base_description = groq_model.get("description") or f"Groq hosted model {model_id}."
+    base_description = groq_model.get("description") or f"Groq hosted model {provider_model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:

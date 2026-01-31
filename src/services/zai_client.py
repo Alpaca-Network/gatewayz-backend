@@ -152,22 +152,22 @@ def normalize_zai_model(zai_model: dict) -> dict | None:
     """
     from src.services.pricing_lookup import enrich_model_with_pricing
 
-    model_id = zai_model.get("id")
-    if not model_id:
+    provider_model_id = zai_model.get("id")
+    if not provider_model_id:
         return {"source_gateway": "zai", "raw_zai": zai_model or {}}
 
-    slug = f"zai/{model_id}"
+    slug = f"zai/{provider_model_id}"
     provider_slug = "zai"
 
     raw_display_name = (
         zai_model.get("display_name")
         or zai_model.get("name")
-        or model_id.replace("-", " ").replace("_", " ").title()
+        or provider_model_id.replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = zai_model.get("owned_by", "zai")
-    base_description = zai_model.get("description") or f"Z.AI GLM model {model_id}."
+    base_description = zai_model.get("description") or f"Z.AI GLM model {provider_model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Provided by Z.AI."
     else:

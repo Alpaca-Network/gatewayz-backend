@@ -628,8 +628,8 @@ def fetch_models_from_openrouter():
             # Mark OpenRouter free models (those with :free suffix)
             # Only OpenRouter has legitimately free models
             # Use `or ""` to handle both missing keys and null values
-            model_id = model.get("id") or ""
-            model["is_free"] = model_id.endswith(":free")
+            provider_model_id = model.get("id") or ""
+            model["is_free"] = provider_model_id.endswith(":free")
 
             filtered_models.append(model)
 

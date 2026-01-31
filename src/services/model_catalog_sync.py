@@ -181,20 +181,18 @@ def transform_normalized_model_to_db_schema(
         Dictionary matching database schema or None if invalid
     """
     try:
-        # Extract model ID - try various fields
-        model_id = (
+        # Extract model name - try various fields
+        model_name = (
             normalized_model.get("id")
             or normalized_model.get("slug")
             or normalized_model.get("canonical_slug")
             or normalized_model.get("model_id")
+            or normalized_model.get("name")
         )
 
-        if not model_id:
-            logger.warning(f"Skipping model without ID from {provider_slug}: {normalized_model}")
+        if not model_name:
+            logger.warning(f"Skipping model without name from {provider_slug}: {normalized_model}")
             return None
-
-        # Extract model name
-        model_name = normalized_model.get("name") or model_id
 
         # Safety validation: ensure name is clean even if normalization missed it
         from src.utils.model_name_validator import clean_model_name
@@ -252,15 +250,14 @@ def transform_normalized_model_to_db_schema(
         if normalized_model.get("default_parameters"):
             metadata["default_parameters"] = normalized_model["default_parameters"]
 
-        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_id
-        # This is important for providers like Google Vertex where the model_id (e.g., "gemini-3-flash")
+        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_name
+        # This is important for providers like Google Vertex where the model_name (e.g., "gemini-3-flash")
         # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
-        provider_model_id = normalized_model.get("provider_model_id") or model_id
+        provider_model_id = normalized_model.get("provider_model_id") or model_name
 
         # Build model data - pricing is stored separately in model_pricing table
         model_data = {
             "provider_id": provider_id,
-            "model_id": str(model_id),
             "model_name": str(model_name),
             "provider_model_id": str(provider_model_id),
             "description": description,

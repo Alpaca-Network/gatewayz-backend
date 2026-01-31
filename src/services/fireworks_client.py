@@ -142,23 +142,23 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     """Normalize Fireworks catalog entries to resemble OpenRouter model shape"""
     from src.services.pricing_lookup import enrich_model_with_pricing
 
-    model_id = fireworks_model.get("id")
-    if not model_id:
+    provider_model_id = fireworks_model.get("id")
+    if not provider_model_id:
         return {"source_gateway": "fireworks", "raw_fireworks": fireworks_model or {}}
 
     # Fireworks uses format like "accounts/fireworks/models/deepseek-v3p1"
     # We'll keep the full ID as-is
-    slug = model_id
+    slug = provider_model_id
     provider_slug = "fireworks"
 
     raw_display_name = (
         fireworks_model.get("display_name")
-        or model_id.split("/")[-1].replace("-", " ").replace("_", " ").title()
+        or provider_model_id.split("/")[-1].replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = fireworks_model.get("owned_by")
-    base_description = fireworks_model.get("description") or f"Fireworks hosted model {model_id}."
+    base_description = fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:

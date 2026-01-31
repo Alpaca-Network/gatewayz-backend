@@ -219,20 +219,20 @@ def fetch_models_from_xai():
         if db_fallback:
             normalized_models = []
             for db_model in db_fallback:
-                model_id = db_model.get("id") or db_model.get("model_id")
-                if not model_id:
+                provider_model_id = db_model.get("id") or db_model.get("model_id")
+                if not provider_model_id:
                     continue
 
                 # Get and clean model name from database
-                raw_name = db_model.get("name") or model_id.replace("-", " ").title()
+                raw_name = db_model.get("name") or provider_model_id.replace("-", " ").title()
                 cleaned_name = clean_model_name(raw_name)
 
                 model = {
-                    "id": model_id,
-                    "slug": model_id,
-                    "canonical_slug": model_id,
+                    "id": provider_model_id,
+                    "slug": provider_model_id,
+                    "canonical_slug": provider_model_id,
                     "name": cleaned_name,
-                    "description": db_model.get("description") or f"xAI Grok model: {model_id}",
+                    "description": db_model.get("description") or f"xAI Grok model: {provider_model_id}",
                     "context_length": db_model.get("context_length") or 131072,
                     "architecture": db_model.get("metadata", {}).get("architecture") or {
                         "modality": "text->text",

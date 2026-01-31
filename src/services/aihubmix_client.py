@@ -226,8 +226,8 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     from src.services.pricing_lookup import enrich_model_with_pricing
 
     # Support both 'id' and 'model_id' field names for API compatibility
-    model_id = model.get("id") or model.get("model_id")
-    if not model_id:
+    provider_model_id = model.get("id") or model.get("model_id")
+    if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
         logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
@@ -245,11 +245,11 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
 
         # Filter out models with zero pricing (free models can drain credits)
         if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
-            logger.debug(f"Filtering out AiHubMix model {model_id} with zero pricing")
+            logger.debug(f"Filtering out AiHubMix model {provider_model_id} with zero pricing")
             return None
 
-        # Get model name, falling back to model_id
-        model_name = model.get("name") or model_id
+        # Get model name, falling back to provider_model_id
+        model_name = model.get("name") or provider_model_id
 
         # Get description from 'desc' or 'description' field
         description = model.get("description") or model.get("desc") or "Model from AiHubMix"
@@ -262,9 +262,9 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
             input_modalities = ["text"]
 
         normalized = {
-            "id": model_id,
-            "slug": f"aihubmix/{model_id}",
-            "canonical_slug": f"aihubmix/{model_id}",
+            "id": provider_model_id,
+            "slug": f"aihubmix/{provider_model_id}",
+            "canonical_slug": f"aihubmix/{provider_model_id}",
             "hugging_face_id": None,
             "name": model_name,
             "created": model.get("created_at"),
@@ -302,19 +302,19 @@ def normalize_aihubmix_model(model) -> dict | None:
 
     # Support both attribute and dict access, and both 'id' and 'model_id' field names
     if isinstance(model, dict):
-        model_id = model.get("id") or model.get("model_id")
-        raw_model_name = model.get("name") or model_id
+        provider_model_id = model.get("id") or model.get("model_id")
+        raw_model_name = model.get("name") or provider_model_id
         created_at = model.get("created_at")
         description = model.get("description") or model.get("desc") or "Model from AiHubMix"
         context_length = model.get("context_length") or 4096
     else:
-        model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
-        raw_model_name = getattr(model, "name", model_id)
+        provider_model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
+        raw_model_name = getattr(model, "name", provider_model_id)
         created_at = getattr(model, "created_at", None)
         description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
         context_length = getattr(model, "context_length", 4096)
 
-    if not model_id:
+    if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
         logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
         return None
@@ -324,9 +324,9 @@ def normalize_aihubmix_model(model) -> dict | None:
 
     try:
         normalized = {
-            "id": model_id,
-            "slug": f"aihubmix/{model_id}",
-            "canonical_slug": f"aihubmix/{model_id}",
+            "id": provider_model_id,
+            "slug": f"aihubmix/{provider_model_id}",
+            "canonical_slug": f"aihubmix/{provider_model_id}",
             "hugging_face_id": None,
             "name": model_name,
             "created": created_at,

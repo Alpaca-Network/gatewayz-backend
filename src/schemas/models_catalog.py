@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 class ModelBase(BaseModel):
     """Base model schema"""
     provider_id: int = Field(..., description="Provider ID (foreign key)")
-    model_id: str = Field(..., description="Standardized model ID")
     model_name: str = Field(..., description="Model display name")
     provider_model_id: str = Field(..., description="Provider-specific model identifier")
     description: str | None = Field(None, description="Model description")
@@ -50,7 +49,6 @@ class ModelBulkCreate(BaseModel):
 class ModelUpdate(BaseModel):
     """Schema for updating a model (all fields optional)"""
     provider_id: int | None = None
-    model_id: str | None = None
     model_name: str | None = None
     provider_model_id: str | None = None
     description: str | None = None

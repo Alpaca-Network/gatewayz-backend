@@ -307,19 +307,19 @@ def normalize_vercel_model(model) -> dict | None:
     from src.services.pricing_lookup import enrich_model_with_pricing
 
     # Extract model ID
-    model_id = getattr(model, "id", None)
-    if not model_id:
+    provider_model_id = getattr(model, "id", None)
+    if not provider_model_id:
         logger.warning("Vercel model missing 'id' field: %s", sanitize_for_logging(str(model)))
         return None
 
     # Determine provider from model ID
     # Models come in formats like "openai/gpt-4", "google/gemini-pro", etc.
-    if "/" in model_id:
-        provider_slug = model_id.split("/")[0]
-        raw_display_name = model_id.split("/")[1]
+    if "/" in provider_model_id:
+        provider_slug = provider_model_id.split("/")[0]
+        raw_display_name = provider_model_id.split("/")[1]
     else:
         provider_slug = "vercel"
-        raw_display_name = model_id
+        raw_display_name = provider_model_id
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
 
@@ -333,12 +333,12 @@ def normalize_vercel_model(model) -> dict | None:
     created = getattr(model, "created_at", None)
 
     # Fetch pricing dynamically from Vercel or underlying provider
-    pricing = get_vercel_model_pricing(model_id)
+    pricing = get_vercel_model_pricing(provider_model_id)
 
     normalized = {
-        "id": model_id,
-        "slug": f"vercel/{model_id}",
-        "canonical_slug": f"vercel/{model_id}",
+        "id": provider_model_id,
+        "slug": f"vercel/{provider_model_id}",
+        "canonical_slug": f"vercel/{provider_model_id}",
         "hugging_face_id": None,
         "name": display_name,
         "created": created,

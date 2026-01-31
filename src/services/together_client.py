@@ -114,22 +114,22 @@ def normalize_together_model(together_model: dict) -> dict:
     """Normalize Together catalog entries to resemble OpenRouter model shape"""
     from src.services.pricing_lookup import enrich_model_with_pricing
 
-    model_id = together_model.get("id")
-    if not model_id:
+    provider_model_id = together_model.get("id")
+    if not provider_model_id:
         return {"source_gateway": "together", "raw_together": together_model or {}}
 
-    slug = model_id
+    slug = provider_model_id
     provider_slug = "together"
 
     # Get display name from API or generate from model ID
     raw_display_name = (
         together_model.get("display_name")
-        or model_id.replace("/", " / ").replace("-", " ").replace("_", " ").title()
+        or provider_model_id.replace("/", " / ").replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove parentheses with size info, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = together_model.get("owned_by") or together_model.get("organization")
-    base_description = together_model.get("description") or f"Together hosted model {model_id}."
+    base_description = together_model.get("description") or f"Together hosted model {provider_model_id}."
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:

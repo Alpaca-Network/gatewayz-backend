@@ -392,7 +392,7 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
 
 def search_models(query: str, provider_id: int | None = None) -> list[dict[str, Any]]:
     """
-    Search models by name, model_id, or description
+    Search models by name, model_name, or description
 
     Args:
         query: Search query string
@@ -404,11 +404,11 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
     try:
         supabase = get_supabase_client()
 
-        # Search in model_name, model_id, and description
+        # Search in model_name and description
         search_query = (
             supabase.table("models")
             .select("*, providers!inner(*)")
-            .or_(f"model_name.ilike.%{query}%,model_id.ilike.%{query}%,description.ilike.%{query}%")
+            .or_(f"model_name.ilike.%{query}%,description.ilike.%{query}%")
         )
 
         if provider_id:
@@ -804,25 +804,25 @@ def get_models_by_gateway_for_catalog(
         return []
 
 
-def get_model_by_model_id_string(
-    model_id: str,
+def get_model_by_model_name_string(
+    model_name: str,
     provider_slug: str | None = None
 ) -> dict[str, Any] | None:
     """
-    Get a model by its model_id string (not integer primary key).
+    Get a model by its model_name string (not integer primary key).
 
-    This is useful for looking up models by their API-facing model ID
+    This is useful for looking up models by their API-facing model name
     (e.g., "gpt-4", "claude-3-opus") rather than the database primary key.
 
     Args:
-        model_id: The model's string identifier (model_id field)
+        model_name: The model's string identifier (model_name field)
         provider_slug: Optional provider slug to narrow search
 
     Returns:
         Model dictionary or None if not found
 
     Example:
-        >>> model = get_model_by_model_id_string("gpt-4")
+        >>> model = get_model_by_model_name_string("gpt-4")
         >>> model["model_name"]
         "GPT-4"
     """
@@ -832,7 +832,7 @@ def get_model_by_model_id_string(
         query = (
             supabase.table("models")
             .select("*, providers!inner(*)")
-            .eq("model_id", model_id)
+            .eq("model_name", model_name)
         )
 
         # Optionally filter by provider
@@ -842,7 +842,7 @@ def get_model_by_model_id_string(
         response = query.single().execute()
         return response.data
     except Exception as e:
-        logger.debug(f"Model {model_id} not found in database: {e}")
+        logger.debug(f"Model {model_name} not found in database: {e}")
         return None
 
 
@@ -855,8 +855,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 
     Database format:
     - id (int) - primary key
-    - model_id (str) - the API-facing identifier
-    - model_name (str) - display name
+    - model_name (str) - the API-facing identifier and display name
     - provider_id (int) - foreign key
     - providers (dict) - joined provider data
     - pricing_prompt (decimal) - per-token input cost
@@ -867,7 +866,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
     - etc.
 
     API format:
-    - id (str) - the model_id (not the DB primary key!)
+    - id (str) - the model_name (not the DB primary key!)
     - name (str) - display name
     - source_gateway (str) - provider slug
     - provider_slug (str) - provider slug
@@ -882,10 +881,10 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         Model dictionary in API format
 
     Example:
-        >>> db_model = get_model_by_model_id_string("gpt-4")
+        >>> db_model = get_model_by_model_name_string("gpt-4")
         >>> api_model = transform_db_model_to_api_format(db_model)
         >>> api_model["id"]
-        "gpt-4"  # model_id, not primary key
+        "gpt-4"  # model_name, not primary key
         >>> api_model["source_gateway"]
         "openai"
     """
@@ -903,8 +902,8 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 
         # Build API format model
         api_model = {
-            # Use model_id as the API-facing id (not the DB primary key)
-            "id": db_model.get("model_id", ""),
+            # Use model_name as the API-facing id (not the DB primary key)
+            "id": db_model.get("model_name", ""),
             "name": db_model.get("model_name", ""),
             "source_gateway": provider_slug,
             "provider_slug": provider_slug,
@@ -914,6 +913,9 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
             "modality": db_model.get("modality"),
             "is_active": db_model.get("is_active", True),
             "health_status": db_model.get("health_status"),
+            # Include provider URLs from the joined providers table
+            "provider_site_url": provider.get("site_url"),
+            "model_logo_url": provider.get("logo_url"),
         }
 
         # Include metadata if present
@@ -932,7 +934,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         logger.error(f"Error transforming DB model to API format: {e}")
         # Return a minimal model on error to avoid breaking the catalog
         return {
-            "id": db_model.get("model_id", "unknown"),
+            "id": db_model.get("model_name", "unknown"),
             "name": db_model.get("model_name", "Unknown Model"),
             "source_gateway": "unknown",
             "provider_slug": "unknown",
@@ -1005,10 +1007,9 @@ def get_models_for_catalog_with_filters(
             query = query.eq("modality", modality)
 
         if search_query:
-            # Search in model_id, model_name, or description
+            # Search in model_name or description
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_id.ilike.{search_pattern},"
                 f"model_name.ilike.{search_pattern},"
                 f"description.ilike.{search_pattern}"
             )
@@ -1083,7 +1084,6 @@ def get_models_count_by_filters(
         if search_query:
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_id.ilike.{search_pattern},"
                 f"model_name.ilike.{search_pattern},"
                 f"description.ilike.{search_pattern}"
             )
@@ -1310,7 +1310,7 @@ def get_all_unique_models_for_catalog(
                 'provider_slug': provider.get('slug'),
                 'provider_name': provider.get('name'),
                 'model_id': model.get('id'),
-                'model_api_id': model.get('model_id'),
+                'model_api_name': model.get('model_name'),
                 'provider_model_id': model.get('provider_model_id'),
                 'pricing_prompt': model.get('pricing_prompt'),
                 'pricing_completion': model.get('pricing_completion'),
@@ -1448,7 +1448,7 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
                 'supports_vision': provider.get('supports_vision', False),
                 'description': provider.get('description'),
                 'architecture': provider.get('architecture'),
-                'model_id': provider.get('model_api_id')  # Include original model_id
+                'model_name': provider.get('model_api_name')  # Include original model_name
             }
 
             transformed_providers.append(transformed_provider)

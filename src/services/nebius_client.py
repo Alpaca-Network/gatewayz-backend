@@ -340,14 +340,14 @@ def _normalize_nebius_model(model: Any) -> dict[str, Any] | None:
     if not raw_id:
         return None
 
-    model_id = str(raw_id).strip()
+    provider_model_id = str(raw_id).strip()
 
     # Extract provider from model ID (e.g., "deepseek-ai/DeepSeek-R1" -> "deepseek-ai")
     provider_slug = (
         payload.get("provider_slug")
         or payload.get("provider")
         or payload.get("owned_by")
-        or (model_id.split("/")[0] if "/" in model_id else "nebius")
+        or (provider_model_id.split("/")[0] if "/" in provider_model_id else "nebius")
     )
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "nebius"
 
@@ -355,10 +355,10 @@ def _normalize_nebius_model(model: Any) -> dict[str, Any] | None:
     raw_display_name = payload.get("display_name") or payload.get("name")
     if not raw_display_name:
         # Convert "deepseek-ai/DeepSeek-R1-0528" to "DeepSeek R1 0528"
-        if "/" in model_id:
-            raw_display_name = model_id.split("/")[-1].replace("-", " ")
+        if "/" in provider_model_id:
+            raw_display_name = provider_model_id.split("/")[-1].replace("-", " ")
         else:
-            raw_display_name = model_id.replace("-", " ")
+            raw_display_name = provider_model_id.replace("-", " ")
 
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
@@ -381,10 +381,10 @@ def _normalize_nebius_model(model: Any) -> dict[str, Any] | None:
     }
 
     normalized = {
-        "id": model_id,
-        "slug": model_id,
-        "canonical_slug": model_id,
-        "hugging_face_id": payload.get("hugging_face_id") or model_id,
+        "id": provider_model_id,
+        "slug": provider_model_id,
+        "canonical_slug": provider_model_id,
+        "hugging_face_id": payload.get("hugging_face_id") or provider_model_id,
         "name": display_name,
         "created": payload.get("created"),
         "description": description,

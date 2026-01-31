@@ -154,15 +154,15 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
     from src.services.pricing_lookup import enrich_model_with_pricing
 
     try:
-        model_id = openai_model.get("id")
-        if not model_id:
+        provider_model_id = openai_model.get("id")
+        if not provider_model_id:
             return None
 
-        slug = f"openai/{model_id}"
+        slug = f"openai/{provider_model_id}"
         provider_slug = "openai"
 
         # Generate display name
-        raw_display_name = model_id.replace("-", " ").replace("_", " ").title()
+        raw_display_name = provider_model_id.replace("-", " ").replace("_", " ").title()
         # Clean up common patterns
         raw_display_name = raw_display_name.replace("Gpt ", "GPT-")
         raw_display_name = raw_display_name.replace("O1 ", "o1-")
@@ -170,25 +170,25 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         # Clean malformed model names (remove company prefix, parentheses, etc.)
         display_name = clean_model_name(raw_display_name)
 
-        description = f"OpenAI {model_id} model."
+        description = f"OpenAI {provider_model_id} model."
 
         # Determine context length based on model
         # Context lengths are aligned with manual_pricing.json values
-        if "gpt-3.5" in model_id:
+        if "gpt-3.5" in provider_model_id:
             context_length = 16385
-        elif "gpt-4-32k" in model_id:
+        elif "gpt-4-32k" in provider_model_id:
             context_length = 32768
-        elif "gpt-4o" in model_id:
+        elif "gpt-4o" in provider_model_id:
             context_length = 128000
-        elif model_id in ("o1", "o1-2024-12-17", "o3-mini"):
+        elif provider_model_id in ("o1", "o1-2024-12-17", "o3-mini"):
             # Latest o1 and o3-mini have 200k context
             context_length = 200000
-        elif "o1" in model_id or "o3" in model_id:
+        elif "o1" in provider_model_id or "o3" in provider_model_id:
             # o1-preview, o1-mini have 128k context
             context_length = 128000
-        elif "gpt-4-turbo" in model_id:
+        elif "gpt-4-turbo" in provider_model_id:
             context_length = 128000
-        elif "gpt-4" in model_id:
+        elif "gpt-4" in provider_model_id:
             # Base gpt-4 models have 8k context
             context_length = 8192
         else:
@@ -199,7 +199,7 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         modality = MODALITY_TEXT_TO_TEXT
         input_modalities = ["text"]
         output_modalities = ["text"]
-        if "vision" in model_id or "gpt-4o" in model_id or "gpt-4-turbo" in model_id:
+        if "vision" in provider_model_id or "gpt-4o" in provider_model_id or "gpt-4-turbo" in provider_model_id:
             modality = "text+image->text"
             input_modalities = ["text", "image"]
 

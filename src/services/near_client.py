@@ -135,17 +135,17 @@ def normalize_near_model(near_model: dict) -> dict:
     """
     from src.services.pricing_lookup import enrich_model_with_pricing
 
-    model_id = near_model.get("modelId")
-    if not model_id:
+    provider_model_id = near_model.get("modelId")
+    if not provider_model_id:
         # Fallback to 'id' for backward compatibility
-        model_id = near_model.get("id")
-        if not model_id:
+        provider_model_id = near_model.get("id")
+        if not provider_model_id:
             logger.warning(
                 "Near AI model missing 'modelId' field: %s", sanitize_for_logging(str(near_model))
             )
             return None
 
-    slug = f"near/{model_id}"
+    slug = f"near/{provider_model_id}"
     provider_slug = "near"
 
     # Extract metadata from Near AI API response
@@ -153,7 +153,7 @@ def normalize_near_model(near_model: dict) -> dict:
     raw_display_name = (
         metadata.get("displayName")
         or near_model.get("display_name")
-        or model_id.replace("-", " ").replace("_", " ").title()
+        or provider_model_id.replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
@@ -163,7 +163,7 @@ def normalize_near_model(near_model: dict) -> dict:
     base_description = (
         metadata.get("description")
         or near_model.get("description")
-        or f"Near AI hosted model {model_id}."
+        or f"Near AI hosted model {provider_model_id}."
     )
     security_features = " Security: Private AI inference with decentralized execution, cryptographic verification, and on-chain auditing."
     description = f"{base_description}{security_features}"
