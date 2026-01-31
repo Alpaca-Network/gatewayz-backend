@@ -6,8 +6,7 @@ to the rate_limit_configs table works correctly, as documented in Issue #977.
 """
 
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import src.db.rate_limits as rate_limits_module
 
@@ -36,9 +35,11 @@ def sample_api_key_id():
     return 67890
 
 
+@pytest.mark.unit
 class TestGetUserRateLimitsConfigsMigration:
     """Test get_user_rate_limits with rate_limit_configs table"""
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_get_rate_limits_from_configs_table(
         self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id
@@ -79,6 +80,7 @@ class TestGetUserRateLimitsConfigsMigration:
         assert result["tokens_per_hour"] == 120000
         assert result["tokens_per_day"] == 2880000  # 120000 * 24
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_get_rate_limits_returns_none_when_no_config(
         self, mock_get_client, mock_supabase_client, sample_api_key
@@ -100,6 +102,7 @@ class TestGetUserRateLimitsConfigsMigration:
         # Verify
         assert result is None
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_get_rate_limits_handles_missing_api_key(
         self, mock_get_client, mock_supabase_client, sample_api_key
@@ -122,9 +125,11 @@ class TestGetUserRateLimitsConfigsMigration:
         assert result is None
 
 
+@pytest.mark.unit
 class TestSetUserRateLimitsConfigsMigration:
     """Test set_user_rate_limits with rate_limit_configs table"""
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_set_rate_limits_creates_new_config(
         self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
@@ -174,6 +179,7 @@ class TestSetUserRateLimitsConfigsMigration:
         # Verify insert was called
         assert mock_supabase_client.table.call_count >= 2
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_set_rate_limits_updates_existing_config(
         self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
@@ -216,6 +222,7 @@ class TestSetUserRateLimitsConfigsMigration:
         # Verify update was called
         assert mock_supabase_client.table.call_count >= 2
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_set_rate_limits_raises_error_for_missing_key(
         self, mock_get_client, mock_supabase_client, sample_api_key
@@ -236,9 +243,11 @@ class TestSetUserRateLimitsConfigsMigration:
             rate_limits_module.set_user_rate_limits(sample_api_key, {})
 
 
+@pytest.mark.unit
 class TestRateLimitsLegacyTableRemoval:
     """Test that legacy rate_limits table is no longer referenced"""
 
+    @pytest.mark.unit
     @patch("src.db.rate_limits.get_supabase_client")
     def test_no_fallback_to_legacy_table(
         self, mock_get_client, mock_supabase_client, sample_api_key
@@ -267,6 +276,7 @@ class TestRateLimitsLegacyTableRemoval:
         table_calls = [call[0][0] for call in mock_supabase_client.table.call_args_list]
         assert "rate_limits" not in table_calls, "Legacy rate_limits table should not be accessed"
 
+    @pytest.mark.unit
     def test_set_user_rate_limits_uses_configs_table(self):
         """
         Verify that set_user_rate_limits uses rate_limit_configs table.
@@ -287,9 +297,11 @@ class TestRateLimitsLegacyTableRemoval:
             "set_user_rate_limits should not write to legacy rate_limits table"
 
 
+@pytest.mark.integration
 class TestRateLimitConfigsIntegration:
     """Integration tests for rate_limit_configs functionality"""
 
+    @pytest.mark.integration
     @patch("src.db.rate_limits.get_supabase_client")
     def test_full_lifecycle_create_retrieve_update(
         self, mock_get_client, sample_api_key, sample_api_key_id, sample_user_id
@@ -344,6 +356,7 @@ class TestRateLimitConfigsIntegration:
 
 
 # Smoke test
+@pytest.mark.unit
 def test_module_imports():
     """Smoke test to ensure the module imports correctly after migration"""
     import src.db.rate_limits

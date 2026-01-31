@@ -490,7 +490,7 @@ async def update_admin_rate_limits(
         config_dict = request.config.model_dump()
 
         # Use the set_user_rate_limits function
-        set_user_rate_limits(request.api_key, config_dict)
+        await set_user_rate_limits(request.api_key, config_dict)
 
         logger.info(
             f"Admin {admin_user.get('username')} updated rate limits for key {request.api_key[:15]}..."
@@ -530,37 +530,67 @@ async def delete_rate_limits(
     - The key will use default rate limits going forward
     """
     try:
+        import asyncio
         from src.config.supabase_config import get_supabase_client
+        from src.db.users import get_user
 
-        client = get_supabase_client()
+        # Wrap all sync database operations in asyncio.to_thread
+        def _delete_rate_limits_sync():
+            client = get_supabase_client()
 
-        # Delete from rate_limit_configs table
-        deleted_from_rate_limit_configs = False
-        try:
-            # Get API key ID
-            key_record = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
-            if key_record.data and len(key_record.data) > 0:
-                api_key_id = key_record.data[0]["id"]
-                result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
-                deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
-        except Exception as e:
-            logger.debug(f"Could not delete from rate_limit_configs table: {e}")
+            # Delete from rate_limit_configs table
+            deleted_from_rate_limit_configs = False
+            api_key_id = None
+            user_id = None
 
-        # Try to reset rate_limit_config in api_keys_new table
-        try:
-            result = (
-                client.table("api_keys_new")
-                .update({
-                    "rate_limit_config": None,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                })
-                .eq("api_key", api_key)
-                .execute()
-            )
-            reset_in_api_keys = len(result.data) > 0 if result.data else False
-        except Exception as e:
-            logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
+            try:
+                # Get API key ID and user_id
+                key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", api_key).execute()
+                if key_record.data and len(key_record.data) > 0:
+                    api_key_id = key_record.data[0]["id"]
+                    user_id = key_record.data[0]["user_id"]
+                    result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
+                    deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
+            except Exception as e:
+                logger.debug(f"Could not delete from rate_limit_configs table: {e}")
+
+            # Try to reset rate_limit_config in api_keys_new table
             reset_in_api_keys = False
+            try:
+                result = (
+                    client.table("api_keys_new")
+                    .update({
+                        "rate_limit_config": None,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    .eq("api_key", api_key)
+                    .execute()
+                )
+                reset_in_api_keys = len(result.data) > 0 if result.data else False
+            except Exception as e:
+                logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
+
+            # Add audit log entry
+            if user_id and api_key_id:
+                try:
+                    client.table("api_key_audit_logs").insert({
+                        "user_id": user_id,
+                        "api_key_id": api_key_id,
+                        "action": "rate_limits_deleted",
+                        "details": {
+                            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
+                            "reset_in_api_keys": reset_in_api_keys,
+                            "admin_user": admin_user.get('username'),
+                        },
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }).execute()
+                except Exception as audit_error:
+                    logger.debug(f"Failed to create audit log: {audit_error}")
+
+            return deleted_from_rate_limit_configs, reset_in_api_keys
+
+        # Execute sync operations in thread pool
+        deleted_from_rate_limit_configs, reset_in_api_keys = await asyncio.to_thread(_delete_rate_limits_sync)
 
         logger.info(
             f"Admin {admin_user.get('username')} deleted rate limits for key {api_key[:15]}..."

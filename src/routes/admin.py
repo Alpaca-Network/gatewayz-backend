@@ -185,7 +185,7 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
 @router.post("/admin/limit", tags=["admin"])
 async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depends(require_admin)):
     try:
-        set_user_rate_limits(req.api_key, req.rate_limits.model_dump())
+        await set_user_rate_limits(req.api_key, req.rate_limits.model_dump())
 
         rate_limits = get_user_rate_limits(req.api_key)
 
