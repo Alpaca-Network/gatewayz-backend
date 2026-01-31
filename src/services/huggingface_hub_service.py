@@ -426,7 +426,6 @@ def normalize_model_info(model_info: Any) -> dict[str, Any] | None:
             "context_length": 0,
             "architecture": architecture,
             "pricing": pricing,
-            "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [],
             "default_parameters": {},

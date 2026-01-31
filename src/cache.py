@@ -1,6 +1,25 @@
-"""Cache module for storing model and provider data"""
+"""Cache module for storing model and provider data
+
+DEPRECATED: This module is being phased out in favor of the unified Redis-based
+caching system in src/services/model_catalog_cache.py.
+
+The in-memory cache dictionaries in this module are no longer recommended for use.
+Instead, use the ModelCatalogCache class which provides:
+- Redis-backed distributed caching
+- Local memory fallback for resilience
+- Automatic cache invalidation
+- Better observability and metrics
+
+Migration path:
+- Old: get_models_cache("openrouter")
+- New: from src.services.model_catalog_cache import get_cached_gateway_catalog
+       get_cached_gateway_catalog("openrouter")
+
+This module will be removed in a future version.
+"""
 
 import logging
+import warnings
 from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
@@ -260,7 +279,17 @@ _gateway_error_cache = {}
 
 # Cache access functions
 def get_models_cache(gateway: str):
-    """Get cache for a specific gateway"""
+    """Get cache for a specific gateway
+
+    DEPRECATED: Use src.services.model_catalog_cache.get_cached_gateway_catalog() instead.
+    This function will be removed in a future version.
+    """
+    warnings.warn(
+        "get_models_cache() is deprecated. Use get_cached_gateway_catalog() from "
+        "src.services.model_catalog_cache instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     cache_map = {
         "openrouter": _models_cache,
         "featherless": _featherless_models_cache,

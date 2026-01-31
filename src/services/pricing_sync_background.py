@@ -196,11 +196,10 @@ class PricingSyncService:
         """
         model_id = model.get("id")
 
-        # Get source_gateway from metadata, top_provider, or provider relationship
+        # Get source_gateway from metadata or provider relationship
         metadata = model.get("metadata", {}) or {}
         source_gateway = (
             metadata.get("source_gateway") or
-            model.get("top_provider") or
             ""
         ).lower()
 

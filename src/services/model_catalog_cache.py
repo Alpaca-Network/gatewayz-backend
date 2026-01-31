@@ -31,12 +31,18 @@ class ModelCatalogCache:
     PREFIX_PROVIDER = "models:provider"
     PREFIX_MODEL = "models:model"
     PREFIX_PRICING = "models:pricing"
+    PREFIX_GATEWAY = "models:gateway"
+    PREFIX_STATS = "models:stats"
+    PREFIX_UNIQUE = "models:unique"
 
     # Cache TTL values (in seconds)
     TTL_FULL_CATALOG = 900  # 15 minutes - full aggregated catalog
     TTL_PROVIDER = 1800  # 30 minutes - individual provider catalogs
     TTL_MODEL = 3600  # 60 minutes - individual model metadata
     TTL_PRICING = 3600  # 60 minutes - pricing data (relatively static)
+    TTL_GATEWAY = 1800  # 30 minutes - gateway/provider catalogs
+    TTL_STATS = 900  # 15 minutes - catalog statistics
+    TTL_UNIQUE = 1800  # 30 minutes - unique models list
 
     def __init__(self):
         self.redis_client = get_redis_client()
@@ -474,6 +480,222 @@ class ModelCatalogCache:
             "invalidations": 0,
         }
 
+    # Gateway Catalog Caching (alias for provider catalog with consistent naming)
+
+    def get_gateway_catalog(self, gateway_name: str) -> list[dict[str, Any]] | None:
+        """Get cached model catalog for a specific gateway.
+
+        This is an alias for get_provider_catalog to support consistent naming
+        across the codebase (gateway vs provider terminology).
+
+        Args:
+            gateway_name: Gateway name (e.g., "openrouter", "anthropic")
+
+        Returns:
+            Cached gateway catalog or None if not found
+        """
+        return self.get_provider_catalog(gateway_name)
+
+    def set_gateway_catalog(
+        self,
+        gateway_name: str,
+        catalog: list[dict[str, Any]],
+        ttl: int | None = None,
+    ) -> bool:
+        """Cache model catalog for a specific gateway.
+
+        This is an alias for set_provider_catalog to support consistent naming.
+
+        Args:
+            gateway_name: Gateway name
+            catalog: Gateway's model catalog
+            ttl: Time to live in seconds (default: TTL_GATEWAY)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        ttl = ttl or self.TTL_GATEWAY
+        return self.set_provider_catalog(gateway_name, catalog, ttl=ttl)
+
+    def invalidate_gateway_catalog(self, gateway_name: str) -> bool:
+        """Invalidate cached catalog for a specific gateway.
+
+        This is an alias for invalidate_provider_catalog to support consistent naming.
+
+        Args:
+            gateway_name: Gateway name
+
+        Returns:
+            True if successful, False otherwise
+        """
+        return self.invalidate_provider_catalog(gateway_name)
+
+    # Catalog Statistics Caching
+
+    def get_catalog_stats(self) -> dict[str, Any] | None:
+        """Get cached catalog statistics.
+
+        Returns:
+            Cached statistics or None if not found
+        """
+        if not self.redis_client or not is_redis_available():
+            return None
+
+        key = self.PREFIX_STATS
+
+        try:
+            cached_data = self.redis_client.get(key)
+            if cached_data:
+                self._stats["hits"] += 1
+                logger.debug("Cache HIT: Catalog statistics")
+                return json.loads(cached_data)
+            else:
+                self._stats["misses"] += 1
+                logger.debug("Cache MISS: Catalog statistics")
+                return None
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache GET error for catalog stats: {e}")
+            return None
+
+    def set_catalog_stats(
+        self,
+        stats: dict[str, Any],
+        ttl: int | None = None,
+    ) -> bool:
+        """Cache catalog statistics.
+
+        Args:
+            stats: Catalog statistics
+            ttl: Time to live in seconds (default: TTL_STATS)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client or not is_redis_available():
+            return False
+
+        key = self.PREFIX_STATS
+        ttl = ttl or self.TTL_STATS
+
+        try:
+            serialized_data = json.dumps(stats)
+            self.redis_client.setex(key, ttl, serialized_data)
+            self._stats["sets"] += 1
+            logger.debug(f"Cache SET: Catalog statistics (TTL: {ttl}s)")
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache SET error for catalog stats: {e}")
+            return False
+
+    def invalidate_catalog_stats(self) -> bool:
+        """Invalidate cached catalog statistics.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client or not is_redis_available():
+            return False
+
+        key = self.PREFIX_STATS
+
+        try:
+            self.redis_client.delete(key)
+            self._stats["invalidations"] += 1
+            logger.debug("Cache INVALIDATE: Catalog statistics")
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache INVALIDATE error for catalog stats: {e}")
+            return False
+
+    # Unique Models Caching
+
+    def get_unique_models(self) -> list[dict[str, Any]] | None:
+        """Get cached unique models list.
+
+        Returns:
+            Cached unique models or None if not found
+        """
+        if not self.redis_client or not is_redis_available():
+            return None
+
+        key = self.PREFIX_UNIQUE
+
+        try:
+            cached_data = self.redis_client.get(key)
+            if cached_data:
+                self._stats["hits"] += 1
+                logger.info("Cache HIT: Unique models")
+                return json.loads(cached_data)
+            else:
+                self._stats["misses"] += 1
+                logger.info("Cache MISS: Unique models")
+                return None
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache GET error for unique models: {e}")
+            return None
+
+    def set_unique_models(
+        self,
+        unique_models: list[dict[str, Any]],
+        ttl: int | None = None,
+    ) -> bool:
+        """Cache unique models list.
+
+        Args:
+            unique_models: List of unique models with providers
+            ttl: Time to live in seconds (default: TTL_UNIQUE)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client or not is_redis_available():
+            return False
+
+        key = self.PREFIX_UNIQUE
+        ttl = ttl or self.TTL_UNIQUE
+
+        try:
+            serialized_data = json.dumps(unique_models)
+            self.redis_client.setex(key, ttl, serialized_data)
+            self._stats["sets"] += 1
+            logger.info(f"Cache SET: Unique models ({len(unique_models)} models, TTL: {ttl}s)")
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache SET error for unique models: {e}")
+            return False
+
+    def invalidate_unique_models(self) -> bool:
+        """Invalidate cached unique models list.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client or not is_redis_available():
+            return False
+
+        key = self.PREFIX_UNIQUE
+
+        try:
+            self.redis_client.delete(key)
+            self._stats["invalidations"] += 1
+            logger.info("Cache INVALIDATE: Unique models")
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            logger.warning(f"Cache INVALIDATE error for unique models: {e}")
+            return False
+
 
 # Global cache instance
 _model_catalog_cache: ModelCatalogCache | None = None
@@ -654,3 +876,184 @@ def clear_all_model_caches() -> int:
     """Clear all model-related caches"""
     cache = get_model_catalog_cache()
     return cache.invalidate_all_models()
+
+
+# Gateway catalog convenience functions
+
+
+def cache_gateway_catalog(
+    gateway_name: str,
+    catalog: list[dict[str, Any]],
+    ttl: int | None = None,
+) -> bool:
+    """Cache model catalog for a specific gateway"""
+    cache = get_model_catalog_cache()
+    return cache.set_gateway_catalog(gateway_name, catalog, ttl=ttl)
+
+
+def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None:
+    """
+    Get cached gateway catalog with multi-tier caching.
+
+    Cache hierarchy:
+    1. Redis (primary) - distributed cache
+    2. Local memory (fallback) - for when Redis is slow/unavailable
+    3. Database (last resort) - kept fresh by scheduled sync
+
+    Args:
+        gateway_name: Gateway slug (e.g., "openrouter", "anthropic")
+
+    Returns:
+        Cached gateway catalog or empty list on error
+    """
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
+
+    cache = get_model_catalog_cache()
+
+    # 1. Try Redis first
+    cached = cache.get_gateway_catalog(gateway_name)
+    if cached is not None:
+        # Also update local cache for fallback
+        set_local_catalog(gateway_name, cached)
+        return cached
+
+    # 2. Try local memory cache (fallback for Redis failures)
+    local_data, is_stale = get_local_catalog(gateway_name)
+    if local_data is not None:
+        if is_stale:
+            logger.info(f"Local cache STALE HIT: {gateway_name} (returning stale data)")
+        else:
+            logger.info(f"Local cache HIT: {gateway_name}")
+        return local_data
+
+    # 3. Cache miss everywhere - fetch from database
+    logger.info(f"Cache MISS (all layers): Fetching {gateway_name} catalog from database")
+
+    try:
+        from src.db.models_catalog_db import (
+            get_models_by_gateway_for_catalog,
+            transform_db_models_batch,
+        )
+
+        # Fetch from database
+        db_models = get_models_by_gateway_for_catalog(
+            gateway_slug=gateway_name,
+            include_inactive=False
+        )
+
+        # Transform to API format
+        api_models = transform_db_models_batch(db_models)
+
+        # Cache in both Redis and local memory
+        cache.set_gateway_catalog(gateway_name, api_models, ttl=1800)
+        set_local_catalog(gateway_name, api_models)
+
+        logger.info(f"Fetched {len(api_models)} models for {gateway_name} from database and cached")
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error fetching {gateway_name} catalog from database: {e}")
+        return []
+
+
+def invalidate_gateway_catalog(gateway_name: str) -> bool:
+    """Invalidate cached gateway catalog"""
+    cache = get_model_catalog_cache()
+    return cache.invalidate_gateway_catalog(gateway_name)
+
+
+# Unique models convenience functions
+
+
+def get_cached_unique_models() -> list[dict[str, Any]] | None:
+    """
+    Get cached unique models with multi-tier caching.
+
+    Cache hierarchy:
+    1. Redis (primary) - distributed cache
+    2. Local memory (fallback) - for when Redis is slow/unavailable
+    3. Database (last resort) - kept fresh by scheduled sync
+
+    Returns:
+        Cached unique models or empty list on error
+    """
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
+
+    cache = get_model_catalog_cache()
+
+    # 1. Try Redis first
+    cached = cache.get_unique_models()
+    if cached is not None:
+        # Also update local cache for fallback
+        set_local_catalog("unique", cached)
+        return cached
+
+    # 2. Try local memory cache (fallback for Redis failures)
+    local_data, is_stale = get_local_catalog("unique")
+    if local_data is not None:
+        if is_stale:
+            logger.info("Local cache STALE HIT: unique models (returning stale data)")
+        else:
+            logger.info("Local cache HIT: unique models")
+        return local_data
+
+    # 3. Cache miss everywhere - compute from database
+    logger.info("Cache MISS (all layers): Computing unique models from database")
+
+    try:
+        from src.db.models_catalog_db import (
+            get_unique_models_for_catalog,
+            transform_db_models_batch,
+        )
+
+        # Fetch unique models from database
+        db_models = get_unique_models_for_catalog(include_inactive=False)
+
+        # Transform to API format
+        api_models = transform_db_models_batch(db_models)
+
+        # Cache in both Redis and local memory
+        cache.set_unique_models(api_models, ttl=1800)
+        set_local_catalog("unique", api_models)
+
+        logger.info(f"Computed {len(api_models)} unique models from database and cached")
+
+        return api_models
+
+    except Exception as e:
+        logger.error(f"Error computing unique models from database: {e}")
+        return []
+
+
+def cache_unique_models(unique_models: list[dict[str, Any]], ttl: int | None = None) -> bool:
+    """Cache unique models list"""
+    cache = get_model_catalog_cache()
+    return cache.set_unique_models(unique_models, ttl=ttl)
+
+
+def invalidate_unique_models() -> bool:
+    """Invalidate cached unique models"""
+    cache = get_model_catalog_cache()
+    return cache.invalidate_unique_models()
+
+
+# Catalog statistics convenience functions
+
+
+def get_cached_catalog_stats() -> dict[str, Any] | None:
+    """Get cached catalog statistics"""
+    cache = get_model_catalog_cache()
+    return cache.get_catalog_stats()
+
+
+def cache_catalog_stats(stats: dict[str, Any], ttl: int | None = None) -> bool:
+    """Cache catalog statistics"""
+    cache = get_model_catalog_cache()
+    return cache.set_catalog_stats(stats, ttl=ttl)
+
+
+def invalidate_catalog_stats() -> bool:
+    """Invalidate cached catalog statistics"""
+    cache = get_model_catalog_cache()
+    return cache.invalidate_catalog_stats()

@@ -912,7 +912,6 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
             "pricing": pricing if pricing else None,
             "description": db_model.get("description"),
             "modality": db_model.get("modality"),
-            "top_provider": db_model.get("top_provider") or provider_slug,
             "is_active": db_model.get("is_active", True),
             "health_status": db_model.get("health_status"),
         }
@@ -1325,8 +1324,7 @@ def get_all_unique_models_for_catalog(
                 'supports_function_calling': model.get('supports_function_calling'),
                 'supports_vision': model.get('supports_vision'),
                 'description': model.get('description'),
-                'architecture': model.get('architecture'),
-                'top_provider': model.get('top_provider')
+                'architecture': model.get('architecture')
             }
 
             providers_by_unique_model[unique_model_id].append(provider_data)

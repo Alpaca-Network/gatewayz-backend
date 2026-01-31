@@ -259,13 +259,37 @@ async def lifespan(app):
         # PERF: Preload frequently accessed model metadata into cache
         async def preload_hot_models_cache():
             try:
-                logger.info("🔥 Preloading hot model metadata...")
-                from src.services.models import get_all_models
+                logger.info("🔥 Preloading hot model metadata and catalog caches...")
+                from src.services.model_catalog_cache import (
+                    get_cached_full_catalog,
+                    get_cached_unique_models,
+                    get_cached_gateway_catalog,
+                )
 
-                # Preload all models to warm up the cache
-                # This prevents cold cache misses on first requests
-                models = await asyncio.to_thread(get_all_models)
-                logger.info(f"✅ Preloaded {len(models)} models into cache")
+                # Warm up the full catalog cache
+                # This triggers a database fetch and caches the result
+                full_catalog = await asyncio.to_thread(get_cached_full_catalog)
+                logger.info(f"✅ Warmed full catalog cache ({len(full_catalog)} models)")
+
+                # Warm up unique models cache
+                unique_models = await asyncio.to_thread(get_cached_unique_models)
+                if unique_models:
+                    logger.info(f"✅ Warmed unique models cache ({len(unique_models)} unique models)")
+
+                # Warm up top gateway catalogs (fast gateways for quick first requests)
+                top_gateways = [
+                    "openrouter", "anthropic", "openai", "groq",
+                    "together", "fireworks", "vercel-ai-gateway"
+                ]
+                for gateway in top_gateways:
+                    try:
+                        catalog = await asyncio.to_thread(get_cached_gateway_catalog, gateway)
+                        if catalog:
+                            logger.debug(f"✅ Warmed {gateway} cache ({len(catalog)} models)")
+                    except Exception as gw_e:
+                        logger.debug(f"Skipping {gateway} warmup: {gw_e}")
+
+                logger.info("✅ Catalog cache warming complete")
             except Exception as e:
                 logger.warning(f"Model cache preload warning: {e}")
 

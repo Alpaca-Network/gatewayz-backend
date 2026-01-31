@@ -2312,6 +2312,7 @@ async def get_unique_models_with_providers(
     ```
     """
     try:
+        from src.services.model_catalog_cache import get_cached_unique_models
         from src.db.models_catalog_db import (
             get_all_unique_models_for_catalog,
             transform_unique_models_batch,
@@ -2322,11 +2323,20 @@ async def get_unique_models_with_providers(
             f"min_providers={min_providers}, sort_by={sort_by}, order={order}"
         )
 
-        # Fetch unique models from database
-        db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
+        # Try to get from cache first (only for active models with default sorting)
+        api_models = None
+        if not include_inactive and min_providers is None and sort_by == "provider_count" and order == "desc" and offset == 0:
+            api_models = get_cached_unique_models()
+            if api_models:
+                logger.info(f"Using cached unique models ({len(api_models)} models)")
 
-        # Transform to API format
-        api_models = transform_unique_models_batch(db_unique_models)
+        # If not cached or needs custom filtering, fetch from database
+        if api_models is None:
+            # Fetch unique models from database
+            db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
+
+            # Transform to API format
+            api_models = transform_unique_models_batch(db_unique_models)
 
         # Filter by minimum providers if specified
         if min_providers is not None:
