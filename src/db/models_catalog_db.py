@@ -646,13 +646,18 @@ def get_all_models_for_catalog(
     Get ALL models from database optimized for catalog building.
 
     This function is designed to replace direct provider API calls in catalog
-    endpoints. It fetches all models with provider information in a single query,
-    which is then cached in Redis.
+    endpoints. It fetches all models with provider information using pagination
+    to handle datasets larger than Supabase's default 1000-row limit.
 
     Key differences from get_all_models():
-    - No pagination (returns all models)
-    - No limit (catalog needs complete dataset)
+    - Uses pagination to fetch ALL models (no 1000-row limit)
+    - No artificial limit (catalog needs complete dataset)
     - Optimized for full catalog building
+
+    Implementation note:
+    - Supabase (PostgREST) has a default page size of 1000 rows
+    - We use chunked fetching with .range() to get all rows
+    - For 11k+ models, this makes 11-12 queries instead of 1, but ensures completeness
 
     Args:
         include_inactive: Include inactive models (default: False)
@@ -663,31 +668,58 @@ def get_all_models_for_catalog(
     Example:
         >>> models = get_all_models_for_catalog()
         >>> len(models)
-        5432  # All active models from all providers
+        11432  # All active models from all providers (not limited to 1000)
     """
     try:
         supabase = get_supabase_client()
+        all_models = []
+        page_size = 1000  # Supabase default limit
+        offset = 0
 
-        # Build query - join with providers table
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
+        logger.info(f"Fetching all models from database (include_inactive={include_inactive})...")
+
+        while True:
+            # Build query with pagination - join with providers table
+            query = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+            )
+
+            # Filter by active status
+            if not include_inactive:
+                query = query.eq("is_active", True)
+
+            # Order by model name for consistent output and pagination
+            query = query.order("model_name")
+
+            # Apply pagination using range
+            query = query.range(offset, offset + page_size - 1)
+
+            # Execute query
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                # No more results, we're done
+                break
+
+            all_models.extend(batch)
+            logger.debug(f"Fetched batch of {len(batch)} models (offset={offset}, total so far={len(all_models)})")
+
+            # If we got fewer than page_size rows, we've reached the end
+            if len(batch) < page_size:
+                break
+
+            # Move to next page
+            offset += page_size
+
+        logger.info(
+            f"Fetched {len(all_models)} models from database for catalog "
+            f"({(offset // page_size) + 1} batches, page_size={page_size})"
         )
 
-        # Filter by active status
-        if not include_inactive:
-            query = query.eq("is_active", True)
+        return all_models
 
-        # Order by model name for consistent output
-        query = query.order("model_name")
-
-        # Execute without pagination (get all models)
-        response = query.execute()
-
-        models = response.data or []
-        logger.info(f"Fetched {len(models)} models from database for catalog")
-
-        return models
     except Exception as e:
         logger.error(f"Error fetching all models for catalog: {e}")
         return []
@@ -701,7 +733,8 @@ def get_models_by_gateway_for_catalog(
     Get all models for a specific gateway/provider optimized for catalog.
 
     This function is designed to replace direct provider API calls when
-    building a single-provider catalog.
+    building a single-provider catalog. Uses pagination to handle providers
+    with more than 1000 models.
 
     Args:
         gateway_slug: Gateway/provider slug (e.g., 'openrouter', 'anthropic')
@@ -713,31 +746,59 @@ def get_models_by_gateway_for_catalog(
     Example:
         >>> models = get_models_by_gateway_for_catalog('openrouter')
         >>> len(models)
-        234  # All OpenRouter models
+        2834  # All OpenRouter models (not limited to 1000)
     """
     try:
         supabase = get_supabase_client()
+        all_models = []
+        page_size = 1000  # Supabase default limit
+        offset = 0
 
-        # Build query with provider filter
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .eq("providers.slug", gateway_slug)
+        logger.info(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
+
+        while True:
+            # Build query with provider filter
+            query = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+                .eq("providers.slug", gateway_slug)
+            )
+
+            # Filter by active status
+            if not include_inactive:
+                query = query.eq("is_active", True)
+
+            # Order by model name for consistent pagination
+            query = query.order("model_name")
+
+            # Apply pagination
+            query = query.range(offset, offset + page_size - 1)
+
+            # Execute query
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                # No more results
+                break
+
+            all_models.extend(batch)
+            logger.debug(f"Fetched batch of {len(batch)} models for {gateway_slug} (offset={offset}, total so far={len(all_models)})")
+
+            # If we got fewer than page_size rows, we've reached the end
+            if len(batch) < page_size:
+                break
+
+            # Move to next page
+            offset += page_size
+
+        logger.info(
+            f"Fetched {len(all_models)} models from database for gateway: {gateway_slug} "
+            f"({(offset // page_size) + 1} batches)"
         )
 
-        # Filter by active status
-        if not include_inactive:
-            query = query.eq("is_active", True)
+        return all_models
 
-        # Order by model name
-        query = query.order("model_name")
-
-        response = query.execute()
-
-        models = response.data or []
-        logger.info(f"Fetched {len(models)} models from database for gateway: {gateway_slug}")
-
-        return models
     except Exception as e:
         logger.error(f"Error fetching models for gateway {gateway_slug}: {e}")
         return []
