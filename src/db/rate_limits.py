@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -42,55 +43,80 @@ def get_user_rate_limits(api_key: str) -> dict[str, Any] | None:
         except Exception as e:
             logger.warning(f"Failed to get rate limits from new system: {e}")
 
-        # Fallback to old system (rate_limits table)
-        result = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
-
-        if not result.data or len(result.data) == 0:
-            return None
-
-        rate_limits = result.data[0]
-        return {
-            "requests_per_minute": rate_limits.get("requests_per_minute", 60),
-            "requests_per_hour": rate_limits.get("requests_per_hour", 1000),
-            "requests_per_day": rate_limits.get("requests_per_day", 10000),
-            "tokens_per_minute": rate_limits.get("tokens_per_minute", 10000),
-            "tokens_per_hour": rate_limits.get("tokens_per_hour", 100000),
-            "tokens_per_day": rate_limits.get("tokens_per_day", 1000000),
-        }
+        # If we reach here, no rate limits found - return None
+        logger.debug(f"No rate limits found for API key {api_key[:10]}...")
+        return None
 
     except Exception as e:
         logger.error(f"Error getting user rate limits: {e}")
         return None
 
 
-def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
+async def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> None:
+    """
+    Set rate limits for a user's API key using the rate_limit_configs table.
+
+    Args:
+        api_key: The API key to set rate limits for
+        rate_limits: Dictionary containing rate limit values
+
+    Raises:
+        ValueError: If user is not found
+        RuntimeError: If setting rate limits fails
+    """
     try:
-        client = get_supabase_client()
+        # Wrap all synchronous Supabase operations in asyncio.to_thread
+        def _set_rate_limits_sync():
+            client = get_supabase_client()
 
-        user = get_user(api_key)
-        if not user:
-            raise ValueError(f"User with API key {api_key} not found")
+            # Get the API key record from api_keys_new
+            key_record = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
 
-        rate_limit_data = {
-            "api_key": api_key,
-            "user_id": user["id"],
-            "requests_per_minute": rate_limits.get("requests_per_minute", 60),
-            "requests_per_hour": rate_limits.get("requests_per_hour", 1000),
-            "requests_per_day": rate_limits.get("requests_per_day", 10000),
-            "tokens_per_minute": rate_limits.get("tokens_per_minute", 10000),
-            "tokens_per_hour": rate_limits.get("tokens_per_hour", 100000),
-            "tokens_per_day": rate_limits.get("tokens_per_day", 1000000),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
+            if not key_record.data or len(key_record.data) == 0:
+                raise ValueError(f"API key not found: {api_key[:10]}...")
 
-        existing = client.table("rate_limits").select("*").eq("api_key", api_key).execute()
+            api_key_id = key_record.data[0]["id"]
 
-        if existing.data and len(existing.data) > 0:
-            client.table("rate_limits").update(rate_limit_data).eq("api_key", api_key).execute()
-        else:
-            client.table("rate_limits").insert(rate_limit_data).execute()
+            # Prepare rate limit config data
+            # Convert per-minute/per-day values to per-hour for storage
+            requests_per_hour = rate_limits.get("requests_per_hour", 1000)
+            tokens_per_hour = rate_limits.get("tokens_per_hour", 100000)
 
+            rate_limit_config = {
+                "api_key_id": api_key_id,
+                "max_requests": requests_per_hour,
+                "max_tokens": tokens_per_hour,
+                "burst_limit": rate_limits.get("burst_limit", 100),
+                "concurrency_limit": rate_limits.get("concurrency_limit", 50),
+                "window_size": 3600,  # 1 hour in seconds
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+            # Check if config already exists
+            existing = (
+                client.table("rate_limit_configs")
+                .select("id")
+                .eq("api_key_id", api_key_id)
+                .execute()
+            )
+
+            if existing.data and len(existing.data) > 0:
+                # Update existing config
+                client.table("rate_limit_configs").update(rate_limit_config).eq(
+                    "api_key_id", api_key_id
+                ).execute()
+                logger.info(f"Updated rate limits for API key {api_key[:10]}...")
+            else:
+                # Insert new config
+                client.table("rate_limit_configs").insert(rate_limit_config).execute()
+                logger.info(f"Created rate limits for API key {api_key[:10]}...")
+
+        # Execute the synchronous function in a thread pool
+        await asyncio.to_thread(_set_rate_limits_sync)
+
+    except ValueError:
+        # Re-raise ValueError as-is for proper error handling (400 response)
+        raise
     except Exception as e:
         logger.error(f"Failed to set user rate limits: {e}")
         raise RuntimeError(f"Failed to set user rate limits: {e}") from e
