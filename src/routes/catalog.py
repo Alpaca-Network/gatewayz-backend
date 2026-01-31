@@ -2235,6 +2235,146 @@ async def get_low_latency_models_api(
     return result
 
 
+@router.get("/models/unique", tags=["models"])
+async def get_unique_models_with_providers(
+    limit: int | None = Query(
+        100, description="Limit number of results (default: 100, max: 1000)", ge=1, le=1000
+    ),
+    offset: int | None = Query(0, description="Offset for pagination", ge=0),
+    min_providers: int | None = Query(
+        None, description="Minimum number of providers (e.g., 2 for models with multiple providers)", ge=1
+    ),
+    sort_by: str = Query(
+        "provider_count",
+        description="Sort by: 'provider_count' (most providers), 'name' (alphabetical), 'cheapest_price' (lowest price)"
+    ),
+    order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
+    include_inactive: bool = Query(False, description="Include inactive models"),
+):
+    """
+    Get unique models with their provider information.
+
+    This endpoint shows deduplicated models (e.g., "GPT-4" appears once) with:
+    - How many providers offer each model
+    - Which providers offer it
+    - Pricing from each provider
+    - Health status and performance metrics per provider
+    - Cheapest and fastest provider for each model
+
+    **Use Cases:**
+    - Find models available from multiple providers
+    - Compare pricing across providers for the same model
+    - Identify the cheapest provider for a specific model
+    - See which providers offer the most models
+
+    **Examples:**
+    - Most widely available models: `?sort_by=provider_count&order=desc`
+    - Models with 3+ providers: `?min_providers=3&sort_by=provider_count`
+    - Cheapest unique models: `?sort_by=cheapest_price&order=asc`
+    - Alphabetical list: `?sort_by=name&order=asc`
+
+    **Response Format:**
+    ```json
+    {
+      "models": [
+        {
+          "id": "gpt-4",
+          "name": "GPT-4",
+          "provider_count": 3,
+          "providers": [
+            {
+              "slug": "openrouter",
+              "name": "OpenRouter",
+              "pricing": {"prompt": "0.03", "completion": "0.06"},
+              "context_length": 8192,
+              "health_status": "healthy",
+              "average_response_time_ms": 1200
+            },
+            {
+              "slug": "groq",
+              "name": "Groq",
+              "pricing": {"prompt": "0.025", "completion": "0.05"},
+              "context_length": 8192,
+              "health_status": "healthy",
+              "average_response_time_ms": 950
+            }
+          ],
+          "cheapest_provider": "groq",
+          "fastest_provider": "groq",
+          "cheapest_prompt_price": 0.025,
+          "fastest_response_time": 950
+        }
+      ],
+      "total": 234,
+      "limit": 100,
+      "offset": 0
+    }
+    ```
+    """
+    try:
+        from src.db.models_catalog_db import (
+            get_all_unique_models_for_catalog,
+            transform_unique_models_batch,
+        )
+
+        logger.info(
+            f"Fetching unique models: limit={limit}, offset={offset}, "
+            f"min_providers={min_providers}, sort_by={sort_by}, order={order}"
+        )
+
+        # Fetch unique models from database
+        db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
+
+        # Transform to API format
+        api_models = transform_unique_models_batch(db_unique_models)
+
+        # Filter by minimum providers if specified
+        if min_providers is not None:
+            api_models = [m for m in api_models if m.get("provider_count", 0) >= min_providers]
+
+        # Sort the results
+        if sort_by == "provider_count":
+            api_models.sort(key=lambda m: m.get("provider_count", 0), reverse=(order == "desc"))
+        elif sort_by == "name":
+            api_models.sort(key=lambda m: m.get("name", "").lower(), reverse=(order == "desc"))
+        elif sort_by == "cheapest_price":
+            # Sort by cheapest price, handling None values
+            api_models.sort(
+                key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
+                reverse=(order == "desc")
+            )
+
+        # Calculate total before pagination
+        total = len(api_models)
+
+        # Apply pagination
+        paginated_models = api_models[offset:offset + limit] if limit else api_models[offset:]
+
+        logger.info(
+            f"Returning {len(paginated_models)} unique models "
+            f"(total: {total}, filtered by min_providers={min_providers})"
+        )
+
+        return {
+            "models": paginated_models,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "min_providers": min_providers,
+                "include_inactive": include_inactive,
+            },
+            "sort": {
+                "by": sort_by,
+                "order": order,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching unique models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch unique models: {str(e)}")
+
+
 @router.post("/models/batch-compare", tags=["comparison"])
 async def batch_compare_models_api(
     model_ids: list[str] = Query(
