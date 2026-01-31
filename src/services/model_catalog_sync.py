@@ -109,7 +109,16 @@ def safe_decimal(value: Any) -> Decimal | None:
 
 def extract_modality(model: dict[str, Any]) -> str:
     """Extract modality from normalized model structure"""
-    # Check architecture field first
+    # Check metadata.architecture first (new location)
+    metadata = model.get("metadata", {})
+    if isinstance(metadata, dict):
+        architecture = metadata.get("architecture")
+        if isinstance(architecture, dict):
+            modality = architecture.get("modality")
+            if modality:
+                return modality
+
+    # Fallback to architecture field (deprecated, for backwards compatibility)
     architecture = model.get("architecture")
     if isinstance(architecture, dict):
         modality = architecture.get("modality")
@@ -146,7 +155,13 @@ def extract_pricing(model: dict[str, Any]) -> dict[str, Decimal | None]:
 
 def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
     """Extract capability flags from normalized model"""
-    architecture = model.get("architecture", {})
+    # Check metadata.architecture first (new location)
+    metadata = model.get("metadata", {})
+    architecture = metadata.get("architecture") if isinstance(metadata, dict) else None
+
+    # Fallback to architecture field (deprecated, for backwards compatibility)
+    if not architecture:
+        architecture = model.get("architecture", {})
 
     # Determine capabilities based on modality and architecture
     supports_streaming = model.get("supports_streaming", False)

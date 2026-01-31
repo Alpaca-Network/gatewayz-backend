@@ -17,8 +17,6 @@ class ModelBase(BaseModel):
     description: str | None = Field(None, description="Model description")
     context_length: int | None = Field(None, description="Maximum context length")
     modality: str | None = Field("text->text", description="Model modality (e.g., 'text->text', 'text->image')")
-    architecture: str | None = Field(None, description="Model architecture")
-    per_request_limits: dict[str, Any] | None = Field(None, description="Per-request limits")
 
     # Pricing
     pricing_prompt: Decimal | None = Field(None, description="Prompt pricing per token")
@@ -54,8 +52,6 @@ class ModelUpdate(BaseModel):
     description: str | None = None
     context_length: int | None = None
     modality: str | None = None
-    architecture: str | None = None
-    per_request_limits: dict[str, Any] | None = None
     pricing_prompt: Decimal | None = None
     pricing_completion: Decimal | None = None
     pricing_image: Decimal | None = None
