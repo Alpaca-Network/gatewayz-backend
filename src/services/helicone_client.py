@@ -1,13 +1,20 @@
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
+from src.cache import _helicone_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Constants
+MODALITY_TEXT_TO_TEXT = "text->text"
 
 # Standard timeout for Helicone
 HELICONE_TIMEOUT = httpx.Timeout(
@@ -292,3 +299,183 @@ def get_provider_pricing_for_helicone_model(model_id: str):
     except Exception as e:
         logger.debug(f"Failed to get provider pricing for {model_id}: {e}")
         return None
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def normalize_helicone_model(model) -> dict | None:
+    """Normalize Helicone AI Gateway model to catalog schema
+
+    Helicone models can originate from various providers (OpenAI, Anthropic, etc.)
+    The gateway provides observability and monitoring on top of provider routing.
+    Pricing is dynamically fetched from the underlying provider's pricing data.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    # Extract model ID
+    model_id = getattr(model, "id", None)
+    if not model_id:
+        logger.warning("Helicone model missing 'id' field: %s", sanitize_for_logging(str(model)))
+        return None
+
+    # Determine provider from model ID
+    # Models typically come in standard formats like "gpt-4o-mini", "claude-3-sonnet", etc.
+    provider_slug = "helicone"
+    raw_display_name = model_id
+
+    # Try to detect provider from model name
+    if "/" in model_id:
+        provider_slug = model_id.split("/")[0]
+        raw_display_name = model_id.split("/")[1]
+    elif "gpt" in model_id.lower() or "o1" in model_id.lower():
+        provider_slug = "openai"
+    elif "claude" in model_id.lower():
+        provider_slug = "anthropic"
+    elif "gemini" in model_id.lower():
+        provider_slug = "google"
+
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
+
+    # Get description - Helicone doesn't provide this, so we create one
+    description = (
+        getattr(model, "description", None) or "Model available through Helicone AI Gateway"
+    )
+
+    # Get context length if available
+    context_length = getattr(model, "context_length", 4096)
+
+    # Get created date if available
+    created = getattr(model, "created_at", None)
+
+    # Fetch pricing dynamically from Helicone or underlying provider
+    pricing = get_helicone_model_pricing(model_id)
+
+    normalized = {
+        "id": model_id,
+        "slug": f"helicone/{model_id}",
+        "canonical_slug": f"helicone/{model_id}",
+        "hugging_face_id": None,
+        "name": display_name,
+        "created": created,
+        "description": description,
+        "context_length": context_length,
+        "architecture": {
+            "modality": MODALITY_TEXT_TO_TEXT,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "instruct_type": "chat",
+        },
+        "pricing": pricing,
+        "per_request_limits": None,
+        "supported_parameters": [],
+        "default_parameters": {},
+        "provider_slug": provider_slug,
+        "provider_site_url": "https://www.helicone.ai",
+        "model_logo_url": "https://www.helicone.ai/favicon.ico",
+        "source_gateway": "helicone",
+    }
+
+    return enrich_model_with_pricing(normalized, "helicone")
+
+
+def get_helicone_model_pricing(model_id: str) -> dict:
+    """Get pricing for a Helicone AI Gateway model
+
+    Fetches pricing from Helicone's public API or the underlying provider.
+    Falls back to default zero pricing if unavailable.
+
+    Args:
+        model_id: Model identifier (e.g., "gpt-4o-mini")
+
+    Returns:
+        dict with 'prompt', 'completion', 'request', and 'image' pricing fields
+    """
+    try:
+        # Fetch pricing from Helicone's public API (no circular dependency)
+        pricing_map = fetch_helicone_pricing_from_public_api()
+
+        if pricing_map:
+            # Try exact match first
+            if model_id in pricing_map:
+                return {
+                    "prompt": str(pricing_map[model_id].get("prompt", "0")),
+                    "completion": str(pricing_map[model_id].get("completion", "0")),
+                    "request": str(pricing_map[model_id].get("request", "0")),
+                    "image": str(pricing_map[model_id].get("image", "0")),
+                }
+
+            # Try without provider prefix
+            model_name = model_id.split("/")[-1] if "/" in model_id else model_id
+            if model_name in pricing_map:
+                return {
+                    "prompt": str(pricing_map[model_name].get("prompt", "0")),
+                    "completion": str(pricing_map[model_name].get("completion", "0")),
+                    "request": str(pricing_map[model_name].get("request", "0")),
+                    "image": str(pricing_map[model_name].get("image", "0")),
+                }
+
+            # Try with common provider prefixes
+            for prefix in ["anthropic", "openai", "google", "meta-llama"]:
+                prefixed_id = f"{prefix}/{model_name}"
+                if prefixed_id in pricing_map:
+                    return {
+                        "prompt": str(pricing_map[prefixed_id].get("prompt", "0")),
+                        "completion": str(pricing_map[prefixed_id].get("completion", "0")),
+                        "request": str(pricing_map[prefixed_id].get("request", "0")),
+                        "image": str(pricing_map[prefixed_id].get("image", "0")),
+                    }
+
+    except Exception as e:
+        logger.debug(
+            "Failed to fetch Helicone pricing for %s: %s",
+            sanitize_for_logging(model_id),
+            sanitize_for_logging(str(e)),
+        )
+
+    # Fallback: return default zero pricing
+    return {
+        "prompt": "0",
+        "completion": "0",
+        "request": "0",
+        "image": "0",
+    }
+
+
+def fetch_models_from_helicone():
+    """Fetch models from Helicone AI Gateway via OpenAI-compatible API
+
+    Helicone AI Gateway provides access to models from multiple providers
+    through a unified OpenAI-compatible endpoint with observability features.
+    """
+    try:
+        # Check if API key is configured
+        if not Config.HELICONE_API_KEY:
+            logger.warning("Helicone API key not configured - skipping model fetch")
+            return []
+
+        client = get_helicone_client()
+        response = client.models.list()
+
+        if not response or not hasattr(response, "data"):
+            logger.warning("No models returned from Helicone AI Gateway")
+            return []
+
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_helicone_model(model) for model in response.data if model) if m
+        ]
+
+        _helicone_models_cache["data"] = normalized_models
+        _helicone_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        logger.info(f"Fetched {len(normalized_models)} models from Helicone AI Gateway")
+        return _helicone_models_cache["data"]
+    except Exception as e:
+        logger.error(
+            "Failed to fetch models from Helicone AI Gateway: %s", sanitize_for_logging(str(e))
+        )
+        return []

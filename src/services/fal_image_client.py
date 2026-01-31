@@ -1,18 +1,26 @@
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from src.cache import _fal_models_cache
 from src.config import Config
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-# Cache for Fal.ai models catalog
-_fal_models_cache: list[dict[str, Any]] | None = None
+# Constants
+MODALITY_TEXT_TO_IMAGE = "text->image"
+MODALITY_TEXT_TO_AUDIO = "text->audio"
+
+# Cache for Fal.ai models catalog (for static JSON)
+_fal_static_catalog_cache: list[dict[str, Any]] | None = None
 
 # Fal.ai API configuration
 FAL_API_BASE = "https://fal.run"
@@ -111,10 +119,10 @@ def load_fal_models_catalog() -> list[dict[str, Any]]:
     Returns:
         List of Fal.ai model definitions with metadata
     """
-    global _fal_models_cache
+    global _fal_static_catalog_cache
 
-    if _fal_models_cache is not None:
-        return _fal_models_cache
+    if _fal_static_catalog_cache is not None:
+        return _fal_static_catalog_cache
 
     try:
         catalog_path = Path(__file__).parent.parent / "data" / "fal_catalog.json"
@@ -126,12 +134,12 @@ def load_fal_models_catalog() -> list[dict[str, Any]]:
 
             # Filter out metadata objects and only keep actual model objects
             # Model objects must have an "id" field
-            _fal_models_cache = [
+            _fal_static_catalog_cache = [
                 item for item in raw_data if isinstance(item, dict) and "id" in item
             ]
 
-            logger.info(f"Loaded {len(_fal_models_cache)} Fal.ai models from catalog")
-            return _fal_models_cache
+            logger.info(f"Loaded {len(_fal_static_catalog_cache)} Fal.ai models from catalog")
+            return _fal_static_catalog_cache
         else:
             logger.warning(f"Fal.ai catalog not found at {catalog_path}")
             return []
@@ -449,3 +457,126 @@ def make_fal_image_request(
     except Exception as e:
         logger.error(f"Fal.ai request failed for model {model}: {e}", exc_info=True)
         raise
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def normalize_fal_model(fal_model: dict) -> dict | None:
+    """Normalize Fal.ai catalog entries to resemble OpenRouter model shape
+
+    Fal.ai features:
+    - 839+ models across text-to-image, text-to-video, image-to-video, etc.
+    - Models include FLUX, Stable Diffusion, Veo, Sora, and many more
+    - Supports image, video, audio, and 3D generation
+
+    Handles both static catalog format (uses "id") and API format (uses "endpoint_id")
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    # API returns "endpoint_id", static catalog uses "id"
+    model_id = fal_model.get("endpoint_id") or fal_model.get("id")
+    if not model_id:
+        logger.warning("Fal.ai model missing 'id'/'endpoint_id' field: %s", sanitize_for_logging(str(fal_model)))
+        return None
+
+    # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
+    provider_slug = model_id.split("/")[0] if "/" in model_id else "fal-ai"
+
+    # Use title (API) or name (catalog) or derive from ID
+    raw_display_name = fal_model.get("title") or fal_model.get("name") or model_id.split("/")[-1]
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
+
+    # Get description
+    description = fal_model.get("description", f"Fal.ai {display_name} model")
+
+    # Determine modality based on type or category (API uses "category")
+    model_type = fal_model.get("type") or fal_model.get("category", "text-to-image")
+    modality_map = {
+        "text-to-image": MODALITY_TEXT_TO_IMAGE,
+        "text-to-video": "text->video",
+        "image-to-image": "image->image",
+        "image-to-video": "image->video",
+        "video-to-video": "video->video",
+        "text-to-audio": MODALITY_TEXT_TO_AUDIO,
+        "text-to-speech": MODALITY_TEXT_TO_AUDIO,
+        "audio-to-audio": "audio->audio",
+        "image-to-3d": "image->3d",
+        "vision": "image->text",
+    }
+    modality = modality_map.get(model_type, MODALITY_TEXT_TO_IMAGE)
+
+    # Parse input/output modalities
+    input_mod, output_mod = modality.split("->") if "->" in modality else ("text", "image")
+
+    architecture = {
+        "modality": modality,
+        "input_modalities": [input_mod],
+        "output_modalities": [output_mod],
+        "model_type": model_type,
+        "tags": fal_model.get("tags", []),
+    }
+
+    # Fal.ai doesn't expose pricing in catalog, set to null
+    pricing = {
+        "prompt": None,
+        "completion": None,
+        "request": None,
+        "image": None,
+    }
+
+    slug = model_id
+    canonical_slug = model_id
+
+    normalized = {
+        "id": slug,
+        "slug": slug,
+        "canonical_slug": canonical_slug,
+        "hugging_face_id": None,
+        "name": display_name,
+        "created": None,
+        "description": description,
+        "context_length": None,  # Not applicable for image/video models
+        "architecture": architecture,
+        "pricing": pricing,
+        "per_request_limits": None,
+        "supported_parameters": [],
+        "default_parameters": {},
+        "provider_slug": provider_slug,
+        "provider_site_url": "https://fal.ai",
+        "model_logo_url": None,
+        "source_gateway": "fal",
+        "raw_fal": fal_model,
+    }
+
+    return enrich_model_with_pricing(normalized, "fal")
+
+
+def fetch_models_from_fal():
+    """Fetch models from Fal.ai catalog
+
+    Loads models from the static Fal.ai catalog JSON file which contains
+    curated models from the 839+ available on fal.ai
+    """
+    try:
+        # Get models from catalog
+        raw_models = get_fal_models()
+
+        if not raw_models:
+            logger.warning("No Fal.ai models found in catalog")
+            return []
+
+        # Normalize models
+        normalized_models = [normalize_fal_model(model) for model in raw_models if model]
+
+        _fal_models_cache["data"] = normalized_models
+        _fal_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        logger.info(f"Fetched {len(normalized_models)} Fal.ai models from catalog")
+        return _fal_models_cache["data"]
+    except Exception as e:
+        logger.error(f"Failed to fetch models from Fal.ai catalog: {e}")
+        return []

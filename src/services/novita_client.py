@@ -299,7 +299,6 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
         "context_length": context_length,
         "architecture": normalized_architecture,
         "pricing": _normalize_pricing(payload.get("pricing")),
-        "top_provider": None,
         "per_request_limits": payload.get("limits") or payload.get("rate_limits"),
         "supported_parameters": _extract_supported_parameters(payload),
         "default_parameters": payload.get("default_parameters") or {},

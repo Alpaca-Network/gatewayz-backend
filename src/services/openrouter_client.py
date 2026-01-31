@@ -1,13 +1,18 @@
+import json
 import logging
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import APIRouter
 from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
+from src.cache import _models_cache, clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
+from src.utils.security_validators import sanitize_for_logging
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
@@ -524,3 +529,132 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
             endpoint='/chat/completions (async stream)'
         )
         raise
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def sanitize_pricing(pricing: dict) -> dict | None:
+    """
+    Sanitize pricing data by handling negative values.
+
+    OpenRouter uses -1 to indicate dynamic pricing (e.g., for auto-routing models).
+    Since we can't determine the actual cost for dynamic pricing models, we return
+    None to indicate this model should be filtered out.
+
+    Args:
+        pricing: Pricing dictionary from API
+
+    Returns:
+        Sanitized pricing dictionary, or None if pricing is dynamic/indeterminate
+    """
+    if not pricing or not isinstance(pricing, dict):
+        return pricing
+
+    sanitized = pricing.copy()
+    has_dynamic_pricing = False
+
+    for key in ["prompt", "completion", "request", "image", "web_search", "internal_reasoning"]:
+        if key in sanitized:
+            try:
+                value = sanitized[key]
+                if value is not None:
+                    # Convert to float and check if negative
+                    float_value = float(value)
+                    if float_value < 0:
+                        # Mark as dynamic pricing - we can't determine actual cost
+                        has_dynamic_pricing = True
+                        logger.debug(
+                            "Found dynamic pricing %s=%s, model will be filtered",
+                            sanitize_for_logging(key),
+                            sanitize_for_logging(str(value)),
+                        )
+                        break
+            except (ValueError, TypeError):
+                # Keep the original value if conversion fails
+                pass
+
+    # If model has dynamic pricing, return None to filter it out
+    if has_dynamic_pricing:
+        return None
+
+    return sanitized
+
+
+def fetch_models_from_openrouter():
+    """Fetch models from OpenRouter API"""
+    try:
+        if not Config.OPENROUTER_API_KEY:
+            logger.error("OpenRouter API key not configured")
+            return None
+
+        headers = {
+            "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        }
+
+        response = httpx.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=30.0)
+        response.raise_for_status()
+
+        try:
+            models_data = response.json()
+        except json.JSONDecodeError as json_err:
+            logger.error(
+                f"Failed to parse JSON response from OpenRouter models API: {json_err}. "
+                f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
+            )
+            return []
+
+        raw_models = models_data.get("data", [])
+
+        # Process and filter models
+        filtered_models = []
+        for model in raw_models:
+            model.setdefault("source_gateway", "openrouter")
+            # Sanitize pricing - returns None for models with dynamic pricing
+            if "pricing" in model:
+                sanitized_pricing = sanitize_pricing(model["pricing"])
+                if sanitized_pricing is None:
+                    # Filter out models with dynamic/indeterminate pricing
+                    logger.debug(
+                        "Filtering out model %s with dynamic pricing",
+                        sanitize_for_logging(model.get("id", "unknown")),
+                    )
+                    continue
+                model["pricing"] = sanitized_pricing
+
+            # Mark OpenRouter free models (those with :free suffix)
+            # Only OpenRouter has legitimately free models
+            # Use `or ""` to handle both missing keys and null values
+            model_id = model.get("id") or ""
+            model["is_free"] = model_id.endswith(":free")
+
+            filtered_models.append(model)
+
+        logger.info(
+            f"Filtered {len(raw_models) - len(filtered_models)} models with dynamic pricing"
+        )
+        _models_cache["data"] = filtered_models
+        _models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        # Clear error state on successful fetch
+        clear_gateway_error("openrouter")
+
+        return _models_cache["data"]
+    except httpx.TimeoutException as e:
+        error_msg = f"Request timeout after 30s: {sanitize_for_logging(str(e))}"
+        logger.error("OpenRouter timeout error: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
+        logger.error("OpenRouter HTTP error: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None
+    except Exception as e:
+        error_msg = sanitize_for_logging(str(e))
+        logger.error("Failed to fetch models from OpenRouter: %s", error_msg)
+        set_gateway_error("openrouter", error_msg)
+        return None

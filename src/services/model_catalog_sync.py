@@ -14,31 +14,29 @@ from src.db.providers_db import (
     get_provider_by_slug,
 )
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.chutes_client import fetch_models_from_chutes
 from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.cohere_client import fetch_models_from_cohere
+from src.services.deepinfra_client import fetch_models_from_deepinfra
+from src.services.featherless_client import fetch_models_from_featherless
+from src.services.fireworks_client import fetch_models_from_fireworks
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.groq_client import fetch_models_from_groq
 from src.services.huggingface_models import fetch_models_from_huggingface_api
+from src.services.aihubmix_client import fetch_models_from_aihubmix
+from src.services.aimo_client import fetch_models_from_aimo
+from src.services.fal_image_client import fetch_models_from_fal
+from src.services.near_client import fetch_models_from_near
 from src.services.openrouter_client import fetch_models_from_openrouter
-from src.services.models import (
-    fetch_models_from_aihubmix,
-    fetch_models_from_aimo,
-    fetch_models_from_alibaba,
-    fetch_models_from_anannas,
-    fetch_models_from_anthropic,
-    fetch_models_from_chutes,
-    fetch_models_from_deepinfra,
-    fetch_models_from_fal,
-    fetch_models_from_featherless,
-    fetch_models_from_fireworks,
-    fetch_models_from_helicone,
-    fetch_models_from_near,
-    fetch_models_from_openai,
-    fetch_models_from_together,
-    fetch_models_from_vercel_ai_gateway,
-    fetch_models_from_zai,
-)
+from src.services.together_client import fetch_models_from_together
+from src.services.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
+from src.services.anannas_client import fetch_models_from_anannas
+from src.services.helicone_client import fetch_models_from_helicone
+from src.services.alibaba_cloud_client import fetch_models_from_alibaba
+from src.services.openai_client import fetch_models_from_openai
+from src.services.anthropic_client import fetch_models_from_anthropic
+from src.services.zai_client import fetch_models_from_zai
 from src.services.modelz_client import fetch_models_from_modelz
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
@@ -224,9 +222,6 @@ def transform_normalized_model_to_db_schema(
             # Store relevant architecture info
             architecture_str = architecture.get("tokenizer") or architecture.get("instruct_type")
 
-        # Extract top provider
-        top_provider = normalized_model.get("top_provider") or provider_slug
-
         # Extract per-request limits
         per_request_limits = normalized_model.get("per_request_limits")
 
@@ -272,7 +267,6 @@ def transform_normalized_model_to_db_schema(
             "context_length": context_length,
             "modality": modality,
             "architecture": architecture_str,
-            "top_provider": top_provider,
             "per_request_limits": per_request_limits,
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],

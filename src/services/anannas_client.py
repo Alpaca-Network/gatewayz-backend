@@ -1,12 +1,19 @@
 import logging
+from datetime import datetime, timezone
 
 from openai import OpenAI
 
+from src.cache import _anannas_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Constants
+MODALITY_TEXT_TO_TEXT = "text->text"
 
 
 def get_anannas_client():
@@ -173,3 +180,93 @@ def get_provider_pricing_for_anannas_model(model_id: str):
     except Exception as e:
         logger.debug(f"Failed to get provider pricing for {model_id}: {e}")
         return None
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def normalize_anannas_model(model) -> dict | None:
+    """Normalize Anannas model to catalog schema
+
+    Anannas models use OpenAI-compatible naming conventions.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    model_id = getattr(model, "id", None)
+    if not model_id:
+        logger.warning("Anannas model missing 'id': %s", sanitize_for_logging(str(model)))
+        return None
+
+    raw_model_name = getattr(model, "name", model_id)
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
+
+    try:
+        normalized = {
+            "id": model_id,
+            "slug": f"anannas/{model_id}",
+            "canonical_slug": f"anannas/{model_id}",
+            "hugging_face_id": None,
+            "name": model_name,
+            "created": getattr(model, "created_at", None),
+            "description": getattr(model, "description", "Model from Anannas"),
+            "context_length": getattr(model, "context_length", 4096),
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": "0",
+                "completion": "0",
+                "request": "0",
+                "image": "0",
+            },
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "anannas",
+            "provider_site_url": "https://api.anannas.ai",
+            "model_logo_url": None,
+            "source_gateway": "anannas",
+        }
+        return enrich_model_with_pricing(normalized, "anannas")
+    except Exception as e:
+        logger.error("Failed to normalize Anannas model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def fetch_models_from_anannas():
+    """Fetch models from Anannas via OpenAI-compatible API
+
+    Anannas provides access to various models through a unified OpenAI-compatible endpoint.
+    """
+    try:
+        # Check if API key is configured
+        if not Config.ANANNAS_API_KEY:
+            logger.warning("Anannas API key not configured - skipping model fetch")
+            return []
+
+        client = get_anannas_client()
+        response = client.models.list()
+
+        if not response or not hasattr(response, "data"):
+            logger.warning("No models returned from Anannas")
+            return []
+
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_anannas_model(model) for model in response.data if model) if m
+        ]
+
+        _anannas_models_cache["data"] = normalized_models
+        _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        logger.info(f"Fetched {len(normalized_models)} models from Anannas")
+        return _anannas_models_cache["data"]
+    except Exception as e:
+        logger.error("Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e)))
+        return []

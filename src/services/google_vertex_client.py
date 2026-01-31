@@ -1584,7 +1584,6 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
                 "web_search": None,
                 "internal_reasoning": None,
             },
-            "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [
                 "max_tokens",
@@ -1663,7 +1662,6 @@ def _get_static_model_config() -> list[dict]:
                 "instruct_type": "chat",
             },
             "pricing": pricing,
-            "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [
                 "max_tokens",
