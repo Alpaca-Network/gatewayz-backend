@@ -68,10 +68,11 @@ def _get_pricing_from_database(model_id: str, candidate_ids: set[str]) -> dict[s
                 with track_database_query(table="models", operation="select"):
                     # Query models table with JOIN to model_pricing table
                     # PostgREST syntax: select model_pricing(*) creates a nested object
+                    # Note: model_id column was dropped from models table - now using model_name
                     result = (
                         client.table("models")
-                        .select("id, model_id, model_pricing(price_per_input_token, price_per_output_token)")
-                        .eq("model_id", candidate)
+                        .select("id, model_name, model_pricing(price_per_input_token, price_per_output_token)")
+                        .eq("model_name", candidate)
                         .eq("is_active", True)
                         .limit(1)
                         .execute()

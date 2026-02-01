@@ -223,10 +223,11 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
         client = get_supabase_client()
 
         # Query models table with JOIN to model_pricing table
+        # Note: model_id column was dropped from models table - now using model_name
         result = (
             client.table("models")
-            .select("id, model_id, model_pricing(price_per_input_token, price_per_output_token)")
-            .eq("model_id", model_id)
+            .select("id, model_name, model_pricing(price_per_input_token, price_per_output_token)")
+            .eq("model_name", model_id)
             .eq("is_active", True)
             .limit(1)
             .execute()
