@@ -206,7 +206,7 @@ class TestLowCreditAlerts:
     async def test_send_critical_alert(self):
         """Test sending critical credit alert"""
         with patch("src.services.provider_credit_monitor.capture_provider_error") as mock_capture, \
-             patch("src.services.provider_credit_monitor.send_email") as mock_email, \
+             patch("src.services.provider_credit_monitor.notification_service") as mock_notification_service, \
              patch("src.services.provider_credit_monitor.Config") as mock_config:
 
             mock_config.ADMIN_EMAIL = "admin@test.com"
@@ -220,6 +220,15 @@ class TestLowCreditAlerts:
             assert kwargs["provider"] == "openrouter"
             assert kwargs["extra_context"]["balance"] == 2.0
             assert kwargs["extra_context"]["status"] == "critical"
+
+            # Should send email notification with correct parameters
+            mock_notification_service.send_email_notification.assert_called_once()
+            call_args = mock_notification_service.send_email_notification.call_args
+            assert call_args[1]["to_email"] == "admin@test.com"
+            assert "URGENT" in call_args[1]["subject"]
+            assert "openrouter" in call_args[1]["subject"]
+            assert "html_content" in call_args[1]  # Verify correct parameter name
+            assert "$2.00" in call_args[1]["html_content"]
 
     @pytest.mark.asyncio
     async def test_send_warning_alert(self):
