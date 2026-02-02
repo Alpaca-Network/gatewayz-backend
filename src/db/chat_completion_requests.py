@@ -19,7 +19,7 @@ def get_model_id_by_name(model_name: str, provider_name: str | None = None) -> i
     Lookup strategy when provider is specified (recommended):
     1. First, find provider_id from provider name
     2. Then search models with provider_id filter for better matching
-    3. Try matching: model_id, provider_model_id, model_name (all case-insensitive)
+    3. Try matching: provider_model_id, model_name (all case-insensitive)
 
     Lookup strategy when provider is not specified:
     1. Search across all providers (less reliable)
@@ -54,15 +54,14 @@ def get_model_id_by_name(model_name: str, provider_name: str | None = None) -> i
         # Step 2: Search models with provider filter
         if provider_id:
             # Search with provider_id filter for more accurate matching
-            # Try multiple fields: model_id, provider_model_id, model_name
+            # Try multiple fields: provider_model_id, model_name (model_id column was removed)
             # Use prefix wildcard for "ends with" matching (e.g., "gpt-4o-mini" matches "openai/gpt-4o-mini")
             # This prevents matching longer variants like "gpt-4o-mini-2024-07-18"
             result = (
                 client.table("models")
-                .select("id, model_id, provider_model_id, model_name")
+                .select("id, provider_model_id, model_name")
                 .eq("provider_id", provider_id)
                 .or_(
-                    f"model_id.ilike.%{model_name},"
                     f"provider_model_id.ilike.%{model_name},"
                     f"model_name.ilike.%{model_name}"
                 )
@@ -73,8 +72,7 @@ def get_model_id_by_name(model_name: str, provider_name: str | None = None) -> i
                 # Prefer exact match, then case-insensitive match
                 for row in result.data:
                     if (
-                        row.get("model_id") == model_name
-                        or row.get("provider_model_id") == model_name
+                        row.get("provider_model_id") == model_name
                         or row.get("model_name") == model_name
                     ):
                         logger.debug(
@@ -98,9 +96,8 @@ def get_model_id_by_name(model_name: str, provider_name: str | None = None) -> i
         # Use prefix wildcard for "ends with" matching
         result = (
             client.table("models")
-            .select("id, model_id, provider_model_id, model_name")
+            .select("id, provider_model_id, model_name")
             .or_(
-                f"model_id.ilike.%{model_name},"
                 f"provider_model_id.ilike.%{model_name},"
                 f"model_name.ilike.%{model_name}"
             )
@@ -331,7 +328,7 @@ def get_chat_completion_requests_by_api_key(
         # Get paginated requests with related data
         query = (
             client.table("chat_completion_requests")
-            .select("*, models(id, model_name, model_id, provider_id, providers(name, slug)), users(id, username, email)")
+            .select("*, models(id, model_name, provider_model_id, provider_id, providers(name, slug)), users(id, username, email)")
             .eq("api_key_id", api_key_id)
             .order("created_at", desc=True)
             .range(offset, offset + limit - 1)
@@ -831,11 +828,11 @@ def search_models_with_chat_summary(
             search_variations.append(underscored)
 
         # Build OR conditions for all variations
+        # Note: model_id column was removed from models table - use model_name and provider_model_id instead
         or_conditions = []
         for variant in search_variations:
             or_conditions.extend([
                 f"model_name.ilike.%{variant}%",
-                f"model_id.ilike.%{variant}%",
                 f"provider_model_id.ilike.%{variant}%",
                 f"description.ilike.%{variant}%"
             ])
@@ -964,10 +961,11 @@ def search_models_with_chat_summary(
                 }
 
             # Build result dictionary
+            # Note: model_id column was removed - use model_name as identifier
             result = {
                 'model_id': model.get('id'),
                 'model_name': model.get('model_name'),
-                'model_identifier': model.get('model_id'),
+                'model_identifier': model.get('model_name'),  # model_id removed, use model_name
                 'provider_model_id': model.get('provider_model_id'),
                 'provider': model.get('providers', {}),
                 'description': model.get('description'),
