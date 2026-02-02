@@ -5,6 +5,27 @@
 -- When streaming API requests complete, credit deduction happens in a background task.
 -- If this task fails (database issues, network problems, etc.), the user gets the response
 -- but credits are not deducted. This table provides an audit trail for reconciliation.
+--
+-- Security Note:
+-- This table contains sensitive billing data and should only be accessible by:
+-- - The service role (for API inserts)
+-- - Admin users (for reconciliation queries)
+
+-- ============================================================================
+-- PRE-CREATE CLEANUP (make migration idempotent)
+-- ============================================================================
+
+-- Drop existing policies if they exist (for idempotency)
+DROP POLICY IF EXISTS credit_deduction_failures_insert_policy ON credit_deduction_failures;
+DROP POLICY IF EXISTS credit_deduction_failures_select_policy ON credit_deduction_failures;
+DROP POLICY IF EXISTS credit_deduction_failures_update_policy ON credit_deduction_failures;
+
+-- Drop existing trigger if it exists
+DROP TRIGGER IF EXISTS trigger_update_credit_deduction_failures_updated_at ON credit_deduction_failures;
+
+-- ============================================================================
+-- UP MIGRATION
+-- ============================================================================
 
 -- Create the credit_deduction_failures table
 CREATE TABLE IF NOT EXISTS credit_deduction_failures (
@@ -35,7 +56,7 @@ CREATE TABLE IF NOT EXISTS credit_deduction_failures (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Indexes for common queries
+    -- Constraints
     CONSTRAINT valid_status CHECK (status IN ('pending', 'resolved', 'written_off'))
 );
 
@@ -53,7 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_deduction_failures_pending
     ON credit_deduction_failures(status, created_at DESC)
     WHERE status = 'pending';
 
--- Add trigger for updated_at
+-- Add trigger for updated_at (CREATE OR REPLACE for idempotency)
 CREATE OR REPLACE FUNCTION update_credit_deduction_failures_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -62,9 +83,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trigger_update_credit_deduction_failures_updated_at
-    ON credit_deduction_failures;
-
 CREATE TRIGGER trigger_update_credit_deduction_failures_updated_at
     BEFORE UPDATE ON credit_deduction_failures
     FOR EACH ROW
@@ -72,7 +90,7 @@ CREATE TRIGGER trigger_update_credit_deduction_failures_updated_at
 
 -- Add comments for documentation
 COMMENT ON TABLE credit_deduction_failures IS
-    'Tracks failed credit deductions from streaming requests for manual reconciliation';
+    'Tracks failed credit deductions from streaming requests for manual reconciliation. Service role only.';
 
 COMMENT ON COLUMN credit_deduction_failures.status IS
     'pending: needs reconciliation, resolved: credits recovered, written_off: cannot recover';
@@ -80,23 +98,59 @@ COMMENT ON COLUMN credit_deduction_failures.status IS
 COMMENT ON COLUMN credit_deduction_failures.cost_usd IS
     'The amount that should have been deducted from user credits';
 
--- Grant appropriate permissions (adjust based on your RLS policies)
+-- ============================================================================
+-- ROW LEVEL SECURITY
+-- ============================================================================
+-- Enable RLS - this table contains sensitive billing data
 ALTER TABLE credit_deduction_failures ENABLE ROW LEVEL SECURITY;
 
--- Policy: Only service role can insert (from the API)
+-- Policy: Service role has full access (for API inserts and admin operations)
+-- Note: Service role bypasses RLS by default, but we add explicit policies
+-- for documentation and to support potential future role changes.
+
+-- Insert policy: Only service role can insert (API backend uses service role)
+-- Regular authenticated users cannot insert directly
 CREATE POLICY credit_deduction_failures_insert_policy ON credit_deduction_failures
     FOR INSERT
-    TO authenticated
+    TO service_role
     WITH CHECK (true);
 
--- Policy: Only service role can select/update (for admin reconciliation)
+-- Select policy: Service role and admin users can read
+-- Admin check: users with tier = 'admin' can view for reconciliation
 CREATE POLICY credit_deduction_failures_select_policy ON credit_deduction_failures
     FOR SELECT
     TO authenticated
-    USING (true);
+    USING (
+        -- Service role has full access (checked via current_setting)
+        current_setting('role', true) = 'service_role'
+        OR
+        -- Admin users can view their own records or all if they're an admin
+        EXISTS (
+            SELECT 1 FROM users
+            WHERE users.id = auth.uid()::bigint
+            AND users.tier = 'admin'
+        )
+    );
 
+-- Update policy: Only service role can update (for admin reconciliation via API)
 CREATE POLICY credit_deduction_failures_update_policy ON credit_deduction_failures
     FOR UPDATE
-    TO authenticated
+    TO service_role
     USING (true)
     WITH CHECK (true);
+
+-- ============================================================================
+-- DOWN MIGRATION (commented out - run manually to rollback)
+-- ============================================================================
+-- To rollback this migration, run:
+--
+-- DROP POLICY IF EXISTS credit_deduction_failures_update_policy ON credit_deduction_failures;
+-- DROP POLICY IF EXISTS credit_deduction_failures_select_policy ON credit_deduction_failures;
+-- DROP POLICY IF EXISTS credit_deduction_failures_insert_policy ON credit_deduction_failures;
+-- DROP TRIGGER IF EXISTS trigger_update_credit_deduction_failures_updated_at ON credit_deduction_failures;
+-- DROP FUNCTION IF EXISTS update_credit_deduction_failures_updated_at();
+-- DROP INDEX IF EXISTS idx_credit_deduction_failures_pending;
+-- DROP INDEX IF EXISTS idx_credit_deduction_failures_created_at;
+-- DROP INDEX IF EXISTS idx_credit_deduction_failures_status;
+-- DROP INDEX IF EXISTS idx_credit_deduction_failures_user_id;
+-- DROP TABLE IF EXISTS credit_deduction_failures;
