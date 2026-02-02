@@ -887,12 +887,16 @@ async def _handle_credits_and_usage(
     prompt_tokens: int,
     completion_tokens: int,
     elapsed_ms: int,
+    is_streaming: bool = False,
 ) -> float:
     """
     Centralized credit/trial handling logic.
 
     This is a thin wrapper around the shared credit_handler module to maintain
     backward compatibility while ensuring consistent billing across all endpoints.
+
+    Args:
+        is_streaming: Whether this is a streaming request (affects retry behavior)
 
     Returns: cost (float)
     """
@@ -908,6 +912,44 @@ async def _handle_credits_and_usage(
         completion_tokens=completion_tokens,
         elapsed_ms=elapsed_ms,
         endpoint="/v1/chat/completions",
+        is_streaming=is_streaming,
+    )
+
+
+async def _handle_credits_and_usage_with_fallback(
+    api_key: str,
+    user: dict,
+    model: str,
+    trial: dict,
+    total_tokens: int,
+    prompt_tokens: int,
+    completion_tokens: int,
+    elapsed_ms: int,
+) -> tuple[float, bool]:
+    """
+    Credit handling for streaming background tasks with fallback on failure.
+
+    This wrapper is specifically designed for streaming requests where the response
+    has already been sent to the client. It:
+    1. Attempts credit deduction with full retry logic
+    2. On failure, logs for reconciliation and returns (cost, False)
+    3. Never raises - failures are tracked for manual reconciliation
+
+    Returns: tuple[float, bool] - (cost, success)
+    """
+    from src.services.credit_handler import handle_credits_and_usage_with_fallback
+
+    return await handle_credits_and_usage_with_fallback(
+        api_key=api_key,
+        user=user,
+        model=model,
+        trial=trial,
+        total_tokens=total_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        elapsed_ms=elapsed_ms,
+        endpoint="/v1/chat/completions",
+        is_streaming=True,
     )
 
 
@@ -1109,8 +1151,12 @@ async def _process_stream_completion_background(
                     logger.debug(f"Failed to capture health metric: {e}")
                 return
 
-            # Handle credits and usage (centralized helper)
-            cost = await _handle_credits_and_usage(
+            # Handle credits and usage (centralized helper with fallback for streaming)
+            # Use the fallback handler which:
+            # 1. Has built-in retry logic with exponential backoff
+            # 2. Logs failures for reconciliation instead of crashing
+            # 3. Records metrics for monitoring credit deduction reliability
+            cost, credit_deduction_success = await _handle_credits_and_usage_with_fallback(
                 api_key=api_key,
                 user=user,
                 model=model,
@@ -1120,6 +1166,13 @@ async def _process_stream_completion_background(
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
             )
+
+            if not credit_deduction_success:
+                logger.warning(
+                    f"Credit deduction failed for streaming request. "
+                    f"User: {user.get('id')}, Model: {model}, Cost: ${cost:.6f}. "
+                    f"Logged for reconciliation."
+                )
 
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
