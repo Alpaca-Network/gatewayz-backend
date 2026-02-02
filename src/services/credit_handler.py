@@ -134,7 +134,22 @@ def _send_critical_billing_alert(
         if additional_context:
             context.update(additional_context)
 
-        # Capture with payment error context
+        # Add breadcrumb for context before capturing the error
+        sentry_sdk.add_breadcrumb(
+            category="billing",
+            message=f"Credit deduction failed for user {user_id}",
+            level="error",
+            data={
+                "model": model,
+                "cost_usd": cost,
+                "endpoint": endpoint,
+                "user_id": user_id,
+                "attempt_number": attempt_number,
+                "is_streaming": is_streaming,
+            },
+        )
+
+        # Capture with payment error context (includes alerting for significant costs)
         capture_payment_error(
             error,
             operation="credit_deduction_failed",
@@ -142,15 +157,6 @@ def _send_critical_billing_alert(
             amount=cost,
             details=context,
         )
-
-        # Also send a separate message for high visibility
-        if cost >= 0.01:  # Alert for costs >= $0.01
-            sentry_sdk.capture_message(
-                f"CRITICAL: Credit deduction failed after {attempt_number} attempts. "
-                f"User {user_id} owes ${cost:.6f} for {model}",
-                level="error",
-                extras=context,
-            )
 
     except Exception as e:
         logger.error(f"Failed to send Sentry alert for billing failure: {e}")
@@ -275,7 +281,12 @@ async def handle_credits_and_usage(
                 e,
                 operation="trial_usage_logging",
                 user_id=user.get("id"),
-                details={"model": model, "tokens": total_tokens, "is_trial": True, "endpoint": endpoint},
+                details={
+                    "model": model,
+                    "tokens": total_tokens,
+                    "is_trial": True,
+                    "endpoint": endpoint,
+                },
             )
     else:
         # Paid user - deduct credits with retry logic
@@ -358,7 +369,9 @@ async def handle_credits_and_usage(
         # If all retries failed, handle the failure
         if not deduction_successful:
             latency = time.monotonic() - start_time
-            _record_credit_metrics("failed", cost, endpoint, is_streaming, latency, CREDIT_DEDUCTION_MAX_RETRIES)
+            _record_credit_metrics(
+                "failed", cost, endpoint, is_streaming, latency, CREDIT_DEDUCTION_MAX_RETRIES
+            )
             _record_missed_deduction(cost, "retry_exhausted")
 
             # Send critical alert
@@ -461,6 +474,7 @@ async def handle_credits_and_usage_with_fallback(
         # Calculate cost for tracking even if deduction failed
         try:
             from src.services.pricing import calculate_cost_async
+
             cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
         except Exception:
             # Fallback cost estimation
@@ -523,21 +537,25 @@ async def _log_failed_deduction_for_reconciliation(
         # Try to insert into a reconciliation table
         # If the table doesn't exist, this will fail silently
         await asyncio.to_thread(
-            lambda: client.table("credit_deduction_failures").insert({
-                "user_id": user_id,
-                "api_key_prefix": api_key[:10] + "..." if api_key else None,
-                "model": model,
-                "cost_usd": cost,
-                "total_tokens": total_tokens,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "endpoint": endpoint,
-                "error_message": error[:1000],
-                "status": "pending",
-            }).execute()
+            lambda: client.table("credit_deduction_failures")
+            .insert(
+                {
+                    "user_id": user_id,
+                    "api_key_prefix": api_key[:10] + "..." if api_key else None,
+                    "model": model,
+                    "cost_usd": cost,
+                    "total_tokens": total_tokens,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "endpoint": endpoint,
+                    "error_message": error[:1000],
+                    "status": "pending",
+                }
+            )
+            .execute()
         )
         logger.info(f"Logged failed deduction for reconciliation: user={user_id}, cost=${cost:.6f}")
 
     except Exception as e:
-        # Table might not exist - that's OK, we've logged it elsewhere
-        logger.debug(f"Could not log to reconciliation table: {e}")
+        # Log at warning level so failures to record reconciliation data are visible
+        logger.warning(f"Could not log to reconciliation table: {e}")

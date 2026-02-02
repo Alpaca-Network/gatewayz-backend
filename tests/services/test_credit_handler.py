@@ -76,9 +76,7 @@ class TestRecordCreditMetrics:
     @patch("src.services.prometheus_metrics.credit_deduction_amount_usd")
     @patch("src.services.prometheus_metrics.credit_deduction_latency")
     @patch("src.services.prometheus_metrics.credit_deduction_retry_count")
-    def test_records_success_metrics(
-        self, mock_retry, mock_latency, mock_amount, mock_total
-    ):
+    def test_records_success_metrics(self, mock_retry, mock_latency, mock_amount, mock_total):
         """Test that success metrics are recorded correctly."""
         mock_total.labels.return_value.inc = MagicMock()
         mock_amount.labels.return_value.inc = MagicMock()
@@ -111,9 +109,7 @@ class TestRecordCreditMetrics:
     @patch("src.services.prometheus_metrics.credit_deduction_amount_usd")
     @patch("src.services.prometheus_metrics.credit_deduction_latency")
     @patch("src.services.prometheus_metrics.credit_deduction_retry_count")
-    def test_records_retry_metrics(
-        self, mock_retry, mock_latency, mock_amount, mock_total
-    ):
+    def test_records_retry_metrics(self, mock_retry, mock_latency, mock_amount, mock_total):
         """Test that retry metrics are recorded for attempt > 1."""
         mock_total.labels.return_value.inc = MagicMock()
         mock_amount.labels.return_value.inc = MagicMock()
@@ -177,11 +173,9 @@ class TestRecordBackgroundTaskFailure:
 class TestSendCriticalBillingAlert:
     """Test Sentry alerting for billing failures."""
 
-    @patch("sentry_sdk.capture_message")
+    @patch("sentry_sdk.add_breadcrumb")
     @patch("src.utils.sentry_context.capture_payment_error")
-    def test_sends_alert_for_significant_cost(
-        self, mock_capture, mock_capture_message
-    ):
+    def test_sends_alert_for_significant_cost(self, mock_capture, mock_add_breadcrumb):
         """Test that Sentry alert is sent for costs >= $0.01."""
         error = RuntimeError("Database error")
 
@@ -196,18 +190,16 @@ class TestSendCriticalBillingAlert:
         )
 
         mock_capture.assert_called_once()
-        mock_capture_message.assert_called_once()
-        call_args = mock_capture_message.call_args
-        assert "CRITICAL" in call_args[0][0]
-        assert "123" in call_args[0][0]
-        assert "0.05" in call_args[0][0]
+        mock_add_breadcrumb.assert_called_once()
+        call_kwargs = mock_add_breadcrumb.call_args[1]
+        assert call_kwargs["category"] == "billing"
+        assert "123" in call_kwargs["message"]
+        assert call_kwargs["data"]["cost_usd"] == 0.05
 
-    @patch("sentry_sdk.capture_message")
+    @patch("sentry_sdk.add_breadcrumb")
     @patch("src.utils.sentry_context.capture_payment_error")
-    def test_skips_message_for_small_cost(
-        self, mock_capture, mock_capture_message
-    ):
-        """Test that Sentry message is skipped for costs < $0.01."""
+    def test_skips_message_for_small_cost(self, mock_capture, mock_add_breadcrumb):
+        """Test that Sentry breadcrumb and alert are sent for all costs."""
         error = RuntimeError("Database error")
 
         _send_critical_billing_alert(
@@ -220,10 +212,10 @@ class TestSendCriticalBillingAlert:
             is_streaming=True,
         )
 
-        # capture_payment_error should still be called
+        # capture_payment_error should be called for all costs
         mock_capture.assert_called_once()
-        # But capture_message should not
-        mock_capture_message.assert_not_called()
+        # Breadcrumb should be added for all costs
+        mock_add_breadcrumb.assert_called_once()
 
 
 class TestHandleCreditsAndUsage:
