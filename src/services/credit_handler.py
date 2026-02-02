@@ -200,7 +200,7 @@ async def handle_credits_and_usage(
     """
     # Import dependencies here to avoid circular imports
     from src.db.rate_limits import update_rate_limit_usage
-    from src.db.trials import track_trial_usage
+    from src.db.trials import track_trial_usage_for_key
     from src.db.users import deduct_credits, log_api_usage_transaction, record_usage
     from src.services.pricing import calculate_cost_async
     from src.utils.sentry_context import capture_payment_error
@@ -239,13 +239,10 @@ async def handle_credits_and_usage(
     if is_trial and not trial.get("is_expired"):
         try:
             await _to_thread(
-                track_trial_usage,
+                track_trial_usage_for_key,
                 api_key,
                 total_tokens,
-                1,
-                model_id=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
+                1,  # requests_used
             )
         except Exception as e:
             logger.warning("Failed to track trial usage: %s", e)
