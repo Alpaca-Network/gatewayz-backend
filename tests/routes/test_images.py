@@ -682,7 +682,7 @@ class TestImageGenerationErrorHandling:
     @patch('src.routes.images.make_deepinfra_image_request')
     @patch('src.routes.images.process_image_generation_response')
     @patch('src.routes.images.deduct_credits')
-    def test_credit_deduction_failure_logged(
+    def test_credit_deduction_failure_returns_402(
         self,
         mock_deduct_credits,
         mock_process_response,
@@ -693,7 +693,11 @@ class TestImageGenerationErrorHandling:
         mock_deepinfra_response,
         valid_image_request
     ):
-        """Test that credit deduction failures are logged but don't fail request"""
+        """Test that credit deduction failures return 402 Payment Required.
+
+        CRITICAL: Users must NOT receive free images when credit deduction fails.
+        This test verifies that billing failures prevent the response from being returned.
+        """
         mock_get_user.return_value = mock_user
         mock_make_request.return_value = mock_deepinfra_response
         mock_process_response.return_value = {
@@ -710,6 +714,48 @@ class TestImageGenerationErrorHandling:
             json=valid_image_request
         )
 
-        # Request should still succeed (image was generated)
-        # Credit deduction error is logged
-        assert response.status_code == 200
+        # Request must fail with 402 Payment Required when credits can't be deducted
+        # Users should NOT receive free images
+        assert response.status_code == 402
+        assert 'payment required' in response.json()['detail'].lower()
+
+    @patch('src.routes.images.get_user')
+    @patch('src.routes.images.make_deepinfra_image_request')
+    @patch('src.routes.images.process_image_generation_response')
+    @patch('src.routes.images.deduct_credits')
+    def test_unexpected_billing_error_returns_500(
+        self,
+        mock_deduct_credits,
+        mock_process_response,
+        mock_make_request,
+        mock_get_user,
+        client,
+        mock_user,
+        mock_deepinfra_response,
+        valid_image_request
+    ):
+        """Test that unexpected billing errors return 500 and don't give away free images.
+
+        CRITICAL: Any billing error should prevent free images from being returned.
+        """
+        mock_get_user.return_value = mock_user
+        mock_make_request.return_value = mock_deepinfra_response
+        mock_process_response.return_value = {
+            'created': 1677652288,
+            'data': mock_deepinfra_response['data'],
+            'provider': 'deepinfra',
+            'model': 'stable-diffusion-3.5-large'
+        }
+        # Simulate an unexpected database/network error during credit deduction
+        mock_deduct_credits.side_effect = RuntimeError("Database connection failed")
+
+        response = client.post(
+            '/v1/images/generations',
+            headers={'Authorization': 'Bearer test_api_key_12345'},
+            json=valid_image_request
+        )
+
+        # Request must fail with 500 when an unexpected billing error occurs
+        # Users should NOT receive free images
+        assert response.status_code == 500
+        assert 'billing error' in response.json()['detail'].lower()

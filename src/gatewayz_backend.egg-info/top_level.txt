@@ -1,4 +1,5 @@
 __init__
+adapters
 app
 backfill_legacy_keys
 cache
@@ -8,6 +9,7 @@ data
 db
 db_security
 enhanced_notification_service
+handlers
 main
 middleware
 models
