@@ -163,6 +163,15 @@ credits_used = get_or_create_metric(
     ["provider", "model"],
 )
 
+# ==================== Pricing Metrics ====================
+# Track when default pricing is used (potential under-billing)
+default_pricing_usage_counter = get_or_create_metric(
+    Counter,
+    "gatewayz_default_pricing_usage_total",
+    "Count of requests using default pricing (pricing data not found). High values indicate missing pricing data.",
+    ["model"],
+)
+
 # ==================== Cost Tracking Metrics ====================
 # Track actual USD costs for billing and budget monitoring
 api_cost_usd_total = get_or_create_metric(

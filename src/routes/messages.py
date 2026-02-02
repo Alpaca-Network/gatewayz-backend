@@ -892,60 +892,24 @@ async def anthropic_messages(
             except Exception as exc:
                 logger.debug("Failed to release concurrency for %s: %s", mask_key(api_key), exc)
 
-        cost = calculate_cost(model, prompt_tokens, completion_tokens)
-        is_trial = trial.get("is_trial", False)
+        # Use unified credit handler for consistent billing across all endpoints
+        from src.services.credit_handler import handle_credits_and_usage
 
-        if is_trial:
-            # Log transaction for trial users (with $0 cost)
-            try:
-                await _to_thread(
-                    log_api_usage_transaction,
-                    api_key,
-                    0.0,
-                    f"API usage - {model} (Trial)",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": 0.0,
-                        "is_trial": True,
-                    },
-                    True,
-                )
-            except Exception as e:
-                logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-        else:
-            # For non-trial users, deduct credits
-            try:
-                await _to_thread(
-                    deduct_credits,
-                    api_key,
-                    cost,
-                    f"API usage - {model}",
-                    {
-                        "model": model,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": cost,
-                    },
-                )
-                await _to_thread(
-                    record_usage,
-                    user["id"],
-                    api_key,
-                    model,
-                    total_tokens,
-                    cost,
-                    int(elapsed * 1000),
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=402, detail=str(e))
-            except Exception as e:
-                logger.error("Usage recording error: %s", e)
-
-            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
+        try:
+            cost = await handle_credits_and_usage(
+                api_key=api_key,
+                user=user,
+                model=model,
+                trial=trial,
+                total_tokens=total_tokens,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                elapsed_ms=int(elapsed * 1000),
+                endpoint="/v1/messages",
+            )
+        except ValueError as e:
+            # Insufficient credits
+            raise HTTPException(status_code=402, detail=str(e))
 
         await _to_thread(increment_api_key_usage, api_key)
 
