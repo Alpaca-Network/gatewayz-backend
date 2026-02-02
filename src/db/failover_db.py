@@ -58,16 +58,13 @@ def get_providers_for_model(
     try:
         supabase = get_supabase_client()
 
-        # Query models table with provider join
+        # Query models table with provider join and pricing from model_pricing table
+        # Note: model_id column was removed - now use model_name as canonical identifier
         query = supabase.table("models").select(
             """
             id,
-            model_id,
+            model_name,
             provider_model_id,
-            pricing_prompt,
-            pricing_completion,
-            pricing_image,
-            pricing_request,
             average_response_time_ms,
             health_status,
             success_rate,
@@ -76,6 +73,12 @@ def get_providers_for_model(
             supports_function_calling,
             supports_vision,
             context_length,
+            model_pricing(
+                price_per_input_token,
+                price_per_output_token,
+                price_per_image_token,
+                price_per_request
+            ),
             providers!inner(
                 id,
                 slug,
@@ -90,8 +93,8 @@ def get_providers_for_model(
             """
         )
 
-        # Filter by model_id (canonical name)
-        query = query.eq("model_id", model_id)
+        # Filter by model_name (canonical name)
+        query = query.eq("model_name", model_id)
 
         # Apply filters
         if active_only:
@@ -112,6 +115,17 @@ def get_providers_for_model(
         providers = []
         for row in response.data:
             provider_info = row["providers"]
+            pricing_info = row.get("model_pricing") or {}
+
+            # Handle model_pricing as list (PostgREST may return array for relationships)
+            if isinstance(pricing_info, list):
+                pricing_info = pricing_info[0] if pricing_info else {}
+
+            # Extract pricing from model_pricing table (per-token format)
+            pricing_prompt = float(pricing_info.get("price_per_input_token") or 0)
+            pricing_completion = float(pricing_info.get("price_per_output_token") or 0)
+            pricing_image = float(pricing_info.get("price_per_image_token") or 0)
+            pricing_request = float(pricing_info.get("price_per_request") or 0)
 
             # Build combined provider dict
             provider = {
@@ -125,14 +139,14 @@ def get_providers_for_model(
 
                 # Model-specific info
                 "model_db_id": row["id"],
-                "model_id": row["model_id"],  # Canonical ID
+                "model_id": row["model_name"],  # Canonical ID (now using model_name)
                 "provider_model_id": row["provider_model_id"],  # Provider-specific ID
 
-                # Pricing
-                "pricing_prompt": float(row["pricing_prompt"]) if row["pricing_prompt"] else 0.0,
-                "pricing_completion": float(row["pricing_completion"]) if row["pricing_completion"] else 0.0,
-                "pricing_image": float(row["pricing_image"]) if row["pricing_image"] else 0.0,
-                "pricing_request": float(row["pricing_request"]) if row["pricing_request"] else 0.0,
+                # Pricing (from model_pricing table - per-token format)
+                "pricing_prompt": pricing_prompt,
+                "pricing_completion": pricing_completion,
+                "pricing_image": pricing_image,
+                "pricing_request": pricing_request,
 
                 # Health
                 "model_health_status": row["health_status"],
@@ -193,10 +207,11 @@ def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> str | 
     try:
         supabase = get_supabase_client()
 
+        # Note: model_id column was removed - now use model_name as canonical identifier
         response = supabase.table("models").select(
             "provider_model_id"
         ).eq(
-            "model_id", canonical_model_id
+            "model_name", canonical_model_id
         ).eq(
             "providers.slug", provider_slug
         ).single().execute()
@@ -258,10 +273,11 @@ def check_model_available_on_provider(
     try:
         supabase = get_supabase_client()
 
+        # Note: model_id column was removed - now use model_name as canonical identifier
         response = supabase.table("models").select(
             "id"
         ).eq(
-            "model_id", model_id
+            "model_name", model_id
         ).eq(
             "is_active", True
         ).eq(
