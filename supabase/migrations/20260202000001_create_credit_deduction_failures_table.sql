@@ -119,23 +119,12 @@ CREATE POLICY credit_deduction_failures_insert_policy ON credit_deduction_failur
     TO service_role
     WITH CHECK (true);
 
--- Select policy: Service role and admin users can read
--- Admin check: users with tier = 'admin' can view for reconciliation
--- Note: auth.uid() returns UUID, users.auth_id is the UUID column for auth matching
+-- Select policy: Service role only (admin access via API using service role)
+-- This is a sensitive billing table - access is only through the API backend
 CREATE POLICY credit_deduction_failures_select_policy ON credit_deduction_failures
     FOR SELECT
-    TO authenticated
-    USING (
-        -- Service role has full access (checked via current_setting)
-        current_setting('role', true) = 'service_role'
-        OR
-        -- Admin users can view all records for reconciliation
-        EXISTS (
-            SELECT 1 FROM users
-            WHERE users.auth_id = auth.uid()
-            AND users.tier = 'admin'
-        )
-    );
+    TO service_role
+    USING (true);
 
 -- Update policy: Only service role can update (for admin reconciliation via API)
 CREATE POLICY credit_deduction_failures_update_policy ON credit_deduction_failures
