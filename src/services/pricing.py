@@ -119,11 +119,12 @@ def _get_pricing_from_database(model_id: str, candidate_ids: set[str]) -> dict[s
                         "source": "database"
                     }
 
-                # Try provider_model_id if model_id didn't match
+                # Try provider_model_id if model_name didn't match
                 with track_database_query(table="models", operation="select"):
+                    # Note: model_id column was dropped from models table - now using model_name
                     result = (
                         client.table("models")
-                        .select("id, model_id, model_pricing(price_per_input_token, price_per_output_token)")
+                        .select("id, model_name, model_pricing(price_per_input_token, price_per_output_token)")
                         .eq("provider_model_id", candidate)
                         .eq("is_active", True)
                         .limit(1)
