@@ -447,6 +447,89 @@ class TestHandleCreditsAndUsage:
         # SHOULD deduct credits
         mock_deduct.assert_called_once()
 
+    @pytest.mark.asyncio
+    @patch("src.services.credit_handler.calculate_cost_async")
+    @patch("src.services.credit_handler.deduct_credits")
+    @patch("src.services.credit_handler.record_usage")
+    @patch("src.services.credit_handler.update_rate_limit_usage")
+    @patch("src.services.credit_handler._record_credit_metrics")
+    async def test_no_duplicate_deduction_when_usage_logging_fails(
+        self,
+        mock_metrics,
+        mock_rate_limit,
+        mock_record_usage,
+        mock_deduct,
+        mock_calc_cost,
+        mock_user,
+        mock_trial_inactive,
+    ):
+        """Test that deduct_credits is only called once even if record_usage fails.
+
+        This is a critical test for the fix: if deduct_credits succeeds but
+        record_usage fails, we should NOT retry the deduction (which would
+        cause duplicate charges).
+        """
+        mock_calc_cost.return_value = 0.05
+        # record_usage fails, but deduct_credits succeeds
+        mock_record_usage.side_effect = RuntimeError("DB connection error")
+
+        # Should complete successfully (usage logging failure is logged, not raised)
+        cost = await handle_credits_and_usage(
+            api_key="test_key",
+            user=mock_user,
+            model="gpt-4",
+            trial=mock_trial_inactive,
+            total_tokens=1000,
+            prompt_tokens=500,
+            completion_tokens=500,
+            elapsed_ms=1000,
+        )
+
+        assert cost == 0.05
+        # CRITICAL: deduct_credits should only be called ONCE
+        mock_deduct.assert_called_once()
+        # record_usage was attempted
+        mock_record_usage.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("src.services.credit_handler.calculate_cost_async")
+    @patch("src.services.credit_handler.deduct_credits")
+    @patch("src.services.credit_handler.record_usage")
+    @patch("src.services.credit_handler.update_rate_limit_usage")
+    @patch("src.services.credit_handler._record_credit_metrics")
+    async def test_no_duplicate_deduction_when_rate_limit_update_fails(
+        self,
+        mock_metrics,
+        mock_rate_limit,
+        mock_record_usage,
+        mock_deduct,
+        mock_calc_cost,
+        mock_user,
+        mock_trial_inactive,
+    ):
+        """Test that deduct_credits is only called once even if rate limit update fails."""
+        mock_calc_cost.return_value = 0.05
+        # rate limit update fails, but deduct_credits succeeds
+        mock_rate_limit.side_effect = RuntimeError("Redis connection error")
+
+        # Should complete successfully
+        cost = await handle_credits_and_usage(
+            api_key="test_key",
+            user=mock_user,
+            model="gpt-4",
+            trial=mock_trial_inactive,
+            total_tokens=1000,
+            prompt_tokens=500,
+            completion_tokens=500,
+            elapsed_ms=1000,
+        )
+
+        assert cost == 0.05
+        # CRITICAL: deduct_credits should only be called ONCE
+        mock_deduct.assert_called_once()
+        # rate limit update was attempted
+        mock_rate_limit.assert_called_once()
+
 
 class TestHandleCreditsAndUsageWithFallback:
     """Test the fallback wrapper for streaming requests."""

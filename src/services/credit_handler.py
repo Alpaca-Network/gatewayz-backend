@@ -303,23 +303,18 @@ async def handle_credits_and_usage(
                         "attempt_number": attempt,
                     },
                 )
-                await _to_thread(
-                    record_usage,
-                    user["id"],
-                    api_key,
-                    model,
-                    total_tokens,
-                    cost,
-                    elapsed_ms,
-                )
-                await _to_thread(update_rate_limit_usage, api_key, total_tokens)
 
-                # Success - record metrics
+                # CRITICAL: Once deduct_credits succeeds, mark as successful immediately
+                # to prevent duplicate deductions if subsequent operations fail.
+                # The deduction is the critical billing operation - usage logging and
+                # rate limit updates are secondary and should not trigger a retry.
+                deduction_successful = True
+
+                # Record success metrics
                 latency = time.monotonic() - start_time
                 status = "success" if attempt == 1 else "retried"
                 _record_credit_metrics(status, cost, endpoint, is_streaming, latency, attempt)
 
-                deduction_successful = True
                 if attempt > 1:
                     logger.info(
                         f"Credit deduction succeeded on attempt {attempt} for user {user.get('id')}, "
@@ -395,6 +390,31 @@ async def handle_credits_and_usage(
             raise RuntimeError(
                 f"Credit deduction failed after {CREDIT_DEDUCTION_MAX_RETRIES} attempts: {last_error}"
             ) from last_error
+
+        # Secondary operations: record usage and update rate limits
+        # These are done AFTER the retry loop to prevent duplicate deductions.
+        # Failures here are logged but don't affect the billing outcome.
+        try:
+            await _to_thread(
+                record_usage,
+                user["id"],
+                api_key,
+                model,
+                total_tokens,
+                cost,
+                elapsed_ms,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to record usage after successful deduction for user {user.get('id')}: {e}"
+            )
+
+        try:
+            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
+        except Exception as e:
+            logger.warning(
+                f"Failed to update rate limit usage after successful deduction for user {user.get('id')}: {e}"
+            )
 
     return cost
 
