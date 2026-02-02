@@ -6,7 +6,7 @@ This ensures consistent conversion between external formats and internal schemas
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator, Dict
+from typing import Any, AsyncIterator
 from src.schemas.internal.chat import InternalChatRequest, InternalChatResponse, InternalStreamChunk
 
 
@@ -25,7 +25,7 @@ class BaseChatAdapter(ABC):
     """
 
     @abstractmethod
-    def to_internal_request(self, external_request: Dict[str, Any]) -> InternalChatRequest:
+    def to_internal_request(self, external_request: dict[str, Any]) -> InternalChatRequest:
         """
         Convert external API request format to internal format.
 
@@ -43,7 +43,7 @@ class BaseChatAdapter(ABC):
         pass
 
     @abstractmethod
-    def from_internal_response(self, internal_response: InternalChatResponse) -> Dict[str, Any]:
+    def from_internal_response(self, internal_response: InternalChatResponse) -> dict[str, Any]:
         """
         Convert internal response format to external API format.
 

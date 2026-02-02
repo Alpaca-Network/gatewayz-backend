@@ -8,14 +8,13 @@ Reference: https://platform.openai.com/docs/api-reference/chat
 import json
 import time
 import logging
-from typing import Any, AsyncIterator, Dict, List, Union
+from typing import Any, AsyncIterator
 from src.adapters.chat.base import BaseChatAdapter
 from src.schemas.internal.chat import (
     InternalChatRequest,
     InternalChatResponse,
     InternalMessage,
     InternalStreamChunk,
-    InternalUsage,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class OpenAIChatAdapter(BaseChatAdapter):
     def format_name(self) -> str:
         return "openai"
 
-    def to_internal_request(self, external_request: Dict[str, Any]) -> InternalChatRequest:
+    def to_internal_request(self, external_request: dict[str, Any]) -> InternalChatRequest:
         """
         Convert OpenAI format request to internal format.
 
@@ -83,7 +82,7 @@ class OpenAIChatAdapter(BaseChatAdapter):
 
         return internal_request
 
-    def from_internal_response(self, internal_response: InternalChatResponse) -> Dict[str, Any]:
+    def from_internal_response(self, internal_response: InternalChatResponse) -> dict[str, Any]:
         """
         Convert internal response to OpenAI format.
 
@@ -154,7 +153,7 @@ class OpenAIChatAdapter(BaseChatAdapter):
                 chunk_count += 1
 
                 # Build delta object
-                delta: Dict[str, Any] = {}
+                delta: dict[str, Any] = {}
 
                 # Add role in first chunk
                 if chunk.role:

@@ -227,6 +227,51 @@ user_cost_by_plan = get_or_create_metric(
     ["plan_type"],  # free, trial, starter, professional, enterprise
 )
 
+# ==================== Credit Deduction Metrics ====================
+# Track credit deduction success/failure for billing reliability monitoring
+credit_deduction_total = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_total",
+    "Total credit deduction attempts",
+    ["status", "endpoint", "is_streaming"],  # status: success, failed, retried
+)
+
+credit_deduction_amount_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_amount_usd_total",
+    "Total USD amount of credit deductions",
+    ["status", "endpoint"],  # status: success, failed
+)
+
+credit_deduction_retry_count = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_retry_total",
+    "Total credit deduction retry attempts",
+    ["attempt_number", "endpoint"],  # attempt_number: 1, 2, 3
+)
+
+credit_deduction_latency = get_or_create_metric(
+    Histogram,
+    "gatewayz_credit_deduction_latency_seconds",
+    "Credit deduction operation latency",
+    ["endpoint", "is_streaming"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+streaming_background_task_failures = get_or_create_metric(
+    Counter,
+    "gatewayz_streaming_background_task_failures_total",
+    "Total streaming background task failures (potential missed credit deductions)",
+    ["failure_type", "endpoint"],  # failure_type: credit_deduction, activity_logging, etc.
+)
+
+missed_credit_deductions_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_missed_credit_deductions_usd_total",
+    "Total USD amount of potentially missed credit deductions due to failures",
+    ["reason"],  # reason: background_task_failure, retry_exhausted, etc.
+)
+
 # ==================== Database Metrics ====================
 database_query_count = get_or_create_metric(
     Counter,
