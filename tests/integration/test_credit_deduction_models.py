@@ -13,10 +13,9 @@ The tests verify:
 4. Transactions are logged with correct metadata
 """
 
-import asyncio
 import math
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 
 class TestCreditDeductionForOpenAIModels:
@@ -307,6 +306,8 @@ class TestTrialUserCreditHandling:
 
             # For trial users, deduct_credits should NOT be called
             assert deduct_credits_called is False
+            # Cost should still be calculated correctly
+            assert cost == 0.05
 
 
 class TestTrialOverrideForPaidUsers:
@@ -367,6 +368,8 @@ class TestTrialOverrideForPaidUsers:
             # Even though is_trial=True, the override should trigger deduct_credits
             # because user has active subscription
             assert deduct_credits_called is True
+            # Cost should still be calculated correctly
+            assert cost == 0.05
 
 
 class TestDefaultPricingAlerts:

@@ -28,8 +28,6 @@ def _track_default_pricing_usage(model_id: str, error: str | None = None) -> Non
 
     Also sends Sentry alert for high-value model families (OpenAI, Anthropic, Google).
     """
-    import time
-
     now = time.time()
 
     if model_id not in _default_pricing_tracker:
@@ -409,7 +407,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
             # Check if we're in an async context
             try:
-                loop = asyncio.get_running_loop()
+                _ = asyncio.get_running_loop()
                 # We're in an async context - skip live fetch (use get_model_pricing_async instead)
                 # Log once per model to avoid spam
                 logger.debug(
@@ -419,12 +417,12 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
             except RuntimeError:
                 # No running loop - we can safely create one and run the async fetch
                 try:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
                     try:
-                        live_pricing = loop.run_until_complete(fetch_live_pricing(model_id))
+                        live_pricing = new_loop.run_until_complete(fetch_live_pricing(model_id))
                     finally:
-                        loop.close()
+                        new_loop.close()
                 except Exception as e:
                     logger.debug(f"Live pricing fetch in new event loop failed for {model_id}: {e}")
 

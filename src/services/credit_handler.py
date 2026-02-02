@@ -10,7 +10,6 @@ across all API endpoints and makes auditing easier.
 
 import asyncio
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
