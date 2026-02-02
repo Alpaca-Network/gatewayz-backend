@@ -16,6 +16,88 @@ logger = logging.getLogger(__name__)
 _pricing_cache: dict[str, dict[str, Any]] = {}
 _pricing_cache_ttl = 900  # 15 minutes TTL for live pricing
 
+# Track models that fall back to default pricing for monitoring/alerting
+# Structure: {model_id: {"count": int, "first_seen": float, "last_seen": float, "errors": list}}
+_default_pricing_tracker: dict[str, dict[str, Any]] = {}
+
+
+def _track_default_pricing_usage(model_id: str, error: str | None = None) -> None:
+    """
+    Track when default pricing is used for a model.
+    This helps identify models that need pricing data added to the database.
+
+    Also sends Sentry alert for high-value model families (OpenAI, Anthropic, Google).
+    """
+    now = time.time()
+
+    if model_id not in _default_pricing_tracker:
+        _default_pricing_tracker[model_id] = {
+            "count": 0,
+            "first_seen": now,
+            "last_seen": now,
+            "errors": [],
+        }
+
+    tracker = _default_pricing_tracker[model_id]
+    tracker["count"] += 1
+    tracker["last_seen"] = now
+    if error:
+        tracker["errors"].append({"time": now, "error": error})
+        # Keep only last 10 errors
+        tracker["errors"] = tracker["errors"][-10:]
+
+    # Alert for high-value model families that should have pricing
+    high_value_prefixes = (
+        "openai/", "anthropic/", "google/", "gpt-", "claude-", "gemini-",
+        "o1", "o3", "o4",  # OpenAI reasoning models
+    )
+    model_lower = model_id.lower()
+
+    if any(model_lower.startswith(prefix) or prefix in model_lower for prefix in high_value_prefixes):
+        # Send Sentry alert for high-value models using default pricing
+        try:
+            import sentry_sdk
+            sentry_sdk.capture_message(
+                f"High-value model using default pricing: {model_id}",
+                level="warning",
+                extras={
+                    "model_id": model_id,
+                    "usage_count": tracker["count"],
+                    "first_seen": tracker["first_seen"],
+                    "last_seen": tracker["last_seen"],
+                    "error": error,
+                },
+            )
+        except Exception:
+            # Sentry not configured or failed, just log
+            logger.error(
+                f"[BILLING_ALERT] High-value model '{model_id}' using default pricing! "
+                f"Usage count: {tracker['count']}. Add pricing data to prevent under-billing."
+            )
+
+    # Log Prometheus metric if available
+    try:
+        from src.services.prometheus_metrics import default_pricing_usage_counter
+        default_pricing_usage_counter.labels(model=model_id).inc()
+    except (ImportError, AttributeError):
+        pass  # Prometheus metrics not available
+
+
+def get_default_pricing_stats() -> dict[str, Any]:
+    """Get statistics about models using default pricing for monitoring."""
+    return {
+        "models_using_default": len(_default_pricing_tracker),
+        "details": {
+            model_id: {
+                "count": data["count"],
+                "first_seen": data["first_seen"],
+                "last_seen": data["last_seen"],
+                "error_count": len(data["errors"]),
+            }
+            for model_id, data in _default_pricing_tracker.items()
+        },
+    }
+
 
 def clear_pricing_cache(model_id: str | None = None) -> None:
     """Clear pricing cache (for testing or explicit invalidation)"""
@@ -313,20 +395,36 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                 logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
 
         # Step 2: Try live API fetch from provider
+        # NOTE: When called from async context (most route handlers), we skip live fetch
+        # here and rely on database/cache. The async version get_model_pricing_async()
+        # should be used from async contexts for live pricing support.
         try:
             import asyncio
+            import concurrent.futures
             from src.services.pricing_live_fetch import fetch_live_pricing
 
-            # Run async fetch in sync context
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                # If we're already in an async context, create a task
-                # This requires the function to be called from async context
-                logger.debug(f"Running in async context, attempting live fetch for {model_id}")
-                live_pricing = None  # Skip for now if in async context, will be handled separately
-            else:
-                # Run in sync mode
-                live_pricing = loop.run_until_complete(fetch_live_pricing(model_id))
+            live_pricing = None
+
+            # Check if we're in an async context
+            try:
+                _ = asyncio.get_running_loop()
+                # We're in an async context - skip live fetch (use get_model_pricing_async instead)
+                # Log once per model to avoid spam
+                logger.debug(
+                    f"[PRICING] Sync get_model_pricing called from async context for {model_id}. "
+                    f"Consider using get_model_pricing_async() for live pricing support."
+                )
+            except RuntimeError:
+                # No running loop - we can safely create one and run the async fetch
+                try:
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        live_pricing = new_loop.run_until_complete(fetch_live_pricing(model_id))
+                    finally:
+                        new_loop.close()
+                except Exception as e:
+                    logger.debug(f"Live pricing fetch in new event loop failed for {model_id}: {e}")
 
             if live_pricing:
                 # Cache the live result
@@ -372,9 +470,13 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
             logger.warning(f"Cache fallback pricing lookup failed for {model_id}: {e}")
 
         # Step 5: Use default pricing (last resort)
+        # ALERT: Default pricing may significantly under-bill for expensive models
+        # Track this metric for monitoring and alerting
         logger.warning(
-            f"Model {model_id} not found in database or cache, using default pricing"
+            f"[DEFAULT_PRICING_ALERT] Model {model_id} not found in database or cache, "
+            f"using default pricing ($0.00002/token). This may under-bill for expensive models."
         )
+        _track_default_pricing_usage(model_id)
         default_pricing = {
             "prompt": 0.00002,
             "completion": 0.00002,
@@ -385,6 +487,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
     except Exception as e:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
+        _track_default_pricing_usage(model_id, error=str(e))
         return {
             "prompt": 0.00002,
             "completion": 0.00002,
@@ -515,9 +618,12 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             logger.warning(f"Cache fallback pricing lookup failed for {model_id}: {e}")
 
         # Step 5: Use default pricing (last resort)
+        # ALERT: Default pricing may significantly under-bill for expensive models
         logger.warning(
-            f"Model {model_id} not found via live API, database, or cache, using default pricing"
+            f"[DEFAULT_PRICING_ALERT] Model {model_id} not found via live API, database, or cache, "
+            f"using default pricing ($0.00002/token). This may under-bill for expensive models."
         )
+        _track_default_pricing_usage(model_id)
         default_pricing = {
             "prompt": 0.00002,
             "completion": 0.00002,
@@ -528,6 +634,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
     except Exception as e:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
+        _track_default_pricing_usage(model_id, error=str(e))
         return {
             "prompt": 0.00002,
             "completion": 0.00002,
@@ -563,6 +670,54 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
 
         logger.info(
             f"Cost calculation for {model_id}: "
+            f"{prompt_tokens} prompt tokens (${prompt_cost:.6f}) + "
+            f"{completion_tokens} completion tokens (${completion_cost:.6f}) = "
+            f"${total_cost:.6f}"
+        )
+
+        return total_cost
+
+    except Exception as e:
+        logger.error(f"Error calculating cost for {model_id}: {e}")
+        # Fallback: Check if free model before applying default pricing
+        if model_id and model_id.endswith(":free"):
+            logger.info(f"Free model detected in fallback: {model_id}, returning $0 cost")
+            return 0.0
+        # Fallback to simple calculation (assuming $0.00002 per token)
+        total_tokens = prompt_tokens + completion_tokens
+        return total_tokens * 0.00002
+
+
+async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """
+    Calculate the total cost for a chat completion based on model pricing (async version).
+
+    This version uses get_model_pricing_async() which can fetch live pricing from
+    provider APIs when called from async contexts.
+
+    Args:
+        model_id: The model ID
+        prompt_tokens: Number of prompt tokens used
+        completion_tokens: Number of completion tokens used
+
+    Returns:
+        Total cost in USD
+    """
+    try:
+        # Check if this is a free model first (OpenRouter free models end with :free)
+        if model_id and model_id.endswith(":free"):
+            logger.info(f"Free model detected: {model_id}, returning $0 cost")
+            return 0.0
+
+        pricing = await get_model_pricing_async(model_id)
+
+        # Pricing is per single token, so just multiply (no division)
+        prompt_cost = prompt_tokens * pricing["prompt"]
+        completion_cost = completion_tokens * pricing["completion"]
+        total_cost = prompt_cost + completion_cost
+
+        logger.info(
+            f"Cost calculation (async) for {model_id}: "
             f"{prompt_tokens} prompt tokens (${prompt_cost:.6f}) + "
             f"{completion_tokens} completion tokens (${completion_cost:.6f}) = "
             f"${total_cost:.6f}"

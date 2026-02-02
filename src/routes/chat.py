@@ -889,115 +889,26 @@ async def _handle_credits_and_usage(
     elapsed_ms: int,
 ) -> float:
     """
-    Centralized credit/trial handling logic (eliminates ~80 lines of duplication).
+    Centralized credit/trial handling logic.
+
+    This is a thin wrapper around the shared credit_handler module to maintain
+    backward compatibility while ensuring consistent billing across all endpoints.
 
     Returns: cost (float)
     """
-    cost = calculate_cost(model, prompt_tokens, completion_tokens)
-    is_trial = trial.get("is_trial", False)
+    from src.services.credit_handler import handle_credits_and_usage
 
-    # Defense-in-depth: Override is_trial flag if user has active subscription
-    # This protects against webhook delays or failures that leave is_trial=TRUE
-    if is_trial and user:
-        has_active_subscription = (
-            user.get("stripe_subscription_id") is not None and
-            user.get("subscription_status") == "active"
-        ) or user.get("tier") in ("pro", "max", "admin")
-
-        if has_active_subscription:
-            logger.warning(
-                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
-                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path.",
-                user.get("id"),
-                user.get("tier"),
-                user.get("subscription_status"),
-                user.get("stripe_subscription_id"),
-            )
-            is_trial = False  # Override to paid path
-
-    # Track trial usage (only for legitimate trial users, not paid users with stale flags)
-    if is_trial and not trial.get("is_expired"):
-        try:
-            await _to_thread(
-                track_trial_usage,
-                api_key,
-                total_tokens,
-                1,
-                model_id=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            )
-        except Exception as e:
-            logger.warning("Failed to track trial usage: %s", e)
-
-    # Log transaction and deduct credits
-    if is_trial:
-        try:
-            await _to_thread(
-                log_api_usage_transaction,
-                api_key,
-                0.0,
-                f"API usage - {model} (Trial)",
-                {
-                    "model": model,
-                    "total_tokens": total_tokens,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "cost_usd": 0.0,
-                    "is_trial": True,
-                },
-                True,
-            )
-        except Exception as e:
-            logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-            capture_payment_error(
-                e,
-                operation="trial_usage_logging",
-                user_id=user.get("id"),
-                details={"model": model, "tokens": total_tokens, "is_trial": True},
-            )
-    else:
-        try:
-            await _to_thread(
-                deduct_credits,
-                api_key,
-                cost,
-                f"API usage - {model}",
-                {
-                    "model": model,
-                    "total_tokens": total_tokens,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "cost_usd": cost,
-                },
-            )
-            await _to_thread(
-                record_usage,
-                user["id"],
-                api_key,
-                model,
-                total_tokens,
-                cost,
-                elapsed_ms,
-            )
-            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
-        except Exception as e:
-            logger.error("Usage recording error: %s", e)
-            capture_payment_error(
-                e,
-                operation="credit_deduction",
-                user_id=user.get("id"),
-                amount=cost,
-                details={
-                    "model": model,
-                    "tokens": total_tokens,
-                    "cost_usd": cost,
-                    "api_key": api_key[:10] + "..." if api_key else None,
-                },
-            )
-            raise  # Re-raise to ensure billing errors are not silently ignored
-
-    return cost
+    return await handle_credits_and_usage(
+        api_key=api_key,
+        user=user,
+        model=model,
+        trial=trial,
+        total_tokens=total_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        elapsed_ms=elapsed_ms,
+        endpoint="/v1/chat/completions",
+    )
 
 
 async def _record_inference_metrics_and_health(
@@ -1530,6 +1441,7 @@ async def stream_generator(
             )
 
         # If no usage was provided, estimate based on content
+        # WARNING: This estimation may result in inaccurate billing!
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
             completion_tokens = max(1, len(accumulated_content) // 4)
@@ -1547,6 +1459,28 @@ async def stream_generator(
                             prompt_chars += len(item.get("text", ""))
             prompt_tokens = max(1, prompt_chars // 4)
             total_tokens = prompt_tokens + completion_tokens
+
+            # Log warning about token estimation (potential billing inaccuracy)
+            logger.warning(
+                f"[TOKEN_ESTIMATION] Provider {provider} did not return usage data for model {model}. "
+                f"Using character-based estimation: prompt_tokens={prompt_tokens}, "
+                f"completion_tokens={completion_tokens}, total_tokens={total_tokens}. "
+                f"Content length: {len(accumulated_content)} chars. "
+                f"This may result in inaccurate billing."
+            )
+
+            # Track metric for monitoring
+            try:
+                from src.services.prometheus_metrics import get_or_create_metric, Counter
+                token_estimation_counter = get_or_create_metric(
+                    Counter,
+                    "gatewayz_token_estimation_total",
+                    "Count of requests where token usage was estimated (not provided by provider)",
+                    ["provider", "model"],
+                )
+                token_estimation_counter.labels(provider=provider, model=model).inc()
+            except Exception:
+                pass  # Metrics not available
 
         elapsed = max(0.001, time.monotonic() - start_time)
 
