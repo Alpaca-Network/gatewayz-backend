@@ -15,13 +15,17 @@
 -- PRE-CREATE CLEANUP (make migration idempotent)
 -- ============================================================================
 
--- Drop existing policies if they exist (for idempotency)
-DROP POLICY IF EXISTS credit_deduction_failures_insert_policy ON credit_deduction_failures;
-DROP POLICY IF EXISTS credit_deduction_failures_select_policy ON credit_deduction_failures;
-DROP POLICY IF EXISTS credit_deduction_failures_update_policy ON credit_deduction_failures;
-
--- Drop existing trigger if it exists
-DROP TRIGGER IF EXISTS trigger_update_credit_deduction_failures_updated_at ON credit_deduction_failures;
+-- Drop existing policies and trigger if table exists (for idempotency)
+-- Using DO block to conditionally drop only if the table exists
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'credit_deduction_failures') THEN
+        DROP POLICY IF EXISTS credit_deduction_failures_insert_policy ON credit_deduction_failures;
+        DROP POLICY IF EXISTS credit_deduction_failures_select_policy ON credit_deduction_failures;
+        DROP POLICY IF EXISTS credit_deduction_failures_update_policy ON credit_deduction_failures;
+        DROP TRIGGER IF EXISTS trigger_update_credit_deduction_failures_updated_at ON credit_deduction_failures;
+    END IF;
+END $$;
 
 -- ============================================================================
 -- UP MIGRATION
