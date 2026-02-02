@@ -7,9 +7,8 @@ Reference: https://sdk.vercel.ai/docs
 """
 
 import json
-import time
 import logging
-from typing import Any, AsyncIterator, Dict, List
+from typing import Any, AsyncIterator
 from src.adapters.chat.base import BaseChatAdapter
 from src.schemas.internal.chat import (
     InternalChatRequest,
@@ -36,7 +35,7 @@ class AISDKChatAdapter(BaseChatAdapter):
     def format_name(self) -> str:
         return "ai-sdk"
 
-    def to_internal_request(self, external_request: Dict[str, Any]) -> InternalChatRequest:
+    def to_internal_request(self, external_request: dict[str, Any]) -> InternalChatRequest:
         """
         Convert AI SDK format request to internal format.
 
@@ -81,7 +80,7 @@ class AISDKChatAdapter(BaseChatAdapter):
 
         return internal_request
 
-    def from_internal_response(self, internal_response: InternalChatResponse) -> Dict[str, Any]:
+    def from_internal_response(self, internal_response: InternalChatResponse) -> dict[str, Any]:
         """
         Convert internal response to AI SDK format.
 
@@ -156,7 +155,7 @@ class AISDKChatAdapter(BaseChatAdapter):
                 chunk_count += 1
 
                 # Build delta object
-                delta: Dict[str, Any] = {}
+                delta: dict[str, Any] = {}
 
                 # Add role in first chunk
                 if chunk.role:
