@@ -121,6 +121,7 @@ CREATE POLICY credit_deduction_failures_insert_policy ON credit_deduction_failur
 
 -- Select policy: Service role and admin users can read
 -- Admin check: users with tier = 'admin' can view for reconciliation
+-- Note: auth.uid() returns UUID, users.auth_id is the UUID column for auth matching
 CREATE POLICY credit_deduction_failures_select_policy ON credit_deduction_failures
     FOR SELECT
     TO authenticated
@@ -128,10 +129,10 @@ CREATE POLICY credit_deduction_failures_select_policy ON credit_deduction_failur
         -- Service role has full access (checked via current_setting)
         current_setting('role', true) = 'service_role'
         OR
-        -- Admin users can view their own records or all if they're an admin
+        -- Admin users can view all records for reconciliation
         EXISTS (
             SELECT 1 FROM users
-            WHERE users.id = auth.uid()::bigint
+            WHERE users.auth_id = auth.uid()
             AND users.tier = 'admin'
         )
     );
