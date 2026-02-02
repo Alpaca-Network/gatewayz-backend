@@ -292,6 +292,10 @@ async def generate_images(
             # Calculate actual cost using the provider that was used (may differ from requested)
             total_cost, cost_per_image = get_image_cost(actual_provider, model, req.n)
 
+            # Token-equivalent for rate limiting: use 100 tokens per image as a standardized unit
+            # This maintains compatibility with token-based rate limiting while using actual USD pricing
+            tokens_equivalent = 100 * req.n
+
             # Deduct credits - CRITICAL: failures must prevent free images
             try:
                 await loop.run_in_executor(executor, deduct_credits, api_key, total_cost)
@@ -301,7 +305,7 @@ async def generate_images(
                     user["id"],
                     api_key,
                     model,
-                    req.n,  # Store number of images, not artificial "tokens"
+                    tokens_equivalent,  # Token-equivalent for rate limiting compatibility
                     total_cost,
                     int(elapsed * 1000),
                 )
@@ -325,7 +329,10 @@ async def generate_images(
                 )
 
             # Add gateway usage info
+            # Note: user_balance_after is an estimate based on pre-request balance;
+            # actual balance may differ due to concurrent requests
             processed_response["gateway_usage"] = {
+                "tokens_charged": tokens_equivalent,  # Keep for backward compatibility
                 "cost_usd": total_cost,
                 "cost_per_image": cost_per_image,
                 "request_ms": int(elapsed * 1000),
