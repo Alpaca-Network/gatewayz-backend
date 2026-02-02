@@ -4,8 +4,7 @@ Tests for pricing_lookup.py model_name migration fix
 Tests that pricing lookup correctly uses model_name instead of dropped model_id column
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from src.services.pricing_lookup import (
     _get_pricing_from_database,
     enrich_model_with_pricing,

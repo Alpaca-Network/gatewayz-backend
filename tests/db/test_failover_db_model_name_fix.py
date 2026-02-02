@@ -4,8 +4,7 @@ Tests for failover_db.py model_name migration fix
 Tests that failover queries correctly use model_name instead of dropped model_id column
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from src.db.failover_db import (
     get_providers_for_model,
     get_provider_model_id,

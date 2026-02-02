@@ -4,7 +4,6 @@ Tests for pricing.py model_name migration fix
 Tests that pricing queries correctly use model_name instead of dropped model_id column
 """
 
-import pytest
 from unittest.mock import Mock, patch
 from src.services.pricing import get_model_pricing_from_db
 

@@ -117,6 +117,10 @@ def get_providers_for_model(
             provider_info = row["providers"]
             pricing_info = row.get("model_pricing") or {}
 
+            # Handle model_pricing as list (PostgREST may return array for relationships)
+            if isinstance(pricing_info, list):
+                pricing_info = pricing_info[0] if pricing_info else {}
+
             # Extract pricing from model_pricing table (per-token format)
             pricing_prompt = float(pricing_info.get("price_per_input_token") or 0)
             pricing_completion = float(pricing_info.get("price_per_output_token") or 0)
@@ -269,10 +273,11 @@ def check_model_available_on_provider(
     try:
         supabase = get_supabase_client()
 
+        # Note: model_id column was dropped from models table - now using model_name
         response = supabase.table("models").select(
             "id"
         ).eq(
-            "model_id", model_id
+            "model_name", model_id
         ).eq(
             "is_active", True
         ).eq(
