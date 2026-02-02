@@ -266,10 +266,12 @@ async def generate_images(
                 # Calculate inference latency
                 elapsed = max(0.001, time.monotonic() - start)
 
-                # Set cost and metadata on trace
-                tokens_charged = 100 * req.n
-                cost = tokens_charged * 0.02 / 1000
-                trace_ctx.set_cost(cost)
+                # Calculate actual cost using provider pricing for tracing
+                trace_total_cost, trace_cost_per_image = get_image_cost(
+                    actual_provider, model, req.n
+                )
+                # Set cost and metadata on trace using actual USD cost
+                trace_ctx.set_cost(trace_total_cost)
                 trace_ctx.set_user_info(user_id=str(user.get("id")))
                 trace_ctx.add_event(
                     "image_generated",

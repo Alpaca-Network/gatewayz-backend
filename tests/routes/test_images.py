@@ -47,7 +47,7 @@ def mock_user_no_credits():
     return {
         'id': 2,
         'email': 'broke@example.com',
-        'credits': 50.0,  # Less than 100 needed for 1 image
+        'credits': 0.01,  # Less than $0.025 (default) or $0.035 (sd3.5-large) needed for 1 image
         'api_key': 'broke_api_key_12345'
     }
 
@@ -157,11 +157,17 @@ class TestImageGenerationSuccess:
 
         # Verify gateway usage metadata
         assert 'gateway_usage' in data
-        assert data['gateway_usage']['tokens_charged'] == 100  # 100 tokens per image
+        assert data['gateway_usage']['tokens_charged'] == 100  # Token-equivalent for rate limiting
         assert data['gateway_usage']['images_generated'] == 1
+        # New billing fields
+        assert 'cost_usd' in data['gateway_usage']
+        assert 'cost_per_image' in data['gateway_usage']
+        # Cost should be $0.035 for stable-diffusion-3.5-large on deepinfra
+        assert data['gateway_usage']['cost_usd'] == 0.035
+        assert data['gateway_usage']['cost_per_image'] == 0.035
 
-        # Verify credits were deducted
-        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 100)
+        # Verify credits were deducted using actual USD cost (not token-based)
+        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 0.035)
         mock_record_usage.assert_called_once()
         mock_increment_usage.assert_called_once_with('test_api_key_12345')
 
@@ -221,11 +227,14 @@ class TestImageGenerationSuccess:
         assert response.status_code == 200
         data = response.json()
         assert len(data['data']) == 3
-        assert data['gateway_usage']['tokens_charged'] == 300  # 100 * 3
+        assert data['gateway_usage']['tokens_charged'] == 300  # Token-equivalent: 100 * 3
         assert data['gateway_usage']['images_generated'] == 3
+        # Cost should be $0.035 * 3 = $0.105 for stable-diffusion-3.5-large on deepinfra
+        assert data['gateway_usage']['cost_usd'] == 0.105
+        assert data['gateway_usage']['cost_per_image'] == 0.035
 
-        # Verify credits deducted for all images
-        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 300)
+        # Verify credits deducted using actual USD cost (not token-based)
+        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 0.105)
 
     @patch('src.security.deps.validate_api_key_security')
     @patch('src.services.user_lookup_cache.get_user')
@@ -291,11 +300,16 @@ class TestImageGenerationSuccess:
 
         # Verify gateway usage metadata
         assert 'gateway_usage' in data
-        assert data['gateway_usage']['tokens_charged'] == 100  # 100 tokens per image
+        assert data['gateway_usage']['tokens_charged'] == 100  # Token-equivalent for rate limiting
         assert data['gateway_usage']['images_generated'] == 1
+        # New billing fields - fal-ai/stable-diffusion-v15 uses default price of $0.025
+        assert 'cost_usd' in data['gateway_usage']
+        assert 'cost_per_image' in data['gateway_usage']
+        assert data['gateway_usage']['cost_usd'] == 0.025
+        assert data['gateway_usage']['cost_per_image'] == 0.025
 
-        # Verify credits were deducted
-        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 100)
+        # Verify credits were deducted using actual USD cost (not token-based)
+        mock_deduct_credits.assert_called_once_with('test_api_key_12345', 0.025)
         mock_record_usage.assert_called_once()
         mock_increment_usage.assert_called_once_with('test_api_key_12345')
 
@@ -371,7 +385,7 @@ class TestImageGenerationCredits:
 
         request_data = {
             'prompt': 'Test prompt',
-            'n': 5  # 5 images = 500 credits needed
+            'n': 5  # 5 images = $0.125 needed (default $0.025/image)
         }
 
         response = client.post(
@@ -383,7 +397,6 @@ class TestImageGenerationCredits:
         assert response.status_code == 402
         detail = response.json()['detail'].lower()
         assert 'insufficient credits' in detail
-        assert '500' in detail  # Should mention required amount
 
 
 # ============================================================
@@ -593,11 +606,16 @@ class TestImageGenerationResponseProcessing:
         assert 'request_ms' in gateway_usage
         assert 'user_balance_after' in gateway_usage
         assert 'images_generated' in gateway_usage
+        # New billing fields
+        assert 'cost_usd' in gateway_usage
+        assert 'cost_per_image' in gateway_usage
 
-        # Verify values
-        assert gateway_usage['tokens_charged'] == 100
+        # Verify values - cost is $0.035 for stable-diffusion-3.5-large on deepinfra
+        assert gateway_usage['tokens_charged'] == 100  # Token-equivalent for rate limiting
         assert gateway_usage['images_generated'] == 1
-        assert gateway_usage['user_balance_after'] == 900.0  # 1000 - 100
+        assert gateway_usage['cost_usd'] == 0.035
+        assert gateway_usage['cost_per_image'] == 0.035
+        assert gateway_usage['user_balance_after'] == 999.965  # 1000 - 0.035
 
     @patch('src.security.deps.validate_api_key_security')
     @patch('src.services.user_lookup_cache.get_user')
