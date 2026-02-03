@@ -49,7 +49,8 @@ def _load_quality_priors() -> dict[str, Any]:
 
                 capture_error(
                     e,
-                    context={"file": str(_QUALITY_PRIORS_PATH)},
+                    context_type="code_router",
+                    context_data={"file": str(_QUALITY_PRIORS_PATH)},
                     level="warning",
                 )
             except ImportError:
