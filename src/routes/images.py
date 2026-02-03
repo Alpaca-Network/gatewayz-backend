@@ -43,6 +43,9 @@ IMAGE_COST_PER_IMAGE = {
         "flux/schnell": 0.003,
         "flux/dev": 0.025,
         "flux-pro": 0.05,
+        "fal-ai/flux/schnell": 0.003,
+        "fal-ai/flux/dev": 0.025,
+        "fal-ai/flux-pro": 0.05,
         "default": 0.025,
     },
     "google-vertex": {
@@ -52,8 +55,14 @@ IMAGE_COST_PER_IMAGE = {
     },
 }
 
+# Default fallback cost when provider is unknown - set conservatively high
+# to avoid revenue loss on new expensive models
+UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
 
-def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[float, float]:
+
+def get_image_cost(
+    provider: str, model: str, num_images: int = 1
+) -> tuple[float, float, bool]:
     """
     Calculate the cost for image generation.
 
@@ -63,12 +72,32 @@ def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[floa
         num_images: Number of images to generate
 
     Returns:
-        Tuple of (total_cost, cost_per_image)
+        Tuple of (total_cost, cost_per_image, is_fallback_pricing)
+        is_fallback_pricing is True when using default/unknown pricing
     """
     provider_pricing = IMAGE_COST_PER_IMAGE.get(provider, {})
-    cost_per_image = provider_pricing.get(model, provider_pricing.get("default", 0.025))
+    is_fallback = False
+
+    if model in provider_pricing:
+        cost_per_image = provider_pricing[model]
+    elif "default" in provider_pricing:
+        cost_per_image = provider_pricing["default"]
+        is_fallback = True
+        logger.warning(
+            f"Using default pricing for unknown model: provider={provider}, model={model}, "
+            f"cost_per_image={cost_per_image}"
+        )
+    else:
+        # Unknown provider - use conservative high default to avoid revenue loss
+        cost_per_image = UNKNOWN_PROVIDER_DEFAULT_COST
+        is_fallback = True
+        logger.warning(
+            f"Using fallback pricing for unknown provider: provider={provider}, model={model}, "
+            f"cost_per_image={cost_per_image}"
+        )
+
     total_cost = cost_per_image * num_images
-    return total_cost, cost_per_image
+    return total_cost, cost_per_image, is_fallback
 
 
 @router.post("/images/generations", response_model=ImageGenerationResponse, tags=["images"])
@@ -197,10 +226,14 @@ async def generate_images(
             )  # Default to DeepInfra for images
 
             # Calculate estimated cost for pre-flight check
-            estimated_cost, cost_per_image = get_image_cost(provider, model, req.n)
+            estimated_cost, cost_per_image, _ = get_image_cost(provider, model, req.n)
 
             # Check if user has enough credits
-            if user["credits"] < estimated_cost:
+            # Note: This is a pre-flight check. Actual deduction happens after generation.
+            # For concurrent request safety, we add a small buffer (10%) to account for
+            # potential race conditions where balance could change between check and deduction.
+            required_credits = estimated_cost * 1.1  # 10% buffer for safety
+            if user["credits"] < required_credits:
                 raise HTTPException(
                     status_code=402,
                     detail=f"Insufficient credits. Image generation costs ${estimated_cost:.4f} (${cost_per_image:.4f}/image x {req.n}). Available: ${user['credits']:.4f}",
@@ -267,7 +300,7 @@ async def generate_images(
                 elapsed = max(0.001, time.monotonic() - start)
 
                 # Calculate actual cost using provider pricing for tracing
-                trace_total_cost, trace_cost_per_image = get_image_cost(
+                trace_total_cost, trace_cost_per_image, _ = get_image_cost(
                     actual_provider, model, req.n
                 )
                 # Set cost and metadata on trace using actual USD cost
@@ -292,15 +325,26 @@ async def generate_images(
             )
 
             # Calculate actual cost using the provider that was used (may differ from requested)
-            total_cost, cost_per_image = get_image_cost(actual_provider, model, req.n)
+            total_cost, cost_per_image, used_fallback_pricing = get_image_cost(
+                actual_provider, model, req.n
+            )
 
             # Token-equivalent for rate limiting: use 100 tokens per image as a standardized unit
             # This maintains compatibility with token-based rate limiting while using actual USD pricing
             tokens_equivalent = 100 * req.n
 
             # Deduct credits - CRITICAL: failures must prevent free images
+            # The deduct_credits function handles atomic balance updates to prevent race conditions
+            actual_balance_after = None
             try:
                 await loop.run_in_executor(executor, deduct_credits, api_key, total_cost)
+
+                # Fetch fresh balance after deduction for accurate reporting
+                # This avoids stale data from the pre-request user lookup
+                updated_user = await loop.run_in_executor(executor, get_user, api_key)
+                if updated_user:
+                    actual_balance_after = updated_user.get("credits")
+
                 await loop.run_in_executor(
                     executor,
                     record_usage,
@@ -330,17 +374,20 @@ async def generate_images(
                     detail="Billing error occurred. Please try again or contact support.",
                 )
 
-            # Add gateway usage info
-            # Note: user_balance_after is an estimate based on pre-request balance;
-            # actual balance may differ due to concurrent requests
+            # Add gateway usage info with accurate balance after deduction
             processed_response["gateway_usage"] = {
                 "tokens_charged": tokens_equivalent,  # Keep for backward compatibility
                 "cost_usd": total_cost,
                 "cost_per_image": cost_per_image,
                 "request_ms": int(elapsed * 1000),
-                "user_balance_after": user["credits"] - total_cost,
+                "user_balance_after": (
+                    actual_balance_after
+                    if actual_balance_after is not None
+                    else user["credits"] - total_cost  # Fallback to estimate if fetch failed
+                ),
                 "user_api_key": f"{api_key[:10]}...",
                 "images_generated": req.n,
+                "used_fallback_pricing": used_fallback_pricing,
             }
 
             return processed_response
