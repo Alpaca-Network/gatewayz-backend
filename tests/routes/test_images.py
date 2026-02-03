@@ -862,3 +862,18 @@ class TestImageGenerationPricing:
         total, per_image, fallback = get_image_cost("fal", "flux-pro", 1)
         assert per_image == 0.05
         assert fallback is False
+
+        # Pro v1.1 with fal-ai prefix
+        total, per_image, fallback = get_image_cost("fal", "fal-ai/flux-pro/v1.1", 1)
+        assert per_image == 0.05
+        assert fallback is False
+
+        # Pro v1.1-ultra (most expensive Fal model)
+        total, per_image, fallback = get_image_cost("fal", "fal-ai/flux-pro/v1.1-ultra", 1)
+        assert per_image == 0.06
+        assert fallback is False
+
+        # Stable diffusion models with fal-ai prefix
+        total, per_image, fallback = get_image_cost("fal", "fal-ai/stable-diffusion-v15", 1)
+        assert per_image == 0.02
+        assert fallback is False

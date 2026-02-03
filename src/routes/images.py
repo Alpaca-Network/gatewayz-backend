@@ -21,6 +21,8 @@ from src.services.image_generation_client import (
 )
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.ai_tracing import AITracer, AIRequestType
+from src.utils.sentry_context import capture_payment_error
+from src.db.activity import log_activity
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -46,6 +48,11 @@ IMAGE_COST_PER_IMAGE = {
         "fal-ai/flux/schnell": 0.003,
         "fal-ai/flux/dev": 0.025,
         "fal-ai/flux-pro": 0.05,
+        "fal-ai/flux-pro/v1.1": 0.05,
+        "fal-ai/flux-pro/v1.1-ultra": 0.06,
+        "fal-ai/flux-realism": 0.025,
+        "fal-ai/stable-diffusion-v15": 0.02,
+        "fal-ai/stable-diffusion-v2": 0.02,
         "default": 0.025,
     },
     "google-vertex": {
@@ -363,6 +370,14 @@ async def generate_images(
 
             except ValueError as e:
                 # Insufficient credits or daily limit exceeded - user should NOT get free images
+                capture_payment_error(
+                    e,
+                    operation="deduct_credits",
+                    provider="image_generation",
+                    user_id=str(user.get("id")),
+                    amount=total_cost,
+                    details={"model": model, "provider": actual_provider, "num_images": req.n},
+                )
                 logger.error(f"Credit deduction failed for image generation: {e}")
                 raise HTTPException(
                     status_code=402,
@@ -370,11 +385,40 @@ async def generate_images(
                 )
             except Exception as e:
                 # Unexpected error in billing - fail safe, don't give away free images
+                capture_payment_error(
+                    e,
+                    operation="deduct_credits",
+                    provider="image_generation",
+                    user_id=str(user.get("id")),
+                    amount=total_cost,
+                    details={"model": model, "provider": actual_provider, "num_images": req.n},
+                )
                 logger.error(f"Unexpected error in credit deduction: {e}", exc_info=True)
                 raise HTTPException(
                     status_code=500,
                     detail="Billing error occurred. Please try again or contact support.",
                 )
+
+            # Log activity for audit trail
+            background_tasks.add_task(
+                log_activity,
+                user_id=user["id"],
+                model=model,
+                provider=actual_provider,
+                tokens=tokens_equivalent,
+                cost=total_cost,
+                speed=req.n / max(elapsed, 0.001),  # Images per second
+                finish_reason="success",
+                app="API",
+                metadata={
+                    "action": "image_generation",
+                    "images_generated": req.n,
+                    "cost_usd": total_cost,
+                    "cost_per_image": cost_per_image,
+                    "size": req.size,
+                    "used_fallback_pricing": used_fallback_pricing,
+                },
+            )
 
             # Add gateway usage info with accurate balance after deduction
             processed_response["gateway_usage"] = {
