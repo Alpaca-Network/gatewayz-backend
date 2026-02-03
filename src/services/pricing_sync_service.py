@@ -40,7 +40,7 @@ PROVIDER_FORMATS = {
     "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing
     "featherless": PricingFormat.PER_1M_TOKENS,
     "deepinfra": PricingFormat.PER_1M_TOKENS,
-    "together": PricingFormat.PER_1M_TOKENS,
+    "together": PricingFormat.PER_1M_TOKENS,  # ✅ Together uses per-1M (input/output keys)
     "fireworks": PricingFormat.PER_1M_TOKENS,
     "groq": PricingFormat.PER_1M_TOKENS,
     "google": PricingFormat.PER_1K_TOKENS,  # ⚠️ Different!
@@ -61,26 +61,28 @@ PROVIDER_FORMATS = {
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 
-    # Which providers to auto-sync (Phase 2.5: Expanded from 4 to 12 providers)
+    # Which providers to auto-sync (Issue #1038: Expand from 4 to 15 providers)
     # NOTE: Uses Config.PRICING_SYNC_PROVIDERS at runtime (configurable via env var)
     # This is the default fallback list
     AUTO_SYNC_PROVIDERS: list[str] = [
-        # Current (Phase 2)
-        "openrouter",      # ✅ Has API
-        "featherless",     # ✅ Has API
-        "nearai",          # ✅ Has API
-        "alibaba-cloud",   # ✅ Has API
+        # Phase 2 (Original 4 providers)
+        "openrouter",      # ✅ Has API (per-token format)
+        "featherless",     # ✅ Has API (per-1M format)
+        "nearai",          # ✅ Has API (per-1M format)
+        "alibaba-cloud",   # ✅ Has API (per-1M format)
 
-        # Phase 2.5 Additions (expand as APIs become available)
-        # "together",      # ⚠️ API research needed
-        # "fireworks",     # ⚠️ API research needed
-        # "groq",          # ⚠️ API research needed
-        # "deepinfra",     # ⚠️ API research needed
-        # "cerebras",      # ⚠️ API research needed
-        # "novita",        # ⚠️ API research needed
-        # "google",        # ⚠️ Vertex AI pricing API research needed
-        # "xai",           # ⚠️ API research needed
-        # "cloudflare",    # ⚠️ Workers AI pricing research needed
+        # Phase 3 (Issue #1038 additions)
+        "together",        # ✅ ADDED: Has API (per-1M, input/output keys)
+
+        # Future additions (to be implemented)
+        # "fireworks",     # 🔄 API research in progress
+        # "groq",          # 🔄 API research in progress
+        # "deepinfra",     # 🔄 API research in progress
+        # "cerebras",      # 🔄 SDK-based, research needed
+        # "novita",        # 🔄 API research needed
+        # "google",        # 🔄 Vertex AI pricing API research needed
+        # "xai",           # 🔄 API research needed
+        # "cloudflare",    # 🔄 Workers AI pricing research needed
         # Add more as provider APIs are discovered and implemented
     ]
 
@@ -515,6 +517,7 @@ class PricingSyncService:
             "near": self.auditor.audit_nearai,
             "alibaba-cloud": self.auditor.audit_alibaba_cloud,
             "alibaba": self.auditor.audit_alibaba_cloud,
+            "together": self.auditor.audit_together,
         }
 
         if provider_slug.lower() not in methods:

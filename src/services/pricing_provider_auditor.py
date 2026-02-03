@@ -242,6 +242,82 @@ class PricingProviderAuditor:
                 error_message=str(e),
             )
 
+    async def audit_together(self) -> ProviderPricingData:
+        """
+        Audit Together AI pricing from their API.
+
+        Together AI returns pricing in per-1M format in `pricing.input` and `pricing.output`.
+        """
+        try:
+            from src.config import Config
+
+            if not Config.TOGETHER_API_KEY:
+                return ProviderPricingData(
+                    provider_name="together",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="Together API key not configured",
+                )
+
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.get(
+                    "https://api.together.xyz/v1/models",
+                    headers={
+                        "Authorization": f"Bearer {Config.TOGETHER_API_KEY}",
+                        "User-Agent": "Gatewayz-Pricing-Auditor/1.0",
+                    },
+                )
+
+                if response.status_code != 200:
+                    return ProviderPricingData(
+                        provider_name="together",
+                        models={},
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        status="error",
+                        error_message=f"HTTP {response.status_code}: {response.text[:200]}",
+                    )
+
+                data = response.json()
+                # Together returns a list directly
+                raw_models = data if isinstance(data, list) else data.get("data", [])
+
+                models = {}
+                for model in raw_models:
+                    model_id = model.get("id")
+                    pricing_info = model.get("pricing", {})
+
+                    if model_id and pricing_info:
+                        # Together uses 'input' and 'output' keys (per-1M format)
+                        prompt_price = pricing_info.get("input")
+                        completion_price = pricing_info.get("output")
+
+                        if prompt_price is not None or completion_price is not None:
+                            models[model_id] = {
+                                "prompt": prompt_price if prompt_price is not None else 0,
+                                "completion": completion_price if completion_price is not None else 0,
+                            }
+
+                logger.info(f"Fetched pricing for {len(models)} Together AI models")
+
+                return ProviderPricingData(
+                    provider_name="together",
+                    models=models,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="success" if models else "partial",
+                    error_message=None if models else "No models with pricing found",
+                )
+
+        except Exception as e:
+            logger.error(f"Error auditing Together AI pricing: {e}")
+            return ProviderPricingData(
+                provider_name="together",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
     async def audit_all_providers(self) -> list[ProviderPricingData]:
         """Audit all provider APIs and return results."""
         tasks = [
@@ -250,6 +326,7 @@ class PricingProviderAuditor:
             self.audit_nearai(),
             self.audit_alibaba_cloud(),
             self.audit_openrouter(),
+            self.audit_together(),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

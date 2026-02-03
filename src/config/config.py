@@ -430,13 +430,14 @@ class Config:
     # Recommended: 15-30 minutes for balance between freshness and API rate limits
     MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
 
+    # Pricing Sync Configuration (Phase 2 → Phase 3, Issue #1038)
     # ============================================================================
     PRICING_SYNC_INTERVAL_HOURS = int(os.environ.get("PRICING_SYNC_INTERVAL_HOURS", "6"))
     PRICING_SYNC_PROVIDERS = [
         p.strip()
         for p in os.environ.get(
             "PRICING_SYNC_PROVIDERS",
-            "openrouter,featherless,nearai,alibaba-cloud"
+            "openrouter,featherless,nearai,alibaba-cloud,together"  # Added Together AI (Issue #1038)
         ).split(",")
         if p.strip()
     ]
