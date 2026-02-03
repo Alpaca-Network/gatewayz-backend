@@ -2145,6 +2145,7 @@ async def chat_completions(
                                 from src.services.prometheus_metrics import track_code_router_fallback
                                 track_code_router_fallback(reason="empty_message")
                             except ImportError:
+                                # Metrics module not available - ignore silently
                                 pass
                             req.model = CODE_ROUTER_DEFAULT_MODEL
                         else:
@@ -2184,6 +2185,7 @@ async def chat_completions(
                         from src.services.prometheus_metrics import track_code_router_fallback
                         track_code_router_fallback(reason="exception")
                     except ImportError:
+                        # Metrics module not available - ignore silently
                         pass
                     # Use default code model since original was a code-route request
                     req.model = CODE_ROUTER_DEFAULT_MODEL

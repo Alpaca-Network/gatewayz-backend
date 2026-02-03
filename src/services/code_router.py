@@ -17,12 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Literal
 
-from src.services.code_classifier import (
-    CodeTaskClassifier,
-    classify_code_task,
-    get_classifier,
-    is_code_related,
-)
+from src.services.code_classifier import get_classifier
 
 logger = logging.getLogger(__name__)
 
