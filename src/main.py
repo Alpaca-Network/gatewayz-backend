@@ -590,6 +590,16 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] General router API not loaded: {e}")
 
+    # ==================== Circuit Breaker Status Router ====================
+    # Load circuit breaker monitoring and management endpoints
+    try:
+        from src.routes.circuit_breaker_status import router as circuit_breaker_router
+
+        app.include_router(circuit_breaker_router)
+        logger.info("  [OK] Circuit Breaker Status API (/circuit-breakers/*)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Circuit breaker status router not loaded: {e}")
+
     # ==================== Exception Handlers ====================
 
     @app.exception_handler(HTTPException)

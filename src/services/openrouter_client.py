@@ -11,12 +11,24 @@ from openai import APIStatusError, AsyncOpenAI, BadRequestError
 from src.cache import _models_cache, clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
 from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Circuit breaker configuration for OpenRouter
+# OpenRouter is our primary provider, so we use conservative thresholds
+OPENROUTER_CIRCUIT_CONFIG = CircuitBreakerConfig(
+    failure_threshold=5,  # Open after 5 consecutive failures
+    success_threshold=2,  # Close after 2 consecutive successes in HALF_OPEN
+    timeout_seconds=60,  # Wait 60s before retrying after opening
+    failure_window_seconds=60,  # Measure failure rate over 60s window
+    failure_rate_threshold=0.5,  # Open if >50% failure rate
+    min_requests_for_rate=10,  # Need at least 10 requests to calculate rate
+)
 
 
 def _normalize_message_roles(messages: list[dict[str, Any] | Any]) -> list[dict[str, Any] | Any]:
@@ -122,16 +134,41 @@ def get_openrouter_client():
         raise
 
 
+def _make_openrouter_request_openai_internal(messages, model, **kwargs):
+    """Internal function to make request to OpenRouter (called by circuit breaker)"""
+    client = get_openrouter_client()
+    # Normalize message roles (e.g., developer -> system) for compatibility
+    normalized_messages = _normalize_message_roles(messages)
+    # Merge provider settings to allow access to all model endpoints
+    merged_kwargs = _merge_extra_body(kwargs)
+    response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
+    return response
+
+
 def make_openrouter_request_openai(messages, model, **kwargs):
-    """Make request to OpenRouter using OpenAI client"""
+    """Make request to OpenRouter using OpenAI client with circuit breaker protection"""
+    circuit_breaker = get_circuit_breaker("openrouter", OPENROUTER_CIRCUIT_CONFIG)
+
     try:
-        client = get_openrouter_client()
-        # Normalize message roles (e.g., developer -> system) for compatibility
-        normalized_messages = _normalize_message_roles(messages)
-        # Merge provider settings to allow access to all model endpoints
-        merged_kwargs = _merge_extra_body(kwargs)
-        response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
+        # Wrap the actual API call with circuit breaker
+        response = circuit_breaker.call(
+            _make_openrouter_request_openai_internal,
+            messages,
+            model,
+            **kwargs
+        )
         return response
+    except CircuitBreakerError as e:
+        # Circuit breaker is open, log and re-raise for failover
+        logger.warning(f"OpenRouter circuit breaker OPEN: {e.message}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions',
+            extra_context={"circuit_breaker_state": e.state.value}
+        )
+        raise
     except APIStatusError as e:
         # Handle 402 Payment Required errors specifically (credit exhaustion)
         if e.status_code == 402:
@@ -276,18 +313,43 @@ def process_openrouter_response(response):
         raise
 
 
+def _make_openrouter_request_openai_stream_internal(messages, model, **kwargs):
+    """Internal function to make streaming request to OpenRouter (called by circuit breaker)"""
+    client = get_openrouter_client()
+    # Normalize message roles (e.g., developer -> system) for compatibility
+    normalized_messages = _normalize_message_roles(messages)
+    # Merge provider settings to allow access to all model endpoints
+    merged_kwargs = _merge_extra_body(kwargs)
+    stream = client.chat.completions.create(
+        model=model, messages=normalized_messages, stream=True, **merged_kwargs
+    )
+    return stream
+
+
 def make_openrouter_request_openai_stream(messages, model, **kwargs):
-    """Make streaming request to OpenRouter using OpenAI client"""
+    """Make streaming request to OpenRouter using OpenAI client with circuit breaker protection"""
+    circuit_breaker = get_circuit_breaker("openrouter", OPENROUTER_CIRCUIT_CONFIG)
+
     try:
-        client = get_openrouter_client()
-        # Normalize message roles (e.g., developer -> system) for compatibility
-        normalized_messages = _normalize_message_roles(messages)
-        # Merge provider settings to allow access to all model endpoints
-        merged_kwargs = _merge_extra_body(kwargs)
-        stream = client.chat.completions.create(
-            model=model, messages=normalized_messages, stream=True, **merged_kwargs
+        # Wrap the actual API call with circuit breaker
+        stream = circuit_breaker.call(
+            _make_openrouter_request_openai_stream_internal,
+            messages,
+            model,
+            **kwargs
         )
         return stream
+    except CircuitBreakerError as e:
+        # Circuit breaker is open, log and re-raise for failover
+        logger.warning(f"OpenRouter circuit breaker OPEN (streaming): {e.message}")
+        capture_provider_error(
+            e,
+            provider='openrouter',
+            model=model,
+            endpoint='/chat/completions (stream)',
+            extra_context={"circuit_breaker_state": e.state.value}
+        )
+        raise
     except APIStatusError as e:
         # Handle 402 Payment Required errors specifically (credit exhaustion)
         if e.status_code == 402:

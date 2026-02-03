@@ -407,6 +407,43 @@ butter_cache_latency = get_or_create_metric(
     buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
+# ==================== Circuit Breaker Metrics ====================
+# Metrics for tracking circuit breaker state and behavior
+circuit_breaker_state_transitions = get_or_create_metric(
+    Counter,
+    "circuit_breaker_state_transitions_total",
+    "Total circuit breaker state transitions",
+    ["provider", "from_state", "to_state"],
+)
+
+circuit_breaker_failures = get_or_create_metric(
+    Counter,
+    "circuit_breaker_failures_total",
+    "Total failures recorded by circuit breaker",
+    ["provider", "state"],
+)
+
+circuit_breaker_successes = get_or_create_metric(
+    Counter,
+    "circuit_breaker_successes_total",
+    "Total successes recorded by circuit breaker",
+    ["provider", "state"],
+)
+
+circuit_breaker_rejected_requests = get_or_create_metric(
+    Counter,
+    "circuit_breaker_rejected_requests_total",
+    "Total requests rejected by circuit breaker",
+    ["provider"],
+)
+
+circuit_breaker_current_state = get_or_create_metric(
+    Gauge,
+    "circuit_breaker_current_state",
+    "Current circuit breaker state (1=active state, 0=inactive state)",
+    ["provider", "state"],
+)
+
 butter_cache_errors = get_or_create_metric(
     Counter,
     "butter_cache_errors_total",
