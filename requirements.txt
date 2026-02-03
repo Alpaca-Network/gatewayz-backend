@@ -26,8 +26,10 @@ clarifai>=10.0.0
 huggingface-hub>=0.23.0
 novita-client>=0.5.0
 
-# NotDiamond AI Router
-notdiamond>=0.3.35,<1.0.0
+# NotDiamond AI Router (optional - code gracefully falls back when not installed)
+# Excluded from main requirements due to dependency conflicts with cryptography and python-dotenv.
+# To enable NotDiamond routing, install separately: pip install notdiamond
+# notdiamond>=0.3.35,<1.0.0
 
 # Analytics
 statsig-python-core==0.10.2
