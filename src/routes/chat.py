@@ -730,6 +730,10 @@ async def make_butter_proxied_stream(
 AUTO_ROUTE_MODEL_PREFIX = "router"
 AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
 
+# Code router constants
+CODE_ROUTER_PREFIX = "router:code"
+CODE_ROUTER_DEFAULT_MODEL = "zai/glm-4.7"  # Fallback model
+
 
 def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
@@ -2095,6 +2099,95 @@ async def chat_completions(
                     # Use default model since original was an auto-route request
                     req.model = AUTO_ROUTE_DEFAULT_MODEL
 
+        # === 2.4) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
+        # Specialized router for code-related tasks with 2026 benchmark-optimized model selection
+        code_router_decision = None
+        is_code_route = original_model and original_model.lower().startswith(CODE_ROUTER_PREFIX)
+
+        if is_code_route:
+            with tracker.stage("code_routing"):
+                try:
+                    from src.services.code_router import (
+                        parse_router_model_string,
+                        route_code_prompt,
+                        get_routing_metadata,
+                    )
+
+                    # Parse the router mode from model string (normalize case)
+                    is_code_router, router_mode = parse_router_model_string(
+                        original_model.lower()
+                    )
+
+                    if is_code_router:
+                        # Extract last user message for classification
+                        last_user_message = ""
+                        for msg in reversed(messages):
+                            if msg.get("role") == "user":
+                                content = msg.get("content", "")
+                                if isinstance(content, str):
+                                    last_user_message = content
+                                elif isinstance(content, list):
+                                    # Handle multi-part messages
+                                    for part in content:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            last_user_message = part.get("text", "")
+                                            break
+                                break
+
+                        # Validate: skip routing if no valid user message found
+                        if not last_user_message or not last_user_message.strip():
+                            logger.warning(
+                                "Code router: no valid user message found, using default model"
+                            )
+                            try:
+                                from src.services.prometheus_metrics import track_code_router_fallback
+                                track_code_router_fallback(reason="empty_message")
+                            except ImportError:
+                                # Prometheus metrics are optional - silently skip if not available
+                                pass
+                            req.model = CODE_ROUTER_DEFAULT_MODEL
+                        else:
+                            # Extract context from messages
+                            from src.services.code_classifier import get_classifier
+                            classifier = get_classifier()
+                            context = classifier.extract_context_from_messages(messages)
+
+                            # Route the code prompt
+                            code_router_decision = route_code_prompt(
+                                prompt=last_user_message,
+                                mode=router_mode,
+                                context=context,
+                                user_default_model=user.get("default_model") if user else None,
+                            )
+
+                            # Update model with routed selection
+                            req.model = code_router_decision["model_id"]
+
+                            logger.info(
+                                "Code router selected model: %s (tier=%d, category=%s, confidence=%.2f, time=%.2fms, mode=%s)",
+                                code_router_decision["model_id"],
+                                code_router_decision["tier"],
+                                code_router_decision["task_category"],
+                                code_router_decision["confidence"],
+                                code_router_decision["routing_latency_ms"],
+                                code_router_decision["mode"],
+                            )
+
+                except Exception as e:
+                    # Fail open - log warning and use default model
+                    logger.warning(
+                        "Code router failed, falling back to default: %s",
+                        str(e),
+                    )
+                    try:
+                        from src.services.prometheus_metrics import track_code_router_fallback
+                        track_code_router_fallback(reason="exception")
+                    except ImportError:
+                        # Prometheus metrics are optional - silently skip if not available
+                        pass
+                    # Use default code model since original was a code-route request
+                    req.model = CODE_ROUTER_DEFAULT_MODEL
+
         with tracker.stage("request_preparation"):
             optional = {}
             for name in (
@@ -2124,7 +2217,9 @@ async def chat_completions(
 
             provider_locked = not req_provider_missing
 
-            override_provider = detect_provider_from_model_id(original_model)
+            # Use routed model for provider detection when code routing is active
+            model_for_provider_detection = req.model if is_code_route and req.model else original_model
+            override_provider = detect_provider_from_model_id(model_for_provider_detection)
             if override_provider:
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
@@ -2164,7 +2259,8 @@ async def chat_completions(
 
             if req_provider_missing:
                 # Try to detect provider from model ID using the transformation module
-                detected_provider = detect_provider_from_model_id(original_model)
+                # Use routed model when code routing is active
+                detected_provider = detect_provider_from_model_id(model_for_provider_detection)
                 if detected_provider:
                     provider = detected_provider
                     # Normalize provider aliases
@@ -2197,10 +2293,14 @@ async def chat_completions(
                             break
                     # Otherwise default to onerouter (already set)
 
+            # Use the routed model (from code router or other routing logic) instead of original
+            # This ensures that routing decisions are actually applied downstream
+            effective_model = req.model if req.model else original_model
+
             provider_chain = build_provider_failover_chain(provider)
-            provider_chain = enforce_model_failover_rules(original_model, provider_chain)
-            provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
-            model = original_model
+            provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
+            provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+            model = effective_model
 
         # Diagnostic logging for tools parameter
         if "tools" in optional:
@@ -3009,6 +3109,15 @@ async def chat_completions(
         if not trial.get("is_trial", False):
             # If you can cheaply re-fetch balance, do it here; otherwise omit
             processed["gateway_usage"]["cost_usd"] = round(cost, 6)
+
+        # === 6.1) Attach code router metadata if code routing was used ===
+        if code_router_decision:
+            try:
+                from src.services.code_router import get_routing_metadata
+                routing_metadata = get_routing_metadata(code_router_decision)
+                processed["routing_metadata"] = routing_metadata
+            except Exception as e:
+                logger.debug(f"Failed to attach code routing metadata: {e}")
 
         # === 7) Log to Braintrust ===
         try:

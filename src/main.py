@@ -466,6 +466,7 @@ def create_app() -> FastAPI:
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
+        ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
     ]
 
     loaded_count = 0
