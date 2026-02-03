@@ -55,9 +55,15 @@ def _load_quality_priors() -> dict[str, Any]:
                 )
             except ImportError:
                 pass  # Sentry not available
+            # Use config-driven fallback instead of hardcoded values
+            from src.config.config import Config
+
             _quality_priors = {
                 "model_tiers": {},
-                "fallback_model": {"id": "zai/glm-4.7", "provider": "zai"},
+                "fallback_model": {
+                    "id": Config.CODE_ROUTER_FALLBACK_MODEL_ID,
+                    "provider": Config.CODE_ROUTER_FALLBACK_PROVIDER,
+                },
                 "baselines": {},
             }
     return _quality_priors
@@ -69,8 +75,14 @@ def get_model_tiers() -> dict[str, Any]:
 
 
 def get_fallback_model() -> dict[str, Any]:
-    """Get fallback model configuration."""
-    return _load_quality_priors().get("fallback_model", {"id": "zai/glm-4.7", "provider": "zai"})
+    """Get fallback model configuration from quality priors or config."""
+    from src.config.config import Config
+
+    default_fallback = {
+        "id": Config.CODE_ROUTER_FALLBACK_MODEL_ID,
+        "provider": Config.CODE_ROUTER_FALLBACK_PROVIDER,
+    }
+    return _load_quality_priors().get("fallback_model", default_fallback)
 
 
 def get_baselines() -> dict[str, Any]:

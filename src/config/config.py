@@ -404,6 +404,19 @@ class Config:
     }
 
     # ============================================================================
+    # CODE ROUTER CONFIGURATION
+    # ============================================================================
+
+    # Code Router fallback model configuration
+    # Used when classification fails or for simple tasks
+    CODE_ROUTER_FALLBACK_MODEL_ID = os.environ.get(
+        "CODE_ROUTER_FALLBACK_MODEL_ID", "zai/glm-4.7"
+    )
+    CODE_ROUTER_FALLBACK_PROVIDER = os.environ.get(
+        "CODE_ROUTER_FALLBACK_PROVIDER", "zai"
+    )
+
+    # ============================================================================
     # MODEL SYNC CONFIGURATION
     # ============================================================================
 

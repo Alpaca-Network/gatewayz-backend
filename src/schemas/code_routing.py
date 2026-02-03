@@ -138,6 +138,23 @@ class ModelTierConfig(BaseModel):
     models: list[dict[str, Any]] = Field(default_factory=list, description="Models in this tier")
 
 
+class BaselineModelConfig(BaseModel):
+    """Configuration for a baseline model used for savings calculation."""
+
+    model_id: str = Field(..., description="Model ID (e.g., 'anthropic/claude-3.5-sonnet')")
+    price_input: float = Field(..., ge=0, description="Input price per million tokens in USD")
+    price_output: float = Field(..., ge=0, description="Output price per million tokens in USD")
+    description: str = Field("", description="Human-readable description")
+
+
+class FallbackModelConfig(BaseModel):
+    """Configuration for the fallback model."""
+
+    id: str = Field(..., description="Model ID")
+    provider: str = Field(..., description="Provider slug")
+    reason: str = Field("", description="Reason for using this fallback")
+
+
 class QualityPriors(BaseModel):
     """Quality priors configuration."""
 
@@ -156,11 +173,11 @@ class QualityPriors(BaseModel):
         default_factory=dict,
         description="Quality gate configurations",
     )
-    fallback_model: dict[str, str] = Field(
+    fallback_model: FallbackModelConfig | dict[str, str] = Field(
         default_factory=dict,
         description="Fallback model configuration",
     )
-    baselines: dict[str, dict[str, Any]] = Field(
+    baselines: dict[str, BaselineModelConfig | dict[str, Any]] = Field(
         default_factory=dict,
         description="Baseline models for savings calculation",
     )
