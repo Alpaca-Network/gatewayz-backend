@@ -1367,6 +1367,161 @@ def track_pricing_sync_job(duration: float, status: str):
     pricing_sync_job_duration_seconds.labels(status=status).observe(duration)
 
 
+# ==================== Code Router Metrics ====================
+# Metrics for the code-optimized prompt router
+
+code_router_requests_total = get_or_create_metric(
+    Counter,
+    "code_router_requests_total",
+    "Total code routing requests",
+    ["task_category", "complexity", "mode", "selected_model", "selected_tier"],
+)
+
+code_router_latency_seconds = get_or_create_metric(
+    Histogram,
+    "code_router_latency_seconds",
+    "Code router decision latency in seconds (target: <2ms)",
+    buckets=(0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1),
+)
+
+code_task_success_total = get_or_create_metric(
+    Counter,
+    "code_task_success_total",
+    "Successful code task completions",
+    ["task_category", "model", "tier"],
+)
+
+code_task_retry_total = get_or_create_metric(
+    Counter,
+    "code_task_retry_total",
+    "Code tasks requiring retry/regeneration",
+    ["task_category", "model", "tier", "retry_reason"],
+)
+
+code_router_savings_dollars = get_or_create_metric(
+    Counter,
+    "code_router_savings_dollars_total",
+    "Dollars saved by code routing optimization",
+    ["baseline", "task_category"],
+)
+
+code_router_tier_distribution = get_or_create_metric(
+    Counter,
+    "code_router_tier_distribution_total",
+    "Distribution of tier selections by task category",
+    ["task_category", "tier", "mode"],
+)
+
+code_router_quality_gate_triggered = get_or_create_metric(
+    Counter,
+    "code_router_quality_gate_triggered_total",
+    "Times quality gate prevented tier downgrade",
+    ["task_category", "requested_tier", "enforced_tier"],
+)
+
+code_router_classification_confidence = get_or_create_metric(
+    Histogram,
+    "code_router_classification_confidence",
+    "Classification confidence distribution",
+    ["task_category"],
+    buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+code_router_fallback_total = get_or_create_metric(
+    Counter,
+    "code_router_fallback_total",
+    "Times fallback model was used",
+    ["reason"],
+)
+
+
+# ==================== Code Router Helper Functions ====================
+
+
+def track_code_routing_request(
+    task_category: str,
+    complexity: str,
+    mode: str,
+    selected_model: str,
+    selected_tier: int,
+    latency_seconds: float,
+    confidence: float,
+):
+    """
+    Track a code routing request in Prometheus metrics.
+
+    Args:
+        task_category: Classified task category
+        complexity: Classified complexity
+        mode: Routing mode used
+        selected_model: Selected model ID
+        selected_tier: Selected tier number
+        latency_seconds: Routing latency in seconds
+        confidence: Classification confidence
+    """
+    code_router_requests_total.labels(
+        task_category=task_category,
+        complexity=complexity,
+        mode=mode,
+        selected_model=selected_model,
+        selected_tier=str(selected_tier),
+    ).inc()
+
+    code_router_latency_seconds.observe(latency_seconds)
+
+    code_router_tier_distribution.labels(
+        task_category=task_category,
+        tier=str(selected_tier),
+        mode=mode,
+    ).inc()
+
+    code_router_classification_confidence.labels(
+        task_category=task_category,
+    ).observe(confidence)
+
+
+def track_code_task_success(task_category: str, model: str, tier: int):
+    """Track successful code task completion."""
+    code_task_success_total.labels(
+        task_category=task_category,
+        model=model,
+        tier=str(tier),
+    ).inc()
+
+
+def track_code_task_retry(task_category: str, model: str, tier: int, retry_reason: str):
+    """Track code task retry/regeneration."""
+    code_task_retry_total.labels(
+        task_category=task_category,
+        model=model,
+        tier=str(tier),
+        retry_reason=retry_reason,
+    ).inc()
+
+
+def track_code_router_savings(baseline: str, task_category: str, savings_usd: float):
+    """Track cost savings from code routing."""
+    if savings_usd > 0:
+        code_router_savings_dollars.labels(
+            baseline=baseline,
+            task_category=task_category,
+        ).inc(savings_usd)
+
+
+def track_quality_gate_triggered(task_category: str, requested_tier: int, enforced_tier: int):
+    """Track when quality gate prevents tier downgrade."""
+    code_router_quality_gate_triggered.labels(
+        task_category=task_category,
+        requested_tier=str(requested_tier),
+        enforced_tier=str(enforced_tier),
+    ).inc()
+
+
+def track_code_router_fallback(reason: str):
+    """Track when fallback model is used."""
+    code_router_fallback_total.labels(reason=reason).inc()
+
+
 def get_metrics_summary() -> dict:
     """Get a summary of key metrics for monitoring."""
     # This function returns a summary of metrics collected.

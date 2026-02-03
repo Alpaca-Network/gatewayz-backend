@@ -735,3 +735,107 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
         # Fallback to simple calculation (assuming $0.00002 per token)
         total_tokens = prompt_tokens + completion_tokens
         return total_tokens * 0.00002
+
+
+# ==================== Code Router Savings Calculation ====================
+
+
+def calculate_code_router_savings(
+    selected_model_id: str,
+    actual_cost: float,
+    input_tokens: int,
+    output_tokens: int,
+    baselines: dict[str, dict[str, float]] | None = None,
+) -> dict[str, dict[str, float]]:
+    """
+    Calculate savings from code router vs baseline models.
+
+    Args:
+        selected_model_id: The model selected by the code router
+        actual_cost: The actual cost in USD
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        baselines: Optional baseline configuration. If not provided, uses default baselines.
+
+    Returns:
+        Dict with savings per baseline:
+        {
+            "opus_4_5": {"baseline_cost": 0.05, "actual_cost": 0.001, "savings": 0.049, "percent": 98.0},
+            "gpt_5_2": {...},
+            "user_default": {...}
+        }
+    """
+    if baselines is None:
+        # Default baselines (prices per million tokens)
+        baselines = {
+            "opus_4_5": {"price_input": 15.0, "price_output": 75.0},
+            "gpt_5_2": {"price_input": 15.0, "price_output": 30.0},
+        }
+
+    savings: dict[str, dict[str, float]] = {}
+
+    for baseline_name, baseline_prices in baselines.items():
+        # Calculate baseline cost (prices are per million tokens)
+        baseline_input_cost = (input_tokens / 1_000_000) * baseline_prices.get("price_input", 0)
+        baseline_output_cost = (output_tokens / 1_000_000) * baseline_prices.get("price_output", 0)
+        baseline_cost = baseline_input_cost + baseline_output_cost
+
+        # Calculate savings
+        raw_savings = max(0, baseline_cost - actual_cost)
+        percent_savings = (raw_savings / baseline_cost * 100) if baseline_cost > 0 else 0
+
+        savings[baseline_name] = {
+            "baseline_cost_usd": round(baseline_cost, 6),
+            "actual_cost_usd": round(actual_cost, 6),
+            "savings_usd": round(raw_savings, 6),
+            "savings_percent": round(percent_savings, 1),
+        }
+
+        logger.debug(
+            f"Code router savings vs {baseline_name}: "
+            f"${raw_savings:.6f} ({percent_savings:.1f}%)"
+        )
+
+    return savings
+
+
+def track_code_router_cost_metrics(
+    selected_model_id: str,
+    actual_cost: float,
+    input_tokens: int,
+    output_tokens: int,
+    task_category: str,
+) -> None:
+    """
+    Track cost-related metrics for code router in Prometheus.
+
+    Args:
+        selected_model_id: The model selected by the code router
+        actual_cost: The actual cost in USD
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        task_category: The classified task category
+    """
+    try:
+        from src.services.prometheus_metrics import track_code_router_savings
+
+        # Calculate savings vs baselines
+        savings = calculate_code_router_savings(
+            selected_model_id=selected_model_id,
+            actual_cost=actual_cost,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+        # Track each baseline savings
+        for baseline_name, savings_data in savings.items():
+            track_code_router_savings(
+                baseline=baseline_name,
+                task_category=task_category,
+                savings_usd=savings_data["savings_usd"],
+            )
+
+    except ImportError:
+        logger.debug("Prometheus metrics not available for code router cost tracking")
+    except Exception as e:
+        logger.debug(f"Failed to track code router cost metrics: {e}")

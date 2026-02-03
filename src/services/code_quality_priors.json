@@ -1,0 +1,269 @@
+{
+  "version": "2026.02",
+  "last_updated": "2026-02-03",
+  "benchmarks_source": ["SWE-Bench", "HumanEval", "LiveBench", "Arena AI"],
+
+  "model_tiers": {
+    "1": {
+      "name": "Premium",
+      "description": "Best-in-class for architecture, agentic, complex multi-file tasks",
+      "price_range": "$10-30/M tokens",
+      "models": [
+        {
+          "id": "openai/gpt-5.2-codex",
+          "name": "GPT-5.2 Codex",
+          "swe_bench": 72.1,
+          "human_eval": 96.8,
+          "price_input": 15.0,
+          "price_output": 30.0,
+          "context_length": 128000,
+          "strengths": ["agentic", "architecture", "multi-file"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "anthropic/claude-opus-4.5",
+          "name": "Claude Opus 4.5",
+          "swe_bench": 69.3,
+          "human_eval": 95.2,
+          "price_input": 15.0,
+          "price_output": 75.0,
+          "context_length": 200000,
+          "strengths": ["reasoning", "architecture", "code_review"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "google/gemini-3-pro",
+          "name": "Gemini 3 Pro",
+          "swe_bench": 68.5,
+          "human_eval": 94.1,
+          "price_input": 12.5,
+          "price_output": 37.5,
+          "context_length": 1000000,
+          "strengths": ["long_context", "architecture", "reasoning"],
+          "provider": "google-vertex"
+        }
+      ]
+    },
+    "2": {
+      "name": "High Performance",
+      "description": "Excellent for debugging, refactoring, complex generation",
+      "price_range": "$2-10/M tokens",
+      "models": [
+        {
+          "id": "anthropic/claude-sonnet-4",
+          "name": "Claude Sonnet 4",
+          "swe_bench": 62.4,
+          "human_eval": 93.7,
+          "price_input": 3.0,
+          "price_output": 15.0,
+          "context_length": 200000,
+          "strengths": ["debugging", "refactoring", "code_generation"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "openai/gpt-4.5-turbo",
+          "name": "GPT-4.5 Turbo",
+          "swe_bench": 58.2,
+          "human_eval": 91.3,
+          "price_input": 5.0,
+          "price_output": 15.0,
+          "context_length": 128000,
+          "strengths": ["debugging", "generation", "fast"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "deepseek/deepseek-v3",
+          "name": "DeepSeek V3",
+          "swe_bench": 55.1,
+          "human_eval": 89.4,
+          "price_input": 2.19,
+          "price_output": 8.76,
+          "context_length": 64000,
+          "strengths": ["code_generation", "debugging", "value"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "google/gemini-2.5-flash",
+          "name": "Gemini 2.5 Flash",
+          "swe_bench": 52.3,
+          "human_eval": 88.1,
+          "price_input": 0.15,
+          "price_output": 0.60,
+          "context_length": 1000000,
+          "strengths": ["fast", "long_context", "value"],
+          "provider": "google-vertex"
+        }
+      ]
+    },
+    "3": {
+      "name": "Balanced",
+      "description": "Good for standard code generation, explanations",
+      "price_range": "$0.50-2/M tokens",
+      "models": [
+        {
+          "id": "qwen/qwen-2.5-coder-32b-instruct",
+          "name": "Qwen 2.5 Coder 32B",
+          "swe_bench": 48.3,
+          "human_eval": 86.2,
+          "price_input": 0.80,
+          "price_output": 0.80,
+          "context_length": 32768,
+          "strengths": ["code_generation", "explanation", "value"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "mistralai/mistral-large-2",
+          "name": "Mistral Large 2",
+          "swe_bench": 45.6,
+          "human_eval": 84.3,
+          "price_input": 1.0,
+          "price_output": 3.0,
+          "context_length": 128000,
+          "strengths": ["code_generation", "multilingual", "fast"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "meta-llama/llama-3.3-70b-instruct",
+          "name": "Llama 3.3 70B Instruct",
+          "swe_bench": 43.2,
+          "human_eval": 82.5,
+          "price_input": 0.59,
+          "price_output": 0.79,
+          "context_length": 131072,
+          "strengths": ["code_generation", "open_source", "value"],
+          "provider": "openrouter"
+        }
+      ]
+    },
+    "4": {
+      "name": "Economy",
+      "description": "Best for simple tasks, syntax fixes, formatting",
+      "price_range": "$0.05-0.50/M tokens",
+      "models": [
+        {
+          "id": "zai/glm-4.7",
+          "name": "GLM-4.7",
+          "swe_bench": 38.1,
+          "human_eval": 78.4,
+          "price_input": 0.10,
+          "price_output": 0.10,
+          "context_length": 128000,
+          "strengths": ["simple_tasks", "syntax_fixes", "ultra_value"],
+          "provider": "zai",
+          "is_fallback": true
+        },
+        {
+          "id": "deepseek/deepseek-coder-6.7b",
+          "name": "DeepSeek Coder 6.7B",
+          "swe_bench": 32.4,
+          "human_eval": 71.2,
+          "price_input": 0.07,
+          "price_output": 0.07,
+          "context_length": 16384,
+          "strengths": ["simple_generation", "syntax", "fast"],
+          "provider": "openrouter"
+        },
+        {
+          "id": "google/codegemma-7b",
+          "name": "CodeGemma 7B",
+          "swe_bench": 28.9,
+          "human_eval": 68.5,
+          "price_input": 0.05,
+          "price_output": 0.05,
+          "context_length": 8192,
+          "strengths": ["formatting", "simple_fixes", "ultra_fast"],
+          "provider": "openrouter"
+        }
+      ]
+    }
+  },
+
+  "task_taxonomy": {
+    "simple_code": {
+      "complexity": "low",
+      "default_tier": 4,
+      "min_tier": 4,
+      "keywords": ["fix typo", "typo", "add comment", "format", "rename", "semicolon", "indent", "spacing", "missing comma", "syntax error", "lint", "prettier"],
+      "description": "Syntax fixes, formatting, small edits"
+    },
+    "code_explanation": {
+      "complexity": "low_medium",
+      "default_tier": 3,
+      "min_tier": 4,
+      "keywords": ["what does", "explain", "how does", "document", "describe", "understand"],
+      "description": "Explain code, document functions"
+    },
+    "code_generation": {
+      "complexity": "medium",
+      "default_tier": 3,
+      "min_tier": 3,
+      "keywords": ["write", "create", "implement", "add function", "add class", "generate", "build"],
+      "description": "Write new functions, classes"
+    },
+    "debugging": {
+      "complexity": "medium_high",
+      "default_tier": 2,
+      "min_tier": 2,
+      "keywords": ["debug", "fix bug", "error", "failing", "broken", "not working", "crash", "exception", "null", "undefined"],
+      "description": "Find and fix bugs"
+    },
+    "refactoring": {
+      "complexity": "medium_high",
+      "default_tier": 2,
+      "min_tier": 2,
+      "keywords": ["refactor", "improve", "optimize", "clean up", "restructure", "modernize", "async/await", "performance"],
+      "description": "Improve code structure"
+    },
+    "architecture": {
+      "complexity": "high",
+      "default_tier": 1,
+      "min_tier": 1,
+      "keywords": ["architecture", "design", "system design", "microservices", "patterns", "scalability", "database design"],
+      "description": "System design, patterns"
+    },
+    "agentic": {
+      "complexity": "very_high",
+      "default_tier": 1,
+      "min_tier": 1,
+      "keywords": ["full implementation", "complete feature", "end-to-end", "autonomous", "multi-step", "agentic", "build entire", "full feature", "entire system", "complete system", "from scratch", "build full"],
+      "description": "Multi-step, autonomous tasks"
+    }
+  },
+
+  "complexity_weights": {
+    "low": 1.0,
+    "low_medium": 1.5,
+    "medium": 2.0,
+    "medium_high": 2.5,
+    "high": 3.0,
+    "very_high": 4.0
+  },
+
+  "quality_gates": {
+    "agentic": {"min_tier": 1, "reason": "Requires planning, multi-step reasoning"},
+    "architecture": {"min_tier": 1, "reason": "System design needs broad knowledge"},
+    "debugging": {"min_tier": 2, "reason": "Needs strong reasoning"},
+    "refactoring": {"min_tier": 2, "reason": "Code understanding required"}
+  },
+
+  "fallback_model": {
+    "id": "zai/glm-4.7",
+    "provider": "zai",
+    "reason": "Cost-effective fallback with reasonable code capability"
+  },
+
+  "baselines": {
+    "opus_4_5": {
+      "model_id": "anthropic/claude-opus-4.5",
+      "price_input": 15.0,
+      "price_output": 75.0,
+      "description": "Premium Anthropic baseline"
+    },
+    "gpt_5_2": {
+      "model_id": "openai/gpt-5.2-codex",
+      "price_input": 15.0,
+      "price_output": 30.0,
+      "description": "Premium OpenAI baseline"
+    }
+  }
+}
