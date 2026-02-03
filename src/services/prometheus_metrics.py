@@ -1435,6 +1435,52 @@ code_router_fallback_total = get_or_create_metric(
 )
 
 
+# ==================== General Router Metrics ====================
+
+general_router_requests_total = get_or_create_metric(
+    Counter,
+    "general_router_requests_total",
+    "Total general routing requests",
+    ["mode", "selected_model", "provider"],
+)
+
+general_router_latency_seconds = get_or_create_metric(
+    Histogram,
+    "general_router_latency_seconds",
+    "General router decision latency in seconds",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2),
+)
+
+general_router_notdiamond_calls_total = get_or_create_metric(
+    Counter,
+    "general_router_notdiamond_calls_total",
+    "NotDiamond API calls",
+    ["status", "mode"],
+)
+
+general_router_notdiamond_latency_seconds = get_or_create_metric(
+    Histogram,
+    "general_router_notdiamond_latency_seconds",
+    "NotDiamond API latency",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1),
+)
+
+general_router_fallback_total = get_or_create_metric(
+    Counter,
+    "general_router_fallback_total",
+    "Fallback model usage",
+    ["reason", "mode"],
+)
+
+general_router_confidence = get_or_create_metric(
+    Histogram,
+    "general_router_confidence",
+    "NotDiamond confidence scores",
+    ["mode"],
+    buckets=(0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0),
+)
+
+
 # ==================== Code Router Helper Functions ====================
 
 
@@ -1478,6 +1524,69 @@ def track_code_routing_request(
     code_router_classification_confidence.labels(
         task_category=task_category,
     ).observe(confidence)
+
+
+# ==================== General Router Helper Functions ====================
+
+
+def track_general_router_request(
+    mode: str,
+    selected_model: str,
+    provider: str,
+    latency_seconds: float,
+    confidence: float,
+):
+    """
+    Track general router request.
+
+    Args:
+        mode: Routing mode (balanced, quality, cost, latency)
+        selected_model: Selected model ID
+        provider: Provider name
+        latency_seconds: Routing latency in seconds
+        confidence: NotDiamond confidence score
+    """
+    general_router_requests_total.labels(
+        mode=mode,
+        selected_model=selected_model,
+        provider=provider,
+    ).inc()
+
+    general_router_latency_seconds.observe(latency_seconds)
+
+    if confidence > 0:
+        general_router_confidence.labels(mode=mode).observe(confidence)
+
+
+def track_notdiamond_api_call(status: str, mode: str, latency_seconds: float):
+    """
+    Track NotDiamond API call.
+
+    Args:
+        status: Call status (success, error)
+        mode: Routing mode
+        latency_seconds: API call latency in seconds
+    """
+    general_router_notdiamond_calls_total.labels(
+        status=status,
+        mode=mode,
+    ).inc()
+
+    general_router_notdiamond_latency_seconds.observe(latency_seconds)
+
+
+def track_general_router_fallback(reason: str, mode: str):
+    """
+    Track fallback usage.
+
+    Args:
+        reason: Fallback reason (disabled, model_unavailable, exception)
+        mode: Routing mode
+    """
+    general_router_fallback_total.labels(
+        reason=reason,
+        mode=mode,
+    ).inc()
 
 
 def track_code_task_success(task_category: str, model: str, tier: int):
