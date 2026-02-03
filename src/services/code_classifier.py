@@ -234,7 +234,7 @@ class CodeTaskClassifier:
             "conversation_length": len(messages),
             "file_count": 0,
             "has_error_trace": False,
-            "file_types": set(),
+            "file_types": [],  # Use list for JSON serialization
         }
 
         # Patterns to detect files and errors
@@ -259,8 +259,9 @@ class CodeTaskClassifier:
 
         # Count files mentioned
         files = file_pattern.findall(all_content)
-        context["file_count"] = len(set(files))
-        context["file_types"] = set(files)
+        unique_files = set(files)
+        context["file_count"] = len(unique_files)
+        context["file_types"] = list(unique_files)  # Use list for JSON serialization
 
         # Check for error traces
         for pattern in error_patterns:

@@ -225,7 +225,7 @@
       "complexity": "very_high",
       "default_tier": 1,
       "min_tier": 1,
-      "keywords": ["full implementation", "complete feature", "end-to-end", "autonomous", "multi-step", "agentic", "build entire", "full feature", "entire system", "complete system", "from scratch", "build full"],
+      "keywords": ["full implementation", "complete feature", "end-to-end", "autonomous", "multi-step", "agentic", "build entire", "full feature", "entire system", "complete system", "from scratch", "build full", "build the complete", "complete authentication", "authentication system"],
       "description": "Multi-step, autonomous tasks"
     }
   },

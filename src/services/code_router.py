@@ -437,10 +437,11 @@ def parse_router_model_string(model_string: str) -> tuple[bool, RouterMode]:
         "router:code:agentic" -> (True, "agentic")
         "gpt-4" -> (False, "auto")
     """
-    if not model_string.startswith("router:code"):
+    model_string_lower = model_string.lower()
+    if not model_string_lower.startswith("router:code"):
         return (False, "auto")
 
-    parts = model_string.split(":")
+    parts = model_string_lower.split(":")
     if len(parts) == 2:
         # "router:code" -> auto mode
         return (True, "auto")

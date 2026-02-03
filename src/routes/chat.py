@@ -2136,31 +2136,43 @@ async def chat_completions(
                                             break
                                 break
 
-                        # Extract context from messages
-                        from src.services.code_classifier import get_classifier
-                        classifier = get_classifier()
-                        context = classifier.extract_context_from_messages(messages)
+                        # Validate: skip routing if no valid user message found
+                        if not last_user_message or not last_user_message.strip():
+                            logger.warning(
+                                "Code router: no valid user message found, using default model"
+                            )
+                            try:
+                                from src.services.prometheus_metrics import track_code_router_fallback
+                                track_code_router_fallback(reason="empty_message")
+                            except ImportError:
+                                pass
+                            req.model = CODE_ROUTER_DEFAULT_MODEL
+                        else:
+                            # Extract context from messages
+                            from src.services.code_classifier import get_classifier
+                            classifier = get_classifier()
+                            context = classifier.extract_context_from_messages(messages)
 
-                        # Route the code prompt
-                        code_router_decision = route_code_prompt(
-                            prompt=last_user_message,
-                            mode=router_mode,
-                            context=context,
-                            user_default_model=user.get("default_model") if user else None,
-                        )
+                            # Route the code prompt
+                            code_router_decision = route_code_prompt(
+                                prompt=last_user_message,
+                                mode=router_mode,
+                                context=context,
+                                user_default_model=user.get("default_model") if user else None,
+                            )
 
-                        # Update model with routed selection
-                        req.model = code_router_decision["model_id"]
+                            # Update model with routed selection
+                            req.model = code_router_decision["model_id"]
 
-                        logger.info(
-                            "Code router selected model: %s (tier=%d, category=%s, confidence=%.2f, time=%.2fms, mode=%s)",
-                            code_router_decision["model_id"],
-                            code_router_decision["tier"],
-                            code_router_decision["task_category"],
-                            code_router_decision["confidence"],
-                            code_router_decision["routing_latency_ms"],
-                            code_router_decision["mode"],
-                        )
+                            logger.info(
+                                "Code router selected model: %s (tier=%d, category=%s, confidence=%.2f, time=%.2fms, mode=%s)",
+                                code_router_decision["model_id"],
+                                code_router_decision["tier"],
+                                code_router_decision["task_category"],
+                                code_router_decision["confidence"],
+                                code_router_decision["routing_latency_ms"],
+                                code_router_decision["mode"],
+                            )
 
                 except Exception as e:
                     # Fail open - log warning and use default model
