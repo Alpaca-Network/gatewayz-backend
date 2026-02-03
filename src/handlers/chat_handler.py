@@ -38,6 +38,9 @@ from src.services.groq_client import (
     make_groq_request_openai,
     make_groq_request_openai_stream,
 )
+from src.services.onerouter_client import (
+    make_onerouter_request_openai_stream,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -327,13 +330,20 @@ class ChatInferenceHandler:
             )
             async for chunk in stream:
                 yield chunk
+        elif provider_name == "onerouter":
+            # OneRouter/Infron.ai uses sync client
+            stream = make_onerouter_request_openai_stream(messages, model_id, **kwargs)
+            for chunk in stream:
+                yield chunk
         elif provider_name == "cerebras":
-            stream = await make_cerebras_request_openai_stream(messages, model_id, **kwargs)
-            async for chunk in stream:
+            # Cerebras uses sync client
+            stream = make_cerebras_request_openai_stream(messages, model_id, **kwargs)
+            for chunk in stream:
                 yield chunk
         elif provider_name == "groq":
-            stream = await make_groq_request_openai_stream(messages, model_id, **kwargs)
-            async for chunk in stream:
+            # Groq uses sync client
+            stream = make_groq_request_openai_stream(messages, model_id, **kwargs)
+            for chunk in stream:
                 yield chunk
         else:
             # Fallback to OpenRouter
