@@ -236,7 +236,11 @@ async def generate_images(
             if user["credits"] < required_credits:
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Insufficient credits. Image generation costs ${estimated_cost:.4f} (${cost_per_image:.4f}/image x {req.n}). Available: ${user['credits']:.4f}",
+                    detail=(
+                        f"Insufficient credits. Image generation costs ${estimated_cost:.4f} "
+                        f"(${cost_per_image:.4f}/image x {req.n}), requires ${required_credits:.4f} "
+                        f"with safety buffer. Available: ${user['credits']:.4f}"
+                    ),
                 )
             actual_provider = provider  # Initialize for error handling
 
