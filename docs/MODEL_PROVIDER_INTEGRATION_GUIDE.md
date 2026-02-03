@@ -1,7 +1,7 @@
 # Model Provider Integration Guide
 
 **Version**: 1.0
-**Last Updated**: 2025-02-03
+**Last Updated**: 2026-02-03
 **Target Audience**: AI Model Providers integrating with Gatewayz Universal Inference API
 
 ---
@@ -377,12 +377,14 @@ Example: $0.02 per image = "0.02"
 
 ### 3.4 Free Models
 
-**Important**: Only OpenRouter has legitimately free models (with `:free` suffix). If you offer free models:
+**Important**: Free models require special handling to prevent billing issues. If you offer free models:
 
 1. Set all pricing fields to `"0"`
 2. Clearly indicate this is a **promotional/trial tier** with limitations
 3. Provide documentation on limitations (rate limits, usage caps, etc.)
 4. Notify Gatewayz team for manual verification
+
+**Note**: Models without valid pricing data are filtered from the catalog to prevent them from incorrectly appearing as "free" to users.
 
 **Free Model Example**:
 ```json
