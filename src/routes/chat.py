@@ -2152,7 +2152,8 @@ async def chat_completions(
                         from src.services.prometheus_metrics import track_general_router_fallback
                         track_general_router_fallback(reason="exception", mode="balanced")
                     except ImportError:
-                        pass
+                        # Prometheus metrics are optional; skip tracking if not available
+                        logger.debug("Prometheus metrics not available for general router fallback tracking")
                     req.model = "anthropic/claude-sonnet-4"
 
         # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===

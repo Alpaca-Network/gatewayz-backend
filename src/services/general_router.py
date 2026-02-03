@@ -42,13 +42,17 @@ def normalize_model_string(model_string: str) -> str:
     """
     model_lower = model_string.lower().strip()
 
-    # General router aliases
+    # General router aliases - convert prefix and remaining hyphens to colons
     if model_lower.startswith("gatewayz-general"):
-        return model_lower.replace("gatewayz-general", "router:general", 1)
+        normalized = model_lower.replace("gatewayz-general", "router:general", 1)
+        # Convert any remaining hyphens to colons (e.g., -quality -> :quality)
+        return normalized.replace("-", ":")
 
-    # Code router aliases
+    # Code router aliases - convert prefix and remaining hyphens to colons
     if model_lower.startswith("gatewayz-code"):
-        return model_lower.replace("gatewayz-code", "router:code", 1)
+        normalized = model_lower.replace("gatewayz-code", "router:code", 1)
+        # Convert any remaining hyphens to colons (e.g., -price -> :price)
+        return normalized.replace("-", ":")
 
     return model_string
 
@@ -218,13 +222,14 @@ class GeneralRouter:
         fallback_model = get_fallback_model(mode, user_default)
         provider = get_fallback_provider(fallback_model)
 
-        # Track fallback
+        # Track fallback (optional - Prometheus may not be installed)
         try:
             from src.services.prometheus_metrics import track_general_router_fallback
 
             track_general_router_fallback(reason=reason, mode=mode)
         except ImportError:
-            pass
+            # Prometheus metrics are optional; skip tracking if not available
+            logger.debug("Prometheus metrics not available, skipping fallback tracking")
 
         return {
             "model_id": fallback_model,

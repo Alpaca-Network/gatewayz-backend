@@ -153,10 +153,17 @@ class NotDiamondClient:
             session_id = result.get("session_id", "")
             confidence = result.get("confidence", 0.9)
 
+            # Validate nd_model is not None or empty
+            if not nd_model:
+                raise ValueError(
+                    "NotDiamond API returned empty model selection. "
+                    f"Response: {result}"
+                )
+
             # Map to Gatewayz format
             gatewayz_id, provider = self.map_notdiamond_to_gatewayz(nd_model)
 
-            # Track metrics
+            # Track metrics (optional - Prometheus may not be installed)
             try:
                 from src.services.prometheus_metrics import track_notdiamond_api_call
 
@@ -164,7 +171,8 @@ class NotDiamondClient:
                     status="success", mode=mode, latency_seconds=latency_ms / 1000
                 )
             except ImportError:
-                pass
+                # Prometheus metrics are optional; skip tracking if not available
+                logger.debug("Prometheus metrics not available, skipping NotDiamond tracking")
 
             return {
                 "model_id": gatewayz_id,
@@ -179,7 +187,7 @@ class NotDiamondClient:
         except Exception as e:
             latency_ms = (time.perf_counter() - start_time) * 1000
 
-            # Track failure
+            # Track failure (optional - Prometheus may not be installed)
             try:
                 from src.services.prometheus_metrics import track_notdiamond_api_call
 
@@ -187,9 +195,10 @@ class NotDiamondClient:
                     status="error", mode=mode, latency_seconds=latency_ms / 1000
                 )
             except ImportError:
-                pass
+                # Prometheus metrics are optional; skip tracking if not available
+                logger.debug("Prometheus metrics not available, skipping error tracking")
 
-            # Capture to Sentry
+            # Capture to Sentry (optional - Sentry may not be configured)
             try:
                 from src.utils.sentry_context import capture_error
 
@@ -200,7 +209,8 @@ class NotDiamondClient:
                     level="warning",
                 )
             except ImportError:
-                pass
+                # Sentry integration is optional; skip error capture if not available
+                logger.debug("Sentry not available, skipping error capture")
 
             logger.error(f"NotDiamond API call failed: {e}")
             raise
@@ -223,9 +233,14 @@ class NotDiamondClient:
             API response dict
         """
         # NotDiamond SDK call
-        # The exact API might vary - adjust based on SDK documentation
+        # Use asyncio.to_thread to avoid blocking the event loop
+        # since the NotDiamond SDK uses synchronous HTTP calls
+        import asyncio
+
         try:
-            result = self.client.model_select(
+            # Wrap synchronous SDK call in thread pool to avoid blocking
+            result = await asyncio.to_thread(
+                self.client.model_select,
                 messages=messages,
                 model=candidate_models,
                 preference=preference,

@@ -20,23 +20,23 @@ class TestNormalizeModelString:
         assert normalize_model_string("gatewayz-general") == "router:general"
         assert (
             normalize_model_string("gatewayz-general-quality")
-            == "router:general-quality"
+            == "router:general:quality"
         )
-        assert normalize_model_string("gatewayz-general-cost") == "router:general-cost"
+        assert normalize_model_string("gatewayz-general-cost") == "router:general:cost"
         assert (
             normalize_model_string("gatewayz-general-latency")
-            == "router:general-latency"
+            == "router:general:latency"
         )
 
     def test_normalize_code_router_hyphenated(self):
         """Test normalizing gatewayz-code aliases."""
         assert normalize_model_string("gatewayz-code") == "router:code"
-        assert normalize_model_string("gatewayz-code-price") == "router:code-price"
+        assert normalize_model_string("gatewayz-code-price") == "router:code:price"
         assert (
-            normalize_model_string("gatewayz-code-quality") == "router:code-quality"
+            normalize_model_string("gatewayz-code-quality") == "router:code:quality"
         )
         assert (
-            normalize_model_string("gatewayz-code-agentic") == "router:code-agentic"
+            normalize_model_string("gatewayz-code-agentic") == "router:code:agentic"
         )
 
     def test_normalize_already_normalized(self):
@@ -59,7 +59,7 @@ class TestNormalizeModelString:
         assert normalize_model_string("GATEWAYZ-GENERAL") == "router:general"
         assert (
             normalize_model_string("Gatewayz-General-Quality")
-            == "router:general-quality"
+            == "router:general:quality"
         )
 
 
