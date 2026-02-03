@@ -245,6 +245,15 @@ class Config:
     # Z.AI Configuration (Zhipu AI - GLM models)
     ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
 
+    # NotDiamond AI Router Configuration
+    NOTDIAMOND_API_KEY = os.environ.get("NOTDIAMOND_API_KEY", "")
+    NOTDIAMOND_TIMEOUT = int(os.environ.get("NOTDIAMOND_TIMEOUT", "10"))
+    NOTDIAMOND_ENABLED = os.environ.get("NOTDIAMOND_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
     # Butter.dev LLM Response Caching Configuration
     # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
     # and serves cached responses to reduce costs and improve latency.

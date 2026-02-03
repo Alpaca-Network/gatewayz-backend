@@ -263,7 +263,147 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://canopywave.io",
     },
+    "notdiamond": {
+        "name": "NotDiamond",
+        "color": "bg-violet-500",
+        "priority": "fast",
+        "site_url": "https://notdiamond.ai",
+        "icon": "zap",
+    },
 }
+
+
+@router.get("/routers", tags=["routers"])
+async def get_intelligent_routers():
+    """
+    Get available intelligent routers with configurations.
+
+    This endpoint provides documentation for router:* model strings,
+    enabling frontend auto-discovery of intelligent routing capabilities.
+
+    Returns router information including:
+    - id: Unique router identifier
+    - name: Display name for UI
+    - description: Router purpose and capabilities
+    - modes: Available optimization modes
+    - syntax: Primary and alias syntax patterns
+    - use_cases: Recommended use cases
+    """
+    try:
+        routers = [
+            {
+                "id": "general",
+                "name": "General Router",
+                "description": "NotDiamond-powered intelligent routing for general-purpose tasks",
+                "powered_by": "NotDiamond",
+                "modes": [
+                    {
+                        "value": "balanced",
+                        "label": "Balanced",
+                        "description": "Balance quality, cost, and latency",
+                    },
+                    {
+                        "value": "quality",
+                        "label": "Quality",
+                        "description": "Optimize for response quality",
+                    },
+                    {
+                        "value": "cost",
+                        "label": "Cost",
+                        "description": "Optimize for lowest cost",
+                    },
+                    {
+                        "value": "latency",
+                        "label": "Latency",
+                        "description": "Optimize for fastest response",
+                    },
+                ],
+                "syntax": {
+                    "primary": "router:general:<mode>",
+                    "examples": [
+                        "router:general",
+                        "router:general:quality",
+                        "router:general:cost",
+                        "router:general:latency",
+                    ],
+                    "aliases": [
+                        "gatewayz-general",
+                        "gatewayz-general-quality",
+                        "gatewayz-general-cost",
+                        "gatewayz-general-latency",
+                    ],
+                },
+                "use_cases": [
+                    "creative writing",
+                    "summarization",
+                    "Q&A",
+                    "general chat",
+                    "data analysis",
+                ],
+            },
+            {
+                "id": "code",
+                "name": "Code Router",
+                "description": "Code-optimized routing with benchmark-based model selection",
+                "powered_by": "Gatewayz",
+                "modes": [
+                    {
+                        "value": "auto",
+                        "label": "Auto",
+                        "description": "Automatically select best model for task",
+                    },
+                    {
+                        "value": "price",
+                        "label": "Price",
+                        "description": "Optimize for lowest cost",
+                    },
+                    {
+                        "value": "quality",
+                        "label": "Quality",
+                        "description": "Optimize for highest quality",
+                    },
+                    {
+                        "value": "agentic",
+                        "label": "Agentic",
+                        "description": "Premium models for complex multi-step tasks",
+                    },
+                ],
+                "syntax": {
+                    "primary": "router:code:<mode>",
+                    "examples": [
+                        "router:code",
+                        "router:code:price",
+                        "router:code:quality",
+                        "router:code:agentic",
+                    ],
+                    "aliases": [
+                        "gatewayz-code",
+                        "gatewayz-code-price",
+                        "gatewayz-code-quality",
+                        "gatewayz-code-agentic",
+                    ],
+                },
+                "use_cases": [
+                    "code generation",
+                    "debugging",
+                    "refactoring",
+                    "code review",
+                    "architecture design",
+                ],
+            },
+        ]
+
+        return {
+            "data": routers,
+            "total": len(routers),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching routers: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch routers: {str(e)}",
+        )
 
 
 @router.get("/gateways", tags=["gateways"])
@@ -319,8 +459,69 @@ async def get_gateways():
         # Sort by priority (fast first), then by name
         gateways.sort(key=lambda g: (0 if g["priority"] == "fast" else 1, g["name"]))
 
+        # Add intelligent routers section
+        routers = [
+            {
+                "id": "general",
+                "name": "General Router",
+                "description": "NotDiamond-powered intelligent routing for general-purpose tasks",
+                "modes": ["balanced", "quality", "cost", "latency"],
+                "syntax": {
+                    "primary": "router:general:<mode>",
+                    "examples": [
+                        "router:general",
+                        "router:general:quality",
+                        "router:general:cost",
+                        "router:general:latency",
+                    ],
+                    "aliases": [
+                        "gatewayz-general",
+                        "gatewayz-general-quality",
+                        "gatewayz-general-cost",
+                        "gatewayz-general-latency",
+                    ],
+                },
+                "use_cases": [
+                    "creative writing",
+                    "summarization",
+                    "Q&A",
+                    "general chat",
+                    "data analysis",
+                ],
+            },
+            {
+                "id": "code",
+                "name": "Code Router",
+                "description": "Code-optimized routing with benchmark-based model selection",
+                "modes": ["auto", "price", "quality", "agentic"],
+                "syntax": {
+                    "primary": "router:code:<mode>",
+                    "examples": [
+                        "router:code",
+                        "router:code:price",
+                        "router:code:quality",
+                        "router:code:agentic",
+                    ],
+                    "aliases": [
+                        "gatewayz-code",
+                        "gatewayz-code-price",
+                        "gatewayz-code-quality",
+                        "gatewayz-code-agentic",
+                    ],
+                },
+                "use_cases": [
+                    "code generation",
+                    "debugging",
+                    "refactoring",
+                    "code review",
+                    "architecture design",
+                ],
+            },
+        ]
+
         return {
             "data": gateways,
+            "routers": routers,
             "total": len(gateways),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }

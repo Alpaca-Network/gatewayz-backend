@@ -2099,10 +2099,67 @@ async def chat_completions(
                     # Use default model since original was an auto-route request
                     req.model = AUTO_ROUTE_DEFAULT_MODEL
 
-        # === 2.4) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
+        # === 2.4) General Router (if model="router:general" or "gatewayz-general") ===
+        # NotDiamond-powered intelligent routing for general-purpose prompts
+        # Normalize model string to handle hyphenated aliases
+        from src.services.general_router import normalize_model_string
+
+        normalized_model = normalize_model_string(original_model) if original_model else original_model
+
+        # Check for general router
+        GENERAL_ROUTER_PREFIX = "router:general"
+        is_general_route = normalized_model and normalized_model.lower().startswith(GENERAL_ROUTER_PREFIX)
+
+        if is_general_route:
+            with tracker.stage("general_routing"):
+                try:
+                    from src.services.general_router import (
+                        parse_router_model_string as parse_general_router,
+                        route_general_prompt,
+                        get_routing_metadata as get_general_routing_metadata,
+                    )
+
+                    # Parse mode from model string
+                    is_general_router, router_mode = parse_general_router(
+                        normalized_model.lower()
+                    )
+
+                    if is_general_router:
+                        # Route using NotDiamond
+                        general_router_decision = await route_general_prompt(
+                            messages=messages,
+                            mode=router_mode,
+                            context=None,
+                            user_default_model=user.get("default_model") if user else None,
+                        )
+
+                        # Update model with routed selection
+                        req.model = general_router_decision["model_id"]
+
+                        logger.info(
+                            "General router selected model: %s (mode=%s, confidence=%.2f, time=%.2fms, fallback=%s)",
+                            general_router_decision["model_id"],
+                            general_router_decision["mode"],
+                            general_router_decision.get("confidence", 0),
+                            general_router_decision["routing_latency_ms"],
+                            general_router_decision.get("fallback_used", False),
+                        )
+
+                except Exception as e:
+                    # Fail open - use fallback
+                    logger.warning("General router failed: %s", str(e))
+                    try:
+                        from src.services.prometheus_metrics import track_general_router_fallback
+                        track_general_router_fallback(reason="exception", mode="balanced")
+                    except ImportError:
+                        pass
+                    req.model = "anthropic/claude-sonnet-4"
+
+        # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
         # Specialized router for code-related tasks with 2026 benchmark-optimized model selection
         code_router_decision = None
-        is_code_route = original_model and original_model.lower().startswith(CODE_ROUTER_PREFIX)
+        # Use normalized_model for code router as well (supports gatewayz-code aliases)
+        is_code_route = normalized_model and normalized_model.lower().startswith(CODE_ROUTER_PREFIX)
 
         if is_code_route:
             with tracker.stage("code_routing"):
@@ -2113,9 +2170,9 @@ async def chat_completions(
                         get_routing_metadata,
                     )
 
-                    # Parse the router mode from model string (normalize case)
+                    # Parse the router mode from model string (use normalized model)
                     is_code_router, router_mode = parse_router_model_string(
-                        original_model.lower()
+                        normalized_model.lower()
                     )
 
                     if is_code_router:

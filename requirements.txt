@@ -26,6 +26,9 @@ clarifai>=10.0.0
 huggingface-hub>=0.23.0
 novita-client>=0.5.0
 
+# NotDiamond AI Router
+notdiamond>=0.3.35,<1.0.0
+
 # Analytics
 statsig-python-core==0.10.2
 posthog==6.7.8
