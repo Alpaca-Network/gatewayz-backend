@@ -238,7 +238,10 @@ class CodeTaskClassifier:
         }
 
         # Patterns to detect files and errors
-        file_pattern = re.compile(r"[\w/\\]+\.(py|js|ts|java|go|rs|cpp|c|h|jsx|tsx|vue|rb|php)")
+        # Use non-capturing group (?:...) so finditer returns full filename matches
+        file_pattern = re.compile(
+            r"[\w/\\]+\.(?:py|js|ts|java|go|rs|cpp|c|h|jsx|tsx|vue|rb|php)"
+        )
         error_patterns = [
             r"Traceback",
             r"Error:",
@@ -257,11 +260,12 @@ class CodeTaskClassifier:
                     if isinstance(part, dict) and part.get("type") == "text":
                         all_content += " " + part.get("text", "")
 
-        # Count files mentioned
-        files = file_pattern.findall(all_content)
+        # Count files mentioned - use finditer for full filename matches
+        files = [m.group(0) for m in file_pattern.finditer(all_content)]
         unique_files = set(files)
         context["file_count"] = len(unique_files)
-        context["file_types"] = list(unique_files)  # Use list for JSON serialization
+        # Extract file types (extensions) from filenames
+        context["file_types"] = list({f.rsplit(".", 1)[-1] for f in files})
 
         # Check for error traces
         for pattern in error_patterns:

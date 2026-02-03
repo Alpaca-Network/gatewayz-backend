@@ -2112,13 +2112,11 @@ async def chat_completions(
                         route_code_prompt,
                         get_routing_metadata,
                     )
-                    from src.services.code_classifier import (
-                        is_code_related,
-                        classify_code_task,
-                    )
 
-                    # Parse the router mode from model string
-                    is_code_router, router_mode = parse_router_model_string(original_model)
+                    # Parse the router mode from model string (normalize case)
+                    is_code_router, router_mode = parse_router_model_string(
+                        original_model.lower()
+                    )
 
                     if is_code_router:
                         # Extract last user message for classification
