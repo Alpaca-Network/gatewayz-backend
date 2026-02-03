@@ -82,6 +82,9 @@ class PricingSyncConfig:
         "novita",          # ✅ ADDED: OpenAI-compatible API with pricing
         "nebius",          # ✅ ADDED: OpenAI-compatible API with pricing
 
+        # Phase 3b (Issue #1038 - 1 additional provider)
+        "aihubmix",        # ✅ ADDED: Per-1K tokens format, API with pricing
+
         # Future additions (to be implemented)
         # "google",        # 🔄 Vertex AI pricing API research needed
         # "xai",           # 🔄 API research needed (no public models.list)
@@ -527,6 +530,7 @@ class PricingSyncService:
             "cerebras": self.auditor.audit_cerebras,
             "novita": self.auditor.audit_novita,
             "nebius": self.auditor.audit_nebius,
+            "aihubmix": self.auditor.audit_aihubmix,
         }
 
         if provider_slug.lower() not in methods:

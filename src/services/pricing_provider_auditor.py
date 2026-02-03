@@ -739,6 +739,77 @@ class PricingProviderAuditor:
                 error_message=str(e),
             )
 
+    async def audit_aihubmix(self) -> ProviderPricingData:
+        """
+        Audit AiHubMix pricing from their public API.
+
+        AiHubMix provides pricing in per-1K tokens format in their models API.
+        Pricing is already parsed by the fetch_models_from_aihubmix function.
+        """
+        try:
+            # Import client function
+            from src.services.aihubmix_client import fetch_models_from_aihubmix
+
+            # Fetch models (this includes pricing)
+            models_data = fetch_models_from_aihubmix()
+            if not models_data:
+                return ProviderPricingData(
+                    provider_name="aihubmix",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="No models fetched from AiHubMix API",
+                )
+
+            # Extract pricing from normalized models
+            models = {}
+            for model in models_data:
+                model_id = model.get("id")
+                pricing_info = model.get("pricing", {})
+
+                if model_id and pricing_info:
+                    # Pricing is already normalized to per-1M tokens format by normalize_aihubmix_model_with_pricing
+                    prompt_price = pricing_info.get("prompt")
+                    completion_price = pricing_info.get("completion")
+
+                    if prompt_price or completion_price:
+                        # Convert string to float if needed
+                        try:
+                            prompt_val = float(prompt_price) if prompt_price else 0
+                            completion_val = float(completion_price) if completion_price else 0
+
+                            # Skip models with zero pricing
+                            if prompt_val == 0 and completion_val == 0:
+                                continue
+
+                            models[model_id] = {
+                                "prompt": prompt_val,
+                                "completion": completion_val,
+                            }
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid pricing for AiHubMix model {model_id}")
+                            continue
+
+            logger.info(f"Fetched pricing for {len(models)} AiHubMix models")
+
+            return ProviderPricingData(
+                provider_name="aihubmix",
+                models=models,
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="success" if models else "partial",
+                error_message=None if models else "No models with pricing found",
+            )
+
+        except Exception as e:
+            logger.error(f"Error auditing AiHubMix pricing: {e}")
+            return ProviderPricingData(
+                provider_name="aihubmix",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
     async def audit_all_providers(self) -> list[ProviderPricingData]:
         """Audit all provider APIs and return results."""
         tasks = [
@@ -753,6 +824,7 @@ class PricingProviderAuditor:
             self.audit_cerebras(),
             self.audit_novita(),
             self.audit_nebius(),
+            self.audit_aihubmix(),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
