@@ -75,8 +75,8 @@ class SavingsDetail(BaseModel):
 class SavingsEstimate(BaseModel):
     """Estimated savings against multiple baselines."""
 
-    opus_4_5: SavingsDetail | None = Field(None, description="Savings vs Claude Opus 4.5")
-    gpt_5_2: SavingsDetail | None = Field(None, description="Savings vs GPT-5.2 Codex")
+    claude_3_5_sonnet: SavingsDetail | None = Field(None, description="Savings vs Claude 3.5 Sonnet")
+    gpt_4o: SavingsDetail | None = Field(None, description="Savings vs GPT-4o")
     user_default: SavingsDetail | None = Field(None, description="Savings vs user's default model")
 
 

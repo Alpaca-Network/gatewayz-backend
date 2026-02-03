@@ -2217,7 +2217,9 @@ async def chat_completions(
 
             provider_locked = not req_provider_missing
 
-            override_provider = detect_provider_from_model_id(original_model)
+            # Use routed model for provider detection when code routing is active
+            model_for_provider_detection = req.model if is_code_route and req.model else original_model
+            override_provider = detect_provider_from_model_id(model_for_provider_detection)
             if override_provider:
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
@@ -2257,7 +2259,8 @@ async def chat_completions(
 
             if req_provider_missing:
                 # Try to detect provider from model ID using the transformation module
-                detected_provider = detect_provider_from_model_id(original_model)
+                # Use routed model when code routing is active
+                detected_provider = detect_provider_from_model_id(model_for_provider_detection)
                 if detected_provider:
                     provider = detected_provider
                     # Normalize provider aliases
@@ -2290,10 +2293,14 @@ async def chat_completions(
                             break
                     # Otherwise default to onerouter (already set)
 
+            # Use the routed model (from code router or other routing logic) instead of original
+            # This ensures that routing decisions are actually applied downstream
+            effective_model = req.model if req.model else original_model
+
             provider_chain = build_provider_failover_chain(provider)
-            provider_chain = enforce_model_failover_rules(original_model, provider_chain)
-            provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
-            model = original_model
+            provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
+            provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+            model = effective_model
 
         # Diagnostic logging for tools parameter
         if "tools" in optional:

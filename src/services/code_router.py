@@ -39,6 +39,7 @@ def _load_quality_priors() -> dict[str, Any]:
             logger.info(f"Code router loaded quality priors v{_quality_priors.get('version', 'unknown')}")
         except Exception as e:
             logger.error(f"Failed to load code quality priors: {e}")
+            logger.warning("Using minimal fallback configuration - routing may use fallback model only")
             _quality_priors = {
                 "model_tiers": {},
                 "fallback_model": {"id": "zai/glm-4.7", "provider": "zai"},

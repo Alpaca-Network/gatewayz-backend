@@ -29,6 +29,7 @@ def _load_quality_priors() -> dict[str, Any]:
             logger.info(f"Loaded code quality priors v{_quality_priors.get('version', 'unknown')}")
         except Exception as e:
             logger.error(f"Failed to load code quality priors: {e}")
+            logger.warning("Using empty fallback configuration - classification may be degraded")
             _quality_priors = {"task_taxonomy": {}, "complexity_weights": {}}
     return _quality_priors
 
