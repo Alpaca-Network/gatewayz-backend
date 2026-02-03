@@ -16,7 +16,7 @@ import os
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone
 
 # Set test environment
 os.environ['APP_ENV'] = 'testing'
