@@ -221,25 +221,67 @@ async def handle_credits_and_usage(
     cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
     is_trial = trial.get("is_trial", False)
 
-    # Defense-in-depth: Override is_trial flag if user has active subscription
+    # Defense-in-depth: Override is_trial flag if user has any subscription indicators
     # This protects against webhook delays or failures that leave is_trial=TRUE
+    # DEFENSIVE APPROACH: Assume trial is stale if ANY subscription indicator is present
     if is_trial and user:
-        has_active_subscription = (
-            user.get("stripe_subscription_id") is not None
-            and user.get("subscription_status") == "active"
-        ) or user.get("tier") in ("pro", "max", "admin")
+        # Check for multiple subscription indicators (defensive approach)
+        has_stripe_subscription_id = user.get("stripe_subscription_id") is not None
+        has_stripe_customer_id = user.get("stripe_customer_id") is not None
+        has_paid_tier = user.get("tier") in ("pro", "max", "admin")
+        has_subscription_allowance = (user.get("subscription_allowance") or 0) > 0
+        has_active_status = user.get("subscription_status") == "active"
 
-        if has_active_subscription:
+        # Count how many indicators suggest the user is NOT on trial
+        subscription_indicators = [
+            has_stripe_subscription_id,
+            has_stripe_customer_id,
+            has_paid_tier,
+            has_subscription_allowance,
+        ]
+        indicator_count = sum(subscription_indicators)
+
+        # If ANY subscription indicator is present, assume trial flag is stale
+        # This is defensive to prevent paid users from getting free service
+        has_subscription_indicators = indicator_count > 0
+
+        if has_subscription_indicators:
             logger.warning(
-                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
-                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path. Endpoint: %s",
+                "BILLING_OVERRIDE: User %s has is_trial=TRUE but shows subscription indicators (%d/4). "
+                "Forcing paid path to prevent free service for paid subscribers. "
+                "Details: tier=%s, sub_status=%s, stripe_sub_id=%s, stripe_customer_id=%s, "
+                "allowance=$%.2f, endpoint=%s",
                 user.get("id"),
+                indicator_count,
                 user.get("tier"),
                 user.get("subscription_status"),
                 user.get("stripe_subscription_id"),
+                user.get("stripe_customer_id"),
+                user.get("subscription_allowance", 0),
                 endpoint,
             )
             is_trial = False  # Override to paid path
+
+            # Send Sentry alert for high indicator count (likely webhook failure)
+            if indicator_count >= 3:
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        f"Trial flag override for user {user.get('id')} with {indicator_count}/4 subscription indicators",
+                        level="warning",
+                        extras={
+                            "user_id": user.get("id"),
+                            "tier": user.get("tier"),
+                            "subscription_status": user.get("subscription_status"),
+                            "has_stripe_subscription_id": has_stripe_subscription_id,
+                            "has_stripe_customer_id": has_stripe_customer_id,
+                            "has_paid_tier": has_paid_tier,
+                            "has_subscription_allowance": has_subscription_allowance,
+                            "endpoint": endpoint,
+                        }
+                    )
+                except Exception:
+                    pass
 
     # Track trial usage (only for legitimate trial users, not paid users with stale flags)
     if is_trial and not trial.get("is_expired"):
@@ -448,6 +490,7 @@ async def handle_credits_and_usage_with_fallback(
     1. The response has already been sent to the client
     2. We MUST attempt credit deduction but cannot block/fail the request
     3. Failures must be tracked for manual reconciliation
+    4. Additional retries beyond the standard retry mechanism to catch edge cases
 
     Args:
         (same as handle_credits_and_usage)
@@ -455,61 +498,110 @@ async def handle_credits_and_usage_with_fallback(
     Returns:
         tuple[float, bool]: (cost, success) - cost calculated, whether deduction succeeded
     """
-    try:
-        cost = await handle_credits_and_usage(
-            api_key=api_key,
-            user=user,
-            model=model,
-            trial=trial,
-            total_tokens=total_tokens,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            elapsed_ms=elapsed_ms,
-            endpoint=endpoint,
-            is_streaming=is_streaming,
-        )
-        return cost, True
+    # ENHANCED: Add extra retry layer for streaming background tasks
+    # Standard handle_credits_and_usage already retries 3 times, but we add
+    # one more layer here since streaming failures mean complete revenue loss
+    MAX_BACKGROUND_RETRIES = 2  # Try twice at this level
+    last_exception = None
 
-    except Exception as e:
-        # Calculate cost for tracking even if deduction failed
+    for attempt in range(1, MAX_BACKGROUND_RETRIES + 1):
         try:
-            from src.services.pricing import calculate_cost_async
-
-            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
-        except Exception:
-            # Fallback cost estimation
-            cost = (prompt_tokens + completion_tokens) * 0.00002
-
-        # Record the failure
-        _record_background_task_failure("credit_deduction", endpoint)
-        _record_missed_deduction(cost, "background_task_failure")
-
-        # Log for manual reconciliation
-        logger.error(
-            f"BILLING_RECONCILIATION_NEEDED: Streaming credit deduction failed. "
-            f"User: {user.get('id')}, API Key: {api_key[:10]}..., "
-            f"Model: {model}, Cost: ${cost:.6f}, "
-            f"Tokens: {total_tokens} (prompt: {prompt_tokens}, completion: {completion_tokens}), "
-            f"Endpoint: {endpoint}, Error: {e}"
-        )
-
-        # Try to log to a reconciliation table for later processing
-        try:
-            await _log_failed_deduction_for_reconciliation(
-                user_id=user.get("id"),
+            cost = await handle_credits_and_usage(
                 api_key=api_key,
+                user=user,
                 model=model,
-                cost=cost,
+                trial=trial,
                 total_tokens=total_tokens,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                elapsed_ms=elapsed_ms,
                 endpoint=endpoint,
-                error=str(e),
+                is_streaming=is_streaming,
             )
-        except Exception as log_error:
-            logger.error(f"Failed to log deduction for reconciliation: {log_error}")
 
-        return cost, False
+            if attempt > 1:
+                logger.info(
+                    f"Streaming credit deduction succeeded on background retry {attempt}/{MAX_BACKGROUND_RETRIES} "
+                    f"for user {user.get('id')}, cost=${cost:.6f}"
+                )
+
+            return cost, True
+
+        except Exception as e:
+            last_exception = e
+            logger.warning(
+                f"Streaming background credit deduction attempt {attempt}/{MAX_BACKGROUND_RETRIES} failed: {e}"
+            )
+
+            # Wait before retry (exponential backoff)
+            if attempt < MAX_BACKGROUND_RETRIES:
+                retry_delay = 1.0 * attempt  # 1s, 2s
+                await asyncio.sleep(retry_delay)
+
+    # All retries exhausted - handle failure
+    e = last_exception
+
+    # Calculate cost for tracking even if deduction failed
+    try:
+        from src.services.pricing import calculate_cost_async
+
+        cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+    except Exception:
+        # Fallback cost estimation
+        cost = (prompt_tokens + completion_tokens) * 0.00002
+
+    # Record the failure
+    _record_background_task_failure("credit_deduction", endpoint)
+    _record_missed_deduction(cost, "background_task_failure")
+
+    # Log for manual reconciliation
+    logger.error(
+        f"BILLING_RECONCILIATION_NEEDED: Streaming credit deduction failed after {MAX_BACKGROUND_RETRIES} background retries. "
+        f"User: {user.get('id')}, API Key: {api_key[:10]}..., "
+        f"Model: {model}, Cost: ${cost:.6f}, "
+        f"Tokens: {total_tokens} (prompt: {prompt_tokens}, completion: {completion_tokens}), "
+        f"Endpoint: {endpoint}, Error: {e}"
+    )
+
+    # Send critical Sentry alert for streaming failures
+    try:
+        import sentry_sdk
+        sentry_sdk.capture_message(
+            f"CRITICAL: Streaming credit deduction failed completely for user {user.get('id')}",
+            level="error",
+            extras={
+                "user_id": user.get("id"),
+                "api_key_prefix": api_key[:10] + "..." if api_key else None,
+                "model": model,
+                "cost_usd": cost,
+                "total_tokens": total_tokens,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "endpoint": endpoint,
+                "error": str(e),
+                "background_retries": MAX_BACKGROUND_RETRIES,
+            }
+        )
+    except Exception:
+        pass
+
+    # Try to log to a reconciliation table for later processing
+    try:
+        await _log_failed_deduction_for_reconciliation(
+            user_id=user.get("id"),
+            api_key=api_key,
+            model=model,
+            cost=cost,
+            total_tokens=total_tokens,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            endpoint=endpoint,
+            error=str(e),
+        )
+    except Exception as log_error:
+        logger.error(f"Failed to log deduction for reconciliation: {log_error}")
+
+    return cost, False
 
 
 async def _log_failed_deduction_for_reconciliation(

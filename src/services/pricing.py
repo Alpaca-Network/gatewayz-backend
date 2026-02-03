@@ -4,6 +4,7 @@ Handles model pricing calculations and credit cost computation
 """
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 # Structure: {model_id: {"data": dict, "timestamp": float}}
 _pricing_cache: dict[str, dict[str, Any]] = {}
 _pricing_cache_ttl = 900  # 15 minutes TTL for live pricing
+_pricing_cache_lock = threading.RLock()  # Reentrant lock to prevent race conditions
 
 # Track models that fall back to default pricing for monitoring/alerting
 # Structure: {model_id: {"count": int, "first_seen": float, "last_seen": float, "errors": list}}
@@ -102,13 +104,14 @@ def get_default_pricing_stats() -> dict[str, Any]:
 def clear_pricing_cache(model_id: str | None = None) -> None:
     """Clear pricing cache (for testing or explicit invalidation)"""
     global _pricing_cache
-    if model_id:
-        if model_id in _pricing_cache:
-            del _pricing_cache[model_id]
-            logger.debug(f"Cleared pricing cache for model {model_id}")
-    else:
-        _pricing_cache.clear()
-        logger.info("Cleared entire pricing cache")
+    with _pricing_cache_lock:
+        if model_id:
+            if model_id in _pricing_cache:
+                del _pricing_cache[model_id]
+                logger.debug(f"Cleared pricing cache for model {model_id}")
+        else:
+            _pricing_cache.clear()
+            logger.info("Cleared entire pricing cache")
 
 
 def get_pricing_cache_stats() -> dict[str, Any]:
@@ -383,17 +386,18 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         # Remove any empty candidates that might have been added
         candidate_ids = {cid for cid in candidate_ids if cid}
 
-        # Step 1: Check in-memory cache (fastest)
-        cache_entry = _pricing_cache.get(model_id)
-        if cache_entry:
-            age = time.time() - cache_entry["timestamp"]
-            if age < _pricing_cache_ttl:
-                logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
-                return cache_entry["data"]
-            else:
-                # Cache expired, remove it
-                del _pricing_cache[model_id]
-                logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+        # Step 1: Check in-memory cache (fastest) - with thread safety
+        with _pricing_cache_lock:
+            cache_entry = _pricing_cache.get(model_id)
+            if cache_entry:
+                age = time.time() - cache_entry["timestamp"]
+                if age < _pricing_cache_ttl:
+                    logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    return cache_entry["data"]
+                else:
+                    # Cache expired, remove it
+                    del _pricing_cache[model_id]
+                    logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
 
         # Step 2: Try live API fetch from provider
         # NOTE: When called from async context (most route handlers), we skip live fetch
@@ -428,11 +432,12 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                     logger.debug(f"Live pricing fetch in new event loop failed for {model_id}: {e}")
 
             if live_pricing:
-                # Cache the live result
-                _pricing_cache[model_id] = {
-                    "data": live_pricing,
-                    "timestamp": time.time()
-                }
+                # Cache the live result - with thread safety
+                with _pricing_cache_lock:
+                    _pricing_cache[model_id] = {
+                        "data": live_pricing,
+                        "timestamp": time.time()
+                    }
                 logger.info(
                     f"[LIVE API SUCCESS] Cached pricing for {model_id} from {live_pricing.get('source', 'unknown')}"
                 )
@@ -447,11 +452,12 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         try:
             db_pricing = _get_pricing_from_database(model_id, candidate_ids)
             if db_pricing:
-                # Cache the database result
-                _pricing_cache[model_id] = {
-                    "data": db_pricing,
-                    "timestamp": time.time()
-                }
+                # Cache the database result - with thread safety
+                with _pricing_cache_lock:
+                    _pricing_cache[model_id] = {
+                        "data": db_pricing,
+                        "timestamp": time.time()
+                    }
                 logger.info(f"[DB FALLBACK] Using database pricing for {model_id}")
                 return db_pricing
         except Exception as e:
@@ -461,18 +467,63 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         try:
             cache_pricing = _get_pricing_from_cache_fallback(model_id, candidate_ids)
             if cache_pricing:
-                # Cache the fallback result (shorter TTL)
-                _pricing_cache[model_id] = {
-                    "data": cache_pricing,
-                    "timestamp": time.time()
-                }
+                # Cache the fallback result - with thread safety
+                with _pricing_cache_lock:
+                    _pricing_cache[model_id] = {
+                        "data": cache_pricing,
+                        "timestamp": time.time()
+                    }
                 return cache_pricing
         except Exception as e:
             logger.warning(f"Cache fallback pricing lookup failed for {model_id}: {e}")
 
         # Step 5: Use default pricing (last resort)
         # ALERT: Default pricing may significantly under-bill for expensive models
-        # Track this metric for monitoring and alerting
+
+        # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
+        # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
+        HIGH_VALUE_MODEL_PATTERNS = [
+            "gpt-4", "gpt-5", "o1-", "o3-", "o4-",  # OpenAI high-end models
+            "claude-3", "claude-opus", "claude-sonnet-4",  # Anthropic high-end
+            "gemini-1.5-pro", "gemini-2", "gemini-pro",  # Google high-end
+            "command-r-plus",  # Cohere high-end
+            "mixtral-8x22b",  # Mistral high-end
+        ]
+
+        model_id_lower = model_id.lower()
+        is_high_value = any(pattern in model_id_lower for pattern in HIGH_VALUE_MODEL_PATTERNS)
+
+        if is_high_value:
+            error_msg = (
+                f"HIGH_VALUE_MODEL_PRICING_MISSING: Cannot use default pricing for {model_id}. "
+                f"This model requires accurate pricing data to prevent significant under-billing. "
+                f"Please contact support to add pricing for this model."
+            )
+            logger.error(error_msg)
+
+            # Send critical Sentry alert
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_message(
+                    error_msg,
+                    level="error",
+                    extras={
+                        "model_id": model_id,
+                        "candidate_ids": list(candidate_ids),
+                        "default_pricing_would_be": 0.00002,
+                    }
+                )
+            except Exception:
+                pass
+
+            # Block the request to prevent revenue loss
+            raise ValueError(
+                f"Pricing data not available for model '{model_id}'. "
+                f"This model cannot be used until pricing is configured. "
+                f"Please try a different model or contact support."
+            )
+
+        # For non-high-value models, allow default pricing but track usage
         logger.warning(
             f"[DEFAULT_PRICING_ALERT] Model {model_id} not found in database or cache, "
             f"using default pricing ($0.00002/token). This may under-bill for expensive models."
@@ -557,17 +608,18 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         # Remove any empty candidates
         candidate_ids = {cid for cid in candidate_ids if cid}
 
-        # Step 1: Check in-memory cache (fastest)
-        cache_entry = _pricing_cache.get(model_id)
-        if cache_entry:
-            age = time.time() - cache_entry["timestamp"]
-            if age < _pricing_cache_ttl:
-                logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
-                return cache_entry["data"]
-            else:
-                # Cache expired, remove it
-                del _pricing_cache[model_id]
-                logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+        # Step 1: Check in-memory cache (fastest) - with thread safety
+        with _pricing_cache_lock:
+            cache_entry = _pricing_cache.get(model_id)
+            if cache_entry:
+                age = time.time() - cache_entry["timestamp"]
+                if age < _pricing_cache_ttl:
+                    logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    return cache_entry["data"]
+                else:
+                    # Cache expired, remove it
+                    del _pricing_cache[model_id]
+                    logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
 
         # Step 2: Try live API fetch from provider
         try:
@@ -576,11 +628,12 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             live_pricing = await fetch_live_pricing(model_id)
 
             if live_pricing:
-                # Cache the live result
-                _pricing_cache[model_id] = {
-                    "data": live_pricing,
-                    "timestamp": time.time()
-                }
+                # Cache the live result - with thread safety
+                with _pricing_cache_lock:
+                    _pricing_cache[model_id] = {
+                        "data": live_pricing,
+                        "timestamp": time.time()
+                    }
                 logger.info(
                     f"[LIVE API SUCCESS] Cached pricing for {model_id} from {live_pricing.get('source', 'unknown')}"
                 )
@@ -595,11 +648,12 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         try:
             db_pricing = _get_pricing_from_database(model_id, candidate_ids)
             if db_pricing:
-                # Cache the database result
-                _pricing_cache[model_id] = {
-                    "data": db_pricing,
-                    "timestamp": time.time()
-                }
+                # Cache the database result - with thread safety
+                with _pricing_cache_lock:
+                    _pricing_cache[model_id] = {
+                        "data": db_pricing,
+                        "timestamp": time.time()
+                    }
                 logger.info(f"[DB FALLBACK] Using database pricing for {model_id}")
                 return db_pricing
         except Exception as e:
@@ -620,6 +674,51 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
         # Step 5: Use default pricing (last resort)
         # ALERT: Default pricing may significantly under-bill for expensive models
+
+        # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
+        # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
+        HIGH_VALUE_MODEL_PATTERNS = [
+            "gpt-4", "gpt-5", "o1-", "o3-", "o4-",  # OpenAI high-end models
+            "claude-3", "claude-opus", "claude-sonnet-4",  # Anthropic high-end
+            "gemini-1.5-pro", "gemini-2", "gemini-pro",  # Google high-end
+            "command-r-plus",  # Cohere high-end
+            "mixtral-8x22b",  # Mistral high-end
+        ]
+
+        model_id_lower = model_id.lower()
+        is_high_value = any(pattern in model_id_lower for pattern in HIGH_VALUE_MODEL_PATTERNS)
+
+        if is_high_value:
+            error_msg = (
+                f"HIGH_VALUE_MODEL_PRICING_MISSING: Cannot use default pricing for {model_id}. "
+                f"This model requires accurate pricing data to prevent significant under-billing. "
+                f"Please contact support to add pricing for this model."
+            )
+            logger.error(error_msg)
+
+            # Send critical Sentry alert
+            try:
+                import sentry_sdk
+                sentry_sdk.capture_message(
+                    error_msg,
+                    level="error",
+                    extras={
+                        "model_id": model_id,
+                        "candidate_ids": list(candidate_ids),
+                        "default_pricing_would_be": 0.00002,
+                    }
+                )
+            except Exception:
+                pass
+
+            # Block the request to prevent revenue loss
+            raise ValueError(
+                f"Pricing data not available for model '{model_id}'. "
+                f"This model cannot be used until pricing is configured. "
+                f"Please try a different model or contact support."
+            )
+
+        # For non-high-value models, allow default pricing but track usage
         logger.warning(
             f"[DEFAULT_PRICING_ALERT] Model {model_id} not found via live API, database, or cache, "
             f"using default pricing ($0.00002/token). This may under-bill for expensive models."
@@ -633,9 +732,26 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         }
         return default_pricing
 
+    except ValueError:
+        # Re-raise validation errors (high-value model pricing missing)
+        raise
     except Exception as e:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
         _track_default_pricing_usage(model_id, error=str(e))
+
+        # Check if this is a high-value model even in error case
+        HIGH_VALUE_MODEL_PATTERNS = [
+            "gpt-4", "gpt-5", "o1-", "o3-", "o4-",
+            "claude-3", "claude-opus", "claude-sonnet-4",
+            "gemini-1.5-pro", "gemini-2", "gemini-pro",
+            "command-r-plus", "mixtral-8x22b",
+        ]
+        if any(pattern in model_id.lower() for pattern in HIGH_VALUE_MODEL_PATTERNS):
+            raise ValueError(
+                f"Pricing data not available for high-value model '{model_id}'. "
+                f"Request blocked to prevent under-billing."
+            )
+
         return {
             "prompt": 0.00002,
             "completion": 0.00002,
@@ -655,12 +771,35 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
 
     Returns:
         Total cost in USD
+
+    Raises:
+        ValueError: If pricing is invalid or outside acceptable bounds
     """
     try:
         # Check if this is a free model first (OpenRouter free models end with :free)
+        # VALIDATION: Only OpenRouter models should have :free suffix to prevent abuse
         if model_id and model_id.endswith(":free"):
-            logger.info(f"Free model detected: {model_id}, returning $0 cost")
-            return 0.0
+            # Validate that this is actually from OpenRouter
+            # OpenRouter model IDs typically start with provider name (e.g., "openai/gpt-4:free")
+            # or are just model names for OpenRouter-exclusive models
+            is_openrouter_model = (
+                "/" in model_id  # Has provider prefix (OpenRouter format)
+                or not any(provider in model_id.lower() for provider in [
+                    "anthropic", "google", "cohere", "mistral", "deepseek"
+                ])  # Not obviously from another provider
+            )
+
+            if not is_openrouter_model:
+                # Suspicious :free suffix on non-OpenRouter model
+                logger.warning(
+                    f"PRICING_VALIDATION: Model {model_id} has :free suffix but doesn't appear to be from OpenRouter. "
+                    f"Removing suffix and charging normally to prevent abuse."
+                )
+                # Strip the :free suffix and continue with normal pricing
+                model_id = model_id[:-5]  # Remove ":free"
+            else:
+                logger.info(f"Free model detected: {model_id}, returning $0 cost")
+                return 0.0
 
         pricing = get_model_pricing(model_id)
 
@@ -668,6 +807,66 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
         prompt_cost = prompt_tokens * pricing["prompt"]
         completion_cost = completion_tokens * pricing["completion"]
         total_cost = prompt_cost + completion_cost
+
+        # PRICING SANITY CHECK: Validate cost is within reasonable bounds
+        # This catches pricing normalization errors (1000x bugs) and missing pricing
+        total_tokens = prompt_tokens + completion_tokens
+        if total_tokens > 0:
+            cost_per_1k_tokens = (total_cost / total_tokens) * 1000
+
+            # Reasonable bounds: $0.0001 to $100 per 1K tokens
+            # - Lower bound catches missing/zero pricing
+            # - Upper bound catches 1000x normalization errors
+            MIN_COST_PER_1K = 0.0001  # $0.0001 per 1K tokens (very cheap models)
+            MAX_COST_PER_1K = 100.0   # $100 per 1K tokens (extremely expensive models)
+
+            if cost_per_1k_tokens < MIN_COST_PER_1K:
+                # Suspiciously low pricing - likely missing or zero pricing
+                error_msg = (
+                    f"PRICING_ANOMALY: {model_id} cost ${cost_per_1k_tokens:.8f} per 1K tokens "
+                    f"is below minimum ${MIN_COST_PER_1K}. This likely indicates missing pricing data. "
+                    f"Pricing source: {pricing.get('source', 'unknown')}"
+                )
+                logger.error(error_msg)
+
+                # If this is default pricing being used, raise error to prevent under-billing
+                if pricing.get("source") == "default":
+                    raise ValueError(
+                        f"Cannot use default pricing for model {model_id}. "
+                        f"Actual pricing data required to prevent under-billing."
+                    )
+
+            elif cost_per_1k_tokens > MAX_COST_PER_1K:
+                # Suspiciously high pricing - likely normalization error (1000x bug)
+                error_msg = (
+                    f"PRICING_ANOMALY: {model_id} cost ${cost_per_1k_tokens:.2f} per 1K tokens "
+                    f"exceeds maximum ${MAX_COST_PER_1K}. This likely indicates a pricing normalization error. "
+                    f"Raw pricing: prompt=${pricing['prompt']}, completion=${pricing['completion']}, "
+                    f"source: {pricing.get('source', 'unknown')}"
+                )
+                logger.error(error_msg)
+
+                # Send alert for manual review
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        error_msg,
+                        level="error",
+                        extras={
+                            "model_id": model_id,
+                            "cost_per_1k_tokens": cost_per_1k_tokens,
+                            "total_cost": total_cost,
+                            "total_tokens": total_tokens,
+                            "pricing": pricing,
+                        }
+                    )
+                except Exception:
+                    pass
+
+                raise ValueError(
+                    f"Pricing anomaly detected for {model_id}: ${cost_per_1k_tokens:.2f} per 1K tokens. "
+                    f"Request blocked to prevent overcharging. Please contact support."
+                )
 
         logger.info(
             f"Cost calculation for {model_id}: "
@@ -678,6 +877,9 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
 
         return total_cost
 
+    except ValueError:
+        # Re-raise validation errors without modification
+        raise
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
         # Fallback: Check if free model before applying default pricing
@@ -703,12 +905,35 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
 
     Returns:
         Total cost in USD
+
+    Raises:
+        ValueError: If pricing is invalid or outside acceptable bounds
     """
     try:
         # Check if this is a free model first (OpenRouter free models end with :free)
+        # VALIDATION: Only OpenRouter models should have :free suffix to prevent abuse
         if model_id and model_id.endswith(":free"):
-            logger.info(f"Free model detected: {model_id}, returning $0 cost")
-            return 0.0
+            # Validate that this is actually from OpenRouter
+            # OpenRouter model IDs typically start with provider name (e.g., "openai/gpt-4:free")
+            # or are just model names for OpenRouter-exclusive models
+            is_openrouter_model = (
+                "/" in model_id  # Has provider prefix (OpenRouter format)
+                or not any(provider in model_id.lower() for provider in [
+                    "anthropic", "google", "cohere", "mistral", "deepseek"
+                ])  # Not obviously from another provider
+            )
+
+            if not is_openrouter_model:
+                # Suspicious :free suffix on non-OpenRouter model
+                logger.warning(
+                    f"PRICING_VALIDATION: Model {model_id} has :free suffix but doesn't appear to be from OpenRouter. "
+                    f"Removing suffix and charging normally to prevent abuse."
+                )
+                # Strip the :free suffix and continue with normal pricing
+                model_id = model_id[:-5]  # Remove ":free"
+            else:
+                logger.info(f"Free model detected: {model_id}, returning $0 cost")
+                return 0.0
 
         pricing = await get_model_pricing_async(model_id)
 
@@ -716,6 +941,66 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
         prompt_cost = prompt_tokens * pricing["prompt"]
         completion_cost = completion_tokens * pricing["completion"]
         total_cost = prompt_cost + completion_cost
+
+        # PRICING SANITY CHECK: Validate cost is within reasonable bounds
+        # This catches pricing normalization errors (1000x bugs) and missing pricing
+        total_tokens = prompt_tokens + completion_tokens
+        if total_tokens > 0:
+            cost_per_1k_tokens = (total_cost / total_tokens) * 1000
+
+            # Reasonable bounds: $0.0001 to $100 per 1K tokens
+            # - Lower bound catches missing/zero pricing
+            # - Upper bound catches 1000x normalization errors
+            MIN_COST_PER_1K = 0.0001  # $0.0001 per 1K tokens (very cheap models)
+            MAX_COST_PER_1K = 100.0   # $100 per 1K tokens (extremely expensive models)
+
+            if cost_per_1k_tokens < MIN_COST_PER_1K:
+                # Suspiciously low pricing - likely missing or zero pricing
+                error_msg = (
+                    f"PRICING_ANOMALY: {model_id} cost ${cost_per_1k_tokens:.8f} per 1K tokens "
+                    f"is below minimum ${MIN_COST_PER_1K}. This likely indicates missing pricing data. "
+                    f"Pricing source: {pricing.get('source', 'unknown')}"
+                )
+                logger.error(error_msg)
+
+                # If this is default pricing being used, raise error to prevent under-billing
+                if pricing.get("source") == "default":
+                    raise ValueError(
+                        f"Cannot use default pricing for model {model_id}. "
+                        f"Actual pricing data required to prevent under-billing."
+                    )
+
+            elif cost_per_1k_tokens > MAX_COST_PER_1K:
+                # Suspiciously high pricing - likely normalization error (1000x bug)
+                error_msg = (
+                    f"PRICING_ANOMALY: {model_id} cost ${cost_per_1k_tokens:.2f} per 1K tokens "
+                    f"exceeds maximum ${MAX_COST_PER_1K}. This likely indicates a pricing normalization error. "
+                    f"Raw pricing: prompt=${pricing['prompt']}, completion=${pricing['completion']}, "
+                    f"source: {pricing.get('source', 'unknown')}"
+                )
+                logger.error(error_msg)
+
+                # Send alert for manual review
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        error_msg,
+                        level="error",
+                        extras={
+                            "model_id": model_id,
+                            "cost_per_1k_tokens": cost_per_1k_tokens,
+                            "total_cost": total_cost,
+                            "total_tokens": total_tokens,
+                            "pricing": pricing,
+                        }
+                    )
+                except Exception:
+                    pass
+
+                raise ValueError(
+                    f"Pricing anomaly detected for {model_id}: ${cost_per_1k_tokens:.2f} per 1K tokens. "
+                    f"Request blocked to prevent overcharging. Please contact support."
+                )
 
         logger.info(
             f"Cost calculation (async) for {model_id}: "
@@ -726,6 +1011,9 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
 
         return total_cost
 
+    except ValueError:
+        # Re-raise validation errors without modification
+        raise
     except Exception as e:
         logger.error(f"Error calculating cost for {model_id}: {e}")
         # Fallback: Check if free model before applying default pricing
