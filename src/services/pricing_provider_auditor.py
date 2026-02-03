@@ -57,20 +57,6 @@ class PricingProviderAuditor:
     def __init__(self):
         self.audit_results = []
 
-    async def audit_deepinfra(self) -> ProviderPricingData:
-        """
-        Audit DeepInfra pricing from their API.
-
-        DeepInfra doesn't expose pricing via public API, so manual verification needed.
-        """
-        return ProviderPricingData(
-            provider_name="deepinfra",
-            models={},
-            fetched_at=datetime.now(timezone.utc).isoformat(),
-            status="error",
-            error_message="DeepInfra does not expose pricing via public API. Manual verification required.",
-        )
-
     async def audit_featherless(self) -> ProviderPricingData:
         """
         Audit Featherless pricing from their API.
@@ -242,6 +228,245 @@ class PricingProviderAuditor:
                 error_message=str(e),
             )
 
+    async def audit_fireworks(self) -> ProviderPricingData:
+        """
+        Audit Fireworks AI pricing from their API.
+
+        Fireworks returns pricing in cents per token format.
+        """
+        try:
+            from src.config import Config
+
+            if not Config.FIREWORKS_API_KEY:
+                return ProviderPricingData(
+                    provider_name="fireworks",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="Fireworks API key not configured",
+                )
+
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.get(
+                    "https://api.fireworks.ai/inference/v1/models",
+                    headers={
+                        "Authorization": f"Bearer {Config.FIREWORKS_API_KEY}",
+                        "User-Agent": "Gatewayz-Pricing-Auditor/1.0",
+                    },
+                )
+
+                if response.status_code != 200:
+                    return ProviderPricingData(
+                        provider_name="fireworks",
+                        models={},
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        status="error",
+                        error_message=f"HTTP {response.status_code}: {response.text[:200]}",
+                    )
+
+                data = response.json()
+                raw_models = data.get("data", [])
+
+                models = {}
+                for model in raw_models:
+                    model_id = model.get("id")
+                    pricing_info = model.get("pricing", {})
+
+                    if model_id and pricing_info:
+                        # Fireworks uses cents per token
+                        cents_input = pricing_info.get("cents_per_input_token")
+                        cents_output = pricing_info.get("cents_per_output_token")
+
+                        # Also check for dollar-based format
+                        input_price = pricing_info.get("input")
+                        output_price = pricing_info.get("output")
+
+                        if cents_input is not None or cents_output is not None:
+                            # Convert cents to dollars per 1M tokens
+                            models[model_id] = {
+                                "prompt": (cents_input / 100 * 1_000_000) if cents_input else 0,
+                                "completion": (cents_output / 100 * 1_000_000) if cents_output else 0,
+                            }
+                        elif input_price is not None or output_price is not None:
+                            # Already in per-1M format (likely)
+                            models[model_id] = {
+                                "prompt": input_price if input_price is not None else 0,
+                                "completion": output_price if output_price is not None else 0,
+                            }
+
+                logger.info(f"Fetched pricing for {len(models)} Fireworks models")
+
+                return ProviderPricingData(
+                    provider_name="fireworks",
+                    models=models,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="success" if models else "partial",
+                    error_message=None if models else "No models with pricing found",
+                )
+
+        except Exception as e:
+            logger.error(f"Error auditing Fireworks pricing: {e}")
+            return ProviderPricingData(
+                provider_name="fireworks",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
+    async def audit_groq(self) -> ProviderPricingData:
+        """
+        Audit Groq pricing from their API.
+
+        Groq returns pricing in cents per token format.
+        """
+        try:
+            from src.config import Config
+
+            if not Config.GROQ_API_KEY:
+                return ProviderPricingData(
+                    provider_name="groq",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="Groq API key not configured",
+                )
+
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.get(
+                    "https://api.groq.com/openai/v1/models",
+                    headers={
+                        "Authorization": f"Bearer {Config.GROQ_API_KEY}",
+                        "User-Agent": "Gatewayz-Pricing-Auditor/1.0",
+                    },
+                )
+
+                if response.status_code != 200:
+                    return ProviderPricingData(
+                        provider_name="groq",
+                        models={},
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        status="error",
+                        error_message=f"HTTP {response.status_code}: {response.text[:200]}",
+                    )
+
+                data = response.json()
+                raw_models = data.get("data", [])
+
+                models = {}
+                for model in raw_models:
+                    model_id = model.get("id")
+                    pricing_info = model.get("pricing", {})
+
+                    if model_id and pricing_info:
+                        # Groq uses cents per token
+                        cents_input = pricing_info.get("cents_per_input_token")
+                        cents_output = pricing_info.get("cents_per_output_token")
+
+                        if cents_input is not None or cents_output is not None:
+                            # Convert cents to dollars per 1M tokens
+                            models[f"groq/{model_id}"] = {
+                                "prompt": (cents_input / 100 * 1_000_000) if cents_input else 0,
+                                "completion": (cents_output / 100 * 1_000_000) if cents_output else 0,
+                            }
+
+                logger.info(f"Fetched pricing for {len(models)} Groq models")
+
+                return ProviderPricingData(
+                    provider_name="groq",
+                    models=models,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="success" if models else "partial",
+                    error_message=None if models else "No models with pricing found",
+                )
+
+        except Exception as e:
+            logger.error(f"Error auditing Groq pricing: {e}")
+            return ProviderPricingData(
+                provider_name="groq",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
+    async def audit_deepinfra(self) -> ProviderPricingData:
+        """
+        Audit DeepInfra pricing from their API.
+
+        DeepInfra returns pricing in cents per token format.
+        """
+        try:
+            from src.config import Config
+
+            if not Config.DEEPINFRA_API_KEY:
+                return ProviderPricingData(
+                    provider_name="deepinfra",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="DeepInfra API key not configured",
+                )
+
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+                response = await client.get(
+                    "https://api.deepinfra.com/models/list",
+                    headers={
+                        "Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}",
+                        "User-Agent": "Gatewayz-Pricing-Auditor/1.0",
+                    },
+                )
+
+                if response.status_code != 200:
+                    return ProviderPricingData(
+                        provider_name="deepinfra",
+                        models={},
+                        fetched_at=datetime.now(timezone.utc).isoformat(),
+                        status="error",
+                        error_message=f"HTTP {response.status_code}: {response.text[:200]}",
+                    )
+
+                data = response.json()
+                # DeepInfra returns array directly
+                raw_models = data if isinstance(data, list) else data.get("data", [])
+
+                models = {}
+                for model in raw_models:
+                    model_id = model.get("model_name") or model.get("id")
+                    pricing_info = model.get("pricing", {})
+
+                    if model_id and pricing_info:
+                        # DeepInfra uses cents per token
+                        cents_input = pricing_info.get("cents_per_input_token")
+                        cents_output = pricing_info.get("cents_per_output_token")
+
+                        if cents_input is not None or cents_output is not None:
+                            # Convert cents to dollars per 1M tokens
+                            models[model_id] = {
+                                "prompt": (cents_input / 100 * 1_000_000) if cents_input else 0,
+                                "completion": (cents_output / 100 * 1_000_000) if cents_output else 0,
+                            }
+
+                logger.info(f"Fetched pricing for {len(models)} DeepInfra models")
+
+                return ProviderPricingData(
+                    provider_name="deepinfra",
+                    models=models,
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="success" if models else "partial",
+                    error_message=None if models else "No models with pricing found",
+                )
+
+        except Exception as e:
+            logger.error(f"Error auditing DeepInfra pricing: {e}")
+            return ProviderPricingData(
+                provider_name="deepinfra",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
     async def audit_together(self) -> ProviderPricingData:
         """
         Audit Together AI pricing from their API.
@@ -318,15 +543,216 @@ class PricingProviderAuditor:
                 error_message=str(e),
             )
 
+    async def audit_cerebras(self) -> ProviderPricingData:
+        """
+        Audit Cerebras pricing from their models.list API.
+
+        Cerebras uses the cerebras-cloud-sdk which provides a models.list endpoint.
+        Pricing is included in the model metadata response.
+        """
+        try:
+            # Import client function
+            from src.services.cerebras_client import fetch_models_from_cerebras
+
+            # Fetch models (this includes pricing)
+            models_data = fetch_models_from_cerebras()
+            if not models_data:
+                return ProviderPricingData(
+                    provider_name="cerebras",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="No models fetched from Cerebras API",
+                )
+
+            # Extract pricing from normalized models
+            models = {}
+            for model in models_data:
+                model_id = model.get("id")
+                pricing_info = model.get("pricing", {})
+
+                if model_id and pricing_info:
+                    # Pricing is already normalized to per-1M tokens format
+                    prompt_price = pricing_info.get("prompt")
+                    completion_price = pricing_info.get("completion")
+
+                    if prompt_price or completion_price:
+                        # Convert string to float if needed
+                        try:
+                            prompt_val = float(prompt_price) if prompt_price else 0
+                            completion_val = float(completion_price) if completion_price else 0
+                            models[model_id] = {
+                                "prompt": prompt_val,
+                                "completion": completion_val,
+                            }
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid pricing for Cerebras model {model_id}")
+                            continue
+
+            logger.info(f"Fetched pricing for {len(models)} Cerebras models")
+
+            return ProviderPricingData(
+                provider_name="cerebras",
+                models=models,
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="success" if models else "partial",
+                error_message=None if models else "No models with pricing found",
+            )
+
+        except Exception as e:
+            logger.error(f"Error auditing Cerebras pricing: {e}")
+            return ProviderPricingData(
+                provider_name="cerebras",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
+    async def audit_novita(self) -> ProviderPricingData:
+        """
+        Audit Novita pricing from their OpenAI-compatible models API.
+
+        Novita provides pricing in their models.list response.
+        """
+        try:
+            # Import client function
+            from src.services.novita_client import fetch_models_from_novita
+
+            # Fetch models (this includes pricing)
+            models_data = fetch_models_from_novita()
+            if not models_data:
+                return ProviderPricingData(
+                    provider_name="novita",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="No models fetched from Novita API",
+                )
+
+            # Extract pricing from normalized models
+            models = {}
+            for model in models_data:
+                model_id = model.get("id")
+                pricing_info = model.get("pricing", {})
+
+                if model_id and pricing_info:
+                    # Pricing is already normalized to per-1M tokens format
+                    prompt_price = pricing_info.get("prompt")
+                    completion_price = pricing_info.get("completion")
+
+                    if prompt_price or completion_price:
+                        # Convert string to float if needed
+                        try:
+                            prompt_val = float(prompt_price) if prompt_price else 0
+                            completion_val = float(completion_price) if completion_price else 0
+                            models[model_id] = {
+                                "prompt": prompt_val,
+                                "completion": completion_val,
+                            }
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid pricing for Novita model {model_id}")
+                            continue
+
+            logger.info(f"Fetched pricing for {len(models)} Novita models")
+
+            return ProviderPricingData(
+                provider_name="novita",
+                models=models,
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="success" if models else "partial",
+                error_message=None if models else "No models with pricing found",
+            )
+
+        except Exception as e:
+            logger.error(f"Error auditing Novita pricing: {e}")
+            return ProviderPricingData(
+                provider_name="novita",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
+    async def audit_nebius(self) -> ProviderPricingData:
+        """
+        Audit Nebius pricing from their OpenAI-compatible models API.
+
+        Nebius Token Factory provides pricing in their models.list response.
+        """
+        try:
+            # Import client function
+            from src.services.nebius_client import fetch_models_from_nebius
+
+            # Fetch models (this includes pricing)
+            models_data = fetch_models_from_nebius()
+            if not models_data:
+                return ProviderPricingData(
+                    provider_name="nebius",
+                    models={},
+                    fetched_at=datetime.now(timezone.utc).isoformat(),
+                    status="error",
+                    error_message="No models fetched from Nebius API",
+                )
+
+            # Extract pricing from normalized models
+            models = {}
+            for model in models_data:
+                model_id = model.get("id")
+                pricing_info = model.get("pricing", {})
+
+                if model_id and pricing_info:
+                    # Pricing is already normalized to per-1M tokens format
+                    prompt_price = pricing_info.get("prompt")
+                    completion_price = pricing_info.get("completion")
+
+                    if prompt_price or completion_price:
+                        # Convert string to float if needed
+                        try:
+                            prompt_val = float(prompt_price) if prompt_price else 0
+                            completion_val = float(completion_price) if completion_price else 0
+                            models[model_id] = {
+                                "prompt": prompt_val,
+                                "completion": completion_val,
+                            }
+                        except (ValueError, TypeError):
+                            logger.warning(f"Invalid pricing for Nebius model {model_id}")
+                            continue
+
+            logger.info(f"Fetched pricing for {len(models)} Nebius models")
+
+            return ProviderPricingData(
+                provider_name="nebius",
+                models=models,
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="success" if models else "partial",
+                error_message=None if models else "No models with pricing found",
+            )
+
+        except Exception as e:
+            logger.error(f"Error auditing Nebius pricing: {e}")
+            return ProviderPricingData(
+                provider_name="nebius",
+                models={},
+                fetched_at=datetime.now(timezone.utc).isoformat(),
+                status="error",
+                error_message=str(e),
+            )
+
     async def audit_all_providers(self) -> list[ProviderPricingData]:
         """Audit all provider APIs and return results."""
         tasks = [
-            self.audit_deepinfra(),
             self.audit_featherless(),
             self.audit_nearai(),
             self.audit_alibaba_cloud(),
             self.audit_openrouter(),
             self.audit_together(),
+            self.audit_fireworks(),
+            self.audit_groq(),
+            self.audit_deepinfra(),
+            self.audit_cerebras(),
+            self.audit_novita(),
+            self.audit_nebius(),
         ]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)

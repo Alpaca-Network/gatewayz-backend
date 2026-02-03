@@ -65,23 +65,26 @@ class PricingSyncConfig:
     # NOTE: Uses Config.PRICING_SYNC_PROVIDERS at runtime (configurable via env var)
     # This is the default fallback list
     AUTO_SYNC_PROVIDERS: list[str] = [
-        # Phase 2 (Original 4 providers)
+        # Phase 1 (Original 4 providers)
         "openrouter",      # ✅ Has API (per-token format)
         "featherless",     # ✅ Has API (per-1M format)
         "nearai",          # ✅ Has API (per-1M format)
         "alibaba-cloud",   # ✅ Has API (per-1M format)
 
-        # Phase 3 (Issue #1038 additions)
+        # Phase 2 (Issue #1038 - 4 new providers)
         "together",        # ✅ ADDED: Has API (per-1M, input/output keys)
+        "fireworks",       # ✅ ADDED: Has API (cents per token)
+        "groq",            # ✅ ADDED: Has API (cents per token)
+        "deepinfra",       # ✅ ADDED: Has API (cents per token)
+
+        # Phase 3a (Issue #1038 - 3 new providers)
+        "cerebras",        # ✅ ADDED: SDK-based, pricing in models.list
+        "novita",          # ✅ ADDED: OpenAI-compatible API with pricing
+        "nebius",          # ✅ ADDED: OpenAI-compatible API with pricing
 
         # Future additions (to be implemented)
-        # "fireworks",     # 🔄 API research in progress
-        # "groq",          # 🔄 API research in progress
-        # "deepinfra",     # 🔄 API research in progress
-        # "cerebras",      # 🔄 SDK-based, research needed
-        # "novita",        # 🔄 API research needed
         # "google",        # 🔄 Vertex AI pricing API research needed
-        # "xai",           # 🔄 API research needed
+        # "xai",           # 🔄 API research needed (no public models.list)
         # "cloudflare",    # 🔄 Workers AI pricing research needed
         # Add more as provider APIs are discovered and implemented
     ]
@@ -518,6 +521,12 @@ class PricingSyncService:
             "alibaba-cloud": self.auditor.audit_alibaba_cloud,
             "alibaba": self.auditor.audit_alibaba_cloud,
             "together": self.auditor.audit_together,
+            "fireworks": self.auditor.audit_fireworks,
+            "groq": self.auditor.audit_groq,
+            "deepinfra": self.auditor.audit_deepinfra,
+            "cerebras": self.auditor.audit_cerebras,
+            "novita": self.auditor.audit_novita,
+            "nebius": self.auditor.audit_nebius,
         }
 
         if provider_slug.lower() not in methods:

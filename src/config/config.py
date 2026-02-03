@@ -437,7 +437,7 @@ class Config:
         p.strip()
         for p in os.environ.get(
             "PRICING_SYNC_PROVIDERS",
-            "openrouter,featherless,nearai,alibaba-cloud,together"  # Added Together AI (Issue #1038)
+            "openrouter,featherless,nearai,alibaba-cloud,together,fireworks,groq,deepinfra,cerebras,novita,nebius"  # 4 → 11 providers (Issue #1038)
         ).split(",")
         if p.strip()
     ]
