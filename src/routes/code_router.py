@@ -8,10 +8,10 @@ Provides endpoints for:
 """
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.services.code_router import (
     get_baselines,
@@ -40,12 +40,27 @@ router = APIRouter(prefix="/code-router", tags=["code-router"])
 # ==================== Request/Response Models ====================
 
 
+# Valid routing modes
+VALID_ROUTING_MODES = ("auto", "price", "quality", "agentic")
+RoutingMode = Literal["auto", "price", "quality", "agentic"]
+
+
 class RouteTestRequest(BaseModel):
     """Request to test code routing without making an actual inference call."""
 
     prompt: str = Field(..., description="The prompt to classify and route")
-    mode: str = Field(default="auto", description="Routing mode: auto, price, quality, agentic")
+    mode: RoutingMode = Field(default="auto", description="Routing mode: auto, price, quality, agentic")
     context: dict[str, Any] | None = Field(default=None, description="Optional context")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, v: str) -> str:
+        """Validate and normalize routing mode."""
+        if isinstance(v, str):
+            v = v.lower()
+        if v not in VALID_ROUTING_MODES:
+            raise ValueError(f"Invalid mode '{v}'. Must be one of: {', '.join(VALID_ROUTING_MODES)}")
+        return v
 
 
 class RouteTestResponse(BaseModel):
@@ -132,7 +147,7 @@ async def test_code_routing(request: RouteTestRequest) -> RouteTestResponse:
     try:
         result = route_code_prompt(
             prompt=request.prompt,
-            mode=request.mode,  # type: ignore
+            mode=request.mode,
             context=request.context,
         )
 
