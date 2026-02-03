@@ -49,10 +49,12 @@ PROVIDER_FORMATS = {
     "vertex-ai": PricingFormat.PER_1K_TOKENS,
     "cerebras": PricingFormat.PER_1M_TOKENS,
     "novita": PricingFormat.PER_1M_TOKENS,
+    "nebius": PricingFormat.PER_1M_TOKENS,
     "nearai": PricingFormat.PER_1M_TOKENS,
     "near": PricingFormat.PER_1M_TOKENS,
     "alibaba-cloud": PricingFormat.PER_1M_TOKENS,
     "alibaba": PricingFormat.PER_1M_TOKENS,
+    "aihubmix": PricingFormat.PER_1K_TOKENS,  # AiHubMix uses per-1K format
     "cloudflare-workers-ai": PricingFormat.PER_1M_TOKENS,
     "nosana": PricingFormat.PER_1M_TOKENS,
 }
