@@ -227,6 +227,21 @@ catalog_cache_invalidations = get_or_create_metric(
     ["gateway", "reason"],  # reason: model_sync, manual, expired
 )
 
+# ==================== Read Replica Metrics ====================
+# Track read replica usage for monitoring database load distribution
+read_replica_queries_total = get_or_create_metric(
+    Counter,
+    "read_replica_queries_total",
+    "Total queries routed to read replica",
+    ["table", "status"],  # status: success, error, fallback_to_primary
+)
+
+read_replica_connection_errors = get_or_create_metric(
+    Counter,
+    "read_replica_connection_errors_total",
+    "Total read replica connection errors (fallback to primary)",
+)
+
 daily_cost_estimate = get_or_create_metric(
     Gauge,
     "gatewayz_daily_cost_estimate_usd",

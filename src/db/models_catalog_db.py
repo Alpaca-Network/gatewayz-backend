@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import get_supabase_client, get_client_for_query
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,8 @@ def get_all_models(
         List of model dictionaries with provider information
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for catalog queries (read-only)
+        supabase = get_client_for_query(read_only=True)
 
         # Join with providers table to get provider info
         query = (
@@ -81,7 +82,8 @@ def get_model_by_id(model_id: int) -> dict[str, Any] | None:
         Model dictionary with provider information or None
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -110,7 +112,8 @@ def get_models_by_provider_slug(
         List of model dictionaries
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         query = (
             supabase.table("models")
@@ -145,7 +148,8 @@ def get_model_by_provider_and_model_id(
         Model dictionary or None
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -375,7 +379,8 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
         List of model dictionaries
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -432,7 +437,8 @@ def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
         Dictionary with model statistics
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Get all models (with optional provider filter)
         query = supabase.table("models").select("*")
@@ -671,7 +677,8 @@ def get_all_models_for_catalog(
         11432  # All active models from all providers (not limited to 1000)
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         all_models = []
         page_size = 1000  # Supabase default limit
         offset = 0
@@ -749,7 +756,8 @@ def get_models_by_gateway_for_catalog(
         2834  # All OpenRouter models (not limited to 1000)
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         all_models = []
         page_size = 1000  # Supabase default limit
         offset = 0
@@ -988,7 +996,8 @@ def get_models_for_catalog_with_filters(
         ... )
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Build base query with provider join
         query = (
@@ -1060,7 +1069,8 @@ def get_models_count_by_filters(
         >>> print(f"OpenRouter has {count} models")
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Build query (same filters as get_models_for_catalog_with_filters)
         query = supabase.table("models").select("id", count="exact")

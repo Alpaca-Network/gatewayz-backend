@@ -14,9 +14,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _supabase_client: Client | None = None
+_read_replica_client: Client | None = None  # Read-only replica for catalog queries
 _last_error: Exception | None = None  # Track last initialization error
 _last_error_time: float = 0  # Timestamp of last error
 _client_lock = threading.Lock()  # Thread-safe client access
+_replica_lock = threading.Lock()  # Thread-safe replica access
 ERROR_CACHE_TTL = 60.0  # Retry after 60 seconds
 
 # Connection error types that indicate the connection needs to be refreshed
@@ -465,6 +467,156 @@ def execute_with_retry(
     # All retries exhausted
     if last_exception:
         raise last_exception
+
+
+def get_read_replica_client() -> Client | None:
+    """
+    Get read-only Supabase client for catalog queries.
+
+    Read replicas offload heavy SELECT queries from the primary database,
+    improving performance and reducing connection pool saturation.
+
+    Usage:
+        - Use for all catalog queries (/models, /providers endpoints)
+        - Use for analytics and reporting queries
+        - DO NOT use for writes (INSERT, UPDATE, DELETE)
+        - Falls back to primary DB if replica not configured
+
+    Returns:
+        Read replica client if SUPABASE_READ_REPLICA_URL configured,
+        otherwise None (caller should use primary client)
+
+    Configuration:
+        Set SUPABASE_READ_REPLICA_URL environment variable to enable.
+        Example: SUPABASE_READ_REPLICA_URL=https://replica.supabase.co
+    """
+    global _read_replica_client
+
+    # Check if read replica is configured
+    read_replica_url = os.getenv("SUPABASE_READ_REPLICA_URL")
+    if not read_replica_url:
+        logger.debug("Read replica not configured (SUPABASE_READ_REPLICA_URL not set)")
+        return None
+
+    # Fast path: return cached replica client
+    if _read_replica_client is not None:
+        return _read_replica_client
+
+    # Slow path: initialize replica client with thread safety
+    with _replica_lock:
+        # Double-check after acquiring lock
+        if _read_replica_client is not None:
+            return _read_replica_client
+
+        try:
+            logger.info(f"Initializing read replica client...")
+
+            # Validate replica URL
+            if not read_replica_url.startswith(("http://", "https://")):
+                logger.error(f"Invalid SUPABASE_READ_REPLICA_URL: {read_replica_url}")
+                return None
+
+            # Build PostgREST URL
+            postgrest_base_url = f"{read_replica_url}/rest/v1"
+
+            # Determine deployment environment
+            is_serverless = os.getenv("VERCEL") or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+
+            # Configure connection pool (same as primary but for reads)
+            if is_serverless:
+                max_conn, keepalive_conn = 30, 10
+                logger.info("Read replica: Using serverless-optimized pool")
+            else:
+                max_conn, keepalive_conn = 100, 30
+                logger.info("Read replica: Using container-optimized pool")
+
+            # Create HTTP transport (HTTP/2 disabled for stability)
+            transport = httpx.HTTPTransport(
+                retries=3,
+                http2=False,  # Disable HTTP/2 to prevent stale connections
+            )
+
+            # Create HTTP client for read replica
+            httpx_client = httpx.Client(
+                base_url=postgrest_base_url,
+                headers={
+                    "apikey": Config.SUPABASE_KEY,
+                    "Authorization": f"Bearer {Config.SUPABASE_KEY}",
+                },
+                timeout=httpx.Timeout(30.0, connect=10.0),
+                limits=httpx.Limits(
+                    max_connections=max_conn,
+                    max_keepalive_connections=keepalive_conn,
+                    keepalive_expiry=20.0,
+                ),
+                transport=transport,
+            )
+
+            # Create Supabase client for read replica
+            _read_replica_client = create_client(
+                supabase_url=read_replica_url,
+                supabase_key=Config.SUPABASE_KEY,
+                options=ClientOptions(
+                    postgrest_client_timeout=30,
+                    storage_client_timeout=30,
+                    schema="public",
+                    headers={"X-Client-Info": "gatewayz-backend-replica/1.0"},
+                ),
+            )
+
+            # Inject HTTP client
+            if hasattr(_read_replica_client, 'postgrest') and hasattr(_read_replica_client.postgrest, 'session'):
+                _read_replica_client.postgrest.session = httpx_client
+                logger.info(f"✅ Read replica client initialized: {postgrest_base_url}")
+
+            # Test connection
+            try:
+                _read_replica_client.table("users").select("*").limit(1).execute()
+                logger.info("✅ Read replica connection test successful")
+            except Exception as e:
+                logger.error(f"❌ Read replica connection test failed: {e}")
+                _read_replica_client = None
+                return None
+
+            return _read_replica_client
+
+        except Exception as e:
+            logger.error(f"Failed to initialize read replica client: {e}")
+            _read_replica_client = None
+            return None
+
+
+def get_client_for_query(read_only: bool = False) -> Client:
+    """
+    Get appropriate Supabase client based on query type.
+
+    This is the recommended way to get a database client as it automatically
+    routes read-only queries to the read replica when available.
+
+    Args:
+        read_only: True for SELECT queries, False for writes (INSERT/UPDATE/DELETE)
+
+    Returns:
+        Read replica client for read-only queries (if configured),
+        otherwise primary client
+
+    Usage:
+        # Read-only query (use replica if available)
+        client = get_client_for_query(read_only=True)
+        models = client.table("models").select("*").execute()
+
+        # Write query (always use primary)
+        client = get_client_for_query(read_only=False)
+        client.table("models").insert({"name": "gpt-4"}).execute()
+    """
+    if read_only:
+        replica = get_read_replica_client()
+        if replica:
+            logger.debug("Using read replica for query")
+            return replica
+        logger.debug("Read replica not available, using primary DB")
+
+    return get_supabase_client()
 
 
 class _LazySupabaseClient:
