@@ -16,12 +16,25 @@ import httpx
 from src.cache import _groq_models_cache, clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
 from src.services.connection_pool import get_groq_pooled_client
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
+from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Circuit breaker configuration for Groq
+# Groq is known for fast inference but can have rate limit issues
+GROQ_CIRCUIT_CONFIG = CircuitBreakerConfig(
+    failure_threshold=5,  # Open after 5 consecutive failures
+    success_threshold=2,  # Close after 2 consecutive successes
+    timeout_seconds=60,  # Wait 60s before retrying
+    failure_window_seconds=60,  # Measure failure rate over 60s
+    failure_rate_threshold=0.5,  # Open if >50% failure rate
+    min_requests_for_rate=10,  # Need at least 10 requests
+)
 
 # Modality constant
 MODALITY_TEXT_TO_TEXT = "text->text"
@@ -44,23 +57,46 @@ def get_groq_client():
         raise
 
 
+def _make_groq_request_openai_internal(messages, model, **kwargs):
+    """Internal function to make request to Groq (called by circuit breaker)."""
+    logger.info(f"Making Groq request with model: {model}")
+    logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
+
+    client = get_groq_client()
+    response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+
+    logger.info(f"Groq request successful for model: {model}")
+    return response
+
+
 def make_groq_request_openai(messages, model, **kwargs):
-    """Make request to Groq using OpenAI-compatible client.
+    """Make request to Groq using OpenAI-compatible client with circuit breaker protection.
 
     Args:
         messages: List of message objects
         model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768')
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
+    circuit_breaker = get_circuit_breaker("groq", GROQ_CIRCUIT_CONFIG)
+
     try:
-        logger.info(f"Making Groq request with model: {model}")
-        logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
-
-        client = get_groq_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
-
-        logger.info(f"Groq request successful for model: {model}")
+        response = circuit_breaker.call(
+            _make_groq_request_openai_internal,
+            messages,
+            model,
+            **kwargs
+        )
         return response
+    except CircuitBreakerError as e:
+        logger.warning(f"Groq circuit breaker OPEN: {e.message}")
+        capture_provider_error(
+            e,
+            provider='groq',
+            model=model,
+            endpoint='/chat/completions',
+            extra_context={"circuit_breaker_state": e.state.value}
+        )
+        raise
     except Exception as e:
         try:
             logger.error(f"Groq request failed for model '{model}': {e}")
@@ -69,28 +105,52 @@ def make_groq_request_openai(messages, model, **kwargs):
                 logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
         except UnicodeEncodeError:
             logger.error("Groq request failed (encoding error in logging)")
+        capture_provider_error(e, provider='groq', model=model, endpoint='/chat/completions')
         raise
 
 
+def _make_groq_request_openai_stream_internal(messages, model, **kwargs):
+    """Internal function to make streaming request to Groq (called by circuit breaker)."""
+    logger.info(f"Making Groq streaming request with model: {model}")
+    logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
+
+    client = get_groq_client()
+    stream = client.chat.completions.create(
+        model=model, messages=messages, stream=True, **kwargs
+    )
+
+    logger.info(f"Groq streaming request initiated for model: {model}")
+    return stream
+
+
 def make_groq_request_openai_stream(messages, model, **kwargs):
-    """Make streaming request to Groq using OpenAI-compatible client.
+    """Make streaming request to Groq using OpenAI-compatible client with circuit breaker protection.
 
     Args:
         messages: List of message objects
         model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768')
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
+    circuit_breaker = get_circuit_breaker("groq", GROQ_CIRCUIT_CONFIG)
+
     try:
-        logger.info(f"Making Groq streaming request with model: {model}")
-        logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
-
-        client = get_groq_client()
-        stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
+        stream = circuit_breaker.call(
+            _make_groq_request_openai_stream_internal,
+            messages,
+            model,
+            **kwargs
         )
-
-        logger.info(f"Groq streaming request initiated for model: {model}")
         return stream
+    except CircuitBreakerError as e:
+        logger.warning(f"Groq circuit breaker OPEN (streaming): {e.message}")
+        capture_provider_error(
+            e,
+            provider='groq',
+            model=model,
+            endpoint='/chat/completions (stream)',
+            extra_context={"circuit_breaker_state": e.state.value}
+        )
+        raise
     except Exception as e:
         try:
             logger.error(f"Groq streaming request failed for model '{model}': {e}")
@@ -99,6 +159,7 @@ def make_groq_request_openai_stream(messages, model, **kwargs):
                 logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
         except UnicodeEncodeError:
             logger.error("Groq streaming request failed (encoding error in logging)")
+        capture_provider_error(e, provider='groq', model=model, endpoint='/chat/completions (stream)')
         raise
 
 
