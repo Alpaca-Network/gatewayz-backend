@@ -615,7 +615,10 @@ class TestImageGenerationResponseProcessing:
         assert gateway_usage['images_generated'] == 1
         assert gateway_usage['cost_usd'] == 0.035
         assert gateway_usage['cost_per_image'] == 0.035
-        assert gateway_usage['user_balance_after'] == 999.965  # 1000 - 0.035
+        # Balance is fetched after deduction for accuracy; mock returns same user so balance = 1000 - 0.035
+        assert gateway_usage['user_balance_after'] == 999.965
+        # New field indicating whether fallback pricing was used
+        assert 'used_fallback_pricing' in gateway_usage
 
     @patch('src.security.deps.validate_api_key_security')
     @patch('src.services.user_lookup_cache.get_user')
@@ -777,3 +780,85 @@ class TestImageGenerationErrorHandling:
         # Users should NOT receive free images
         assert response.status_code == 500
         assert 'billing error' in response.json()['detail'].lower()
+
+
+# ============================================================
+# TEST CLASS: Image Generation - Pricing
+# ============================================================
+
+class TestImageGenerationPricing:
+    """Test pricing calculations and fallback behavior"""
+
+    def test_get_image_cost_known_model(self):
+        """Test cost calculation for known model"""
+        from src.routes.images import get_image_cost
+
+        total_cost, cost_per_image, is_fallback = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", 1
+        )
+
+        assert total_cost == 0.035
+        assert cost_per_image == 0.035
+        assert is_fallback is False
+
+    def test_get_image_cost_multiple_images(self):
+        """Test cost calculation for multiple images"""
+        from src.routes.images import get_image_cost
+
+        total_cost, cost_per_image, is_fallback = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", 3
+        )
+
+        assert total_cost == 0.105
+        assert cost_per_image == 0.035
+        assert is_fallback is False
+
+    def test_get_image_cost_unknown_model_uses_provider_default(self):
+        """Test that unknown models use provider default pricing and flag as fallback"""
+        from src.routes.images import get_image_cost
+
+        total_cost, cost_per_image, is_fallback = get_image_cost(
+            "deepinfra", "unknown-model-xyz", 1
+        )
+
+        # Should use deepinfra default of 0.025
+        assert cost_per_image == 0.025
+        assert total_cost == 0.025
+        assert is_fallback is True  # Flag that fallback pricing was used
+
+    def test_get_image_cost_unknown_provider_uses_conservative_default(self):
+        """Test that unknown providers use conservative high default to avoid revenue loss"""
+        from src.routes.images import get_image_cost, UNKNOWN_PROVIDER_DEFAULT_COST
+
+        total_cost, cost_per_image, is_fallback = get_image_cost(
+            "unknown-provider", "some-model", 1
+        )
+
+        # Should use conservative high default
+        assert cost_per_image == UNKNOWN_PROVIDER_DEFAULT_COST
+        assert cost_per_image == 0.05  # Verify the actual value
+        assert is_fallback is True
+
+    def test_get_image_cost_fal_flux_models(self):
+        """Test pricing for Fal flux models"""
+        from src.routes.images import get_image_cost
+
+        # Schnell (cheapest)
+        total, per_image, fallback = get_image_cost("fal", "flux/schnell", 1)
+        assert per_image == 0.003
+        assert fallback is False
+
+        # Also test with fal-ai prefix
+        total, per_image, fallback = get_image_cost("fal", "fal-ai/flux/schnell", 1)
+        assert per_image == 0.003
+        assert fallback is False
+
+        # Dev
+        total, per_image, fallback = get_image_cost("fal", "flux/dev", 1)
+        assert per_image == 0.025
+        assert fallback is False
+
+        # Pro
+        total, per_image, fallback = get_image_cost("fal", "flux-pro", 1)
+        assert per_image == 0.05
+        assert fallback is False
