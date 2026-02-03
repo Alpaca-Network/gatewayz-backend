@@ -97,6 +97,16 @@ async def sync_single_provider(
                 detail=result.get("error", "Sync failed")
             )
 
+        # Invalidate catalog cache after successful sync (unless dry_run)
+        if not dry_run:
+            try:
+                from src.services.catalog_response_cache import invalidate_catalog_cache
+                deleted_count = invalidate_catalog_cache(provider_slug)
+                logger.info(f"Invalidated {deleted_count} cache entries for {provider_slug}")
+            except Exception as cache_error:
+                # Don't fail sync if cache invalidation fails
+                logger.warning(f"Failed to invalidate cache for {provider_slug}: {cache_error}")
+
         message = (
             f"{'[DRY RUN] ' if dry_run else ''}"
             f"Synced {result.get('models_synced', 0)} models from {provider_slug}. "
@@ -162,6 +172,15 @@ async def sync_all_provider_models(
                 )
 
         result = sync_all_providers(provider_slugs=providers, dry_run=dry_run)
+
+        # Invalidate all catalog caches after successful sync (unless dry_run)
+        if not dry_run and result.get("success"):
+            try:
+                from src.services.catalog_response_cache import invalidate_catalog_cache
+                deleted_count = invalidate_catalog_cache()  # None = invalidate all
+                logger.info(f"Invalidated {deleted_count} cache entries after bulk sync")
+            except Exception as cache_error:
+                logger.warning(f"Failed to invalidate cache after bulk sync: {cache_error}")
 
         # Even if there are errors, we return 200 with details
         # Only raise if catastrophic failure

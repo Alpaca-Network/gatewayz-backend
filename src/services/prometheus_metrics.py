@@ -197,6 +197,36 @@ cost_per_1k_tokens = get_or_create_metric(
     buckets=(0.0001, 0.001, 0.01, 0.1, 1.0, 10.0),
 )
 
+# ==================== Catalog Cache Metrics ====================
+# Track catalog response caching performance for monitoring cache effectiveness
+catalog_cache_hits = get_or_create_metric(
+    Counter,
+    "catalog_cache_hits_total",
+    "Total catalog cache hits (successful cache retrievals)",
+    ["gateway"],  # gateway: openrouter, anthropic, groq, all, etc.
+)
+
+catalog_cache_misses = get_or_create_metric(
+    Counter,
+    "catalog_cache_misses_total",
+    "Total catalog cache misses (cache not found, fetch required)",
+    ["gateway"],
+)
+
+catalog_cache_size_bytes = get_or_create_metric(
+    Gauge,
+    "catalog_cache_size_bytes",
+    "Size of catalog cache in bytes per gateway",
+    ["gateway"],
+)
+
+catalog_cache_invalidations = get_or_create_metric(
+    Counter,
+    "catalog_cache_invalidations_total",
+    "Total catalog cache invalidation operations",
+    ["gateway", "reason"],  # reason: model_sync, manual, expired
+)
+
 daily_cost_estimate = get_or_create_metric(
     Gauge,
     "gatewayz_daily_cost_estimate_usd",
