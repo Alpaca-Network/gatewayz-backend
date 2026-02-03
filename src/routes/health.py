@@ -9,6 +9,7 @@ This API reads health data from Redis cache populated by health-service.
 See: health-service/main.py
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -36,6 +37,10 @@ from src.utils.sentry_context import capture_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Health check timeout constant - used for database queries in health endpoints
+# This prevents health checks from blocking the event loop when external services are slow
+HEALTH_CHECK_TIMEOUT_SECONDS = 3.0
 
 
 @router.get("/health", tags=["health"])
@@ -70,6 +75,28 @@ async def health_check():
         response["database"] = "not_initialized"
 
     return response
+
+
+@router.get("/health/quick", tags=["health"])
+async def health_quick():
+    """
+    Ultra-fast health check - no database, no Redis, no I/O operations.
+
+    Use this endpoint for uptime monitoring services with strict timeout requirements
+    (e.g., Sentry uptime monitoring with 4-second timeout).
+
+    This endpoint:
+    - Performs zero database queries
+    - Performs zero Redis operations
+    - Performs zero network calls
+    - Returns immediately with HTTP 200
+
+    For detailed health status including database connectivity, use /health instead.
+    """
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
@@ -1218,17 +1245,38 @@ async def database_health():
 
     Returns database connection status and any errors.
     This is critical for startup diagnostics in Railway.
+
+    Note: Database query is wrapped with a 3-second timeout to prevent
+    blocking the event loop when the database is slow or unresponsive.
     """
     try:
         logger.info("Checking database connectivity...")
 
-        # Get initialization status
+        # Get initialization status (fast - just reads global variable)
         init_status = get_initialization_status()
 
         # Try a simple query to verify connection
-        supabase.table("users").limit(1).execute()
+        # Wrap synchronous Supabase call in asyncio.to_thread with timeout
+        # to prevent blocking the event loop (Supabase SDK is synchronous)
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(lambda: supabase.table("users").limit(1).execute()),
+                timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"Database health check timed out after {HEALTH_CHECK_TIMEOUT_SECONDS} seconds"
+            )
+            return {
+                "status": "degraded",
+                "database": "supabase",
+                "connection": "timeout",
+                "error": f"Database query timed out after {HEALTH_CHECK_TIMEOUT_SECONDS} seconds",
+                "initialization": init_status,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
-        logger.info("✅ Database connection verified")
+        logger.info("Database connection verified")
         return {
             "status": "healthy",
             "database": "supabase",
@@ -1237,7 +1285,7 @@ async def database_health():
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        logger.error(f"❌ Database connection failed: {type(e).__name__}: {str(e)}")
+        logger.error(f"Database connection failed: {type(e).__name__}: {str(e)}")
 
         # Capture to Sentry
         try:

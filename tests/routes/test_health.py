@@ -156,6 +156,46 @@ class TestBasicHealthCheck:
         assert isinstance(data, dict)
 
 
+class TestQuickHealthCheck:
+    """Test /health/quick endpoint - ultra-fast health check with no I/O operations"""
+
+    def test_quick_health_returns_200(self, client):
+        """Quick health check returns 200 OK"""
+        response = client.get('/health/quick')
+        assert response.status_code == 200
+
+    def test_quick_health_returns_healthy_status(self, client):
+        """Quick health check returns healthy status"""
+        response = client.get('/health/quick')
+        data = response.json()
+
+        assert 'status' in data
+        assert data['status'] == 'healthy'
+
+    def test_quick_health_has_timestamp(self, client):
+        """Quick health check includes timestamp"""
+        response = client.get('/health/quick')
+        data = response.json()
+
+        assert 'timestamp' in data
+        # Timestamp should be ISO format
+        assert 'T' in data['timestamp']
+
+    def test_quick_health_no_auth_required(self, client):
+        """Quick health check doesn't require authentication"""
+        # No auth headers - this is critical for uptime monitoring
+        response = client.get('/health/quick')
+        assert response.status_code == 200
+
+    def test_quick_health_response_is_minimal(self, client):
+        """Quick health check returns minimal response (no database info)"""
+        response = client.get('/health/quick')
+        data = response.json()
+
+        # Should only have status and timestamp - no database info
+        assert set(data.keys()) == {'status', 'timestamp'}
+
+
 class TestSystemHealth:
     """Test system health endpoint"""
 
@@ -790,6 +830,49 @@ class TestDatabaseHealth:
             # Clean up
             if 'sentry_sdk' in sys.modules:
                 del sys.modules['sentry_sdk']
+
+    @pytest.mark.asyncio
+    async def test_database_health_timeout(self):
+        """Test database health returns degraded status when query times out"""
+        import asyncio
+        from src.routes.health import database_health, HEALTH_CHECK_TIMEOUT_SECONDS
+
+        with patch('src.routes.health.supabase') as mock_supabase, \
+             patch('src.routes.health.get_initialization_status') as mock_get_status:
+
+            # Mock a slow query that takes longer than the health check timeout
+            def slow_query():
+                import time
+                time.sleep(HEALTH_CHECK_TIMEOUT_SECONDS + 1)  # Sleep longer than timeout
+                return MagicMock()
+
+            mock_supabase.table.return_value.limit.return_value.execute = slow_query
+
+            # Mock initialization status
+            mock_get_status.return_value = {
+                "initialized": True,
+                "has_error": False,
+                "error_message": None,
+                "error_type": None,
+            }
+
+            result = await database_health()
+
+            # Should return degraded status due to timeout
+            assert result["status"] == "degraded"
+            assert result["database"] == "supabase"
+            assert result["connection"] == "timeout"
+            assert "timeout" in result["error"].lower()
+            assert "initialization" in result
+
+    @pytest.mark.asyncio
+    async def test_database_health_timeout_constant_exists(self):
+        """Test that HEALTH_CHECK_TIMEOUT_SECONDS constant is defined"""
+        from src.routes.health import HEALTH_CHECK_TIMEOUT_SECONDS
+
+        # Timeout should be a reasonable value for health checks (1-5 seconds)
+        assert isinstance(HEALTH_CHECK_TIMEOUT_SECONDS, (int, float))
+        assert 1.0 <= HEALTH_CHECK_TIMEOUT_SECONDS <= 5.0
 
 
 # =============================================================================
