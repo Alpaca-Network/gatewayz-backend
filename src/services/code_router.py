@@ -36,13 +36,17 @@ def _load_quality_priors() -> dict[str, Any]:
         try:
             with open(_QUALITY_PRIORS_PATH) as f:
                 _quality_priors = json.load(f)
-            logger.info(f"Code router loaded quality priors v{_quality_priors.get('version', 'unknown')}")
+            version = _quality_priors.get("version", "unknown")
+            logger.info(f"Code router loaded quality priors v{version}")
         except Exception as e:
             logger.error(f"Failed to load code quality priors: {e}")
-            logger.warning("Using minimal fallback configuration - routing may use fallback model only")
+            logger.warning(
+                "Using minimal fallback configuration - routing may use fallback model only"
+            )
             # Capture to Sentry for monitoring (non-critical but worth tracking)
             try:
                 from src.utils.sentry_context import capture_error
+
                 capture_error(
                     e,
                     context={"file": str(_QUALITY_PRIORS_PATH)},
@@ -306,9 +310,8 @@ class CodeRouter:
         avg_input_tokens = 1000
         avg_output_tokens = 500
 
-        selected_cost = (
-            (selected_input * avg_input_tokens / 1_000_000)
-            + (selected_output * avg_output_tokens / 1_000_000)
+        selected_cost = (selected_input * avg_input_tokens / 1_000_000) + (
+            selected_output * avg_output_tokens / 1_000_000
         )
 
         savings: dict[str, Any] = {}
@@ -316,18 +319,19 @@ class CodeRouter:
         for baseline_key, baseline in self.baselines.items():
             baseline_input = baseline.get("price_input", 0)
             baseline_output = baseline.get("price_output", 0)
-            baseline_cost = (
-                (baseline_input * avg_input_tokens / 1_000_000)
-                + (baseline_output * avg_output_tokens / 1_000_000)
+            baseline_cost = (baseline_input * avg_input_tokens / 1_000_000) + (
+                baseline_output * avg_output_tokens / 1_000_000
             )
             savings[baseline_key] = {
                 "baseline_cost_usd": round(baseline_cost, 6),
                 "selected_cost_usd": round(selected_cost, 6),
                 "savings_usd": round(max(0, baseline_cost - selected_cost), 6),
                 "savings_percent": round(
-                    max(0, (baseline_cost - selected_cost) / baseline_cost * 100)
-                    if baseline_cost > 0
-                    else 0,
+                    (
+                        max(0, (baseline_cost - selected_cost) / baseline_cost * 100)
+                        if baseline_cost > 0
+                        else 0
+                    ),
                     1,
                 ),
             }
@@ -337,18 +341,15 @@ class CodeRouter:
             user_model = self._model_lookup[user_default_model]
             user_input = user_model.get("price_input", 0)
             user_output = user_model.get("price_output", 0)
-            user_cost = (
-                (user_input * avg_input_tokens / 1_000_000)
-                + (user_output * avg_output_tokens / 1_000_000)
+            user_cost = (user_input * avg_input_tokens / 1_000_000) + (
+                user_output * avg_output_tokens / 1_000_000
             )
             savings["user_default"] = {
                 "baseline_cost_usd": round(user_cost, 6),
                 "selected_cost_usd": round(selected_cost, 6),
                 "savings_usd": round(max(0, user_cost - selected_cost), 6),
                 "savings_percent": round(
-                    max(0, (user_cost - selected_cost) / user_cost * 100)
-                    if user_cost > 0
-                    else 0,
+                    max(0, (user_cost - selected_cost) / user_cost * 100) if user_cost > 0 else 0,
                     1,
                 ),
             }

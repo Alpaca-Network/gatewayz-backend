@@ -33,6 +33,7 @@ def _load_quality_priors() -> dict[str, Any]:
             # Capture to Sentry for monitoring (non-critical but worth tracking)
             try:
                 from src.utils.sentry_context import capture_error
+
                 capture_error(
                     e,
                     context={"file": str(_QUALITY_PRIORS_PATH)},
@@ -162,7 +163,10 @@ class CodeTaskClassifier:
             "category_scores": {k: round(v, 2) for k, v in category_scores.items() if v > 0},
         }
 
-        logger.debug(f"Classified prompt as {best_category} ({complexity}) with confidence {confidence:.2f}")
+        logger.debug(
+            f"Classified prompt as {best_category} ({complexity}) "
+            f"with confidence {confidence:.2f}"
+        )
 
         return result
 
@@ -250,9 +254,7 @@ class CodeTaskClassifier:
 
         # Patterns to detect files and errors
         # Use non-capturing group (?:...) so finditer returns full filename matches
-        file_pattern = re.compile(
-            r"[\w/\\]+\.(?:py|js|ts|java|go|rs|cpp|c|h|jsx|tsx|vue|rb|php)"
-        )
+        file_pattern = re.compile(r"[\w/\\]+\.(?:py|js|ts|java|go|rs|cpp|c|h|jsx|tsx|vue|rb|php)")
         error_patterns = [
             r"Traceback",
             r"Error:",

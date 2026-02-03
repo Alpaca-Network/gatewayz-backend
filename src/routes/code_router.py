@@ -49,7 +49,9 @@ class RouteTestRequest(BaseModel):
     """Request to test code routing without making an actual inference call."""
 
     prompt: str = Field(..., description="The prompt to classify and route")
-    mode: RoutingMode = Field(default="auto", description="Routing mode: auto, price, quality, agentic")
+    mode: RoutingMode = Field(
+        default="auto", description="Routing mode: auto, price, quality, agentic"
+    )
     context: dict[str, Any] | None = Field(default=None, description="Optional context")
 
     @field_validator("mode", mode="before")
@@ -59,7 +61,9 @@ class RouteTestRequest(BaseModel):
         if isinstance(v, str):
             v = v.lower()
         if v not in VALID_ROUTING_MODES:
-            raise ValueError(f"Invalid mode '{v}'. Must be one of: {', '.join(VALID_ROUTING_MODES)}")
+            raise ValueError(
+                f"Invalid mode '{v}'. Must be one of: {', '.join(VALID_ROUTING_MODES)}"
+            )
         return v
 
 
@@ -183,7 +187,9 @@ async def validate_code_router_settings(
     # Validate optimization mode
     valid_modes = [m.value for m in CodeRouterMode]
     if request.optimization_mode not in valid_modes:
-        errors.append(f"Invalid optimization_mode: {request.optimization_mode}. Valid: {valid_modes}")
+        errors.append(
+            f"Invalid optimization_mode: {request.optimization_mode}. Valid: {valid_modes}"
+        )
 
     # Validate manual model if router is disabled
     if not request.use_code_router:
@@ -239,25 +245,17 @@ async def get_code_router_stats() -> dict[str, Any]:
         stats = {
             "tiers_loaded": len(router_instance.model_tiers),
             "models_available": sum(
-                len(tier.get("models", []))
-                for tier in router_instance.model_tiers.values()
+                len(tier.get("models", [])) for tier in router_instance.model_tiers.values()
             ),
             "fallback_model": router_instance.fallback_model.get("id"),
             "baselines": list(router_instance.baselines.keys()),
         }
 
-        # Try to get Prometheus metrics if available
-        try:
-            from src.services.prometheus_metrics import (
-                code_router_latency_seconds,
-                code_router_requests_total,
-            )
+        # Check if Prometheus metrics module is available
+        import importlib.util
 
-            # Note: Getting actual values from Prometheus requires more complex logic
-            # This is just indicating that metrics are being tracked
-            stats["metrics_enabled"] = True
-        except ImportError:
-            stats["metrics_enabled"] = False
+        prometheus_spec = importlib.util.find_spec("src.services.prometheus_metrics")
+        stats["metrics_enabled"] = prometheus_spec is not None
 
         return {
             "success": True,
@@ -297,8 +295,14 @@ def _is_valid_model_id(model_id: str) -> bool:
         return True
     # Check if it's a known short alias
     known_aliases = [
-        "gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo",
-        "claude-3-opus", "claude-3-sonnet", "claude-3-haiku",
-        "gemini-pro", "gemini-flash",
+        "gpt-4",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-3.5-turbo",
+        "claude-3-opus",
+        "claude-3-sonnet",
+        "claude-3-haiku",
+        "gemini-pro",
+        "gemini-flash",
     ]
     return model_id.lower() in known_aliases
