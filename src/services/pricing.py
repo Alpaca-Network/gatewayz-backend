@@ -766,11 +766,24 @@ def calculate_code_router_savings(
         }
     """
     if baselines is None:
-        # Default baselines (prices per million tokens)
-        baselines = {
-            "opus_4_5": {"price_input": 15.0, "price_output": 75.0},
-            "gpt_5_2": {"price_input": 15.0, "price_output": 30.0},
-        }
+        # Load baselines from code quality priors if available, else use defaults
+        # This ensures pricing matches the router configuration
+        try:
+            from src.services.code_router import get_baselines as get_router_baselines
+            router_baselines = get_router_baselines()
+            baselines = {
+                name: {
+                    "price_input": config.get("price_input", 3.0),
+                    "price_output": config.get("price_output", 15.0),
+                }
+                for name, config in router_baselines.items()
+            }
+        except (ImportError, Exception):
+            # Fallback to default baselines (prices per million tokens)
+            baselines = {
+                "claude_3_5_sonnet": {"price_input": 3.0, "price_output": 15.0},
+                "gpt_4o": {"price_input": 2.50, "price_output": 10.0},
+            }
 
     savings: dict[str, dict[str, float]] = {}
 

@@ -19,6 +19,14 @@ from src.services.code_router import (
 )
 
 
+# Shared fixtures for code router tests
+@pytest.fixture
+def router():
+    """Provide a fresh CodeRouter instance for tests."""
+    return CodeRouter()
+
+
+@pytest.mark.unit
 class TestParseRouterModelString:
     """Test router model string parsing."""
 
@@ -70,13 +78,9 @@ class TestParseRouterModelString:
         assert mode == "auto"
 
 
+@pytest.mark.unit
 class TestCodeRouter:
     """Test suite for CodeRouter class."""
-
-    @pytest.fixture
-    def router(self):
-        """Get a fresh router instance."""
-        return CodeRouter()
 
     # ==================== Basic Routing Tests ====================
 
@@ -178,7 +182,7 @@ class TestCodeRouter:
         savings = result["savings_estimate"]
 
         # Should have baseline comparisons
-        for baseline in ["opus_4_5", "gpt_5_2"]:
+        for baseline in ["claude_3_5_sonnet", "gpt_4o"]:
             if baseline in savings:
                 assert "baseline_cost_usd" in savings[baseline]
                 assert "selected_cost_usd" in savings[baseline]
@@ -208,6 +212,7 @@ class TestCodeRouter:
             assert "savings_usd" in result["savings_estimate"]["user_default"]
 
 
+@pytest.mark.unit
 class TestModuleFunctions:
     """Test module-level convenience functions."""
 
@@ -252,12 +257,9 @@ class TestModuleFunctions:
         assert isinstance(baselines, dict)
 
 
+@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and error handling."""
-
-    @pytest.fixture
-    def router(self):
-        return CodeRouter()
 
     def test_empty_prompt(self, router):
         """Test routing with empty prompt."""
@@ -283,17 +285,17 @@ class TestEdgeCases:
 
     def test_invalid_mode_defaults_to_auto(self, router):
         """Test that invalid mode is handled gracefully."""
-        # This should not raise an error
-        result = router.route("Write code", mode="auto")
-        assert result["mode"] == "auto"
+        # This should not raise an error - use an invalid mode string
+        # Note: Passing an invalid mode to route() is a type error at runtime,
+        # but we test parse_router_model_string which handles invalid modes
+        is_code, mode = parse_router_model_string("router:code:invalid_mode")
+        assert is_code is True
+        assert mode == "auto"  # Invalid mode falls back to auto
 
 
+@pytest.mark.unit
 class TestTierSelection:
     """Test tier selection logic in detail."""
-
-    @pytest.fixture
-    def router(self):
-        return CodeRouter()
 
     def test_tier_1_for_architecture(self, router):
         """Test that architecture always gets tier 1."""

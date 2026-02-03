@@ -254,10 +254,13 @@ class CodeRouter:
             if any(s in strengths for s in ["code_generation", "debugging", "refactoring"]):
                 score += 0.5
 
-            # For price mode, prefer cheaper models
+            # For price mode, prefer cheaper models (consider both input and output prices)
             if mode == "price":
-                price = model.get("price_output", 1.0)
-                score -= price * 0.1  # Penalize expensive models
+                price_input = model.get("price_input", 1.0)
+                price_output = model.get("price_output", 1.0)
+                # Weight combined price: assume typical 2:1 input:output token ratio
+                combined_price = (price_input * 2 + price_output) / 3
+                score -= combined_price * 0.1  # Penalize expensive models
 
             # For quality mode, prefer higher benchmark scores
             if mode == "quality":

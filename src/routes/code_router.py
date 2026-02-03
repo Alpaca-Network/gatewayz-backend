@@ -21,15 +21,19 @@ from src.services.code_router import (
     route_code_prompt,
 )
 from src.services.code_router_client import (
-    CodeRouterConfig,
     CodeRouterMode,
     CodeRouterSettings,
-    get_router_model_string,
     get_settings_options,
 )
 
 logger = logging.getLogger(__name__)
 
+# Note: These endpoints expose router configuration and testing functionality.
+# Authentication is intentionally not required for the read-only endpoints
+# (settings/options, tiers, stats) as they expose non-sensitive configuration.
+# The /test endpoint may want authentication in production to prevent abuse.
+# Consider adding rate limiting or authentication if these endpoints are
+# exposed publicly and receive significant traffic.
 router = APIRouter(prefix="/code-router", tags=["code-router"])
 
 

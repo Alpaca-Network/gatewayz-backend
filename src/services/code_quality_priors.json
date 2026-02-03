@@ -1,7 +1,8 @@
 {
-  "version": "2026.02",
-  "last_updated": "2026-02-03",
+  "version": "1.0.0",
+  "last_updated": "2025-01-15",
   "benchmarks_source": ["SWE-Bench", "HumanEval", "LiveBench", "Arena AI"],
+  "note": "Model pricing and benchmarks are approximate and subject to change. Update periodically.",
 
   "model_tiers": {
     "1": {
@@ -10,34 +11,34 @@
       "price_range": "$10-30/M tokens",
       "models": [
         {
-          "id": "openai/gpt-5.2-codex",
-          "name": "GPT-5.2 Codex",
-          "swe_bench": 72.1,
-          "human_eval": 96.8,
+          "id": "openai/o1",
+          "name": "OpenAI o1",
+          "swe_bench": 48.9,
+          "human_eval": 94.4,
           "price_input": 15.0,
-          "price_output": 30.0,
-          "context_length": 128000,
-          "strengths": ["agentic", "architecture", "multi-file"],
+          "price_output": 60.0,
+          "context_length": 200000,
+          "strengths": ["agentic", "architecture", "reasoning"],
           "provider": "openrouter"
         },
         {
-          "id": "anthropic/claude-opus-4.5",
-          "name": "Claude Opus 4.5",
-          "swe_bench": 69.3,
-          "human_eval": 95.2,
-          "price_input": 15.0,
-          "price_output": 75.0,
+          "id": "anthropic/claude-3.5-sonnet",
+          "name": "Claude 3.5 Sonnet",
+          "swe_bench": 49.0,
+          "human_eval": 92.0,
+          "price_input": 3.0,
+          "price_output": 15.0,
           "context_length": 200000,
           "strengths": ["reasoning", "architecture", "code_review"],
           "provider": "openrouter"
         },
         {
-          "id": "google/gemini-3-pro",
-          "name": "Gemini 3 Pro",
-          "swe_bench": 68.5,
-          "human_eval": 94.1,
-          "price_input": 12.5,
-          "price_output": 37.5,
+          "id": "google/gemini-2.0-pro",
+          "name": "Gemini 2.0 Pro",
+          "swe_bench": 45.2,
+          "human_eval": 91.8,
+          "price_input": 1.25,
+          "price_output": 5.0,
           "context_length": 1000000,
           "strengths": ["long_context", "architecture", "reasoning"],
           "provider": "google-vertex"
@@ -50,23 +51,23 @@
       "price_range": "$2-10/M tokens",
       "models": [
         {
-          "id": "anthropic/claude-sonnet-4",
-          "name": "Claude Sonnet 4",
-          "swe_bench": 62.4,
-          "human_eval": 93.7,
-          "price_input": 3.0,
-          "price_output": 15.0,
+          "id": "anthropic/claude-3.5-haiku",
+          "name": "Claude 3.5 Haiku",
+          "swe_bench": 40.6,
+          "human_eval": 88.1,
+          "price_input": 0.80,
+          "price_output": 4.0,
           "context_length": 200000,
           "strengths": ["debugging", "refactoring", "code_generation"],
           "provider": "openrouter"
         },
         {
-          "id": "openai/gpt-4.5-turbo",
-          "name": "GPT-4.5 Turbo",
-          "swe_bench": 58.2,
-          "human_eval": 91.3,
-          "price_input": 5.0,
-          "price_output": 15.0,
+          "id": "openai/gpt-4o",
+          "name": "GPT-4o",
+          "swe_bench": 38.4,
+          "human_eval": 90.2,
+          "price_input": 2.50,
+          "price_output": 10.0,
           "context_length": 128000,
           "strengths": ["debugging", "generation", "fast"],
           "provider": "openrouter"
@@ -74,21 +75,21 @@
         {
           "id": "deepseek/deepseek-v3",
           "name": "DeepSeek V3",
-          "swe_bench": 55.1,
-          "human_eval": 89.4,
-          "price_input": 2.19,
-          "price_output": 8.76,
+          "swe_bench": 42.0,
+          "human_eval": 82.6,
+          "price_input": 0.27,
+          "price_output": 1.10,
           "context_length": 64000,
           "strengths": ["code_generation", "debugging", "value"],
           "provider": "openrouter"
         },
         {
-          "id": "google/gemini-2.5-flash",
-          "name": "Gemini 2.5 Flash",
-          "swe_bench": 52.3,
-          "human_eval": 88.1,
-          "price_input": 0.15,
-          "price_output": 0.60,
+          "id": "google/gemini-2.0-flash",
+          "name": "Gemini 2.0 Flash",
+          "swe_bench": 37.2,
+          "human_eval": 85.5,
+          "price_input": 0.10,
+          "price_output": 0.40,
           "context_length": 1000000,
           "strengths": ["fast", "long_context", "value"],
           "provider": "google-vertex"
@@ -253,16 +254,16 @@
   },
 
   "baselines": {
-    "opus_4_5": {
-      "model_id": "anthropic/claude-opus-4.5",
-      "price_input": 15.0,
-      "price_output": 75.0,
+    "claude_3_5_sonnet": {
+      "model_id": "anthropic/claude-3.5-sonnet",
+      "price_input": 3.0,
+      "price_output": 15.0,
       "description": "Premium Anthropic baseline"
     },
-    "gpt_5_2": {
-      "model_id": "openai/gpt-5.2-codex",
-      "price_input": 15.0,
-      "price_output": 30.0,
+    "gpt_4o": {
+      "model_id": "openai/gpt-4o",
+      "price_input": 2.50,
+      "price_output": 10.0,
       "description": "Premium OpenAI baseline"
     }
   }

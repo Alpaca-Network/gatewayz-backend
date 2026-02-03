@@ -14,13 +14,30 @@ from src.services.code_classifier import (
 )
 
 
+# Shared fixtures for code classifier tests
+@pytest.fixture
+def classifier():
+    """Provide a fresh CodeTaskClassifier instance for tests."""
+    return CodeTaskClassifier()
+
+
+@pytest.fixture
+def sample_prompts():
+    """Provide sample prompts for testing classification."""
+    return {
+        "simple_code": "Fix the typo in the variable name",
+        "code_explanation": "What does this function do?",
+        "code_generation": "Write a function that calculates fibonacci numbers",
+        "debugging": "Debug this function, it returns null unexpectedly",
+        "refactoring": "Refactor this code to use async/await",
+        "architecture": "Design a microservices architecture for this system",
+        "agentic": "Build the entire authentication system from scratch",
+    }
+
+
+@pytest.mark.unit
 class TestCodeTaskClassifier:
     """Test suite for CodeTaskClassifier."""
-
-    @pytest.fixture
-    def classifier(self):
-        """Get a fresh classifier instance."""
-        return CodeTaskClassifier()
 
     # ==================== Task Category Classification Tests ====================
 
@@ -172,6 +189,7 @@ class TestCodeTaskClassifier:
         assert context["file_count"] >= 2
 
 
+@pytest.mark.unit
 class TestModuleFunctions:
     """Test module-level convenience functions."""
 
@@ -194,12 +212,9 @@ class TestModuleFunctions:
         assert is_code_related("def foo(): pass") is True
 
 
+@pytest.mark.unit
 class TestEdgeCases:
     """Test edge cases and error handling."""
-
-    @pytest.fixture
-    def classifier(self):
-        return CodeTaskClassifier()
 
     def test_empty_prompt(self, classifier):
         """Test classification of empty prompt."""
