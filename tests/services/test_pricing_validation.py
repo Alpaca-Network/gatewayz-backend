@@ -241,5 +241,197 @@ class TestPricingNormalization:
             f"Gemini 2.5 Pro conversion failed: {result} != {expected}"
 
 
+class TestPriceBoundsValidation:
+    """Test price bounds validation from Issue #1038"""
+
+    def test_valid_price_within_bounds(self):
+        """Test that valid prices pass validation"""
+        from src.services.pricing_validation import validate_price_bounds
+
+        # Typical GPT-4o pricing
+        result = validate_price_bounds(0.0000025, "openai/gpt-4o", "input")
+
+        assert result.is_valid is True
+        assert result.price_per_token == Decimal("0.0000025")
+        assert len(result.errors) == 0
+
+    def test_price_below_minimum_rejected(self):
+        """Test that prices below minimum are rejected"""
+        from src.services.pricing_validation import validate_price_bounds
+
+        result = validate_price_bounds(0.00000001, "test/model", "input")
+
+        assert result.is_valid is False
+        assert len(result.errors) > 0
+        assert "below absolute minimum" in result.errors[0]
+
+    def test_price_above_maximum_rejected(self):
+        """Test that prices above maximum are rejected"""
+        from src.services.pricing_validation import validate_price_bounds
+
+        result = validate_price_bounds(0.5, "test/model", "input")
+
+        assert result.is_valid is False
+        assert len(result.errors) > 0
+        assert "exceeds absolute maximum" in result.errors[0]
+
+    def test_zero_price_valid_with_warning(self):
+        """Test that zero pricing is valid but triggers warning"""
+        from src.services.pricing_validation import validate_price_bounds
+
+        result = validate_price_bounds(0, "test/model", "input")
+
+        assert result.is_valid is True
+        assert len(result.warnings) > 0
+        assert "Zero pricing" in result.warnings[0]
+
+    def test_unusually_low_price_warning(self):
+        """Test that unusually low prices trigger warnings"""
+        from src.services.pricing_validation import validate_price_bounds
+
+        # Below typical minimum but above absolute minimum
+        result = validate_price_bounds(0.00000015, "test/model", "input")
+
+        assert result.is_valid is True
+        assert len(result.warnings) > 0
+        assert "unusually low" in result.warnings[0]
+
+
+class TestPriceSpikeDetection:
+    """Test price spike detection from Issue #1038"""
+
+    def test_small_price_change_valid(self):
+        """Test that small price changes are valid"""
+        from src.services.pricing_validation import detect_price_spike
+
+        result = detect_price_spike(0.000001, 0.0000012, "test/model", "input")
+
+        assert result.is_valid is True
+        assert len(result.errors) == 0
+        assert result.metadata["percent_change"] == 20.0
+
+    def test_large_price_spike_rejected(self):
+        """Test that large price spikes are rejected"""
+        from src.services.pricing_validation import detect_price_spike
+
+        # 100% increase
+        result = detect_price_spike(0.000001, 0.000002, "test/model", "input")
+
+        assert result.is_valid is False
+        assert len(result.errors) > 0
+        assert "Price spike detected" in result.errors[0]
+        assert result.metadata["percent_change"] == 100.0
+
+    def test_spike_detection_with_zero_old_price(self):
+        """Test spike detection when old price is zero"""
+        from src.services.pricing_validation import detect_price_spike
+
+        result = detect_price_spike(0, 0.000001, "test/model", "input")
+
+        assert result.is_valid is True
+        assert result.metadata.get("skipped") is True
+
+
+class TestComprehensivePricingValidation:
+    """Test comprehensive pricing update validation from Issue #1038"""
+
+    def test_valid_pricing_update(self):
+        """Test validation of a valid pricing update"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        new_pricing = {
+            "prompt": 0.0000025,
+            "completion": 0.00001,
+        }
+        old_pricing = {
+            "prompt": 0.000002,
+            "completion": 0.000009,
+        }
+
+        result = validate_pricing_update("openai/gpt-4o", new_pricing, old_pricing)
+
+        assert result["is_valid"] is True
+        assert len(result["errors"]) == 0
+
+    def test_pricing_update_with_bounds_violation(self):
+        """Test pricing update with bounds violations"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        new_pricing = {
+            "prompt": 0.5,  # Too high
+            "completion": 0.00001,
+        }
+
+        result = validate_pricing_update("test/model", new_pricing)
+
+        assert result["is_valid"] is False
+        assert len(result["errors"]) > 0
+
+    def test_pricing_update_with_spike(self):
+        """Test pricing update with price spike"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        new_pricing = {
+            "prompt": 0.000004,  # 100% increase from old
+            "completion": 0.00001,
+        }
+        old_pricing = {
+            "prompt": 0.000002,
+            "completion": 0.00001,
+        }
+
+        result = validate_pricing_update("test/model", new_pricing, old_pricing)
+
+        assert result["is_valid"] is False
+        assert len(result["errors"]) > 0
+
+
+@pytest.mark.integration
+class TestValidationWithRealPricing:
+    """Test validation with real-world pricing examples"""
+
+    def test_openai_gpt4o_pricing(self):
+        """Test validation with actual GPT-4o pricing"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        # Actual OpenAI GPT-4o pricing as of 2024
+        pricing = {
+            "prompt": 0.0000025,  # $2.50 per 1M tokens
+            "completion": 0.00001,  # $10 per 1M tokens
+        }
+
+        result = validate_pricing_update("openai/gpt-4o", pricing)
+
+        assert result["is_valid"] is True
+
+    def test_anthropic_claude_opus_pricing(self):
+        """Test validation with actual Claude Opus pricing"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        # Actual Anthropic Claude 3 Opus pricing
+        pricing = {
+            "prompt": 0.000015,  # $15 per 1M tokens
+            "completion": 0.000075,  # $75 per 1M tokens
+        }
+
+        result = validate_pricing_update("anthropic/claude-3-opus", pricing)
+
+        assert result["is_valid"] is True
+
+    def test_llama_8b_pricing(self):
+        """Test validation with actual Llama 3.1 8B pricing"""
+        from src.services.pricing_validation import validate_pricing_update
+
+        # Typical open-source model pricing
+        pricing = {
+            "prompt": 0.000000055,  # $0.055 per 1M tokens
+            "completion": 0.000000055,
+        }
+
+        result = validate_pricing_update("meta-llama/Meta-Llama-3.1-8B-Instruct", pricing)
+
+        assert result["is_valid"] is True
+
+
 # Mark tests as critical for CI/CD
 pytestmark = pytest.mark.critical

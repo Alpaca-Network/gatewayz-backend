@@ -23,6 +23,7 @@ from typing import Any, Dict, List
 from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
 from src.services.pricing_provider_auditor import PricingProviderAuditor
+from src.services.pricing_validation import validate_pricing_update
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,49 @@ class PricingSyncService:
             return {
                 "status": "unchanged",
                 "model_id": model_id
+            }
+
+        # Validate pricing before updating (Issue #1038)
+        new_pricing_dict = {
+            "prompt": float(input_price),
+            "completion": float(output_price),
+            "image": 0,
+            "request": 0
+        }
+        old_pricing_dict = None
+        if old_input is not None and old_output is not None:
+            old_pricing_dict = {
+                "prompt": float(old_input),
+                "completion": float(old_output),
+                "image": 0,
+                "request": 0
+            }
+
+        validation_result = validate_pricing_update(
+            model_id,
+            new_pricing_dict,
+            old_pricing_dict
+        )
+
+        # Log validation warnings
+        if validation_result["warnings"]:
+            logger.warning(
+                f"Pricing validation warnings for {model_id}: "
+                f"{', '.join(validation_result['warnings'])}"
+            )
+
+        # Reject if validation failed
+        if not validation_result["is_valid"]:
+            logger.error(
+                f"Pricing validation failed for {model_id}: "
+                f"{', '.join(validation_result['errors'])}"
+            )
+            return {
+                "status": "skipped",
+                "model_id": model_id,
+                "reason": f"Validation failed: {validation_result['errors'][0]}",
+                "validation_errors": validation_result["errors"],
+                "validation_warnings": validation_result["warnings"]
             }
 
         # Prepare pricing data

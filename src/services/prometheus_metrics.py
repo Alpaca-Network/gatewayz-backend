@@ -1298,6 +1298,35 @@ pricing_sync_price_changes_total = get_or_create_metric(
     ["provider"],
 )
 
+# Pricing validation metrics
+pricing_validation_total = get_or_create_metric(
+    Counter,
+    "pricing_validation_total",
+    "Total number of pricing validations performed",
+    ["model"],
+)
+
+pricing_validation_failures = get_or_create_metric(
+    Counter,
+    "pricing_validation_failures",
+    "Total number of pricing validation failures",
+    ["model", "reason"],
+)
+
+pricing_spike_detected_total = get_or_create_metric(
+    Counter,
+    "pricing_spike_detected_total",
+    "Total number of pricing spikes detected",
+    ["model", "price_type"],
+)
+
+pricing_bounds_violations_total = get_or_create_metric(
+    Counter,
+    "pricing_bounds_violations_total",
+    "Total number of pricing bounds violations",
+    ["model", "violation_type"],
+)
+
 
 # ==================== Helper Functions for Pricing Sync ====================
 
