@@ -30,6 +30,16 @@ def _load_quality_priors() -> dict[str, Any]:
         except Exception as e:
             logger.error(f"Failed to load code quality priors: {e}")
             logger.warning("Using empty fallback configuration - classification may be degraded")
+            # Capture to Sentry for monitoring (non-critical but worth tracking)
+            try:
+                from src.utils.sentry_context import capture_error
+                capture_error(
+                    e,
+                    context={"file": str(_QUALITY_PRIORS_PATH)},
+                    level="warning",
+                )
+            except ImportError:
+                pass  # Sentry not available
             _quality_priors = {"task_taxonomy": {}, "complexity_weights": {}}
     return _quality_priors
 

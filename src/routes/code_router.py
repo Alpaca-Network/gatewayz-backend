@@ -265,9 +265,12 @@ async def get_code_router_stats() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to get code router stats: {e}")
+        # Return error response with success=False for graceful degradation
+        # Don't raise HTTPException since stats are non-critical
         return {
             "success": False,
             "error": str(e),
+            "stats": {},  # Include empty stats for consistent response shape
         }
 
 
