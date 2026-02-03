@@ -1327,6 +1327,28 @@ pricing_bounds_violations_total = get_or_create_metric(
     ["model", "violation_type"],
 )
 
+# Pricing health monitoring metrics
+pricing_staleness_hours = get_or_create_metric(
+    Gauge,
+    "pricing_staleness_hours",
+    "Hours since last pricing update",
+    [],
+)
+
+models_using_default_pricing = get_or_create_metric(
+    Gauge,
+    "models_using_default_pricing",
+    "Number of models currently using default pricing",
+    [],
+)
+
+pricing_health_status = get_or_create_metric(
+    Gauge,
+    "pricing_health_status",
+    "Overall pricing system health status (0=unknown, 1=healthy, 2=warning, 3=critical)",
+    [],
+)
+
 
 # ==================== Helper Functions for Pricing Sync ====================
 
