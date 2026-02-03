@@ -27,6 +27,49 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Provider-specific image generation pricing (cost per image in USD)
+# Based on provider pricing pages as of Jan 2025
+# TODO: Move to database-driven pricing for easier updates
+IMAGE_COST_PER_IMAGE = {
+    "deepinfra": {
+        "stable-diffusion-3.5-large": 0.035,
+        "stable-diffusion-3.5-medium": 0.02,
+        "stabilityai/sd3.5": 0.035,
+        "stabilityai/sd3.5-large": 0.035,
+        "stabilityai/sd3.5-medium": 0.02,
+        "default": 0.025,
+    },
+    "fal": {
+        "flux/schnell": 0.003,
+        "flux/dev": 0.025,
+        "flux-pro": 0.05,
+        "default": 0.025,
+    },
+    "google-vertex": {
+        "imagegeneration@006": 0.02,
+        "imagen-3.0-generate-001": 0.04,
+        "default": 0.03,
+    },
+}
+
+
+def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[float, float]:
+    """
+    Calculate the cost for image generation.
+
+    Args:
+        provider: Image generation provider (deepinfra, fal, google-vertex)
+        model: Model name
+        num_images: Number of images to generate
+
+    Returns:
+        Tuple of (total_cost, cost_per_image)
+    """
+    provider_pricing = IMAGE_COST_PER_IMAGE.get(provider, {})
+    cost_per_image = provider_pricing.get(model, provider_pricing.get("default", 0.025))
+    total_cost = cost_per_image * num_images
+    return total_cost, cost_per_image
+
 
 @router.post("/images/generations", response_model=ImageGenerationResponse, tags=["images"])
 async def generate_images(
@@ -146,22 +189,22 @@ async def generate_images(
                         detail="Image size must be formatted as WIDTHxHEIGHT with positive integers",
                     ) from None
 
-            # Image generation is more expensive - estimate ~100 tokens per image
-            estimated_tokens = 100 * req.n
-
-            # Check if user has enough credits
-            if user["credits"] < estimated_tokens:
-                raise HTTPException(
-                    status_code=402,
-                    detail=f"Insufficient credits. Image generation requires ~{estimated_tokens} credits. Available: {user['credits']}",
-                )
-
-            # Prepare request parameters
+            # Prepare request parameters (needed for cost estimation)
             prompt = req.prompt
             model = req.model if req.model else "stable-diffusion-3.5-large"
             provider = (
                 req.provider if req.provider else "deepinfra"
             )  # Default to DeepInfra for images
+
+            # Calculate estimated cost for pre-flight check
+            estimated_cost, cost_per_image = get_image_cost(provider, model, req.n)
+
+            # Check if user has enough credits
+            if user["credits"] < estimated_cost:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Insufficient credits. Image generation costs ${estimated_cost:.4f} (${cost_per_image:.4f}/image x {req.n}). Available: ${user['credits']:.4f}",
+                )
             actual_provider = provider  # Initialize for error handling
 
             # Make image generation request
@@ -223,10 +266,12 @@ async def generate_images(
                 # Calculate inference latency
                 elapsed = max(0.001, time.monotonic() - start)
 
-                # Set cost and metadata on trace
-                tokens_charged = 100 * req.n
-                cost = tokens_charged * 0.02 / 1000
-                trace_ctx.set_cost(cost)
+                # Calculate actual cost using provider pricing for tracing
+                trace_total_cost, trace_cost_per_image = get_image_cost(
+                    actual_provider, model, req.n
+                )
+                # Set cost and metadata on trace using actual USD cost
+                trace_ctx.set_cost(trace_total_cost)
                 trace_ctx.set_user_info(user_id=str(user.get("id")))
                 trace_ctx.add_event(
                     "image_generated",
@@ -246,20 +291,24 @@ async def generate_images(
                 status="success",
             )
 
-            # Deduct credits (100 tokens per image generated)
-            tokens_charged = 100 * req.n
+            # Calculate actual cost using the provider that was used (may differ from requested)
+            total_cost, cost_per_image = get_image_cost(actual_provider, model, req.n)
 
+            # Token-equivalent for rate limiting: use 100 tokens per image as a standardized unit
+            # This maintains compatibility with token-based rate limiting while using actual USD pricing
+            tokens_equivalent = 100 * req.n
+
+            # Deduct credits - CRITICAL: failures must prevent free images
             try:
-                await loop.run_in_executor(executor, deduct_credits, api_key, tokens_charged)
-                cost = tokens_charged * 0.02 / 1000
+                await loop.run_in_executor(executor, deduct_credits, api_key, total_cost)
                 await loop.run_in_executor(
                     executor,
                     record_usage,
                     user["id"],
                     api_key,
                     model,
-                    tokens_charged,
-                    cost,
+                    tokens_equivalent,  # Token-equivalent for rate limiting compatibility
+                    total_cost,
                     int(elapsed * 1000),
                 )
 
@@ -267,15 +316,29 @@ async def generate_images(
                 await loop.run_in_executor(executor, increment_api_key_usage, api_key)
 
             except ValueError as e:
-                logger.error(f"Failed to deduct credits: {e}")
+                # Insufficient credits or daily limit exceeded - user should NOT get free images
+                logger.error(f"Credit deduction failed for image generation: {e}")
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Payment required: {e}",
+                )
             except Exception as e:
-                logger.error(f"Error in usage recording process: {e}")
+                # Unexpected error in billing - fail safe, don't give away free images
+                logger.error(f"Unexpected error in credit deduction: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=500,
+                    detail="Billing error occurred. Please try again or contact support.",
+                )
 
             # Add gateway usage info
+            # Note: user_balance_after is an estimate based on pre-request balance;
+            # actual balance may differ due to concurrent requests
             processed_response["gateway_usage"] = {
-                "tokens_charged": tokens_charged,
+                "tokens_charged": tokens_equivalent,  # Keep for backward compatibility
+                "cost_usd": total_cost,
+                "cost_per_image": cost_per_image,
                 "request_ms": int(elapsed * 1000),
-                "user_balance_after": user["credits"] - tokens_charged,
+                "user_balance_after": user["credits"] - total_cost,
                 "user_api_key": f"{api_key[:10]}...",
                 "images_generated": req.n,
             }
