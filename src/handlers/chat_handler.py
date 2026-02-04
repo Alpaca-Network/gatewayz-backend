@@ -307,7 +307,7 @@ class ChatInferenceHandler:
         Route streaming request to the appropriate provider client.
 
         Args:
-            provider_name: Provider to use (e.g., "openrouter", "cerebras", "groq")
+            provider_name: Provider to use (e.g., "openrouter", "cerebras", "groq", "onerouter")
             model_id: Model identifier to use
             messages: Chat messages in OpenAI format
             **kwargs: Additional parameters (temperature, max_tokens, etc.)
@@ -323,6 +323,33 @@ class ChatInferenceHandler:
             f"[ChatHandler] Calling provider={provider_name} (streaming), model={model_id}"
         )
 
+        # Sentinel value to signal iterator exhaustion (PEP 479 compliance)
+        _STREAM_EXHAUSTED = object()
+
+        def _safe_next(iterator):
+            """Wrapper for next() that returns a sentinel instead of raising StopIteration.
+
+            This is necessary because StopIteration cannot be raised into a Future
+            (PEP 479), which causes issues when using asyncio.to_thread(next, iterator).
+            """
+            try:
+                return next(iterator)
+            except StopIteration:
+                return _STREAM_EXHAUSTED
+
+        async def _iterate_sync_stream(sync_stream):
+            """Non-blocking iteration over sync streams using asyncio.to_thread.
+
+            This prevents blocking the event loop while waiting for chunks from
+            providers that use synchronous HTTP clients.
+            """
+            iterator = iter(sync_stream)
+            while True:
+                chunk = await asyncio.to_thread(_safe_next, iterator)
+                if chunk is _STREAM_EXHAUSTED:
+                    break
+                yield chunk
+
         # Route to appropriate provider
         if provider_name == "openrouter":
             stream = await make_openrouter_request_openai_stream_async(
@@ -331,19 +358,19 @@ class ChatInferenceHandler:
             async for chunk in stream:
                 yield chunk
         elif provider_name == "onerouter":
-            # OneRouter/Infron.ai uses sync client
+            # OneRouter/Infron.ai uses sync client - use non-blocking iteration
             stream = make_onerouter_request_openai_stream(messages, model_id, **kwargs)
-            for chunk in stream:
+            async for chunk in _iterate_sync_stream(stream):
                 yield chunk
         elif provider_name == "cerebras":
-            # Cerebras uses sync client
+            # Cerebras uses sync client - use non-blocking iteration
             stream = make_cerebras_request_openai_stream(messages, model_id, **kwargs)
-            for chunk in stream:
+            async for chunk in _iterate_sync_stream(stream):
                 yield chunk
         elif provider_name == "groq":
-            # Groq uses sync client
+            # Groq uses sync client - use non-blocking iteration
             stream = make_groq_request_openai_stream(messages, model_id, **kwargs)
-            for chunk in stream:
+            async for chunk in _iterate_sync_stream(stream):
                 yield chunk
         else:
             # Fallback to OpenRouter
