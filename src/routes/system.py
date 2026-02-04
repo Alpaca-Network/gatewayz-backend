@@ -1138,6 +1138,73 @@ async def trigger_gateway_fix(
 # ============================================================================
 
 
+@router.get("/cache/warmer/stats", tags=["cache", "monitoring"])
+async def get_cache_warmer_stats():
+    """
+    Get cache warmer statistics including:
+    - Background refresh counts
+    - Request coalescing effectiveness
+    - Error rates
+    - Currently in-flight refreshes
+
+    Returns detailed metrics about the cache warming system.
+    """
+    try:
+        from src.services.cache_warmer import get_cache_warmer
+        from src.services.model_catalog_cache import get_catalog_cache_stats
+        from src.services.local_memory_cache import get_local_cache
+
+        warmer = get_cache_warmer()
+        warmer_stats = warmer.get_stats()
+
+        # Get catalog cache stats
+        catalog_cache_stats = get_catalog_cache_stats()
+
+        # Get local cache stats
+        local_cache = get_local_cache()
+        local_cache_stats = local_cache.get_stats()
+
+        return {
+            "cache_warmer": {
+                "status": "healthy",
+                "refreshes": warmer_stats["refreshes"],
+                "coalesced_requests": warmer_stats["coalesced"],
+                "errors": warmer_stats["errors"],
+                "skipped": warmer_stats["skipped"],
+                "in_flight": warmer_stats["in_flight"],
+                "description": "Background cache warming prevents thundering herd problems",
+            },
+            "redis_cache": catalog_cache_stats,
+            "local_memory_cache": {
+                **local_cache_stats,
+                "description": "Fallback cache when Redis is unavailable",
+            },
+            "health_summary": {
+                "redis_available": catalog_cache_stats.get("redis_available", False),
+                "local_cache_entries": local_cache_stats["entries"],
+                "stale_hit_rate": round(
+                    local_cache_stats["stale_hits"]
+                    / max(local_cache_stats["total_requests"], 1)
+                    * 100,
+                    2,
+                ),
+                "cache_warmer_effectiveness": round(
+                    (warmer_stats["refreshes"] - warmer_stats["errors"])
+                    / max(warmer_stats["refreshes"], 1)
+                    * 100,
+                    2,
+                )
+                if warmer_stats["refreshes"] > 0
+                else 100.0,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache warmer stats: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get cache warmer stats: {str(e)}"
+        ) from e
+
+
 @router.get("/cache/status", tags=["cache"])
 async def get_cache_status():
     """

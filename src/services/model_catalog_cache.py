@@ -796,12 +796,14 @@ def cache_provider_catalog(
 
 def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | None:
     """
-    Get cached provider catalog with multi-tier caching.
+    Get cached provider catalog with multi-tier caching and background refresh.
 
     Cache hierarchy:
     1. Redis (primary) - distributed cache
     2. Local memory (fallback) - for when Redis is slow/unavailable
     3. Database (last resort) - kept fresh by scheduled sync
+
+    Features background cache warming when stale data is detected.
 
     Args:
         provider_name: Provider slug (e.g., "openrouter", "anthropic")
@@ -810,6 +812,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
         Cached provider catalog or empty list on error
     """
     from src.services.local_memory_cache import get_local_catalog, set_local_catalog
+    from src.services.cache_warmer import get_cache_warmer
 
     cache = get_model_catalog_cache()
 
@@ -825,8 +828,34 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
     if local_data is not None:
         if is_stale:
             logger.info(f"Local cache STALE HIT: {provider_name} (returning stale data)")
+
+            # Trigger background refresh using cache warmer
+            # This prevents thundering herd - only one refresh at a time
+            def fetch_fresh_data():
+                from src.db.models_catalog_db import (
+                    get_models_by_gateway_for_catalog,
+                    transform_db_models_batch,
+                )
+                db_models = get_models_by_gateway_for_catalog(
+                    gateway_slug=provider_name,
+                    include_inactive=False
+                )
+                return transform_db_models_batch(db_models)
+
+            def update_caches(fresh_data):
+                cache.set_provider_catalog(provider_name, fresh_data, ttl=1800)
+                set_local_catalog(provider_name, fresh_data)
+
+            # Fire and forget background refresh
+            warmer = get_cache_warmer()
+            warmer.warm_cache_sync(
+                cache_key=f"provider:{provider_name}",
+                fetch_fn=fetch_fresh_data,
+                set_cache_fn=update_caches,
+            )
         else:
             logger.info(f"Local cache HIT: {provider_name}")
+
         return local_data
 
     # 3. Cache miss everywhere - fetch from database
@@ -893,12 +922,14 @@ def cache_gateway_catalog(
 
 def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None:
     """
-    Get cached gateway catalog with multi-tier caching.
+    Get cached gateway catalog with multi-tier caching and background refresh.
 
     Cache hierarchy:
     1. Redis (primary) - distributed cache
     2. Local memory (fallback) - for when Redis is slow/unavailable
     3. Database (last resort) - kept fresh by scheduled sync
+
+    Features background cache warming when stale data is detected.
 
     Args:
         gateway_name: Gateway slug (e.g., "openrouter", "anthropic")
@@ -907,6 +938,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
         Cached gateway catalog or empty list on error
     """
     from src.services.local_memory_cache import get_local_catalog, set_local_catalog
+    from src.services.cache_warmer import get_cache_warmer
 
     cache = get_model_catalog_cache()
 
@@ -922,8 +954,33 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
     if local_data is not None:
         if is_stale:
             logger.info(f"Local cache STALE HIT: {gateway_name} (returning stale data)")
+
+            # Trigger background refresh using cache warmer
+            def fetch_fresh_data():
+                from src.db.models_catalog_db import (
+                    get_models_by_gateway_for_catalog,
+                    transform_db_models_batch,
+                )
+                db_models = get_models_by_gateway_for_catalog(
+                    gateway_slug=gateway_name,
+                    include_inactive=False
+                )
+                return transform_db_models_batch(db_models)
+
+            def update_caches(fresh_data):
+                cache.set_gateway_catalog(gateway_name, fresh_data, ttl=1800)
+                set_local_catalog(gateway_name, fresh_data)
+
+            # Fire and forget background refresh
+            warmer = get_cache_warmer()
+            warmer.warm_cache_sync(
+                cache_key=f"gateway:{gateway_name}",
+                fetch_fn=fetch_fresh_data,
+                set_cache_fn=update_caches,
+            )
         else:
             logger.info(f"Local cache HIT: {gateway_name}")
+
         return local_data
 
     # 3. Cache miss everywhere - fetch from database

@@ -17,16 +17,21 @@ class RedisConfig:
     """Redis configuration and connection management"""
 
     def __init__(self):
-        self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        # Prefer Railway's public Redis URL over internal DNS (which is deprecated)
+        # RAILWAY_SERVICE_REDIS_URL points to the public endpoint that works across services
+        self.redis_url = os.environ.get(
+            "RAILWAY_SERVICE_REDIS_URL",
+            os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        )
         self.redis_password = os.environ.get("REDIS_PASSWORD")
         self.redis_host = os.environ.get("REDIS_HOST", "localhost")
         self.redis_port = int(os.environ.get("REDIS_PORT", "6379"))
         self.redis_db = int(os.environ.get("REDIS_DB", "0"))
         self.redis_max_connections = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
-        # Increased timeouts to allow Redis time to respond under load
-        # while still failing before request timeout (55s)
-        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "15"))
-        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "8"))
+        # Reduced timeouts to fail fast - with working Redis these should be quick
+        # If Redis is slow, we fall back to local cache gracefully
+        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
+        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "3"))
         self.redis_retry_on_timeout = (
             os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
         )
