@@ -129,7 +129,7 @@ def get_supabase_client() -> Client:
             limits=httpx.Limits(
                 max_connections=max_conn,
                 max_keepalive_connections=keepalive_conn,
-                keepalive_expiry=20.0,  # Reduced to 20s to aggressively close idle connections
+                keepalive_expiry=120.0,  # Increased to 120s to reduce reconnection overhead
             ),
             transport=transport,
         )
@@ -547,7 +547,7 @@ def get_read_replica_client() -> Client | None:
                 limits=httpx.Limits(
                     max_connections=max_conn,
                     max_keepalive_connections=keepalive_conn,
-                    keepalive_expiry=20.0,
+                    keepalive_expiry=120.0,  # Increased to 120s to reduce reconnection overhead
                 ),
                 transport=transport,
             )

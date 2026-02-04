@@ -20,11 +20,15 @@ logger = logging.getLogger(__name__)
 # Set to 55 seconds to stay within Vercel's 60-second limit
 DEFAULT_REQUEST_TIMEOUT = 55.0
 
-# Paths that are exempt from timeout enforcement (e.g., streaming endpoints)
+# Paths that are exempt from timeout enforcement (e.g., streaming endpoints, admin operations)
 TIMEOUT_EXEMPT_PATHS = [
     "/v1/chat/completions",  # OpenAI-compatible streaming
     "/v1/messages",  # Anthropic Messages API streaming
     "/ai-sdk/chat/completions",  # AI SDK streaming
+    "/admin/",  # Admin operations (model sync, background jobs)
+    "/api/catalog",  # Model catalog fetches (can be slow)
+    "/health",  # Health checks
+    "/metrics",  # Prometheus metrics
 ]
 
 

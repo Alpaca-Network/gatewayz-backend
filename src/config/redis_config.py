@@ -23,10 +23,10 @@ class RedisConfig:
         self.redis_port = int(os.environ.get("REDIS_PORT", "6379"))
         self.redis_db = int(os.environ.get("REDIS_DB", "0"))
         self.redis_max_connections = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
-        # Timeouts set to fail fast before per-provider timeout (15s)
-        # This ensures circuit breaker triggers properly on slow Redis operations
-        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "10"))
-        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
+        # Increased timeouts to allow Redis time to respond under load
+        # while still failing before request timeout (55s)
+        self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "15"))
+        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "8"))
         self.redis_retry_on_timeout = (
             os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
         )
