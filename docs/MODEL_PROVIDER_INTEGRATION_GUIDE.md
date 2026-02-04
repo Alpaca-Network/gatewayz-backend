@@ -347,9 +347,9 @@ Example: $0.10 per 1M tokens = 0.10 / 1,000,000 = 0.0000001
 
 **From cents per token**:
 ```
-per_token = cents / 100
+per_token_dollars = cents_per_token / 100
 
-Example: $0.01 per token = 0.01 / 100 = 0.0001
+Example: 0.01 cents per token = 0.01 / 100 = $0.0001 per token
 ```
 
 **Image generation** (per-second or per-image):
