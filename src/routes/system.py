@@ -25,19 +25,19 @@ from src.cache import (
 )
 from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
-from src.services.models import (
-    fetch_models_from_aihubmix,
-    fetch_models_from_aimo,
-    fetch_models_from_anannas,
-    fetch_models_from_chutes,
-    fetch_models_from_fal,
-    fetch_models_from_featherless,
-    fetch_models_from_fireworks,
-    fetch_models_from_groq,
-    fetch_models_from_near,
-    fetch_models_from_openrouter,
-    fetch_models_from_together,
-)
+
+# Import fetch_models functions from their respective client files
+from src.services.aihubmix_client import fetch_models_from_aihubmix
+from src.services.aimo_client import fetch_models_from_aimo
+from src.services.anannas_client import fetch_models_from_anannas
+from src.services.chutes_client import fetch_models_from_chutes
+from src.services.fal_image_client import fetch_models_from_fal
+from src.services.featherless_client import fetch_models_from_featherless
+from src.services.fireworks_client import fetch_models_from_fireworks
+from src.services.groq_client import fetch_models_from_groq
+from src.services.near_client import fetch_models_from_near
+from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.together_client import fetch_models_from_together
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
 from src.services.onerouter_client import fetch_models_from_onerouter
