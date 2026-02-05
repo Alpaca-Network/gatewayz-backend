@@ -77,11 +77,11 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                logger.info("Cache HIT: Full model catalog")
+                logger.debug("Cache HIT: Full model catalog")
                 return json.loads(cached_data)
             else:
                 self._stats["misses"] += 1
-                logger.info("Cache MISS: Full model catalog")
+                logger.debug("Cache MISS: Full model catalog")
                 return None
 
         except Exception as e:
@@ -630,11 +630,11 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                logger.info("Cache HIT: Unique models")
+                logger.debug("Cache HIT: Unique models")
                 return json.loads(cached_data)
             else:
                 self._stats["misses"] += 1
-                logger.info("Cache MISS: Unique models")
+                logger.debug("Cache MISS: Unique models")
                 return None
 
         except Exception as e:
@@ -666,7 +666,7 @@ class ModelCatalogCache:
             serialized_data = json.dumps(unique_models)
             self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
-            logger.info(f"Cache SET: Unique models ({len(unique_models)} models, TTL: {ttl}s)")
+            logger.debug(f"Cache SET: Unique models ({len(unique_models)} models, TTL: {ttl}s)")
             return True
 
         except Exception as e:
@@ -688,7 +688,7 @@ class ModelCatalogCache:
         try:
             self.redis_client.delete(key)
             self._stats["invalidations"] += 1
-            logger.info("Cache INVALIDATE: Unique models")
+            logger.debug("Cache INVALIDATE: Unique models")
             return True
 
         except Exception as e:
@@ -720,7 +720,7 @@ def cache_full_catalog(catalog: list[dict[str, Any]], ttl: int | None = None) ->
 
 def get_cached_full_catalog() -> list[dict[str, Any]] | None:
     """
-    Get cached full model catalog with multi-tier caching.
+    Get cached full model catalog with multi-tier caching and step logging.
 
     Cache hierarchy:
     1. Redis (primary) - distributed cache
@@ -731,49 +731,63 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
         Cached catalog or empty list on error
     """
     from src.services.local_memory_cache import get_local_catalog, set_local_catalog
+    from src.utils.step_logger import StepLogger
+
+    step_logger = StepLogger("Cache: Fetch Full Catalog", total_steps=5)
+    step_logger.start(cache_type="full_catalog")
 
     cache = get_model_catalog_cache()
 
-    # 1. Try Redis first
+    # Step 1: Try Redis cache
+    step_logger.step(1, "Checking Redis cache", cache_layer="redis")
     cached = cache.get_full_catalog()
     if cached is not None:
         # Also update local cache for fallback
         set_local_catalog("all", cached)
+        step_logger.success(result="HIT", count=len(cached))
+        step_logger.complete(source="redis", models=len(cached))
         return cached
+    step_logger.success(result="MISS")
 
-    # 2. Try local memory cache (fallback for Redis failures)
+    # Step 2: Try local memory cache (fallback for Redis failures)
+    step_logger.step(2, "Checking local memory cache", cache_layer="local_memory")
     local_data, is_stale = get_local_catalog("all")
     if local_data is not None:
         if is_stale:
-            logger.info("Local cache STALE HIT: full catalog (returning stale data)")
+            step_logger.success(result="STALE_HIT", count=len(local_data), stale="true")
         else:
-            logger.info("Local cache HIT: full catalog")
+            step_logger.success(result="HIT", count=len(local_data))
+        step_logger.complete(source="local_memory", models=len(local_data), stale=is_stale)
         return local_data
+    step_logger.success(result="MISS")
 
-    # 3. Cache miss everywhere - fetch from database
-    logger.info("Cache MISS (all layers): Fetching full catalog from database")
-
+    # Step 3: Fetch from database (cache miss everywhere)
+    step_logger.step(3, "Fetching from database", cache_layer="database")
     try:
         from src.db.models_catalog_db import (
             get_all_models_for_catalog,
             transform_db_models_batch,
         )
 
-        # Fetch from database
         db_models = get_all_models_for_catalog(include_inactive=False)
+        step_logger.success(db_models=len(db_models))
 
-        # Transform to API format
+        # Step 4: Transform to API format
+        step_logger.step(4, "Transforming models to API format", count=len(db_models))
         api_models = transform_db_models_batch(db_models)
+        step_logger.success(api_models=len(api_models))
 
-        # Cache in both Redis and local memory
+        # Step 5: Populate caches
+        step_logger.step(5, "Populating caches", targets="redis+local")
         cache.set_full_catalog(api_models, ttl=900)
         set_local_catalog("all", api_models)
+        step_logger.success(redis="updated", local="updated", ttl=900)
 
-        logger.info(f"Fetched {len(api_models)} models from database and cached")
-
+        step_logger.complete(source="database", models=len(api_models), cache_status="populated")
         return api_models
 
     except Exception as e:
+        step_logger.failure(e, source="database")
         logger.error(f"Error fetching catalog from database: {e}")
         return []
 
@@ -827,7 +841,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
     local_data, is_stale = get_local_catalog(provider_name)
     if local_data is not None:
         if is_stale:
-            logger.info(f"Local cache STALE HIT: {provider_name} (returning stale data)")
+            logger.debug(f"Local cache STALE HIT: {provider_name} (returning stale data)")
 
             # Trigger background refresh using cache warmer
             # This prevents thundering herd - only one refresh at a time
@@ -854,12 +868,12 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
                 set_cache_fn=update_caches,
             )
         else:
-            logger.info(f"Local cache HIT: {provider_name}")
+            logger.debug(f"Local cache HIT: {provider_name}")
 
         return local_data
 
     # 3. Cache miss everywhere - fetch from database
-    logger.info(f"Cache MISS (all layers): Fetching {provider_name} catalog from database")
+    logger.debug(f"Cache MISS (all layers): Fetching {provider_name} catalog from database")
 
     try:
         from src.db.models_catalog_db import (
@@ -953,7 +967,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
     local_data, is_stale = get_local_catalog(gateway_name)
     if local_data is not None:
         if is_stale:
-            logger.info(f"Local cache STALE HIT: {gateway_name} (returning stale data)")
+            logger.debug(f"Local cache STALE HIT: {gateway_name} (returning stale data)")
 
             # Trigger background refresh using cache warmer
             def fetch_fresh_data():
@@ -979,12 +993,12 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
                 set_cache_fn=update_caches,
             )
         else:
-            logger.info(f"Local cache HIT: {gateway_name}")
+            logger.debug(f"Local cache HIT: {gateway_name}")
 
         return local_data
 
     # 3. Cache miss everywhere - fetch from database
-    logger.info(f"Cache MISS (all layers): Fetching {gateway_name} catalog from database")
+    logger.debug(f"Cache MISS (all layers): Fetching {gateway_name} catalog from database")
 
     try:
         from src.db.models_catalog_db import (
@@ -1050,13 +1064,13 @@ def get_cached_unique_models() -> list[dict[str, Any]] | None:
     local_data, is_stale = get_local_catalog("unique")
     if local_data is not None:
         if is_stale:
-            logger.info("Local cache STALE HIT: unique models (returning stale data)")
+            logger.debug("Local cache STALE HIT: unique models (returning stale data)")
         else:
-            logger.info("Local cache HIT: unique models")
+            logger.debug("Local cache HIT: unique models")
         return local_data
 
     # 3. Cache miss everywhere - compute from database
-    logger.info("Cache MISS (all layers): Computing unique models from database")
+    logger.debug("Cache MISS (all layers): Computing unique models from database")
 
     try:
         from src.db.models_catalog_db import (

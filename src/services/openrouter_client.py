@@ -646,12 +646,23 @@ def sanitize_pricing(pricing: dict) -> dict | None:
 
 
 def fetch_models_from_openrouter():
-    """Fetch models from OpenRouter API"""
+    """Fetch models from OpenRouter API with step-by-step logging"""
+    from src.utils.step_logger import StepLogger
+
+    step_logger = StepLogger("OpenRouter Model Fetch", total_steps=4)
+    step_logger.start(provider="openrouter", endpoint="https://openrouter.ai/api/v1/models")
+
     try:
+        # Step 1: Validate API key
+        step_logger.step(1, "Validating API key", provider="openrouter")
         if not Config.OPENROUTER_API_KEY:
+            step_logger.failure(Exception("API key not configured"))
             logger.error("OpenRouter API key not configured")
             return None
+        step_logger.success(status="configured")
 
+        # Step 2: Fetch models from API
+        step_logger.step(2, "Fetching models from API", provider="openrouter")
         headers = {
             "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
             "Content-Type": "application/json",
@@ -663,6 +674,7 @@ def fetch_models_from_openrouter():
         try:
             models_data = response.json()
         except json.JSONDecodeError as json_err:
+            step_logger.failure(json_err, status_code=response.status_code)
             logger.error(
                 f"Failed to parse JSON response from OpenRouter models API: {json_err}. "
                 f"Response status: {response.status_code}, Content-Type: {response.headers.get('content-type')}"
@@ -670,8 +682,10 @@ def fetch_models_from_openrouter():
             return []
 
         raw_models = models_data.get("data", [])
+        step_logger.success(raw_count=len(raw_models), status_code=response.status_code)
 
-        # Process and filter models
+        # Step 3: Process and filter models
+        step_logger.step(3, "Processing and filtering models", provider="openrouter")
         filtered_models = []
         for model in raw_models:
             model.setdefault("source_gateway", "openrouter")
@@ -695,15 +709,21 @@ def fetch_models_from_openrouter():
 
             filtered_models.append(model)
 
-        logger.info(
-            f"Filtered {len(raw_models) - len(filtered_models)} models with dynamic pricing"
+        filtered_count = len(raw_models) - len(filtered_models)
+        step_logger.success(
+            final_count=len(filtered_models),
+            filtered_out=filtered_count,
+            filter_rate=f"{(filtered_count/len(raw_models)*100):.1f}%"
         )
+
+        # Step 4: Cache the results
+        step_logger.step(4, "Caching models", provider="openrouter")
         _models_cache["data"] = filtered_models
         _models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        # Clear error state on successful fetch
         clear_gateway_error("openrouter")
+        step_logger.success(cached_count=len(filtered_models), cache_status="updated")
 
+        step_logger.complete(total_models=len(filtered_models), provider="openrouter")
         return _models_cache["data"]
     except httpx.TimeoutException as e:
         error_msg = f"Request timeout after 30s: {sanitize_for_logging(str(e))}"

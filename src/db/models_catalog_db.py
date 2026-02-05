@@ -676,14 +676,23 @@ def get_all_models_for_catalog(
         >>> len(models)
         11432  # All active models from all providers (not limited to 1000)
     """
+    from src.utils.step_logger import StepLogger
+
+    step_logger = StepLogger("Database: Fetch All Models", total_steps=2)
+    step_logger.start(table="models", include_inactive=include_inactive)
+
     try:
-        # Use read replica for read-only catalog queries
+        # Step 1: Initialize database connection
+        step_logger.step(1, "Connecting to database", table="models", replica="read")
         supabase = get_client_for_query(read_only=True)
         all_models = []
         page_size = 1000  # Supabase default limit
         offset = 0
+        step_logger.success(connection="ready", page_size=page_size)
 
-        logger.info(f"Fetching all models from database (include_inactive={include_inactive})...")
+        # Step 2: Fetch models with pagination
+        step_logger.step(2, "Fetching models (paginated)", table="models")
+        batch_count = 0
 
         while True:
             # Build query with pagination - join with providers table
@@ -711,7 +720,8 @@ def get_all_models_for_catalog(
                 break
 
             all_models.extend(batch)
-            logger.debug(f"Fetched batch of {len(batch)} models (offset={offset}, total so far={len(all_models)})")
+            batch_count += 1
+            logger.debug(f"Fetched batch {batch_count}: {len(batch)} models (offset={offset}, total={len(all_models)})")
 
             # If we got fewer than page_size rows, we've reached the end
             if len(batch) < page_size:
@@ -720,14 +730,22 @@ def get_all_models_for_catalog(
             # Move to next page
             offset += page_size
 
-        logger.info(
-            f"Fetched {len(all_models)} models from database for catalog "
-            f"({(offset // page_size) + 1} batches, page_size={page_size})"
+        step_logger.success(
+            total_models=len(all_models),
+            batches=batch_count,
+            page_size=page_size
+        )
+
+        step_logger.complete(
+            total_models=len(all_models),
+            table="models",
+            include_inactive=include_inactive
         )
 
         return all_models
 
     except Exception as e:
+        step_logger.failure(e, table="models")
         logger.error(f"Error fetching all models for catalog: {e}")
         return []
 
@@ -762,7 +780,7 @@ def get_models_by_gateway_for_catalog(
         page_size = 1000  # Supabase default limit
         offset = 0
 
-        logger.info(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
+        logger.debug(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
 
         while True:
             # Build query with provider filter
@@ -1279,7 +1297,7 @@ def get_all_unique_models_for_catalog(
 
     try:
         start_time = time.time()
-        logger.info(f"Fetching unique models (include_inactive={include_inactive})")
+        logger.debug(f"Fetching unique models (include_inactive={include_inactive})")
 
         # OPTIMIZATION: Fetch all unique models in one query
         um_query = supabase.table("unique_models").select("*")
