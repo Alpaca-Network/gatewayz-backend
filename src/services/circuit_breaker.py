@@ -124,7 +124,8 @@ class CircuitBreaker:
 
             state_str = redis.get(self._get_redis_key("state"))
             if state_str:
-                self._state = CircuitState(state_str.decode())
+                # Redis client has decode_responses=True, so state_str is already a string
+                self._state = CircuitState(state_str)
 
             failure_count = redis.get(self._get_redis_key("failure_count"))
             if failure_count:
