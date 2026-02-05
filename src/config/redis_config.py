@@ -44,15 +44,21 @@ class RedisConfig:
         if self._pool is None:
             # Parse Redis URL if it contains connection details
             if self.redis_url and "://" in self.redis_url:
-                # Use URL-based connection for Redis Cloud
-                self._pool = ConnectionPool.from_url(
-                    self.redis_url,
-                    max_connections=self.redis_max_connections,
-                    socket_timeout=self.redis_socket_timeout,
-                    socket_connect_timeout=self.redis_socket_connect_timeout,
-                    retry_on_timeout=self.redis_retry_on_timeout,
-                    decode_responses=True,
-                )
+                # Use URL-based connection for Redis Cloud (Upstash, Railway, etc.)
+                # For Upstash with TLS (rediss://), we need to disable SSL cert verification
+                connection_kwargs = {
+                    "max_connections": self.redis_max_connections,
+                    "socket_timeout": self.redis_socket_timeout,
+                    "socket_connect_timeout": self.redis_socket_connect_timeout,
+                    "retry_on_timeout": self.redis_retry_on_timeout,
+                    "decode_responses": True,
+                }
+
+                # Add SSL configuration for rediss:// URLs (Upstash)
+                if self.redis_url.startswith("rediss://"):
+                    connection_kwargs["ssl_cert_reqs"] = None  # Don't verify SSL cert
+
+                self._pool = ConnectionPool.from_url(self.redis_url, **connection_kwargs)
             else:
                 # Use individual parameters for local Redis
                 self._pool = ConnectionPool(
