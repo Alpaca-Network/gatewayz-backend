@@ -270,6 +270,10 @@ def transform_normalized_model_to_db_schema(
         # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
         provider_model_id = normalized_model.get("provider_model_id") or model_name
 
+        # Store architecture string in metadata (no top-level DB column for it)
+        if architecture_str:
+            metadata["architecture_str"] = architecture_str
+
         # Build model data - pricing is stored separately in model_pricing table
         model_data = {
             "provider_id": provider_id,
@@ -278,7 +282,6 @@ def transform_normalized_model_to_db_schema(
             "description": description,
             "context_length": context_length,
             "modality": modality,
-            "architecture": architecture_str,
             "per_request_limits": per_request_limits,
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],

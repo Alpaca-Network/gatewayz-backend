@@ -797,15 +797,15 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
 
     gateway = (gateway or "openrouter").lower()
 
-    logger.info(f"get_cached_models: gateway={gateway}, use_unique_models={use_unique_models}")
+    logger.debug(f"get_cached_models: gateway={gateway}, use_unique_models={use_unique_models}")
 
     try:
         if use_unique_models and gateway == "all":
             # New: Deduplicated unique models with provider arrays
-            logger.info("Fetching unique models catalog (deduplicated)")
+            logger.debug("Fetching unique models catalog (deduplicated)")
             models = get_cached_unique_models_catalog()
             if models is not None:
-                logger.info(f"Returning {len(models)} unique models")
+                logger.debug(f"Returning {len(models)} unique models")
                 return models
             logger.warning("Failed to get unique models catalog")
             return []
@@ -813,7 +813,7 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             # Current: Full aggregated flat catalog
             models = get_cached_full_catalog()
             if models is not None:
-                logger.info(f"Returning {len(models)} models for 'all'")
+                logger.debug(f"Returning {len(models)} models for 'all'")
                 return models
             # get_cached_full_catalog already fetched from DB on miss
             logger.warning("Failed to get catalog from cache or database")
@@ -827,7 +827,7 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
                 )
             models = get_cached_provider_catalog(gateway)
             if models is not None:
-                logger.info(f"Returning {len(models)} models for '{gateway}'")
+                logger.debug(f"Returning {len(models)} models for '{gateway}'")
                 return models
             # get_cached_provider_catalog already fetched from DB on miss
             logger.warning(f"Failed to get {gateway} catalog from cache or database")
