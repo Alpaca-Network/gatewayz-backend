@@ -1074,12 +1074,12 @@ def get_cached_unique_models() -> list[dict[str, Any]] | None:
 
     try:
         from src.db.models_catalog_db import (
-            get_unique_models_for_catalog,
+            get_all_unique_models_for_catalog,
             transform_db_models_batch,
         )
 
         # Fetch unique models from database
-        db_models = get_unique_models_for_catalog(include_inactive=False)
+        db_models = get_all_unique_models_for_catalog(include_inactive=False)
 
         # Transform to API format
         api_models = transform_db_models_batch(db_models)
