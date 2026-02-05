@@ -130,8 +130,9 @@ class TestSetUserRateLimitsConfigsMigration:
     """Test set_user_rate_limits with rate_limit_configs table"""
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
-    def test_set_rate_limits_creates_new_config(
+    async def test_set_rate_limits_creates_new_config(
         self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
     ):
         """Test creating new rate limit config in rate_limit_configs table"""
@@ -174,14 +175,15 @@ class TestSetUserRateLimitsConfigsMigration:
             "concurrency_limit": 25,
         }
 
-        rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
+        await rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
 
         # Verify insert was called
         assert mock_supabase_client.table.call_count >= 2
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
-    def test_set_rate_limits_updates_existing_config(
+    async def test_set_rate_limits_updates_existing_config(
         self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
     ):
         """Test updating existing rate limit config"""
@@ -217,14 +219,15 @@ class TestSetUserRateLimitsConfigsMigration:
             "tokens_per_hour": 200000,
         }
 
-        rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
+        await rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
 
         # Verify update was called
         assert mock_supabase_client.table.call_count >= 2
 
     @pytest.mark.unit
+    @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
-    def test_set_rate_limits_raises_error_for_missing_key(
+    async def test_set_rate_limits_raises_error_for_missing_key(
         self, mock_get_client, mock_supabase_client, sample_api_key
     ):
         """Test that ValueError is raised when API key not found"""
@@ -240,7 +243,7 @@ class TestSetUserRateLimitsConfigsMigration:
 
         # Execute and verify
         with pytest.raises(ValueError, match="API key not found"):
-            rate_limits_module.set_user_rate_limits(sample_api_key, {})
+            await rate_limits_module.set_user_rate_limits(sample_api_key, {})
 
 
 @pytest.mark.unit
@@ -302,8 +305,9 @@ class TestRateLimitConfigsIntegration:
     """Integration tests for rate_limit_configs functionality"""
 
     @pytest.mark.integration
+    @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
-    def test_full_lifecycle_create_retrieve_update(
+    async def test_full_lifecycle_create_retrieve_update(
         self, mock_get_client, sample_api_key, sample_api_key_id, sample_user_id
     ):
         """Test full lifecycle: create config, retrieve it, update it"""
@@ -333,7 +337,7 @@ class TestRateLimitConfigsIntegration:
 
         # Create
         rate_limits = {"requests_per_hour": 500, "tokens_per_hour": 50000}
-        rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
+        await rate_limits_module.set_user_rate_limits(sample_api_key, rate_limits)
 
         # Step 2: Retrieve rate limits
         config_result = Mock()
