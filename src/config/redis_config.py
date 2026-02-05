@@ -17,12 +17,10 @@ class RedisConfig:
     """Redis configuration and connection management"""
 
     def __init__(self):
-        # Prefer Railway's public Redis URL over internal DNS (which is deprecated)
-        # RAILWAY_SERVICE_REDIS_URL points to the public endpoint that works across services
-        self.redis_url = os.environ.get(
-            "RAILWAY_SERVICE_REDIS_URL",
-            os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-        )
+        # Get Redis URL from environment
+        # Priority: REDIS_URL (full connection string) > localhost fallback
+        # Note: RAILWAY_SERVICE_REDIS_URL is just a hostname, not a full URL, so we use REDIS_URL
+        self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis_password = os.environ.get("REDIS_PASSWORD")
         self.redis_host = os.environ.get("REDIS_HOST", "localhost")
         self.redis_port = int(os.environ.get("REDIS_PORT", "6379"))
