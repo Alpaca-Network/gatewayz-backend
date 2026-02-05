@@ -109,9 +109,11 @@ class CacheWarmer:
             try:
                 logger.info(f"Starting cache warm for {cache_key}")
 
-                # Fetch fresh data (run in thread pool to avoid blocking)
+                # Fetch fresh data using dedicated DB executor to avoid starving
+                # the default thread pool used by asyncio.to_thread()
+                from src.services.background_tasks import _db_executor
                 loop = asyncio.get_event_loop()
-                fresh_data = await loop.run_in_executor(None, fetch_fn)
+                fresh_data = await loop.run_in_executor(_db_executor, fetch_fn)
 
                 if fresh_data is not None:
                     # Update cache

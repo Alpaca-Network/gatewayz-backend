@@ -256,45 +256,26 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
-        # PERF: Preload frequently accessed model metadata into cache
+        # PERF: Preload full catalog cache in background (single DB fetch)
+        # NOTE: Only loads the full catalog once. Individual gateway caches are
+        # populated lazily on first request (stale-while-revalidate pattern).
+        # The background refresh task (update_full_model_catalog_loop) keeps
+        # the full catalog warm every 14 minutes after the initial 60s delay.
         async def preload_hot_models_cache():
             try:
-                logger.info("🔥 Preloading hot model metadata and catalog caches...")
-                from src.services.model_catalog_cache import (
-                    get_cached_full_catalog,
-                    get_cached_unique_models,
-                    get_cached_gateway_catalog,
-                )
+                # Wait a few seconds for DB connection pool to stabilize
+                await asyncio.sleep(5)
 
-                # Warm up the full catalog cache
-                # This triggers a database fetch and caches the result
+                logger.info("🔥 Preloading full model catalog cache...")
+                from src.services.model_catalog_cache import get_cached_full_catalog
+
+                # Single fetch: full catalog (Redis → local memory → DB fallback)
+                # This is the most important cache to warm since all other lookups
+                # can derive from it. Individual gateway caches warm lazily.
                 full_catalog = await asyncio.to_thread(get_cached_full_catalog)
 
-                # Warm up unique models cache
-                unique_models = await asyncio.to_thread(get_cached_unique_models)
-
-                # Warm up top gateway catalogs (fast gateways for quick first requests)
-                top_gateways = [
-                    "openrouter", "anthropic", "openai", "groq",
-                    "together", "fireworks", "vercel-ai-gateway"
-                ]
-                warmed_gateways = 0
-                for gateway in top_gateways:
-                    try:
-                        catalog = await asyncio.to_thread(get_cached_gateway_catalog, gateway)
-                        if catalog:
-                            warmed_gateways += 1
-                            logger.debug(f"✅ Warmed {gateway} cache ({len(catalog)} models)")
-                    except Exception as gw_e:
-                        logger.debug(f"Skipping {gateway} warmup: {gw_e}")
-
-                # Single consolidated log message
-                logger.info(
-                    f"✅ Catalog cache warming complete: "
-                    f"{len(full_catalog)} total models, "
-                    f"{len(unique_models) if unique_models else 0} unique models, "
-                    f"{warmed_gateways}/{len(top_gateways)} gateways"
-                )
+                catalog_count = len(full_catalog) if full_catalog else 0
+                logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
             except Exception as e:
                 logger.warning(f"Model cache preload warning: {e}")
 

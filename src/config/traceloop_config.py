@@ -128,18 +128,11 @@ def is_enabled() -> bool:
     """
     Check if OpenLLMetry/Traceloop SDK should be enabled.
 
-    Returns True if:
-    - OPENLLMETRY_ENABLED is explicitly set to "true", or
-    - TEMPO_ENABLED is true (and OPENLLMETRY_ENABLED is not explicitly "false")
+    Returns True ONLY if OPENLLMETRY_ENABLED is explicitly set to "true".
+    Disabled by default to prevent startup issues on deployments where
+    traceloop-sdk is not yet configured.
     """
-    explicit = os.environ.get("OPENLLMETRY_ENABLED", "").lower()
-    if explicit == "true":
-        return True
-    if explicit == "false":
-        return False
-
-    # Default: follow TEMPO_ENABLED
-    return os.environ.get("TEMPO_ENABLED", "true").lower() == "true"
+    return os.environ.get("OPENLLMETRY_ENABLED", "false").lower() == "true"
 
 
 def initialize_traceloop() -> bool:

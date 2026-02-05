@@ -5,11 +5,17 @@ Handles activity logging and other I/O operations in the background
 
 import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from src.db.activity import log_activity as db_log_activity
 
 logger = logging.getLogger(__name__)
+
+# Dedicated thread pool for heavy DB operations (catalog refresh, etc.)
+# This prevents heavy background DB work from starving the default executor
+# which is used by asyncio.to_thread() throughout the app.
+_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-background")
 
 # Queue for background tasks
 _background_tasks = []
@@ -315,11 +321,12 @@ async def update_full_model_catalog_loop() -> None:
     
     REFRESH_INTERVAL_SECONDS = 14 * 60  # 14 minutes
     
-    # CRITICAL FIX: Add startup delay to prevent 502 Bad Gateway
-    # Wait for app to fully boot and pass health checks before hitting DB
-    logger.info("Waiting 60s before first model catalog refresh...")
+    # Startup delay: let preload_hot_models_cache (5s delay) handle the first
+    # cache warm. This task takes over for periodic refreshes after that.
+    STARTUP_DELAY = 120  # 2 minutes - well after initial preload completes
+    logger.info(f"Waiting {STARTUP_DELAY}s before first model catalog refresh...")
     try:
-        await asyncio.sleep(60)
+        await asyncio.sleep(STARTUP_DELAY)
     except asyncio.CancelledError:
         logger.info("Model catalog refresh task cancelled during startup delay")
         return
@@ -334,9 +341,9 @@ async def update_full_model_catalog_loop() -> None:
             logger.info("🔄 Background Refresh: Updating full model catalog...")
             
             # 1. Fetch from DB (optimized query)
-            # Run in thread pool to avoid blocking the event loop
+            # Use dedicated DB executor to avoid starving the default thread pool
             loop = asyncio.get_running_loop()
-            db_models = await loop.run_in_executor(None, get_all_models_for_catalog, False)
+            db_models = await loop.run_in_executor(_db_executor, get_all_models_for_catalog, False)
             
             # 2. Transform to API format
             api_models = transform_db_models_batch(db_models)
