@@ -3,6 +3,8 @@ System endpoints for cache management and gateway health monitoring
 Phase 2 implementation
 """
 
+import asyncio
+import inspect
 import io
 import json
 import logging
@@ -1390,12 +1392,13 @@ async def refresh_gateway_cache(
         # Get the fetch function dynamically
         fetch_func = get_fetch_function(gateway)
         if fetch_func:
-            # Most fetch functions are sync, so we need to handle both
             try:
-                result = fetch_func()
-                # If it's a coroutine, await it
-                if hasattr(result, "__await__"):
-                    await result
+                if inspect.iscoroutinefunction(fetch_func):
+                    # Async fetch function - await directly
+                    await fetch_func()
+                else:
+                    # Sync fetch function - run in thread to avoid blocking event loop
+                    await asyncio.to_thread(fetch_func)
             except Exception as fetch_error:
                 logger.error(f"Error fetching models from {gateway}: {fetch_error}")
                 raise HTTPException(
@@ -2033,7 +2036,7 @@ async def check_pricing_health():
     try:
         from src.services.pricing_health_monitor import check_pricing_health
 
-        health = check_pricing_health()
+        health = await asyncio.to_thread(check_pricing_health)
 
         # Update Prometheus metric
         try:
@@ -2088,7 +2091,7 @@ async def check_pricing_staleness():
         from src.services.pricing_health_monitor import get_pricing_health_monitor
 
         monitor = get_pricing_health_monitor()
-        staleness = monitor.check_pricing_staleness()
+        staleness = await asyncio.to_thread(monitor.check_pricing_staleness)
 
         return {
             "success": True,
@@ -2133,7 +2136,7 @@ async def check_default_pricing_usage():
         from src.services.pricing_health_monitor import get_pricing_health_monitor
 
         monitor = get_pricing_health_monitor()
-        usage = monitor.check_default_pricing_usage()
+        usage = await asyncio.to_thread(monitor.check_default_pricing_usage)
 
         return {
             "success": True,
