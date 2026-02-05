@@ -847,6 +847,12 @@ class ChatInferenceHandler:
                 provider_used, provider_model_id, messages, **kwargs
             )
 
+            # Validate stream before iteration
+            if stream is None:
+                raise ValueError(
+                    f"Provider {provider_used} returned None instead of stream for model {provider_model_id}"
+                )
+
             # Step 5: Yield normalized chunks
             accumulated_content = ""  # For token estimation fallback
             chunk_count = 0
