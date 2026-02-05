@@ -296,6 +296,10 @@ def _get_pricing_from_cache_fallback(model_id: str, candidate_ids: set[str]) -> 
             ):
                 pricing = model.get("pricing", {})
 
+                # Handle case where pricing might be None instead of dict
+                if not isinstance(pricing, dict):
+                    pricing = {}
+
                 # Convert pricing strings to floats, handling None and empty strings
                 prompt_price = float(pricing.get("prompt", "0") or "0")
                 prompt_price = max(0.0, prompt_price)
