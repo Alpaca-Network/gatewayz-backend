@@ -79,7 +79,9 @@ class RedisConfig:
                 self._client.ping()
                 logger.info("Redis connection established successfully")
             except Exception as e:
-                logger.warning(f"Redis connection failed: {e}. Falling back to local cache.")
+                # Log at debug level - this is expected behavior in dev/environments without Redis
+                # The system gracefully falls back to local memory cache
+                logger.debug(f"Redis unavailable: {e}. Using local memory cache fallback.")
                 self._client = None
         return self._client
 
