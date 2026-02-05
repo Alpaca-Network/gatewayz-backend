@@ -3,21 +3,6 @@ import logging
 import os
 import secrets
 
-# CRITICAL: Initialize Traceloop SDK (OpenLLMetry) BEFORE any LLM SDK imports
-# This enables automatic instrumentation of OpenAI, Anthropic, etc.
-# Must be at the very top of the application entry point.
-# Wrapped in try/except to ensure the app still works if traceloop isn't installed
-try:
-    from src.config.traceloop_config import initialize_traceloop
-
-    initialize_traceloop()
-except ImportError:
-    # traceloop_config or its dependencies not available - continue without it
-    pass
-except Exception:
-    # Any other error during initialization - continue without it
-    pass
-
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -466,6 +451,7 @@ def create_app() -> FastAPI:
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
+        ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
     ]
 
     loaded_count = 0
@@ -579,6 +565,26 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
 
+    # ==================== General Router API Router ====================
+    # Load general router API endpoints for NotDiamond-powered routing
+    try:
+        from src.routes.general_router import router as general_router_router
+
+        app.include_router(general_router_router)
+        logger.info("  [OK] General Router API (/general-router/*)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] General router API not loaded: {e}")
+
+    # ==================== Circuit Breaker Status Router ====================
+    # Load circuit breaker monitoring and management endpoints
+    try:
+        from src.routes.circuit_breaker_status import router as circuit_breaker_router
+
+        app.include_router(circuit_breaker_router)
+        logger.info("  [OK] Circuit Breaker Status API (/circuit-breakers/*)")
+    except ImportError as e:
+        logger.warning(f"  [SKIP] Circuit breaker status router not loaded: {e}")
+
     # ==================== Exception Handlers ====================
 
     @app.exception_handler(HTTPException)
@@ -677,6 +683,20 @@ def create_app() -> FastAPI:
             except Exception as otel_e:
                 logger.warning(f"    OpenTelemetry initialization warning: {otel_e}", exc_info=True)
 
+            # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
+            # Must run after OTel but before any LLM SDK calls
+            try:
+                from src.config.traceloop_config import initialize_traceloop
+
+                if initialize_traceloop():
+                    logger.info("  [OK] Traceloop SDK (OpenLLMetry) initialized")
+                else:
+                    logger.info("  [SKIP] Traceloop SDK not enabled or not available")
+            except ImportError:
+                logger.debug("  [SKIP] Traceloop SDK not installed")
+            except Exception as tl_e:
+                logger.warning(f"    Traceloop initialization warning: {tl_e}")
+
             # Validate configuration
             logger.info("    Validating configuration...")
             Config.validate()
@@ -771,23 +791,10 @@ def create_app() -> FastAPI:
             except Exception as analytics_e:
                 logger.warning(f"    Analytics initialization warning: {analytics_e}")
 
-            # OPTIMIZED: Warm model caches asynchronously (non-blocking startup)
-            async def warm_caches_async():
-                """Background task to warm model caches without blocking startup."""
-                try:
-                    logger.info("  🔥 Warming model caches asynchronously...")
-                    from src.services.models import get_cached_models
-
-                    # Warm critical provider caches
-                    await asyncio.to_thread(get_cached_models, "hug")
-                    logger.info("   ✅ HuggingFace models cache warmed")
-
-                except Exception as cache_e:
-                    logger.warning(f"    Cache warming warning: {cache_e}")
-
-            # Start cache warming in background (don't block startup)
-            asyncio.create_task(warm_caches_async())
-            logger.info("  🔥 Cache warming started in background (non-blocking)")
+            # Cache warming is handled by preload_hot_models_cache() in lifespan
+            # and update_full_model_catalog_loop() background task.
+            # No additional cache warming needed here to avoid thread pool contention.
+            logger.info("  [OK] Cache warming delegated to lifespan background tasks")
 
             # NOTE: Health monitoring is handled by the dedicated health-service container
             # The main API reads health data from Redis cache populated by health-service

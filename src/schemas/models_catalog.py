@@ -12,15 +12,11 @@ from pydantic import BaseModel, Field
 class ModelBase(BaseModel):
     """Base model schema"""
     provider_id: int = Field(..., description="Provider ID (foreign key)")
-    model_id: str = Field(..., description="Standardized model ID")
     model_name: str = Field(..., description="Model display name")
     provider_model_id: str = Field(..., description="Provider-specific model identifier")
     description: str | None = Field(None, description="Model description")
     context_length: int | None = Field(None, description="Maximum context length")
     modality: str | None = Field("text->text", description="Model modality (e.g., 'text->text', 'text->image')")
-    architecture: str | None = Field(None, description="Model architecture")
-    top_provider: str | None = Field(None, description="Top provider for this model")
-    per_request_limits: dict[str, Any] | None = Field(None, description="Per-request limits")
 
     # Pricing
     pricing_prompt: Decimal | None = Field(None, description="Prompt pricing per token")
@@ -51,15 +47,11 @@ class ModelBulkCreate(BaseModel):
 class ModelUpdate(BaseModel):
     """Schema for updating a model (all fields optional)"""
     provider_id: int | None = None
-    model_id: str | None = None
     model_name: str | None = None
     provider_model_id: str | None = None
     description: str | None = None
     context_length: int | None = None
     modality: str | None = None
-    architecture: str | None = None
-    top_provider: str | None = None
-    per_request_limits: dict[str, Any] | None = None
     pricing_prompt: Decimal | None = None
     pricing_completion: Decimal | None = None
     pricing_image: Decimal | None = None

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -29,69 +30,78 @@ router = APIRouter()
 # =============================================================================
 
 
+def _fetch_user_rate_limits_sync(api_key: str) -> dict | None:
+    """Synchronous helper to fetch all user rate limit data in a thread."""
+    user = get_user(api_key)
+    if not user:
+        return None
+
+    configs = get_user_rate_limit_configs(user["id"])
+
+    enhanced_configs = []
+    for config in configs:
+        usage_stats = {
+            "minute": get_rate_limit_usage_stats(config["api_key"], "minute"),
+            "hour": get_rate_limit_usage_stats(config["api_key"], "hour"),
+            "day": get_rate_limit_usage_stats(config["api_key"], "day"),
+        }
+
+        enhanced_configs.append(
+            {
+                **config,
+                "usage_stats": usage_stats,
+                "current_status": {
+                    "requests_remaining_minute": max(
+                        0,
+                        config["rate_limit_config"].get("requests_per_minute", 60)
+                        - usage_stats["minute"]["total_requests"],
+                    ),
+                    "tokens_remaining_minute": max(
+                        0,
+                        config["rate_limit_config"].get("tokens_per_minute", 10000)
+                        - usage_stats["minute"]["total_tokens"],
+                    ),
+                    "requests_remaining_hour": max(
+                        0,
+                        config["rate_limit_config"].get("requests_per_hour", 1000)
+                        - usage_stats["hour"]["total_requests"],
+                    ),
+                    "tokens_remaining_hour": max(
+                        0,
+                        config["rate_limit_config"].get("tokens_per_hour", 100000)
+                        - usage_stats["hour"]["total_tokens"],
+                    ),
+                    "requests_remaining_day": max(
+                        0,
+                        config["rate_limit_config"].get("requests_per_day", 10000)
+                        - usage_stats["day"]["total_requests"],
+                    ),
+                    "tokens_remaining_day": max(
+                        0,
+                        config["rate_limit_config"].get("tokens_per_day", 1000000)
+                        - usage_stats["day"]["total_tokens"],
+                    ),
+                },
+            }
+        )
+
+    return {"user": user, "configs": enhanced_configs}
+
+
 @router.get("/user/rate-limits", tags=["authentication"])
 async def get_user_rate_limits_advanced(api_key: str = Depends(get_api_key)):
     """Get advanced rate limit configuration and status for user's API keys"""
     try:
-        user = get_user(api_key)
-        if not user:
+        # FIX (2026-02-05): Run all synchronous DB queries in a thread
+        # to prevent blocking the event loop and causing 499/500 errors
+        result = await asyncio.to_thread(_fetch_user_rate_limits_sync, api_key)
+        if result is None:
             raise HTTPException(status_code=401, detail="Invalid API key")
-
-        # Get rate limit configurations for all user's keys
-        configs = get_user_rate_limit_configs(user["id"])
-
-        # Get current usage stats for each key
-        enhanced_configs = []
-        for config in configs:
-            usage_stats = {
-                "minute": get_rate_limit_usage_stats(config["api_key"], "minute"),
-                "hour": get_rate_limit_usage_stats(config["api_key"], "hour"),
-                "day": get_rate_limit_usage_stats(config["api_key"], "day"),
-            }
-
-            enhanced_configs.append(
-                {
-                    **config,
-                    "usage_stats": usage_stats,
-                    "current_status": {
-                        "requests_remaining_minute": max(
-                            0,
-                            config["rate_limit_config"].get("requests_per_minute", 60)
-                            - usage_stats["minute"]["total_requests"],
-                        ),
-                        "tokens_remaining_minute": max(
-                            0,
-                            config["rate_limit_config"].get("tokens_per_minute", 10000)
-                            - usage_stats["minute"]["total_tokens"],
-                        ),
-                        "requests_remaining_hour": max(
-                            0,
-                            config["rate_limit_config"].get("requests_per_hour", 1000)
-                            - usage_stats["hour"]["total_requests"],
-                        ),
-                        "tokens_remaining_hour": max(
-                            0,
-                            config["rate_limit_config"].get("tokens_per_hour", 100000)
-                            - usage_stats["hour"]["total_tokens"],
-                        ),
-                        "requests_remaining_day": max(
-                            0,
-                            config["rate_limit_config"].get("requests_per_day", 10000)
-                            - usage_stats["day"]["total_requests"],
-                        ),
-                        "tokens_remaining_day": max(
-                            0,
-                            config["rate_limit_config"].get("tokens_per_day", 1000000)
-                            - usage_stats["day"]["total_tokens"],
-                        ),
-                    },
-                }
-            )
 
         return {
             "status": "success",
-            "user_id": user["id"],
-            "rate_limit_configs": enhanced_configs,
+            "user_id": result["user"]["id"],
+            "rate_limit_configs": result["configs"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -108,12 +118,12 @@ async def update_user_rate_limits_advanced(
 ):
     """Update rate limit configuration for a specific API key"""
     try:
-        user = get_user(api_key)
+        user = await asyncio.to_thread(get_user, api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         # Verify the user owns the key
-        key_to_update = get_api_key_by_id(key_id, user["id"])
+        key_to_update = await asyncio.to_thread(get_api_key_by_id, key_id, user["id"])
         if not key_to_update:
             raise HTTPException(status_code=404, detail="API key not found")
 
@@ -138,7 +148,9 @@ async def update_user_rate_limits_advanced(
                 )
 
         # Update rate limit configuration
-        success = update_rate_limit_config(key_to_update["api_key"], rate_limit_config)
+        success = await asyncio.to_thread(
+            update_rate_limit_config, key_to_update["api_key"], rate_limit_config
+        )
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to update rate limit configuration")
@@ -164,7 +176,7 @@ async def bulk_update_user_rate_limits(
 ):
     """Bulk update rate limit configuration for all user's API keys"""
     try:
-        user = get_user(api_key)
+        user = await asyncio.to_thread(get_user, api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
@@ -189,7 +201,9 @@ async def bulk_update_user_rate_limits(
                 )
 
         # Bulk update rate limit configurations
-        updated_count = bulk_update_rate_limit_configs(user["id"], rate_limit_config)
+        updated_count = await asyncio.to_thread(
+            bulk_update_rate_limit_configs, user["id"], rate_limit_config
+        )
 
         return {
             "status": "success",
@@ -212,12 +226,12 @@ async def get_api_key_rate_limit_usage(
 ):
     """Get detailed rate limit usage statistics for a specific API key"""
     try:
-        user = get_user(api_key)
+        user = await asyncio.to_thread(get_user, api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         # Verify the user owns the key
-        key_to_check = get_api_key_by_id(key_id, user["id"])
+        key_to_check = await asyncio.to_thread(get_api_key_by_id, key_id, user["id"])
         if not key_to_check:
             raise HTTPException(status_code=404, detail="API key not found")
 
@@ -227,11 +241,11 @@ async def get_api_key_rate_limit_usage(
                 status_code=400, detail="Invalid time window. Must be 'minute', 'hour', or 'day'"
             )
 
-        # Get usage statistics
-        usage_stats = get_rate_limit_usage_stats(key_to_check["api_key"], time_window)
-
-        # Get rate limit configuration
-        rate_limit_config = get_rate_limit_config(key_to_check["api_key"])
+        # Get usage statistics and config in parallel threads
+        usage_stats, rate_limit_config = await asyncio.gather(
+            asyncio.to_thread(get_rate_limit_usage_stats, key_to_check["api_key"], time_window),
+            asyncio.to_thread(get_rate_limit_config, key_to_check["api_key"]),
+        )
 
         return {
             "status": "success",
@@ -254,7 +268,7 @@ async def get_api_key_rate_limit_usage(
 async def get_system_rate_limits(admin_user: dict = Depends(require_admin)):
     """Get system-wide rate limiting statistics"""
     try:
-        stats = get_system_rate_limit_stats()
+        stats = await asyncio.to_thread(get_system_rate_limit_stats)
 
         return {
             "status": "success",
@@ -276,7 +290,7 @@ async def get_rate_limit_alerts_endpoint(
 ):
     """Get rate limit alerts for monitoring"""
     try:
-        alerts = get_rate_limit_alerts(api_key, resolved, limit)
+        alerts = await asyncio.to_thread(get_rate_limit_alerts, api_key, resolved, limit)
 
         return {
             "status": "success",
@@ -356,7 +370,7 @@ async def get_admin_rate_limit_config(
     try:
         if api_key:
             # Get config for specific API key
-            config = get_rate_limit_config(api_key)
+            config = await asyncio.to_thread(get_rate_limit_config, api_key)
             return {
                 "status": "success",
                 "api_key": api_key[:15] + "...",
@@ -398,7 +412,9 @@ async def set_admin_rate_limit_config(
         config_dict = request.config.model_dump()
 
         # Update rate limit configuration
-        success = update_rate_limit_config(request.api_key, config_dict)
+        success = await asyncio.to_thread(
+            update_rate_limit_config, request.api_key, config_dict
+        )
 
         if not success:
             raise HTTPException(
@@ -441,7 +457,9 @@ async def reset_rate_limit_config(
     """
     try:
         # Reset to default configuration
-        success = update_rate_limit_config(api_key, DEFAULT_RATE_LIMIT_CONFIG)
+        success = await asyncio.to_thread(
+            update_rate_limit_config, api_key, DEFAULT_RATE_LIMIT_CONFIG
+        )
 
         if not success:
             raise HTTPException(
@@ -489,7 +507,7 @@ async def update_admin_rate_limits(
     try:
         config_dict = request.config.model_dump()
 
-        # Use the set_user_rate_limits function
+        # Use the set_user_rate_limits function (async)
         await set_user_rate_limits(request.api_key, config_dict)
 
         logger.info(
@@ -529,68 +547,68 @@ async def delete_rate_limits(
     - Success status
     - The key will use default rate limits going forward
     """
+    from src.config.supabase_config import get_supabase_client
+
+    def _delete_rate_limits_sync(target_api_key: str) -> dict:
+        """Synchronous helper to delete rate limits in a thread."""
+        client = get_supabase_client()
+
+        # Delete from rate_limit_configs table (migrated from legacy rate_limits table)
+        deleted_from_rate_limit_configs = False
+        api_key_id = None
+        user_id = None
+
+        try:
+            # Get API key ID and user_id
+            key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", target_api_key).execute()
+            if key_record.data and len(key_record.data) > 0:
+                api_key_id = key_record.data[0]["id"]
+                user_id = key_record.data[0]["user_id"]
+                result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
+                deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
+        except Exception as e:
+            logger.debug(f"Could not delete from rate_limit_configs table: {e}")
+
+        # Try to reset rate_limit_config in api_keys_new table
+        reset_in_api_keys = False
+        try:
+            result = (
+                client.table("api_keys_new")
+                .update({
+                    "rate_limit_config": None,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("api_key", target_api_key)
+                .execute()
+            )
+            reset_in_api_keys = len(result.data) > 0 if result.data else False
+        except Exception as e:
+            logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
+
+        # Add audit log entry
+        if user_id and api_key_id:
+            try:
+                client.table("api_key_audit_logs").insert({
+                    "user_id": user_id,
+                    "api_key_id": api_key_id,
+                    "action": "rate_limits_deleted",
+                    "details": {
+                        "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
+                        "reset_in_api_keys": reset_in_api_keys,
+                        "admin_user": admin_user.get('username'),
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+            except Exception as audit_error:
+                logger.debug(f"Failed to create audit log: {audit_error}")
+
+        return {
+            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
+            "reset_in_api_keys": reset_in_api_keys,
+        }
+
     try:
-        import asyncio
-        from src.config.supabase_config import get_supabase_client
-        from src.db.users import get_user
-
-        # Wrap all sync database operations in asyncio.to_thread
-        def _delete_rate_limits_sync():
-            client = get_supabase_client()
-
-            # Delete from rate_limit_configs table
-            deleted_from_rate_limit_configs = False
-            api_key_id = None
-            user_id = None
-
-            try:
-                # Get API key ID and user_id
-                key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", api_key).execute()
-                if key_record.data and len(key_record.data) > 0:
-                    api_key_id = key_record.data[0]["id"]
-                    user_id = key_record.data[0]["user_id"]
-                    result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
-                    deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
-            except Exception as e:
-                logger.debug(f"Could not delete from rate_limit_configs table: {e}")
-
-            # Try to reset rate_limit_config in api_keys_new table
-            reset_in_api_keys = False
-            try:
-                result = (
-                    client.table("api_keys_new")
-                    .update({
-                        "rate_limit_config": None,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    })
-                    .eq("api_key", api_key)
-                    .execute()
-                )
-                reset_in_api_keys = len(result.data) > 0 if result.data else False
-            except Exception as e:
-                logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
-
-            # Add audit log entry
-            if user_id and api_key_id:
-                try:
-                    client.table("api_key_audit_logs").insert({
-                        "user_id": user_id,
-                        "api_key_id": api_key_id,
-                        "action": "rate_limits_deleted",
-                        "details": {
-                            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
-                            "reset_in_api_keys": reset_in_api_keys,
-                            "admin_user": admin_user.get('username'),
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }).execute()
-                except Exception as audit_error:
-                    logger.debug(f"Failed to create audit log: {audit_error}")
-
-            return deleted_from_rate_limit_configs, reset_in_api_keys
-
-        # Execute sync operations in thread pool
-        deleted_from_rate_limit_configs, reset_in_api_keys = await asyncio.to_thread(_delete_rate_limits_sync)
+        result = await asyncio.to_thread(_delete_rate_limits_sync, api_key)
 
         logger.info(
             f"Admin {admin_user.get('username')} deleted rate limits for key {api_key[:15]}..."
@@ -600,8 +618,8 @@ async def delete_rate_limits(
             "status": "success",
             "message": "Rate limits deleted successfully. Key will use default limits.",
             "api_key": api_key[:15] + "...",
-            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
-            "reset_in_api_keys": reset_in_api_keys,
+            "deleted_from_rate_limit_configs": result["deleted_from_rate_limit_configs"],
+            "reset_in_api_keys": result["reset_in_api_keys"],
             "default_config": DEFAULT_RATE_LIMIT_CONFIG,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -634,7 +652,10 @@ async def get_users_rate_limits(
     - List of users with their rate limit configurations
     - Pagination info
     """
-    try:
+    def _fetch_users_rate_limits_sync(
+        q_limit: int, q_offset: int, q_user_id: int | None, q_has_custom: bool | None
+    ) -> dict:
+        """Synchronous helper to fetch all user rate limits in a thread."""
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
@@ -642,57 +663,48 @@ async def get_users_rate_limits(
         # Try query with rate_limit_config column first, fallback without it
         rate_limit_config_available = True
         try:
-            # Build query for api_keys_new table
             query = client.table("api_keys_new").select(
                 "id, api_key, key_name, user_id, rate_limit_config, environment_tag, created_at"
             )
 
-            if user_id is not None:
-                query = query.eq("user_id", user_id)
+            if q_user_id is not None:
+                query = query.eq("user_id", q_user_id)
 
-            # Apply has_custom_config filter at database level if possible
-            if has_custom_config is not None:
-                if has_custom_config:
+            if q_has_custom is not None:
+                if q_has_custom:
                     query = query.not_.is_("rate_limit_config", "null")
                 else:
                     query = query.is_("rate_limit_config", "null")
 
-            # Execute query - fetch one extra to determine has_more
-            result = query.range(offset, offset + limit).execute()
+            result = query.range(q_offset, q_offset + q_limit).execute()
             api_keys = result.data or []
         except Exception as e:
-            # rate_limit_config column may not exist
             if "rate_limit_config" in str(e):
                 logger.debug(f"rate_limit_config column not available: {e}")
                 rate_limit_config_available = False
-                # Fallback query without rate_limit_config
                 query = client.table("api_keys_new").select(
                     "id, api_key, key_name, user_id, environment_tag, created_at"
                 )
 
-                if user_id is not None:
-                    query = query.eq("user_id", user_id)
+                if q_user_id is not None:
+                    query = query.eq("user_id", q_user_id)
 
-                # Skip has_custom_config filter when column doesn't exist
-                result = query.range(offset, offset + limit).execute()
+                result = query.range(q_offset, q_offset + q_limit).execute()
                 api_keys = result.data or []
             else:
                 raise
 
-        # Determine if there are more records and trim to limit
-        has_more = len(api_keys) > limit
-        api_keys = api_keys[:limit]
+        q_has_more = len(api_keys) > q_limit
+        api_keys = api_keys[:q_limit]
 
-        # Format response
         users_rate_limits = []
         for key in api_keys:
             if rate_limit_config_available:
                 config = key.get("rate_limit_config") or DEFAULT_RATE_LIMIT_CONFIG
-                has_custom = key.get("rate_limit_config") is not None
+                key_has_custom = key.get("rate_limit_config") is not None
             else:
-                # Try to get config from rate_limit_configs table
                 config = DEFAULT_RATE_LIMIT_CONFIG
-                has_custom = False
+                key_has_custom = False
                 try:
                     config_result = (
                         client.table("rate_limit_configs")
@@ -710,7 +722,7 @@ async def get_users_rate_limits(
                             "tokens_per_hour": cfg.get("max_tokens", 1000000),
                             "tokens_per_day": cfg.get("max_tokens", 1000000) * 24,
                         }
-                        has_custom = True
+                        key_has_custom = True
                 except Exception:
                     pass
 
@@ -720,19 +732,26 @@ async def get_users_rate_limits(
                 "key_name": key.get("key_name"),
                 "user_id": key["user_id"],
                 "environment_tag": key.get("environment_tag"),
-                "has_custom_config": has_custom,
+                "has_custom_config": key_has_custom,
                 "config": config,
                 "created_at": key.get("created_at"),
             })
 
+        return {"users": users_rate_limits, "has_more": q_has_more}
+
+    try:
+        result = await asyncio.to_thread(
+            _fetch_users_rate_limits_sync, limit, offset, user_id, has_custom_config
+        )
+
         return {
             "status": "success",
-            "total": len(users_rate_limits),
-            "users": users_rate_limits,
+            "total": len(result["users"]),
+            "users": result["users"],
             "pagination": {
                 "limit": limit,
                 "offset": offset,
-                "has_more": has_more,
+                "has_more": result["has_more"],
             },
             "filters": {
                 "user_id": user_id,

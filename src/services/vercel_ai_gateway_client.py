@@ -1,13 +1,20 @@
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
+from src.cache import _vercel_ai_gateway_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Constants
+MODALITY_TEXT_TO_TEXT = "text->text"
 
 # Standard timeout for Vercel AI Gateway
 VERCEL_TIMEOUT = httpx.Timeout(
@@ -283,3 +290,150 @@ def get_provider_pricing_for_vercel_model(model_id: str):
     except Exception as e:
         logger.debug(f"Failed to get provider pricing for {model_id}: {e}")
         return None
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def normalize_vercel_model(model) -> dict | None:
+    """Normalize Vercel AI Gateway model to catalog schema
+
+    Vercel models can originate from various providers (OpenAI, Google, Anthropic, etc.)
+    The gateway automatically routes requests to the appropriate provider.
+    Pricing is dynamically fetched from the underlying provider's pricing data.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    # Extract model ID
+    provider_model_id = getattr(model, "id", None)
+    if not provider_model_id:
+        logger.warning("Vercel model missing 'id' field: %s", sanitize_for_logging(str(model)))
+        return None
+
+    # Determine provider from model ID
+    # Models come in formats like "openai/gpt-4", "google/gemini-pro", etc.
+    if "/" in provider_model_id:
+        provider_slug = provider_model_id.split("/")[0]
+        raw_display_name = provider_model_id.split("/")[1]
+    else:
+        provider_slug = "vercel"
+        raw_display_name = provider_model_id
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
+
+    # Get description - Vercel doesn't provide this, so we create one
+    description = getattr(model, "description", None) or "Model available through Vercel AI Gateway"
+
+    # Get context length if available
+    context_length = getattr(model, "context_length", 4096)
+
+    # Get created date if available
+    created = getattr(model, "created_at", None)
+
+    # Fetch pricing dynamically from Vercel or underlying provider
+    pricing = get_vercel_model_pricing(provider_model_id)
+
+    normalized = {
+        "id": provider_model_id,
+        "slug": f"vercel/{provider_model_id}",
+        "canonical_slug": f"vercel/{provider_model_id}",
+        "hugging_face_id": None,
+        "name": display_name,
+        "created": created,
+        "description": description,
+        "context_length": context_length,
+        "architecture": {
+            "modality": MODALITY_TEXT_TO_TEXT,
+            "input_modalities": ["text"],
+            "output_modalities": ["text"],
+            "instruct_type": "chat",
+        },
+        "pricing": pricing,
+        "per_request_limits": None,
+        "supported_parameters": [],
+        "default_parameters": {},
+        "provider_slug": provider_slug,
+        "provider_site_url": "https://vercel.com/ai-gateway",
+        "model_logo_url": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/vercel.svg",
+        "source_gateway": "vercel-ai-gateway",
+    }
+
+    return enrich_model_with_pricing(normalized, "vercel-ai-gateway")
+
+
+def get_vercel_model_pricing(model_id: str) -> dict:
+    """Get pricing for a Vercel AI Gateway model
+
+    Fetches pricing from Vercel or the underlying provider.
+    Falls back to default zero pricing if unavailable.
+
+    Args:
+        model_id: Model identifier (e.g., "openai/gpt-4")
+
+    Returns:
+        dict with 'prompt', 'completion', 'request', and 'image' pricing fields
+    """
+    try:
+        # Attempt to fetch pricing from Vercel or underlying provider
+        pricing_data = fetch_model_pricing_from_vercel(model_id)
+
+        if pricing_data:
+            # Normalize to standard schema with default zeros for missing fields
+            return {
+                "prompt": str(pricing_data.get("prompt", "0")),
+                "completion": str(pricing_data.get("completion", "0")),
+                "request": str(pricing_data.get("request", "0")),
+                "image": str(pricing_data.get("image", "0")),
+            }
+    except Exception as e:
+        logger.debug(
+            "Failed to fetch Vercel pricing for %s: %s",
+            sanitize_for_logging(model_id),
+            sanitize_for_logging(str(e)),
+        )
+
+    # Fallback: return default zero pricing
+    return {
+        "prompt": "0",
+        "completion": "0",
+        "request": "0",
+        "image": "0",
+    }
+
+
+def fetch_models_from_vercel_ai_gateway():
+    """Fetch models from Vercel AI Gateway via OpenAI-compatible API
+
+    Vercel AI Gateway provides access to models from multiple providers
+    through a unified OpenAI-compatible endpoint.
+    """
+    try:
+        # Check if API key is configured
+        if not Config.VERCEL_AI_GATEWAY_API_KEY:
+            logger.warning("Vercel AI Gateway API key not configured - skipping model fetch")
+            return []
+
+        client = get_vercel_ai_gateway_client()
+        response = client.models.list()
+
+        if not response or not hasattr(response, "data"):
+            logger.warning("No models returned from Vercel AI Gateway")
+            return []
+
+        # Normalize models and filter out None (models without pricing)
+        normalized_models = [
+            m for m in (normalize_vercel_model(model) for model in response.data if model) if m
+        ]
+
+        _vercel_ai_gateway_models_cache["data"] = normalized_models
+        _vercel_ai_gateway_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        logger.info(f"Fetched {len(normalized_models)} models from Vercel AI Gateway")
+        return _vercel_ai_gateway_models_cache["data"]
+    except Exception as e:
+        logger.error(
+            "Failed to fetch models from Vercel AI Gateway: %s", sanitize_for_logging(str(e))
+        )
+        return []

@@ -259,17 +259,17 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
     if not raw_id:
         return None
 
-    model_id = _cleanup_model_id(str(raw_id))
+    provider_model_id = _cleanup_model_id(str(raw_id))
     provider_slug = (
         payload.get("provider_slug")
         or payload.get("provider")
         or payload.get("owned_by")
-        or (model_id.split("/")[0] if "/" in model_id else "novita")
+        or (provider_model_id.split("/")[0] if "/" in provider_model_id else "novita")
     )
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "novita"
 
     # Get and clean display name (remove colons, parentheses, etc.)
-    raw_display_name = payload.get("display_name") or payload.get("name") or model_id
+    raw_display_name = payload.get("display_name") or payload.get("name") or provider_model_id
     display_name = clean_model_name(raw_display_name)
     description = payload.get("description") or f"Novita hosted model '{display_name}'."
     context_length = (
@@ -289,9 +289,9 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
     }
 
     normalized = {
-        "id": model_id,
-        "slug": model_id,
-        "canonical_slug": model_id,
+        "id": provider_model_id,
+        "slug": provider_model_id,
+        "canonical_slug": provider_model_id,
         "hugging_face_id": payload.get("hugging_face_id"),
         "name": display_name,
         "created": payload.get("created"),
@@ -299,7 +299,6 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
         "context_length": context_length,
         "architecture": normalized_architecture,
         "pricing": _normalize_pricing(payload.get("pricing")),
-        "top_provider": None,
         "per_request_limits": payload.get("limits") or payload.get("rate_limits"),
         "supported_parameters": _extract_supported_parameters(payload),
         "default_parameters": payload.get("default_parameters") or {},

@@ -681,3 +681,26 @@ async def run_comprehensive_check(
             results["unconfigured"] += 1
 
     return results
+
+
+# Stub functions for backward compatibility
+# TODO: Implement proper gateway error tracking if needed
+def set_gateway_error(gateway_name: str, error_message: str) -> None:
+    """
+    Set error state for a gateway (stub for backward compatibility).
+
+    Args:
+        gateway_name: Name of the gateway
+        error_message: Error message to log
+    """
+    logger.warning(f"Gateway {gateway_name} error: {error_message}")
+
+
+def clear_gateway_error(gateway_name: str) -> None:
+    """
+    Clear error state for a gateway (stub for backward compatibility).
+
+    Args:
+        gateway_name: Name of the gateway
+    """
+    logger.debug(f"Gateway {gateway_name} error cleared")

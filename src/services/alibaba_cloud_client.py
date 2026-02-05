@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Callable
+from datetime import datetime, timezone
 from threading import Lock
 from typing import TypeVar
 
@@ -11,11 +12,17 @@ try:  # pragma: no cover - defensive import for differing OpenAI SDKs
 except ImportError:  # pragma: no cover
     AuthenticationError = Exception  # type: ignore[assignment]
 
+from src.cache import _alibaba_models_cache
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Constants
+MODALITY_TEXT_TO_TEXT = "text->text"
 
 _REGION_ENDPOINTS = {
     "china": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -389,3 +396,194 @@ def validate_stream_chunk(chunk):
     except Exception as e:
         logger.error(f"Error validating stream chunk: {e}")
         return False
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def _is_alibaba_quota_error_cached() -> bool:
+    """Check if we're in a quota error backoff period.
+
+    Returns True if a quota error was recently recorded and we should skip
+    making API calls to avoid log spam.
+    """
+    if not _alibaba_models_cache.get("quota_error"):
+        return False
+
+    timestamp = _alibaba_models_cache.get("quota_error_timestamp")
+    if not timestamp:
+        return False
+
+    backoff = _alibaba_models_cache.get("quota_error_backoff", 900)  # Default 15 min
+    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+    return age < backoff
+
+
+def _set_alibaba_quota_error():
+    """Record a quota error with backoff timing.
+
+    Note: We intentionally do NOT set the main cache timestamp here.
+    This ensures that the cache appears "stale" so that get_cached_models()
+    will call fetch_models_from_alibaba(), where the quota error backoff
+    check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
+    the 1-hour cache TTL would override our 15-minute quota error backoff.
+    """
+    _alibaba_models_cache["quota_error"] = True
+    _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
+    _alibaba_models_cache["data"] = []
+    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
+    # is called and can check the quota_error_backoff
+
+
+def _clear_alibaba_quota_error():
+    """Clear quota error state after successful fetch."""
+    _alibaba_models_cache["quota_error"] = False
+    _alibaba_models_cache["quota_error_timestamp"] = None
+
+
+def normalize_alibaba_model(model) -> dict | None:
+    """Normalize Alibaba Cloud model to catalog schema
+
+    Alibaba models use OpenAI-compatible naming conventions.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    model_id = getattr(model, "id", None)
+    if not model_id:
+        logger.warning("Alibaba Cloud model missing 'id': %s", sanitize_for_logging(str(model)))
+        return None
+
+    raw_model_name = getattr(model, "name", model_id)
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
+
+    try:
+        normalized = {
+            "id": model_id,
+            "slug": f"alibaba/{model_id}",
+            "canonical_slug": f"alibaba/{model_id}",
+            "hugging_face_id": None,
+            "name": model_name,
+            "created": getattr(model, "created_at", None),
+            "description": getattr(model, "description", "Model from Alibaba Cloud"),
+            "context_length": getattr(model, "context_length", 4096),
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": "0",
+                "completion": "0",
+                "request": "0",
+                "image": "0",
+            },
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "alibaba",
+            "provider_site_url": "https://dashscope.aliyun.com",
+            "model_logo_url": None,
+            "source_gateway": "alibaba",
+        }
+        return enrich_model_with_pricing(normalized, "alibaba-cloud")
+    except Exception as e:
+        logger.error("Failed to normalize Alibaba Cloud model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def fetch_models_from_alibaba():
+    """Fetch models from Alibaba Cloud (DashScope) via OpenAI-compatible API
+
+    Alibaba Cloud provides access to Qwen models through a unified OpenAI-compatible endpoint.
+    """
+    try:
+        # Check if API key is configured
+        if not (
+            Config.ALIBABA_CLOUD_API_KEY
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None)
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None)
+        ):
+            logger.debug("Alibaba Cloud API key not configured - skipping model fetch")
+            # Cache empty result to avoid repeated warnings
+            _alibaba_models_cache["data"] = []
+            _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+            return []
+
+        # Check if we're in quota error backoff period
+        if _is_alibaba_quota_error_cached():
+            logger.debug(
+                "Alibaba Cloud quota error in backoff period - skipping API call. "
+                "Will retry after backoff expires."
+            )
+            return _alibaba_models_cache.get("data", [])
+
+        response = list_alibaba_models()
+
+        if not response or not hasattr(response, "data"):
+            logger.warning("No models returned from Alibaba Cloud")
+            return []
+
+        # Normalize models (filter out None values from normalization failures)
+        normalized_models = [
+            m for m in (normalize_alibaba_model(model) for model in response.data if model) if m
+        ]
+
+        _alibaba_models_cache["data"] = normalized_models
+        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Clear any previous quota error state on success
+        _clear_alibaba_quota_error()
+
+        logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
+        return _alibaba_models_cache["data"]
+    except QuotaExceededError:
+        # Quota exceeded - cache the failure state to prevent repeated API calls
+        _set_alibaba_quota_error()
+        logger.warning(
+            "Alibaba Cloud quota exceeded. Caching empty result for %d seconds. "
+            "Please check your plan and billing details.",
+            _alibaba_models_cache.get("quota_error_backoff", 900),
+        )
+        return []
+    except Exception as e:
+        from src.cache import clear_gateway_error
+
+        error_msg = sanitize_for_logging(str(e))
+        # Check if it's a 401 authentication error
+        if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:
+            # Get the actual region being used
+            region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
+            if region == 'china':
+                current_endpoint = "dashscope.aliyuncs.com (China/Beijing)"
+                suggestion = (
+                    "If your key only works for the International endpoint, set "
+                    "ALIBABA_CLOUD_REGION='international' or provide "
+                    "ALIBABA_CLOUD_API_KEY_INTERNATIONAL."
+                )
+            else:
+                current_endpoint = "dashscope-intl.aliyuncs.com (International/Singapore)"
+                suggestion = (
+                    "If your key only works for the China endpoint, set "
+                    "ALIBABA_CLOUD_REGION='china' or provide ALIBABA_CLOUD_API_KEY_CHINA."
+                )
+
+            logger.error(
+                "Alibaba Cloud authentication failed (401): %s. "
+                "Action required: Verify API key is valid and matches endpoint region. "
+                "Currently using: %s. %s",
+                error_msg,
+                current_endpoint,
+                suggestion
+            )
+        elif (
+            Config.ALIBABA_CLOUD_API_KEY
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None)
+            or getattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", None)
+        ):
+            logger.error("Failed to fetch models from Alibaba Cloud: %s", error_msg)
+        else:
+            logger.debug("Alibaba Cloud not available (no API key configured)")
+        return []

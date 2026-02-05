@@ -245,6 +245,15 @@ class Config:
     # Z.AI Configuration (Zhipu AI - GLM models)
     ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
 
+    # NotDiamond AI Router Configuration
+    NOTDIAMOND_API_KEY = os.environ.get("NOTDIAMOND_API_KEY", "")
+    NOTDIAMOND_TIMEOUT = int(os.environ.get("NOTDIAMOND_TIMEOUT", "10"))
+    NOTDIAMOND_ENABLED = os.environ.get("NOTDIAMOND_ENABLED", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
     # Butter.dev LLM Response Caching Configuration
     # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
     # and serves cached responses to reduce costs and improve latency.
@@ -421,13 +430,14 @@ class Config:
     # Recommended: 15-30 minutes for balance between freshness and API rate limits
     MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
 
+    # Pricing Sync Configuration (Phase 2 → Phase 3, Issue #1038)
     # ============================================================================
     PRICING_SYNC_INTERVAL_HOURS = int(os.environ.get("PRICING_SYNC_INTERVAL_HOURS", "6"))
     PRICING_SYNC_PROVIDERS = [
         p.strip()
         for p in os.environ.get(
             "PRICING_SYNC_PROVIDERS",
-            "openrouter,featherless,nearai,alibaba-cloud"
+            "openrouter,featherless,nearai,alibaba-cloud,together,fireworks,groq,deepinfra,cerebras,novita,nebius,aihubmix"  # 4 → 12 providers (Issue #1038)
         ).split(",")
         if p.strip()
     ]

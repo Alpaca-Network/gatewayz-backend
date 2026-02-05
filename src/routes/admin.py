@@ -1923,7 +1923,7 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
 
         result = (
             client.table("chat_completion_requests")
-            .select("model_id, models!inner(id, model_name, model_id, providers!inner(name, slug))")
+            .select("model_id, models!inner(id, model_name, provider_model_id, providers!inner(name, slug))")
             .execute()
         )
 

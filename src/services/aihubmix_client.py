@@ -1,12 +1,19 @@
 import logging
+from datetime import datetime, timezone
 
 from openai import OpenAI
 
+from src.cache import _aihubmix_models_cache, clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
+
+# Constants
+MODALITY_TEXT_TO_TEXT = "text->text"
 
 
 def get_aihubmix_client():
@@ -195,3 +202,213 @@ def get_provider_pricing_for_aihubmix_model(model_id: str):
     except Exception as e:
         logger.debug(f"Failed to get provider pricing for {model_id}: {e}")
         return None
+
+
+# ============================================================================
+# Model Catalog Functions
+# ============================================================================
+
+
+def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
+    """Normalize AiHubMix model with pricing data from their API
+
+    AiHubMix API returns pricing in USD per 1K tokens:
+    - input: cost per 1K input tokens
+    - output: cost per 1K output tokens
+
+    We convert to per-token pricing (divide by 1000) to match the format used by
+    all other gateways (OpenRouter, DeepInfra, etc.) and expected by calculate_cost().
+
+    Example: $1.25/1K tokens -> $0.00125/token (same as OpenRouter format)
+
+    Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    # Support both 'id' and 'model_id' field names for API compatibility
+    provider_model_id = model.get("id") or model.get("model_id")
+    if not provider_model_id:
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        return None
+
+    try:
+        # Extract pricing from the API response
+        # AiHubMix returns pricing per 1K tokens
+        # Use pricing_normalization to convert to per-token format
+        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
+
+        pricing_data = model.get("pricing", {})
+
+        # Normalize pricing from per-1K to per-token format
+        normalized_pricing = normalize_pricing_dict(pricing_data, PricingFormat.PER_1K_TOKENS)
+
+        # Filter out models with zero pricing (free models can drain credits)
+        if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
+            logger.debug(f"Filtering out AiHubMix model {provider_model_id} with zero pricing")
+            return None
+
+        # Get model name, falling back to provider_model_id
+        model_name = model.get("name") or provider_model_id
+
+        # Get description from 'desc' or 'description' field
+        description = model.get("description") or model.get("desc") or "Model from AiHubMix"
+
+        # Determine input modalities from model data
+        input_modalities_str = model.get("input_modalities", "")
+        if input_modalities_str and "image" in input_modalities_str.lower():
+            input_modalities = ["text", "image"]
+        else:
+            input_modalities = ["text"]
+
+        normalized = {
+            "id": provider_model_id,
+            "slug": f"aihubmix/{provider_model_id}",
+            "canonical_slug": f"aihubmix/{provider_model_id}",
+            "hugging_face_id": None,
+            "name": model_name,
+            "created": model.get("created_at"),
+            "description": description,
+            "context_length": model.get("context_length") or 4096,
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": input_modalities,
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": normalized_pricing,
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "aihubmix",
+            "provider_site_url": "https://aihubmix.com",
+            "model_logo_url": None,
+            "source_gateway": "aihubmix",
+            "pricing_source": "aihubmix-api",
+        }
+        return normalized
+    except Exception as e:
+        logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def normalize_aihubmix_model(model) -> dict | None:
+    """Normalize AiHubMix model to catalog schema
+
+    AiHubMix models use OpenAI-compatible naming conventions.
+    Supports both object-style (attributes) and dict-style models.
+    """
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    # Support both attribute and dict access, and both 'id' and 'model_id' field names
+    if isinstance(model, dict):
+        provider_model_id = model.get("id") or model.get("model_id")
+        raw_model_name = model.get("name") or provider_model_id
+        created_at = model.get("created_at")
+        description = model.get("description") or model.get("desc") or "Model from AiHubMix"
+        context_length = model.get("context_length") or 4096
+    else:
+        provider_model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
+        raw_model_name = getattr(model, "name", provider_model_id)
+        created_at = getattr(model, "created_at", None)
+        description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
+        context_length = getattr(model, "context_length", 4096)
+
+    if not provider_model_id:
+        # Use debug level to avoid excessive logging during catalog refresh
+        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        return None
+
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    model_name = clean_model_name(raw_model_name)
+
+    try:
+        normalized = {
+            "id": provider_model_id,
+            "slug": f"aihubmix/{provider_model_id}",
+            "canonical_slug": f"aihubmix/{provider_model_id}",
+            "hugging_face_id": None,
+            "name": model_name,
+            "created": created_at,
+            "description": description,
+            "context_length": context_length,
+            "architecture": {
+                "modality": MODALITY_TEXT_TO_TEXT,
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+                "instruct_type": "chat",
+            },
+            "pricing": {
+                "prompt": "0",
+                "completion": "0",
+                "request": "0",
+                "image": "0",
+            },
+            "per_request_limits": None,
+            "supported_parameters": [],
+            "default_parameters": {},
+            "provider_slug": "aihubmix",
+            "provider_site_url": "https://aihubmix.com",
+            "model_logo_url": None,
+            "source_gateway": "aihubmix",
+        }
+        return enrich_model_with_pricing(normalized, "aihubmix")
+    except Exception as e:
+        logger.error("Failed to normalize AiHubMix model: %s", sanitize_for_logging(str(e)))
+        return None
+
+
+def fetch_models_from_aihubmix():
+    """Fetch models from AiHubMix via their public API
+
+    AiHubMix provides access to models through a unified OpenAI-compatible endpoint.
+    The API at https://aihubmix.com/api/v1/models includes pricing information.
+    """
+    try:
+        import requests
+
+        # Fetch from AiHubMix public API which includes pricing
+        response = requests.get(
+            "https://aihubmix.com/api/v1/models",
+            timeout=30,
+            headers={"Accept": "application/json"},
+        )
+
+        if response.status_code != 200:
+            error_msg = f"AiHubMix API returned status {response.status_code}"
+            logger.warning(error_msg)
+            set_gateway_error("aihubmix", error_msg)
+            return []
+
+        data = response.json()
+        models_data = data.get("data", [])
+
+        if not models_data:
+            logger.warning("No models returned from AiHubMix")
+            return []
+
+        # Normalize models and filter out None (models without valid pricing)
+        normalized_models = [
+            m
+            for m in (normalize_aihubmix_model_with_pricing(model) for model in models_data if model)
+            if m
+        ]
+
+        _aihubmix_models_cache["data"] = normalized_models
+        _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
+
+        # Clear error state on success
+        clear_gateway_error("aihubmix")
+
+        logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
+        return _aihubmix_models_cache["data"]
+    except requests.exceptions.Timeout as e:
+        error_msg = f"AiHubMix API timeout: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
+        return []
+    except Exception as e:
+        error_msg = f"Failed to fetch models from AiHubMix: {sanitize_for_logging(str(e))}"
+        logger.error(error_msg)
+        set_gateway_error("aihubmix", error_msg)
+        return []

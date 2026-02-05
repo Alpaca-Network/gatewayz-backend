@@ -785,10 +785,14 @@ def deduct_credits(
 
         # Check sufficiency
         if balance_before < tokens:
+            # SECURITY: Sanitize exact credit amounts from error messages
+            # Round to nearest $0.01 to avoid exposing precise financial data in logs
+            balance_rounded = round(balance_before, 2)
+            required_rounded = round(tokens, 2)
+
             raise ValueError(
-                f"Insufficient credits. Current: ${balance_before:.6f} "
-                f"(allowance: ${allowance_before:.6f}, purchased: ${purchased_before:.6f}), "
-                f"Required: ${tokens:.6f}"
+                f"Insufficient credits. Current balance: ~${balance_rounded:.2f}, "
+                f"Required: ~${required_rounded:.2f}. Please add credits to continue."
             )
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
@@ -830,9 +834,14 @@ def deduct_credits(
             else:
                 current_balance = "unknown"
 
+            # SECURITY: Sanitize credit amounts in concurrent modification errors too
+            current_rounded = round(float(current_balance), 2) if isinstance(current_balance, (int, float)) else "unknown"
+            required_rounded = round(tokens, 2)
+
             raise ValueError(
-                f"Failed to update user balance due to concurrent modification. "
-                f"Current balance: {current_balance}, Required: ${tokens:.6f}. Please retry."
+                f"Failed to update balance due to concurrent modification. "
+                f"Current balance: ~${current_rounded:.2f if isinstance(current_rounded, float) else ''}{current_rounded if not isinstance(current_rounded, float) else ''}, "
+                f"Required: ~${required_rounded:.2f}. Please retry."
             )
 
         # Log the transaction with breakdown (negative amount for deduction)

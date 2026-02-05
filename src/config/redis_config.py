@@ -17,14 +17,19 @@ class RedisConfig:
     """Redis configuration and connection management"""
 
     def __init__(self):
+        # Get Redis URL from environment
+        # Priority: REDIS_URL (full connection string) > localhost fallback
+        # Note: RAILWAY_SERVICE_REDIS_URL is just a hostname, not a full URL, so we use REDIS_URL
         self.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         self.redis_password = os.environ.get("REDIS_PASSWORD")
         self.redis_host = os.environ.get("REDIS_HOST", "localhost")
         self.redis_port = int(os.environ.get("REDIS_PORT", "6379"))
         self.redis_db = int(os.environ.get("REDIS_DB", "0"))
         self.redis_max_connections = int(os.environ.get("REDIS_MAX_CONNECTIONS", "50"))
+        # Reduced timeouts to fail fast - with working Redis these should be quick
+        # If Redis is slow, we fall back to local cache gracefully
         self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
-        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
+        self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "3"))
         self.redis_retry_on_timeout = (
             os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
         )
@@ -37,15 +42,21 @@ class RedisConfig:
         if self._pool is None:
             # Parse Redis URL if it contains connection details
             if self.redis_url and "://" in self.redis_url:
-                # Use URL-based connection for Redis Cloud
-                self._pool = ConnectionPool.from_url(
-                    self.redis_url,
-                    max_connections=self.redis_max_connections,
-                    socket_timeout=self.redis_socket_timeout,
-                    socket_connect_timeout=self.redis_socket_connect_timeout,
-                    retry_on_timeout=self.redis_retry_on_timeout,
-                    decode_responses=True,
-                )
+                # Use URL-based connection for Redis Cloud (Upstash, Railway, etc.)
+                # For Upstash with TLS (rediss://), we need to disable SSL cert verification
+                connection_kwargs = {
+                    "max_connections": self.redis_max_connections,
+                    "socket_timeout": self.redis_socket_timeout,
+                    "socket_connect_timeout": self.redis_socket_connect_timeout,
+                    "retry_on_timeout": self.redis_retry_on_timeout,
+                    "decode_responses": True,
+                }
+
+                # Add SSL configuration for rediss:// URLs (Upstash)
+                if self.redis_url.startswith("rediss://"):
+                    connection_kwargs["ssl_cert_reqs"] = None  # Don't verify SSL cert
+
+                self._pool = ConnectionPool.from_url(self.redis_url, **connection_kwargs)
             else:
                 # Use individual parameters for local Redis
                 self._pool = ConnectionPool(
@@ -72,7 +83,9 @@ class RedisConfig:
                 self._client.ping()
                 logger.info("Redis connection established successfully")
             except Exception as e:
-                logger.warning(f"Redis connection failed: {e}. Falling back to local cache.")
+                # Log at debug level - this is expected behavior in dev/environments without Redis
+                # The system gracefully falls back to local memory cache
+                logger.debug(f"Redis unavailable: {e}. Using local memory cache fallback.")
                 self._client = None
         return self._client
 

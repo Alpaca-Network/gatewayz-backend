@@ -163,6 +163,15 @@ credits_used = get_or_create_metric(
     ["provider", "model"],
 )
 
+# ==================== Pricing Metrics ====================
+# Track when default pricing is used (potential under-billing)
+default_pricing_usage_counter = get_or_create_metric(
+    Counter,
+    "gatewayz_default_pricing_usage_total",
+    "Count of requests using default pricing (pricing data not found). High values indicate missing pricing data.",
+    ["model"],
+)
+
 # ==================== Cost Tracking Metrics ====================
 # Track actual USD costs for billing and budget monitoring
 api_cost_usd_total = get_or_create_metric(
@@ -186,6 +195,51 @@ cost_per_1k_tokens = get_or_create_metric(
     "Cost per 1000 tokens in USD",
     ["provider", "model", "token_type"],  # token_type: input, output
     buckets=(0.0001, 0.001, 0.01, 0.1, 1.0, 10.0),
+)
+
+# ==================== Catalog Cache Metrics ====================
+# Track catalog response caching performance for monitoring cache effectiveness
+catalog_cache_hits = get_or_create_metric(
+    Counter,
+    "catalog_cache_hits_total",
+    "Total catalog cache hits (successful cache retrievals)",
+    ["gateway"],  # gateway: openrouter, anthropic, groq, all, etc.
+)
+
+catalog_cache_misses = get_or_create_metric(
+    Counter,
+    "catalog_cache_misses_total",
+    "Total catalog cache misses (cache not found, fetch required)",
+    ["gateway"],
+)
+
+catalog_cache_size_bytes = get_or_create_metric(
+    Gauge,
+    "catalog_cache_size_bytes",
+    "Size of catalog cache in bytes per gateway",
+    ["gateway"],
+)
+
+catalog_cache_invalidations = get_or_create_metric(
+    Counter,
+    "catalog_cache_invalidations_total",
+    "Total catalog cache invalidation operations",
+    ["gateway", "reason"],  # reason: model_sync, manual, expired
+)
+
+# ==================== Read Replica Metrics ====================
+# Track read replica usage for monitoring database load distribution
+read_replica_queries_total = get_or_create_metric(
+    Counter,
+    "read_replica_queries_total",
+    "Total queries routed to read replica",
+    ["table", "status"],  # status: success, error, fallback_to_primary
+)
+
+read_replica_connection_errors = get_or_create_metric(
+    Counter,
+    "read_replica_connection_errors_total",
+    "Total read replica connection errors (fallback to primary)",
 )
 
 daily_cost_estimate = get_or_create_metric(
@@ -216,6 +270,51 @@ user_cost_by_plan = get_or_create_metric(
     "gatewayz_user_cost_by_plan_usd_total",
     "Total user costs by plan type in USD",
     ["plan_type"],  # free, trial, starter, professional, enterprise
+)
+
+# ==================== Credit Deduction Metrics ====================
+# Track credit deduction success/failure for billing reliability monitoring
+credit_deduction_total = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_total",
+    "Total credit deduction attempts",
+    ["status", "endpoint", "is_streaming"],  # status: success, failed, retried
+)
+
+credit_deduction_amount_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_amount_usd_total",
+    "Total USD amount of credit deductions",
+    ["status", "endpoint"],  # status: success, failed
+)
+
+credit_deduction_retry_count = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_deduction_retry_total",
+    "Total credit deduction retry attempts",
+    ["attempt_number", "endpoint"],  # attempt_number: 1, 2, 3
+)
+
+credit_deduction_latency = get_or_create_metric(
+    Histogram,
+    "gatewayz_credit_deduction_latency_seconds",
+    "Credit deduction operation latency",
+    ["endpoint", "is_streaming"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+streaming_background_task_failures = get_or_create_metric(
+    Counter,
+    "gatewayz_streaming_background_task_failures_total",
+    "Total streaming background task failures (potential missed credit deductions)",
+    ["failure_type", "endpoint"],  # failure_type: credit_deduction, activity_logging, etc.
+)
+
+missed_credit_deductions_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_missed_credit_deductions_usd_total",
+    "Total USD amount of potentially missed credit deductions due to failures",
+    ["reason"],  # reason: background_task_failure, retry_exhausted, etc.
 )
 
 # ==================== Database Metrics ====================
@@ -306,6 +405,43 @@ butter_cache_latency = get_or_create_metric(
     "Butter.dev request latency in seconds",
     ["provider", "cache_result"],
     buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
+# ==================== Circuit Breaker Metrics ====================
+# Metrics for tracking circuit breaker state and behavior
+circuit_breaker_state_transitions = get_or_create_metric(
+    Counter,
+    "circuit_breaker_state_transitions_total",
+    "Total circuit breaker state transitions",
+    ["provider", "from_state", "to_state"],
+)
+
+circuit_breaker_failures = get_or_create_metric(
+    Counter,
+    "circuit_breaker_failures_total",
+    "Total failures recorded by circuit breaker",
+    ["provider", "state"],
+)
+
+circuit_breaker_successes = get_or_create_metric(
+    Counter,
+    "circuit_breaker_successes_total",
+    "Total successes recorded by circuit breaker",
+    ["provider", "state"],
+)
+
+circuit_breaker_rejected_requests = get_or_create_metric(
+    Counter,
+    "circuit_breaker_rejected_requests_total",
+    "Total requests rejected by circuit breaker",
+    ["provider"],
+)
+
+circuit_breaker_current_state = get_or_create_metric(
+    Gauge,
+    "circuit_breaker_current_state",
+    "Current circuit breaker state (1=active state, 0=inactive state)",
+    ["provider", "state"],
 )
 
 butter_cache_errors = get_or_create_metric(
@@ -1244,6 +1380,57 @@ pricing_sync_price_changes_total = get_or_create_metric(
     ["provider"],
 )
 
+# Pricing validation metrics
+pricing_validation_total = get_or_create_metric(
+    Counter,
+    "pricing_validation_total",
+    "Total number of pricing validations performed",
+    ["model"],
+)
+
+pricing_validation_failures = get_or_create_metric(
+    Counter,
+    "pricing_validation_failures",
+    "Total number of pricing validation failures",
+    ["model", "reason"],
+)
+
+pricing_spike_detected_total = get_or_create_metric(
+    Counter,
+    "pricing_spike_detected_total",
+    "Total number of pricing spikes detected",
+    ["model", "price_type"],
+)
+
+pricing_bounds_violations_total = get_or_create_metric(
+    Counter,
+    "pricing_bounds_violations_total",
+    "Total number of pricing bounds violations",
+    ["model", "violation_type"],
+)
+
+# Pricing health monitoring metrics
+pricing_staleness_hours = get_or_create_metric(
+    Gauge,
+    "pricing_staleness_hours",
+    "Hours since last pricing update",
+    [],
+)
+
+models_using_default_pricing = get_or_create_metric(
+    Gauge,
+    "models_using_default_pricing",
+    "Number of models currently using default pricing",
+    [],
+)
+
+pricing_health_status = get_or_create_metric(
+    Gauge,
+    "pricing_health_status",
+    "Overall pricing system health status (0=unknown, 1=healthy, 2=warning, 3=critical)",
+    [],
+)
+
 
 # ==================== Helper Functions for Pricing Sync ====================
 
@@ -1311,6 +1498,270 @@ def set_pricing_sync_job_queue_size(status: str, count: int):
 def track_pricing_sync_job(duration: float, status: str):
     """Track pricing sync background job duration."""
     pricing_sync_job_duration_seconds.labels(status=status).observe(duration)
+
+
+# ==================== Code Router Metrics ====================
+# Metrics for the code-optimized prompt router
+
+code_router_requests_total = get_or_create_metric(
+    Counter,
+    "code_router_requests_total",
+    "Total code routing requests",
+    ["task_category", "complexity", "mode", "selected_model", "selected_tier"],
+)
+
+code_router_latency_seconds = get_or_create_metric(
+    Histogram,
+    "code_router_latency_seconds",
+    "Code router decision latency in seconds (target: <2ms)",
+    buckets=(0.0005, 0.001, 0.002, 0.005, 0.01, 0.025, 0.05, 0.1),
+)
+
+code_task_success_total = get_or_create_metric(
+    Counter,
+    "code_task_success_total",
+    "Successful code task completions",
+    ["task_category", "model", "tier"],
+)
+
+code_task_retry_total = get_or_create_metric(
+    Counter,
+    "code_task_retry_total",
+    "Code tasks requiring retry/regeneration",
+    ["task_category", "model", "tier", "retry_reason"],
+)
+
+code_router_savings_dollars = get_or_create_metric(
+    Counter,
+    "code_router_savings_dollars_total",
+    "Dollars saved by code routing optimization",
+    ["baseline", "task_category"],
+)
+
+code_router_tier_distribution = get_or_create_metric(
+    Counter,
+    "code_router_tier_distribution_total",
+    "Distribution of tier selections by task category",
+    ["task_category", "tier", "mode"],
+)
+
+code_router_quality_gate_triggered = get_or_create_metric(
+    Counter,
+    "code_router_quality_gate_triggered_total",
+    "Times quality gate prevented tier downgrade",
+    ["task_category", "requested_tier", "enforced_tier"],
+)
+
+code_router_classification_confidence = get_or_create_metric(
+    Histogram,
+    "code_router_classification_confidence",
+    "Classification confidence distribution",
+    ["task_category"],
+    buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+code_router_fallback_total = get_or_create_metric(
+    Counter,
+    "code_router_fallback_total",
+    "Times fallback model was used",
+    ["reason"],
+)
+
+
+# ==================== General Router Metrics ====================
+
+general_router_requests_total = get_or_create_metric(
+    Counter,
+    "general_router_requests_total",
+    "Total general routing requests",
+    ["mode", "selected_model", "provider"],
+)
+
+general_router_latency_seconds = get_or_create_metric(
+    Histogram,
+    "general_router_latency_seconds",
+    "General router decision latency in seconds",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2),
+)
+
+general_router_notdiamond_calls_total = get_or_create_metric(
+    Counter,
+    "general_router_notdiamond_calls_total",
+    "NotDiamond API calls",
+    ["status", "mode"],
+)
+
+general_router_notdiamond_latency_seconds = get_or_create_metric(
+    Histogram,
+    "general_router_notdiamond_latency_seconds",
+    "NotDiamond API latency",
+    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1),
+)
+
+general_router_fallback_total = get_or_create_metric(
+    Counter,
+    "general_router_fallback_total",
+    "Fallback model usage",
+    ["reason", "mode"],
+)
+
+general_router_confidence = get_or_create_metric(
+    Histogram,
+    "general_router_confidence",
+    "NotDiamond confidence scores",
+    ["mode"],
+    buckets=(0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0),
+)
+
+
+# ==================== Code Router Helper Functions ====================
+
+
+def track_code_routing_request(
+    task_category: str,
+    complexity: str,
+    mode: str,
+    selected_model: str,
+    selected_tier: int,
+    latency_seconds: float,
+    confidence: float,
+):
+    """
+    Track a code routing request in Prometheus metrics.
+
+    Args:
+        task_category: Classified task category
+        complexity: Classified complexity
+        mode: Routing mode used
+        selected_model: Selected model ID
+        selected_tier: Selected tier number
+        latency_seconds: Routing latency in seconds
+        confidence: Classification confidence
+    """
+    code_router_requests_total.labels(
+        task_category=task_category,
+        complexity=complexity,
+        mode=mode,
+        selected_model=selected_model,
+        selected_tier=str(selected_tier),
+    ).inc()
+
+    code_router_latency_seconds.observe(latency_seconds)
+
+    code_router_tier_distribution.labels(
+        task_category=task_category,
+        tier=str(selected_tier),
+        mode=mode,
+    ).inc()
+
+    code_router_classification_confidence.labels(
+        task_category=task_category,
+    ).observe(confidence)
+
+
+# ==================== General Router Helper Functions ====================
+
+
+def track_general_router_request(
+    mode: str,
+    selected_model: str,
+    provider: str,
+    latency_seconds: float,
+    confidence: float,
+):
+    """
+    Track general router request.
+
+    Args:
+        mode: Routing mode (balanced, quality, cost, latency)
+        selected_model: Selected model ID
+        provider: Provider name
+        latency_seconds: Routing latency in seconds
+        confidence: NotDiamond confidence score
+    """
+    general_router_requests_total.labels(
+        mode=mode,
+        selected_model=selected_model,
+        provider=provider,
+    ).inc()
+
+    general_router_latency_seconds.observe(latency_seconds)
+
+    if confidence > 0:
+        general_router_confidence.labels(mode=mode).observe(confidence)
+
+
+def track_notdiamond_api_call(status: str, mode: str, latency_seconds: float):
+    """
+    Track NotDiamond API call.
+
+    Args:
+        status: Call status (success, error)
+        mode: Routing mode
+        latency_seconds: API call latency in seconds
+    """
+    general_router_notdiamond_calls_total.labels(
+        status=status,
+        mode=mode,
+    ).inc()
+
+    general_router_notdiamond_latency_seconds.observe(latency_seconds)
+
+
+def track_general_router_fallback(reason: str, mode: str):
+    """
+    Track fallback usage.
+
+    Args:
+        reason: Fallback reason (disabled, model_unavailable, exception)
+        mode: Routing mode
+    """
+    general_router_fallback_total.labels(
+        reason=reason,
+        mode=mode,
+    ).inc()
+
+
+def track_code_task_success(task_category: str, model: str, tier: int):
+    """Track successful code task completion."""
+    code_task_success_total.labels(
+        task_category=task_category,
+        model=model,
+        tier=str(tier),
+    ).inc()
+
+
+def track_code_task_retry(task_category: str, model: str, tier: int, retry_reason: str):
+    """Track code task retry/regeneration."""
+    code_task_retry_total.labels(
+        task_category=task_category,
+        model=model,
+        tier=str(tier),
+        retry_reason=retry_reason,
+    ).inc()
+
+
+def track_code_router_savings(baseline: str, task_category: str, savings_usd: float):
+    """Track cost savings from code routing."""
+    if savings_usd > 0:
+        code_router_savings_dollars.labels(
+            baseline=baseline,
+            task_category=task_category,
+        ).inc(savings_usd)
+
+
+def track_quality_gate_triggered(task_category: str, requested_tier: int, enforced_tier: int):
+    """Track when quality gate prevents tier downgrade."""
+    code_router_quality_gate_triggered.labels(
+        task_category=task_category,
+        requested_tier=str(requested_tier),
+        enforced_tier=str(enforced_tier),
+    ).inc()
+
+
+def track_code_router_fallback(reason: str):
+    """Track when fallback model is used."""
+    code_router_fallback_total.labels(reason=reason).inc()
 
 
 def get_metrics_summary() -> dict:

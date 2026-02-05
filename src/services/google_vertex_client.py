@@ -31,6 +31,7 @@ import httpx
 
 from src.config import Config
 from datetime import UTC
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -1482,9 +1483,9 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         # Extract model name from the full resource name
         # Format: publishers/google/models/gemini-2.0-flash
         name = api_model.get("name", "")
-        model_id = name.split("/")[-1] if "/" in name else name
+        provider_model_id = name.split("/")[-1] if "/" in name else name
 
-        if not model_id:
+        if not provider_model_id:
             return None
 
         # Skip non-generative models (embeddings handled separately, imagen, etc.)
@@ -1494,12 +1495,14 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
             "streamGenerateContent"
         ):
             # Check if it's an embedding model we want to include
-            if not supported_actions.get("computeTokens") and "embedding" not in model_id.lower():
+            if not supported_actions.get("computeTokens") and "embedding" not in provider_model_id.lower():
                 return None
 
         # Get version info
         version_info = api_model.get("versionId", "")
-        display_name = api_model.get("openSourceCategory", "") or model_id
+        raw_display_name = api_model.get("openSourceCategory", "") or provider_model_id
+        # Clean malformed model names (remove company prefix, parentheses, etc.)
+        display_name = clean_model_name(raw_display_name)
 
         # Extract from publisherModelTemplate if available
         template = api_model.get("publisherModelTemplate", {})
@@ -1516,11 +1519,11 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
 
         # Default context lengths based on model family
         if input_token_limit is None:
-            if "gemini-3" in model_id or "gemini-2.5" in model_id or "gemini-2.0" in model_id:
+            if "gemini-3" in provider_model_id or "gemini-2.5" in provider_model_id or "gemini-2.0" in provider_model_id:
                 input_token_limit = 1000000  # 1M context for newer models
-            elif "gemini-1.5" in model_id:
+            elif "gemini-1.5" in provider_model_id:
                 input_token_limit = 1000000
-            elif "gemma" in model_id:
+            elif "gemma" in provider_model_id:
                 input_token_limit = 8192
             else:
                 input_token_limit = 32768  # Safe default
@@ -1530,35 +1533,35 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         output_modalities = ["text"]
 
         # Gemini models support multimodal input
-        if "gemini" in model_id.lower():
+        if "gemini" in provider_model_id.lower():
             input_modalities = ["text", "image", "audio", "video"]
 
         # Check for image generation models
-        if "imagen" in model_id.lower() or "image" in model_id.lower():
+        if "imagen" in provider_model_id.lower() or "image" in provider_model_id.lower():
             output_modalities = ["image"]
 
         # Determine features based on model capabilities
         features = ["streaming"]
-        if "gemini" in model_id.lower():
+        if "gemini" in provider_model_id.lower():
             features.extend(["multimodal", "function_calling"])
-            if "pro" in model_id.lower() or "flash" in model_id.lower():
+            if "pro" in provider_model_id.lower() or "flash" in provider_model_id.lower():
                 features.append("thinking")
 
-        if "embedding" in model_id.lower():
+        if "embedding" in provider_model_id.lower():
             features = ["embeddings"]
             input_modalities = ["text"]
             output_modalities = ["embedding"]
 
         # Build description
-        description = api_model.get("description", "") or f"Google {model_id} model"
+        description = api_model.get("description", "") or f"Google {provider_model_id} model"
 
         # Create display name
-        name_display = api_model.get("displayName", "") or model_id.replace("-", " ").title()
+        name_display = api_model.get("displayName", "") or provider_model_id.replace("-", " ").title()
 
-        prefixed_slug = f"google-vertex/{model_id}"
+        prefixed_slug = f"google-vertex/{provider_model_id}"
 
         return {
-            "id": model_id,
+            "id": provider_model_id,
             "slug": prefixed_slug,
             "canonical_slug": prefixed_slug,
             "hugging_face_id": None,
@@ -1581,7 +1584,6 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
                 "web_search": None,
                 "internal_reasoning": None,
             },
-            "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [
                 "max_tokens",
@@ -1597,7 +1599,7 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
             "source_gateway": "google-vertex",
             "tags": features,
             "raw_google_vertex": {
-                "id": model_id,
+                "id": provider_model_id,
                 "name": name_display,
                 "version": version_info,
                 "api_response": api_model,
@@ -1660,7 +1662,6 @@ def _get_static_model_config() -> list[dict]:
                 "instruct_type": "chat",
             },
             "pricing": pricing,
-            "top_provider": None,
             "per_request_limits": None,
             "supported_parameters": [
                 "max_tokens",

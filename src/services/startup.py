@@ -256,16 +256,26 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
-        # PERF: Preload frequently accessed model metadata into cache
+        # PERF: Preload full catalog cache in background (single DB fetch)
+        # NOTE: Only loads the full catalog once. Individual gateway caches are
+        # populated lazily on first request (stale-while-revalidate pattern).
+        # The background refresh task (update_full_model_catalog_loop) keeps
+        # the full catalog warm every 14 minutes after the initial 60s delay.
         async def preload_hot_models_cache():
             try:
-                logger.info("🔥 Preloading hot model metadata...")
-                from src.services.models import get_all_models
+                # Wait a few seconds for DB connection pool to stabilize
+                await asyncio.sleep(5)
 
-                # Preload all models to warm up the cache
-                # This prevents cold cache misses on first requests
-                models = await asyncio.to_thread(get_all_models)
-                logger.info(f"✅ Preloaded {len(models)} models into cache")
+                logger.info("🔥 Preloading full model catalog cache...")
+                from src.services.model_catalog_cache import get_cached_full_catalog
+
+                # Single fetch: full catalog (Redis → local memory → DB fallback)
+                # This is the most important cache to warm since all other lookups
+                # can derive from it. Individual gateway caches warm lazily.
+                full_catalog = await asyncio.to_thread(get_cached_full_catalog)
+
+                catalog_count = len(full_catalog) if full_catalog else 0
+                logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
             except Exception as e:
                 logger.warning(f"Model cache preload warning: {e}")
 
@@ -401,6 +411,16 @@ async def lifespan(app):
 
         _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
 
+        # Initialize model catalog background refresh task (Prevent 499 Deadlocks)
+        async def init_model_catalog_refresh_background():
+            try:
+                from src.services.background_tasks import start_model_catalog_refresh_task
+                start_model_catalog_refresh_task()
+            except Exception as e:
+                logger.warning(f"Model catalog refresh initialization warning: {e}")
+
+        _create_background_task(init_model_catalog_refresh_background(), name="init_model_catalog_refresh")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -474,6 +494,13 @@ async def lifespan(app):
             logger.info("Router health snapshot task stopped")
         except Exception as e:
             logger.warning(f"Router health snapshot shutdown warning: {e}")
+
+        # Stop model catalog refresh task
+        try:
+            from src.services.background_tasks import stop_model_catalog_refresh_task
+            stop_model_catalog_refresh_task()
+        except Exception as e:
+            logger.warning(f"Model catalog refresh shutdown warning: {e}")
 
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API

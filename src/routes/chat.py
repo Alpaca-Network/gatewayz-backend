@@ -40,7 +40,7 @@ from src.services.stream_normalizer import (
 from src.utils.exceptions import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
-from src.utils.sentry_context import capture_payment_error, capture_provider_error
+from src.utils.sentry_context import capture_provider_error
 from src.services.anonymous_rate_limiter import (
     validate_anonymous_request,
     record_anonymous_request,
@@ -55,18 +55,13 @@ except ImportError:
     # Traceloop not available - provide no-op function
     def set_traceloop_properties(**kwargs):
         pass
-from src.services.butter_client import (
-    should_use_butter_cache,
-    ButterCacheTimer,
-    get_butter_request_metadata,
-    log_butter_cache_result,
-)
+
+
 from src.services.connection_pool import get_butter_pooled_async_client
 
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.adapters.chat import OpenAIChatAdapter
-from src.schemas.internal.chat import InternalChatRequest
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -79,6 +74,7 @@ try:
         is_available as check_braintrust_available,
         NoopSpan,
     )
+
     # Import traced decorator from braintrust SDK for route decoration
     from braintrust import traced
 
@@ -696,9 +692,7 @@ async def make_butter_proxied_stream(
         target_base_url=base_url,
     )
 
-    logger.info(
-        f"Butter.dev: Routing {provider}/{model} through cache proxy"
-    )
+    logger.info(f"Butter.dev: Routing {provider}/{model} through cache proxy")
 
     # Build request parameters
     request_params = {
@@ -735,6 +729,10 @@ async def make_butter_proxied_stream(
 # Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
 AUTO_ROUTE_MODEL_PREFIX = "router"
 AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
+
+# Code router constants
+CODE_ROUTER_PREFIX = "router:code"
+CODE_ROUTER_DEFAULT_MODEL = "zai/glm-4.7"  # Fallback model
 
 
 def mask_key(k: str) -> str:
@@ -887,117 +885,70 @@ async def _handle_credits_and_usage(
     prompt_tokens: int,
     completion_tokens: int,
     elapsed_ms: int,
+    is_streaming: bool = False,
 ) -> float:
     """
-    Centralized credit/trial handling logic (eliminates ~80 lines of duplication).
+    Centralized credit/trial handling logic.
+
+    This is a thin wrapper around the shared credit_handler module to maintain
+    backward compatibility while ensuring consistent billing across all endpoints.
+
+    Args:
+        is_streaming: Whether this is a streaming request (affects retry behavior)
 
     Returns: cost (float)
     """
-    cost = calculate_cost(model, prompt_tokens, completion_tokens)
-    is_trial = trial.get("is_trial", False)
+    from src.services.credit_handler import handle_credits_and_usage
 
-    # Defense-in-depth: Override is_trial flag if user has active subscription
-    # This protects against webhook delays or failures that leave is_trial=TRUE
-    if is_trial and user:
-        has_active_subscription = (
-            user.get("stripe_subscription_id") is not None and
-            user.get("subscription_status") == "active"
-        ) or user.get("tier") in ("pro", "max", "admin")
+    return await handle_credits_and_usage(
+        api_key=api_key,
+        user=user,
+        model=model,
+        trial=trial,
+        total_tokens=total_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        elapsed_ms=elapsed_ms,
+        endpoint="/v1/chat/completions",
+        is_streaming=is_streaming,
+    )
 
-        if has_active_subscription:
-            logger.warning(
-                "BILLING_OVERRIDE: User %s has is_trial=TRUE but has active subscription "
-                "(tier=%s, sub_status=%s, stripe_sub_id=%s). Forcing paid path.",
-                user.get("id"),
-                user.get("tier"),
-                user.get("subscription_status"),
-                user.get("stripe_subscription_id"),
-            )
-            is_trial = False  # Override to paid path
 
-    # Track trial usage (only for legitimate trial users, not paid users with stale flags)
-    if is_trial and not trial.get("is_expired"):
-        try:
-            await _to_thread(
-                track_trial_usage,
-                api_key,
-                total_tokens,
-                1,
-                model_id=model,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            )
-        except Exception as e:
-            logger.warning("Failed to track trial usage: %s", e)
+async def _handle_credits_and_usage_with_fallback(
+    api_key: str,
+    user: dict,
+    model: str,
+    trial: dict,
+    total_tokens: int,
+    prompt_tokens: int,
+    completion_tokens: int,
+    elapsed_ms: int,
+) -> tuple[float, bool]:
+    """
+    Credit handling for streaming background tasks with fallback on failure.
 
-    # Log transaction and deduct credits
-    if is_trial:
-        try:
-            await _to_thread(
-                log_api_usage_transaction,
-                api_key,
-                0.0,
-                f"API usage - {model} (Trial)",
-                {
-                    "model": model,
-                    "total_tokens": total_tokens,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "cost_usd": 0.0,
-                    "is_trial": True,
-                },
-                True,
-            )
-        except Exception as e:
-            logger.error(f"Failed to log trial API usage transaction: {e}", exc_info=True)
-            capture_payment_error(
-                e,
-                operation="trial_usage_logging",
-                user_id=user.get("id"),
-                details={"model": model, "tokens": total_tokens, "is_trial": True},
-            )
-    else:
-        try:
-            await _to_thread(
-                deduct_credits,
-                api_key,
-                cost,
-                f"API usage - {model}",
-                {
-                    "model": model,
-                    "total_tokens": total_tokens,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "cost_usd": cost,
-                },
-            )
-            await _to_thread(
-                record_usage,
-                user["id"],
-                api_key,
-                model,
-                total_tokens,
-                cost,
-                elapsed_ms,
-            )
-            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
-        except Exception as e:
-            logger.error("Usage recording error: %s", e)
-            capture_payment_error(
-                e,
-                operation="credit_deduction",
-                user_id=user.get("id"),
-                amount=cost,
-                details={
-                    "model": model,
-                    "tokens": total_tokens,
-                    "cost_usd": cost,
-                    "api_key": api_key[:10] + "..." if api_key else None,
-                },
-            )
-            raise  # Re-raise to ensure billing errors are not silently ignored
+    This wrapper is specifically designed for streaming requests where the response
+    has already been sent to the client. It:
+    1. Attempts credit deduction with full retry logic
+    2. On failure, logs for reconciliation and returns (cost, False)
+    3. Never raises - failures are tracked for manual reconciliation
 
-    return cost
+    Returns: tuple[float, bool] - (cost, success)
+    """
+    from src.services.credit_handler import handle_credits_and_usage_with_fallback
+
+    return await handle_credits_and_usage_with_fallback(
+        api_key=api_key,
+        user=user,
+        model=model,
+        trial=trial,
+        total_tokens=total_tokens,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        elapsed_ms=elapsed_ms,
+        endpoint="/v1/chat/completions",
+        is_streaming=True,
+    )
 
 
 async def _record_inference_metrics_and_health(
@@ -1198,8 +1149,12 @@ async def _process_stream_completion_background(
                     logger.debug(f"Failed to capture health metric: {e}")
                 return
 
-            # Handle credits and usage (centralized helper)
-            cost = await _handle_credits_and_usage(
+            # Handle credits and usage (centralized helper with fallback for streaming)
+            # Use the fallback handler which:
+            # 1. Has built-in retry logic with exponential backoff
+            # 2. Logs failures for reconciliation instead of crashing
+            # 3. Records metrics for monitoring credit deduction reliability
+            cost, credit_deduction_success = await _handle_credits_and_usage_with_fallback(
                 api_key=api_key,
                 user=user,
                 model=model,
@@ -1209,6 +1164,13 @@ async def _process_stream_completion_background(
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
             )
+
+            if not credit_deduction_success:
+                logger.warning(
+                    f"Credit deduction failed for streaming request. "
+                    f"User: {user.get('id')}, Model: {model}, Cost: ${cost:.6f}. "
+                    f"Logged for reconciliation."
+                )
 
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
@@ -1530,6 +1492,7 @@ async def stream_generator(
             )
 
         # If no usage was provided, estimate based on content
+        # WARNING: This estimation may result in inaccurate billing!
         if total_tokens == 0:
             # Rough estimate: 1 token ≈ 4 characters
             completion_tokens = max(1, len(accumulated_content) // 4)
@@ -1547,6 +1510,29 @@ async def stream_generator(
                             prompt_chars += len(item.get("text", ""))
             prompt_tokens = max(1, prompt_chars // 4)
             total_tokens = prompt_tokens + completion_tokens
+
+            # Log warning about token estimation (potential billing inaccuracy)
+            logger.warning(
+                f"[TOKEN_ESTIMATION] Provider {provider} did not return usage data for model {model}. "
+                f"Using character-based estimation: prompt_tokens={prompt_tokens}, "
+                f"completion_tokens={completion_tokens}, total_tokens={total_tokens}. "
+                f"Content length: {len(accumulated_content)} chars. "
+                f"This may result in inaccurate billing."
+            )
+
+            # Track metric for monitoring
+            try:
+                from src.services.prometheus_metrics import get_or_create_metric, Counter
+
+                token_estimation_counter = get_or_create_metric(
+                    Counter,
+                    "gatewayz_token_estimation_total",
+                    "Count of requests where token usage was estimated (not provided by provider)",
+                    ["provider", "model"],
+                )
+                token_estimation_counter.labels(provider=provider, model=model).inc()
+            except Exception:
+                pass  # Metrics not available
 
         elapsed = max(0.001, time.monotonic() - start_time)
 
@@ -1701,7 +1687,9 @@ async def chat_completions(
             if len(parts) == 2:
                 api_key = parts[1].strip()
             else:
-                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
+                logger.warning(
+                    f"Malformed Authorization header in testing mode: {auth_header[:20]}..."
+                )
 
     # Determine if this is an authenticated or anonymous request
     is_anonymous = api_key is None
@@ -1762,7 +1750,7 @@ async def chat_completions(
                                     "code": "anonymous_model_restricted",
                                     "allowed_models": ANONYMOUS_ALLOWED_MODELS[:5],
                                 }
-                            }
+                            },
                         )
                     else:
                         raise HTTPException(
@@ -1773,7 +1761,7 @@ async def chat_completions(
                                     "type": "rate_limit_exceeded",
                                     "code": "anonymous_daily_limit",
                                 }
-                            }
+                            },
                         )
 
                 user = None
@@ -2047,7 +2035,9 @@ async def chat_completions(
 
         # Store original model for response and routing logic
         original_model = req.model
-        is_auto_route = original_model and original_model.lower().startswith(AUTO_ROUTE_MODEL_PREFIX)
+        is_auto_route = original_model and original_model.lower().startswith(
+            AUTO_ROUTE_MODEL_PREFIX
+        )
 
         # === 2.3) Prompt-Level Routing (if model="auto") ===
         # This is a fail-open router - if it fails or times out, it returns a default cheap model
@@ -2090,8 +2080,12 @@ async def chat_completions(
                         logger.info(
                             "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
                             router_decision.selected_model,
-                            router_decision.classification.category.value if router_decision.classification else "unknown",
-                            router_decision.classification.confidence if router_decision.classification else 0,
+                            router_decision.classification.category.value
+                            if router_decision.classification
+                            else "unknown",
+                            router_decision.classification.confidence
+                            if router_decision.classification
+                            else 0,
                             router_decision.decision_time_ms,
                             router_decision.reason,
                         )
@@ -2104,6 +2098,153 @@ async def chat_completions(
                     )
                     # Use default model since original was an auto-route request
                     req.model = AUTO_ROUTE_DEFAULT_MODEL
+
+        # === 2.4) General Router (if model="router:general" or "gatewayz-general") ===
+        # NotDiamond-powered intelligent routing for general-purpose prompts
+        # Normalize model string to handle hyphenated aliases
+        from src.services.general_router import normalize_model_string
+
+        normalized_model = normalize_model_string(original_model) if original_model else original_model
+
+        # Check for general router
+        GENERAL_ROUTER_PREFIX = "router:general"
+        is_general_route = normalized_model and normalized_model.lower().startswith(GENERAL_ROUTER_PREFIX)
+
+        if is_general_route:
+            with tracker.stage("general_routing"):
+                try:
+                    from src.services.general_router import (
+                        parse_router_model_string as parse_general_router,
+                        route_general_prompt,
+                        get_routing_metadata as get_general_routing_metadata,
+                    )
+
+                    # Parse mode from model string
+                    is_general_router, router_mode = parse_general_router(
+                        normalized_model.lower()
+                    )
+
+                    if is_general_router:
+                        # Route using NotDiamond
+                        general_router_decision = await route_general_prompt(
+                            messages=messages,
+                            mode=router_mode,
+                            context=None,
+                            user_default_model=user.get("default_model") if user else None,
+                        )
+
+                        # Update model with routed selection
+                        req.model = general_router_decision["model_id"]
+
+                        logger.info(
+                            "General router selected model: %s (mode=%s, confidence=%.2f, time=%.2fms, fallback=%s)",
+                            general_router_decision["model_id"],
+                            general_router_decision["mode"],
+                            general_router_decision.get("confidence", 0),
+                            general_router_decision["routing_latency_ms"],
+                            general_router_decision.get("fallback_used", False),
+                        )
+
+                except Exception as e:
+                    # Fail open - use fallback
+                    logger.warning("General router failed: %s", str(e))
+                    try:
+                        from src.services.prometheus_metrics import track_general_router_fallback
+                        track_general_router_fallback(reason="exception", mode="balanced")
+                    except ImportError:
+                        # Prometheus metrics are optional; skip tracking if not available
+                        logger.debug("Prometheus metrics not available for general router fallback tracking")
+                    req.model = "anthropic/claude-sonnet-4"
+
+        # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
+        # Specialized router for code-related tasks with 2026 benchmark-optimized model selection
+        code_router_decision = None
+        # Use normalized_model for code router as well (supports gatewayz-code aliases)
+        is_code_route = normalized_model and normalized_model.lower().startswith(CODE_ROUTER_PREFIX)
+
+        if is_code_route:
+            with tracker.stage("code_routing"):
+                try:
+                    from src.services.code_router import (
+                        parse_router_model_string,
+                        route_code_prompt,
+                        get_routing_metadata,
+                    )
+
+                    # Parse the router mode from model string (use normalized model)
+                    is_code_router, router_mode = parse_router_model_string(
+                        normalized_model.lower()
+                    )
+
+                    if is_code_router:
+                        # Extract last user message for classification
+                        last_user_message = ""
+                        for msg in reversed(messages):
+                            if msg.get("role") == "user":
+                                content = msg.get("content", "")
+                                if isinstance(content, str):
+                                    last_user_message = content
+                                elif isinstance(content, list):
+                                    # Handle multi-part messages
+                                    for part in content:
+                                        if isinstance(part, dict) and part.get("type") == "text":
+                                            last_user_message = part.get("text", "")
+                                            break
+                                break
+
+                        # Validate: skip routing if no valid user message found
+                        if not last_user_message or not last_user_message.strip():
+                            logger.warning(
+                                "Code router: no valid user message found, using default model"
+                            )
+                            try:
+                                from src.services.prometheus_metrics import track_code_router_fallback
+                                track_code_router_fallback(reason="empty_message")
+                            except ImportError:
+                                # Prometheus metrics are optional - silently skip if not available
+                                pass
+                            req.model = CODE_ROUTER_DEFAULT_MODEL
+                        else:
+                            # Extract context from messages
+                            from src.services.code_classifier import get_classifier
+                            classifier = get_classifier()
+                            context = classifier.extract_context_from_messages(messages)
+
+                            # Route the code prompt
+                            code_router_decision = route_code_prompt(
+                                prompt=last_user_message,
+                                mode=router_mode,
+                                context=context,
+                                user_default_model=user.get("default_model") if user else None,
+                            )
+
+                            # Update model with routed selection
+                            req.model = code_router_decision["model_id"]
+
+                            logger.info(
+                                "Code router selected model: %s (tier=%d, category=%s, confidence=%.2f, time=%.2fms, mode=%s)",
+                                code_router_decision["model_id"],
+                                code_router_decision["tier"],
+                                code_router_decision["task_category"],
+                                code_router_decision["confidence"],
+                                code_router_decision["routing_latency_ms"],
+                                code_router_decision["mode"],
+                            )
+
+                except Exception as e:
+                    # Fail open - log warning and use default model
+                    logger.warning(
+                        "Code router failed, falling back to default: %s",
+                        str(e),
+                    )
+                    try:
+                        from src.services.prometheus_metrics import track_code_router_fallback
+                        track_code_router_fallback(reason="exception")
+                    except ImportError:
+                        # Prometheus metrics are optional - silently skip if not available
+                        pass
+                    # Use default code model since original was a code-route request
+                    req.model = CODE_ROUTER_DEFAULT_MODEL
 
         with tracker.stage("request_preparation"):
             optional = {}
@@ -2134,7 +2275,9 @@ async def chat_completions(
 
             provider_locked = not req_provider_missing
 
-            override_provider = detect_provider_from_model_id(original_model)
+            # Use routed model for provider detection when code routing is active
+            model_for_provider_detection = req.model if is_code_route and req.model else original_model
+            override_provider = detect_provider_from_model_id(model_for_provider_detection)
             if override_provider:
                 override_provider = override_provider.lower()
                 if override_provider == "hug":
@@ -2174,7 +2317,8 @@ async def chat_completions(
 
             if req_provider_missing:
                 # Try to detect provider from model ID using the transformation module
-                detected_provider = detect_provider_from_model_id(original_model)
+                # Use routed model when code routing is active
+                detected_provider = detect_provider_from_model_id(model_for_provider_detection)
                 if detected_provider:
                     provider = detected_provider
                     # Normalize provider aliases
@@ -2189,7 +2333,14 @@ async def chat_completions(
                     # Fallback to checking cached models
                     from src.services.models import get_cached_models
 
-                    # Try each provider with transformation
+                    # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
+                    # This prevents 499 errors caused by sequential DB fetches when cache is cold.
+                    # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
+                    import asyncio
+                    all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
+                    all_model_ids = {m.get("id") for m in all_models_catalog}
+
+                    # Try each provider with transformation against the in-memory set
                     for test_provider in [
                         "huggingface",
                         "featherless",
@@ -2198,8 +2349,7 @@ async def chat_completions(
                         "google-vertex",
                     ]:
                         transformed = transform_model_id(original_model, test_provider)
-                        provider_models = get_cached_models(test_provider) or []
-                        if any(m.get("id") == transformed for m in provider_models):
+                        if transformed in all_model_ids:
                             provider = test_provider
                             logger.info(
                                 f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
@@ -2207,10 +2357,14 @@ async def chat_completions(
                             break
                     # Otherwise default to onerouter (already set)
 
+            # Use the routed model (from code router or other routing logic) instead of original
+            # This ensures that routing decisions are actually applied downstream
+            effective_model = req.model if req.model else original_model
+
             provider_chain = build_provider_failover_chain(provider)
-            provider_chain = enforce_model_failover_rules(original_model, provider_chain)
-            provider_chain = filter_by_circuit_breaker(original_model, provider_chain)
-            model = original_model
+            provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
+            provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+            model = effective_model
 
         # Diagnostic logging for tools parameter
         if "tools" in optional:
@@ -2308,12 +2462,9 @@ async def chat_completions(
 
                     # Convert external OpenAI format to internal format
                     adapter = OpenAIChatAdapter()
-                    internal_request = adapter.to_internal_request({
-                        "messages": messages,
-                        "model": original_model,
-                        "stream": True,
-                        **optional
-                    })
+                    internal_request = adapter.to_internal_request(
+                        {"messages": messages, "model": original_model, "stream": True, **optional}
+                    )
 
                     # Create unified handler with user context
                     handler = ChatInferenceHandler(api_key, background_tasks)
@@ -2354,15 +2505,19 @@ async def chat_completions(
 
                 except Exception as exc:
                     # Map any errors to HTTPException
-                    logger.error(f"[Unified Handler] Streaming error: {type(exc).__name__}: {exc}", exc_info=True)
+                    logger.error(
+                        f"[Unified Handler] Streaming error: {type(exc).__name__}: {exc}",
+                        exc_info=True,
+                    )
                     if isinstance(exc, HTTPException):
                         raise
                     # Map provider-specific errors
                     from src.services.provider_failover import map_provider_error
+
                     http_exc = map_provider_error(
                         "onerouter",  # Default provider for error mapping
                         original_model,
-                        exc
+                        exc,
                     )
                     raise http_exc
             else:
@@ -2397,7 +2552,9 @@ async def chat_completions(
                         elif attempt_provider in PROVIDER_ROUTING:
                             # Use registry for all registered providers
                             stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
-                            stream = await _to_thread(stream_func, messages, request_model, **optional)
+                            stream = await _to_thread(
+                                stream_func, messages, request_model, **optional
+                            )
                         else:
                             # Default to OpenRouter with async streaming for performance
                             try:
@@ -2500,7 +2657,9 @@ async def chat_completions(
                                     request_id=request_id_var.get(),
                                 )
                         else:
-                            logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
+                            logger.error(
+                                "Unexpected upstream error (%s): %s", attempt_provider, exc
+                            )
                             # Capture unexpected errors to Sentry
                             capture_provider_error(
                                 exc,
@@ -2530,7 +2689,9 @@ async def chat_completions(
                             extended_chain = enforce_model_failover_rules(
                                 original_model, extended_chain, allow_payment_failover=True
                             )
-                            extended_chain = filter_by_circuit_breaker(original_model, extended_chain)
+                            extended_chain = filter_by_circuit_breaker(
+                                original_model, extended_chain
+                            )
                             # Find providers we haven't tried yet
                             new_providers = [p for p in extended_chain if p not in provider_chain]
                             if new_providers:
@@ -2561,12 +2722,9 @@ async def chat_completions(
 
                 # Convert external OpenAI format to internal format
                 adapter = OpenAIChatAdapter()
-                internal_request = adapter.to_internal_request({
-                    "messages": messages,
-                    "model": original_model,
-                    "stream": False,
-                    **optional
-                })
+                internal_request = adapter.to_internal_request(
+                    {"messages": messages, "model": original_model, "stream": False, **optional}
+                )
 
                 # Create unified handler with user context
                 handler = ChatInferenceHandler(api_key, background_tasks)
@@ -2600,7 +2758,9 @@ async def chat_completions(
                     )
                     trace_ctx.set_response_model(
                         response_model=model,
-                        finish_reason=processed.get("choices", [{}])[0].get("finish_reason") if processed.get("choices") else None,
+                        finish_reason=processed.get("choices", [{}])[0].get("finish_reason")
+                        if processed.get("choices")
+                        else None,
                         response_id=processed.get("id"),
                     )
                     if optional:
@@ -2619,12 +2779,20 @@ async def chat_completions(
 
                 # Record Prometheus metrics for model popularity tracking
                 inference_duration = time.time() - inference_start
-                model_inference_requests.labels(provider=provider, model=model, status="success").inc()
-                model_inference_duration.labels(provider=provider, model=model).observe(inference_duration)
+                model_inference_requests.labels(
+                    provider=provider, model=model, status="success"
+                ).inc()
+                model_inference_duration.labels(provider=provider, model=model).observe(
+                    inference_duration
+                )
                 if input_tokens > 0:
-                    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
+                    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+                        input_tokens
+                    )
                 if output_tokens > 0:
-                    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
+                    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+                        output_tokens
+                    )
 
                 logger.info(
                     f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
@@ -2632,9 +2800,11 @@ async def chat_completions(
 
             except Exception as exc:
                 # Record error metric for model popularity tracking
-                error_provider = provider if 'provider' in locals() else "onerouter"
-                error_model = model if 'model' in locals() else original_model
-                model_inference_requests.labels(provider=error_provider, model=error_model, status="error").inc()
+                error_provider = provider if "provider" in locals() else "onerouter"
+                error_model = model if "model" in locals() else original_model
+                model_inference_requests.labels(
+                    provider=error_provider, model=error_model, status="error"
+                ).inc()
 
                 # Map any errors to HTTPException
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
@@ -2642,11 +2812,8 @@ async def chat_completions(
                     raise
                 # Map provider-specific errors
                 from src.services.provider_failover import map_provider_error
-                http_exc = map_provider_error(
-                    error_provider,
-                    error_model,
-                    exc
-                )
+
+                http_exc = map_provider_error(error_provider, error_model, exc)
                 raise http_exc
         else:
             # Anonymous users: keep existing provider routing logic
@@ -2661,7 +2828,9 @@ async def chat_completions(
                 request_timeout = PROVIDER_TIMEOUTS.get(attempt_provider, DEFAULT_PROVIDER_TIMEOUT)
                 if request_timeout != DEFAULT_PROVIDER_TIMEOUT:
                     logger.debug(
-                        "Using extended timeout %ss for provider %s", request_timeout, attempt_provider
+                        "Using extended timeout %ss for provider %s",
+                        request_timeout,
+                        attempt_provider,
                     )
 
                 try:
@@ -2699,7 +2868,10 @@ async def chat_completions(
                             # Default to OpenRouter
                             resp_raw = await asyncio.wait_for(
                                 _to_thread(
-                                    make_openrouter_request_openai, messages, request_model, **optional
+                                    make_openrouter_request_openai,
+                                    messages,
+                                    request_model,
+                                    **optional,
                                 ),
                                 timeout=request_timeout,
                             )
@@ -2763,7 +2935,9 @@ async def chat_completions(
                         logger.warning("Upstream network error (%s): %s", attempt_provider, exc)
                     elif isinstance(exc, httpx.HTTPStatusError):
                         logger.debug(
-                            "Upstream HTTP error (%s): %s", attempt_provider, exc.response.status_code
+                            "Upstream HTTP error (%s): %s",
+                            attempt_provider,
+                            exc.response.status_code,
                         )
                     else:
                         logger.error("Unexpected upstream error (%s): %s", attempt_provider, exc)
@@ -2883,6 +3057,7 @@ async def chat_completions(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
+                is_streaming=False,
             )
             await _to_thread(increment_api_key_usage, api_key)
         else:
@@ -2998,6 +3173,15 @@ async def chat_completions(
         if not trial.get("is_trial", False):
             # If you can cheaply re-fetch balance, do it here; otherwise omit
             processed["gateway_usage"]["cost_usd"] = round(cost, 6)
+
+        # === 6.1) Attach code router metadata if code routing was used ===
+        if code_router_decision:
+            try:
+                from src.services.code_router import get_routing_metadata
+                routing_metadata = get_routing_metadata(code_router_decision)
+                processed["routing_metadata"] = routing_metadata
+            except Exception as e:
+                logger.debug(f"Failed to attach code routing metadata: {e}")
 
         # === 7) Log to Braintrust ===
         try:
@@ -3261,7 +3445,9 @@ async def unified_responses(
             if len(parts) == 2:
                 api_key = parts[1].strip()
             else:
-                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
+                logger.warning(
+                    f"Malformed Authorization header in testing mode: {auth_header[:20]}..."
+                )
 
     logger.info(
         "unified_responses start (request_id=%s, api_key=%s, model=%s)",
@@ -3535,7 +3721,14 @@ async def unified_responses(
                 # Fallback to checking cached models
                 from src.services.models import get_cached_models
 
-                # Try each provider with transformation
+                # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
+                # This prevents 499 errors caused by sequential DB fetches when cache is cold.
+                # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
+                import asyncio
+                all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
+                all_model_ids = {m.get("id") for m in all_models_catalog}
+
+                # Try each provider with transformation against the in-memory set
                 for test_provider in [
                     "huggingface",
                     "featherless",
@@ -3544,8 +3737,7 @@ async def unified_responses(
                     "google-vertex",
                 ]:
                     transformed = transform_model_id(original_model, test_provider)
-                    provider_models = get_cached_models(test_provider) or []
-                    if any(m.get("id") == transformed for m in provider_models):
+                    if transformed in all_model_ids:
                         provider = test_provider
                         logger.info(
                             "Auto-detected provider '%s' for model %s (transformed to %s)",
@@ -3952,12 +4144,9 @@ async def unified_responses(
 
             # Convert to OpenAI format for adapter
             adapter = OpenAIChatAdapter()
-            internal_request = adapter.to_internal_request({
-                "messages": messages,
-                "model": original_model,
-                "stream": False,
-                **optional
-            })
+            internal_request = adapter.to_internal_request(
+                {"messages": messages, "model": original_model, "stream": False, **optional}
+            )
 
             # Create unified handler with user context
             handler = ChatInferenceHandler(api_key, background_tasks)
@@ -3983,9 +4172,9 @@ async def unified_responses(
                 raise
             # Map provider-specific errors
             http_exc = map_provider_error(
-                provider if 'provider' in locals() else "onerouter",
-                model if 'model' in locals() else original_model,
-                exc
+                provider if "provider" in locals() else "onerouter",
+                model if "model" in locals() else original_model,
+                exc,
             )
             raise http_exc
 
@@ -4052,6 +4241,7 @@ async def unified_responses(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             elapsed_ms=int(elapsed * 1000),
+            is_streaming=False,
         )
 
         await _to_thread(increment_api_key_usage, api_key)

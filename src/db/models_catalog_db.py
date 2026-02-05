@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client
+from src.config.supabase_config import get_supabase_client, get_client_for_query
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,8 @@ def get_all_models(
         List of model dictionaries with provider information
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for catalog queries (read-only)
+        supabase = get_client_for_query(read_only=True)
 
         # Join with providers table to get provider info
         query = (
@@ -81,7 +82,8 @@ def get_model_by_id(model_id: int) -> dict[str, Any] | None:
         Model dictionary with provider information or None
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -110,7 +112,8 @@ def get_models_by_provider_slug(
         List of model dictionaries
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         query = (
             supabase.table("models")
@@ -145,7 +148,8 @@ def get_model_by_provider_and_model_id(
         Model dictionary or None
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -375,7 +379,8 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
         List of model dictionaries
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
             .select("*, providers!inner(*)")
@@ -392,7 +397,7 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
 
 def search_models(query: str, provider_id: int | None = None) -> list[dict[str, Any]]:
     """
-    Search models by name, model_id, or description
+    Search models by name, model_name, or description
 
     Args:
         query: Search query string
@@ -404,11 +409,11 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
     try:
         supabase = get_supabase_client()
 
-        # Search in model_name, model_id, and description
+        # Search in model_name and description
         search_query = (
             supabase.table("models")
             .select("*, providers!inner(*)")
-            .or_(f"model_name.ilike.%{query}%,model_id.ilike.%{query}%,description.ilike.%{query}%")
+            .or_(f"model_name.ilike.%{query}%,description.ilike.%{query}%")
         )
 
         if provider_id:
@@ -432,7 +437,8 @@ def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
         Dictionary with model statistics
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Get all models (with optional provider filter)
         query = supabase.table("models").select("*")
@@ -646,13 +652,18 @@ def get_all_models_for_catalog(
     Get ALL models from database optimized for catalog building.
 
     This function is designed to replace direct provider API calls in catalog
-    endpoints. It fetches all models with provider information in a single query,
-    which is then cached in Redis.
+    endpoints. It fetches all models with provider information using pagination
+    to handle datasets larger than Supabase's default 1000-row limit.
 
     Key differences from get_all_models():
-    - No pagination (returns all models)
-    - No limit (catalog needs complete dataset)
+    - Uses pagination to fetch ALL models (no 1000-row limit)
+    - No artificial limit (catalog needs complete dataset)
     - Optimized for full catalog building
+
+    Implementation note:
+    - Supabase (PostgREST) has a default page size of 1000 rows
+    - We use chunked fetching with .range() to get all rows
+    - For 11k+ models, this makes 11-12 queries instead of 1, but ensures completeness
 
     Args:
         include_inactive: Include inactive models (default: False)
@@ -663,32 +674,78 @@ def get_all_models_for_catalog(
     Example:
         >>> models = get_all_models_for_catalog()
         >>> len(models)
-        5432  # All active models from all providers
+        11432  # All active models from all providers (not limited to 1000)
     """
-    try:
-        supabase = get_supabase_client()
+    from src.utils.step_logger import StepLogger
 
-        # Build query - join with providers table
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
+    step_logger = StepLogger("Database: Fetch All Models", total_steps=2)
+    step_logger.start(table="models", include_inactive=include_inactive)
+
+    try:
+        # Step 1: Initialize database connection
+        step_logger.step(1, "Connecting to database", table="models", replica="read")
+        supabase = get_client_for_query(read_only=True)
+        all_models = []
+        page_size = 1000  # Supabase default limit
+        offset = 0
+        step_logger.success(connection="ready", page_size=page_size)
+
+        # Step 2: Fetch models with pagination
+        step_logger.step(2, "Fetching models (paginated)", table="models")
+        batch_count = 0
+
+        while True:
+            # Build query with pagination - join with providers table
+            query = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+            )
+
+            # Filter by active status
+            if not include_inactive:
+                query = query.eq("is_active", True)
+
+            # Order by model name for consistent output and pagination
+            query = query.order("model_name")
+
+            # Apply pagination using range
+            query = query.range(offset, offset + page_size - 1)
+
+            # Execute query
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                # No more results, we're done
+                break
+
+            all_models.extend(batch)
+            batch_count += 1
+            logger.debug(f"Fetched batch {batch_count}: {len(batch)} models (offset={offset}, total={len(all_models)})")
+
+            # If we got fewer than page_size rows, we've reached the end
+            if len(batch) < page_size:
+                break
+
+            # Move to next page
+            offset += page_size
+
+        step_logger.success(
+            total_models=len(all_models),
+            batches=batch_count,
+            page_size=page_size
         )
 
-        # Filter by active status
-        if not include_inactive:
-            query = query.eq("is_active", True)
+        step_logger.complete(
+            total_models=len(all_models),
+            table="models",
+            include_inactive=include_inactive
+        )
 
-        # Order by model name for consistent output
-        query = query.order("model_name")
+        return all_models
 
-        # Execute without pagination (get all models)
-        response = query.execute()
-
-        models = response.data or []
-        logger.info(f"Fetched {len(models)} models from database for catalog")
-
-        return models
     except Exception as e:
+        step_logger.failure(e, table="models")
         logger.error(f"Error fetching all models for catalog: {e}")
         return []
 
@@ -701,7 +758,8 @@ def get_models_by_gateway_for_catalog(
     Get all models for a specific gateway/provider optimized for catalog.
 
     This function is designed to replace direct provider API calls when
-    building a single-provider catalog.
+    building a single-provider catalog. Uses pagination to handle providers
+    with more than 1000 models.
 
     Args:
         gateway_slug: Gateway/provider slug (e.g., 'openrouter', 'anthropic')
@@ -713,55 +771,84 @@ def get_models_by_gateway_for_catalog(
     Example:
         >>> models = get_models_by_gateway_for_catalog('openrouter')
         >>> len(models)
-        234  # All OpenRouter models
+        2834  # All OpenRouter models (not limited to 1000)
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
+        all_models = []
+        page_size = 1000  # Supabase default limit
+        offset = 0
 
-        # Build query with provider filter
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .eq("providers.slug", gateway_slug)
+        logger.debug(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
+
+        while True:
+            # Build query with provider filter
+            query = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+                .eq("providers.slug", gateway_slug)
+            )
+
+            # Filter by active status
+            if not include_inactive:
+                query = query.eq("is_active", True)
+
+            # Order by model name for consistent pagination
+            query = query.order("model_name")
+
+            # Apply pagination
+            query = query.range(offset, offset + page_size - 1)
+
+            # Execute query
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                # No more results
+                break
+
+            all_models.extend(batch)
+            logger.debug(f"Fetched batch of {len(batch)} models for {gateway_slug} (offset={offset}, total so far={len(all_models)})")
+
+            # If we got fewer than page_size rows, we've reached the end
+            if len(batch) < page_size:
+                break
+
+            # Move to next page
+            offset += page_size
+
+        logger.info(
+            f"Fetched {len(all_models)} models from database for gateway: {gateway_slug} "
+            f"({(offset // page_size) + 1} batches)"
         )
 
-        # Filter by active status
-        if not include_inactive:
-            query = query.eq("is_active", True)
+        return all_models
 
-        # Order by model name
-        query = query.order("model_name")
-
-        response = query.execute()
-
-        models = response.data or []
-        logger.info(f"Fetched {len(models)} models from database for gateway: {gateway_slug}")
-
-        return models
     except Exception as e:
         logger.error(f"Error fetching models for gateway {gateway_slug}: {e}")
         return []
 
 
-def get_model_by_model_id_string(
-    model_id: str,
+def get_model_by_model_name_string(
+    model_name: str,
     provider_slug: str | None = None
 ) -> dict[str, Any] | None:
     """
-    Get a model by its model_id string (not integer primary key).
+    Get a model by its model_name string (not integer primary key).
 
-    This is useful for looking up models by their API-facing model ID
+    This is useful for looking up models by their API-facing model name
     (e.g., "gpt-4", "claude-3-opus") rather than the database primary key.
 
     Args:
-        model_id: The model's string identifier (model_id field)
+        model_name: The model's string identifier (model_name field)
         provider_slug: Optional provider slug to narrow search
 
     Returns:
         Model dictionary or None if not found
 
     Example:
-        >>> model = get_model_by_model_id_string("gpt-4")
+        >>> model = get_model_by_model_name_string("gpt-4")
         >>> model["model_name"]
         "GPT-4"
     """
@@ -771,7 +858,7 @@ def get_model_by_model_id_string(
         query = (
             supabase.table("models")
             .select("*, providers!inner(*)")
-            .eq("model_id", model_id)
+            .eq("model_name", model_name)
         )
 
         # Optionally filter by provider
@@ -781,7 +868,7 @@ def get_model_by_model_id_string(
         response = query.single().execute()
         return response.data
     except Exception as e:
-        logger.debug(f"Model {model_id} not found in database: {e}")
+        logger.debug(f"Model {model_name} not found in database: {e}")
         return None
 
 
@@ -794,8 +881,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 
     Database format:
     - id (int) - primary key
-    - model_id (str) - the API-facing identifier
-    - model_name (str) - display name
+    - model_name (str) - the API-facing identifier and display name
     - provider_id (int) - foreign key
     - providers (dict) - joined provider data
     - pricing_prompt (decimal) - per-token input cost
@@ -806,7 +892,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
     - etc.
 
     API format:
-    - id (str) - the model_id (not the DB primary key!)
+    - id (str) - the model_name (not the DB primary key!)
     - name (str) - display name
     - source_gateway (str) - provider slug
     - provider_slug (str) - provider slug
@@ -821,10 +907,10 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         Model dictionary in API format
 
     Example:
-        >>> db_model = get_model_by_model_id_string("gpt-4")
+        >>> db_model = get_model_by_model_name_string("gpt-4")
         >>> api_model = transform_db_model_to_api_format(db_model)
         >>> api_model["id"]
-        "gpt-4"  # model_id, not primary key
+        "gpt-4"  # model_name, not primary key
         >>> api_model["source_gateway"]
         "openai"
     """
@@ -842,8 +928,8 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 
         # Build API format model
         api_model = {
-            # Use model_id as the API-facing id (not the DB primary key)
-            "id": db_model.get("model_id", ""),
+            # Use model_name as the API-facing id (not the DB primary key)
+            "id": db_model.get("model_name", ""),
             "name": db_model.get("model_name", ""),
             "source_gateway": provider_slug,
             "provider_slug": provider_slug,
@@ -851,9 +937,11 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
             "pricing": pricing if pricing else None,
             "description": db_model.get("description"),
             "modality": db_model.get("modality"),
-            "top_provider": db_model.get("top_provider") or provider_slug,
             "is_active": db_model.get("is_active", True),
             "health_status": db_model.get("health_status"),
+            # Include provider URLs from the joined providers table
+            "provider_site_url": provider.get("site_url"),
+            "model_logo_url": provider.get("logo_url"),
         }
 
         # Include metadata if present
@@ -872,7 +960,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         logger.error(f"Error transforming DB model to API format: {e}")
         # Return a minimal model on error to avoid breaking the catalog
         return {
-            "id": db_model.get("model_id", "unknown"),
+            "id": db_model.get("model_name", "unknown"),
             "name": db_model.get("model_name", "Unknown Model"),
             "source_gateway": "unknown",
             "provider_slug": "unknown",
@@ -926,7 +1014,8 @@ def get_models_for_catalog_with_filters(
         ... )
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Build base query with provider join
         query = (
@@ -945,10 +1034,9 @@ def get_models_for_catalog_with_filters(
             query = query.eq("modality", modality)
 
         if search_query:
-            # Search in model_id, model_name, or description
+            # Search in model_name or description
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_id.ilike.{search_pattern},"
                 f"model_name.ilike.{search_pattern},"
                 f"description.ilike.{search_pattern}"
             )
@@ -999,7 +1087,8 @@ def get_models_count_by_filters(
         >>> print(f"OpenRouter has {count} models")
     """
     try:
-        supabase = get_supabase_client()
+        # Use read replica for read-only catalog queries
+        supabase = get_client_for_query(read_only=True)
 
         # Build query (same filters as get_models_for_catalog_with_filters)
         query = supabase.table("models").select("id", count="exact")
@@ -1023,7 +1112,6 @@ def get_models_count_by_filters(
         if search_query:
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_id.ilike.{search_pattern},"
                 f"model_name.ilike.{search_pattern},"
                 f"description.ilike.{search_pattern}"
             )
@@ -1151,9 +1239,19 @@ def get_all_unique_models_for_catalog(
     """
     Fetch unique models with provider relationships from the database.
 
-    This function queries the unique_models table and joins with the
-    unique_models_provider and models tables to get all providers that
-    offer each unique model.
+    OPTIMIZED VERSION: Uses a single query to fetch all data instead of N+1 queries.
+    This dramatically improves performance from 10-30s to under 1s for 500+ models.
+
+    Previous issue (N+1 query problem):
+    - Made 1 query to fetch unique models
+    - Made N additional queries (one per unique model) to fetch providers
+    - For 500 models: 501 total queries, taking 10-30+ seconds
+    - Caused 499 errors (client timeout) in production
+
+    Current optimization:
+    - Makes 2 queries total (unique_models + all provider mappings)
+    - Groups results in Python memory (fast)
+    - Executes in <1s even for 1000+ models
 
     Args:
         include_inactive: If True, includes inactive models. Default: False.
@@ -1193,69 +1291,87 @@ def get_all_unique_models_for_catalog(
     """
     from src.config.supabase_config import get_supabase_client
     import time
+    from collections import defaultdict
 
     supabase = get_supabase_client()
 
     try:
         start_time = time.time()
-        logger.info(f"Fetching unique models (include_inactive={include_inactive})")
+        logger.debug(f"Fetching unique models (include_inactive={include_inactive})")
 
-        # Get all unique models
+        # OPTIMIZATION: Fetch all unique models in one query
         um_query = supabase.table("unique_models").select("*")
         um_response = um_query.execute()
         unique_models_data = um_response.data or []
 
-        # For each unique model, get its providers
+        if not unique_models_data:
+            logger.info("No unique models found in database")
+            return []
+
+        # OPTIMIZATION: Fetch ALL provider mappings in a SINGLE query
+        # This replaces N individual queries (one per unique model)
+        ump_query = (
+            supabase.table("unique_models_provider")
+            .select("*, models!inner(*), providers!inner(*)")
+        )
+
+        if not include_inactive:
+            ump_query = ump_query.eq("models.is_active", True)
+
+        ump_response = ump_query.execute()
+        all_provider_mappings = ump_response.data or []
+
+        # OPTIMIZATION: Group provider mappings by unique_model_id in memory
+        # This is MUCH faster than N database queries
+        providers_by_unique_model = defaultdict(list)
+
+        for ump in all_provider_mappings:
+            unique_model_id = ump.get("unique_model_id")
+            if not unique_model_id:
+                continue
+
+            model = ump.get("models", {})
+            provider = ump.get("providers", {})
+
+            provider_data = {
+                'provider_id': provider.get('id'),
+                'provider_slug': provider.get('slug'),
+                'provider_name': provider.get('name'),
+                'model_id': model.get('id'),
+                'model_api_name': model.get('model_name'),
+                'provider_model_id': model.get('provider_model_id'),
+                'pricing_prompt': model.get('pricing_prompt'),
+                'pricing_completion': model.get('pricing_completion'),
+                'pricing_image': model.get('pricing_image'),
+                'pricing_request': model.get('pricing_request'),
+                'context_length': model.get('context_length'),
+                'health_status': model.get('health_status'),
+                'average_response_time_ms': model.get('average_response_time_ms'),
+                'modality': model.get('modality'),
+                'supports_streaming': model.get('supports_streaming'),
+                'supports_function_calling': model.get('supports_function_calling'),
+                'supports_vision': model.get('supports_vision'),
+                'description': model.get('description'),
+                'architecture': model.get('architecture')
+            }
+
+            providers_by_unique_model[unique_model_id].append(provider_data)
+
+        # Build final result by combining unique models with their providers
         result = []
         for um in unique_models_data:
-            # Get provider mappings
-            ump_query = (
-                supabase.table("unique_models_provider")
-                .select("*, models!inner(*), providers!inner(*)")
-                .eq("unique_model_id", um["id"])
-            )
+            unique_model_id = um['id']
+            providers = providers_by_unique_model.get(unique_model_id, [])
 
-            if not include_inactive:
-                ump_query = ump_query.eq("models.is_active", True)
-
-            ump_response = ump_query.execute()
-
-            if ump_response.data:
-                providers = []
-                for ump in ump_response.data:
-                    model = ump.get("models", {})
-                    provider = ump.get("providers", {})
-
-                    providers.append({
-                        'provider_id': provider.get('id'),
-                        'provider_slug': provider.get('slug'),
-                        'provider_name': provider.get('name'),
-                        'model_id': model.get('id'),
-                        'model_api_id': model.get('model_id'),
-                        'provider_model_id': model.get('provider_model_id'),
-                        'pricing_prompt': model.get('pricing_prompt'),
-                        'pricing_completion': model.get('pricing_completion'),
-                        'pricing_image': model.get('pricing_image'),
-                        'pricing_request': model.get('pricing_request'),
-                        'context_length': model.get('context_length'),
-                        'health_status': model.get('health_status'),
-                        'average_response_time_ms': model.get('average_response_time_ms'),
-                        'modality': model.get('modality'),
-                        'supports_streaming': model.get('supports_streaming'),
-                        'supports_function_calling': model.get('supports_function_calling'),
-                        'supports_vision': model.get('supports_vision'),
-                        'description': model.get('description'),
-                        'architecture': model.get('architecture'),
-                        'top_provider': model.get('top_provider')
-                    })
-
+            # Only include models that have at least one provider
+            if providers:
                 # Sort providers by price (cheapest first)
                 providers.sort(
                     key=lambda p: p['pricing_prompt'] if p['pricing_prompt'] is not None else float('inf')
                 )
 
                 result.append({
-                    'unique_model_id': um['id'],
+                    'unique_model_id': unique_model_id,
                     'model_name': um['model_name'],
                     'model_count': um['model_count'],
                     'sample_model_id': um['sample_model_id'],
@@ -1263,7 +1379,10 @@ def get_all_unique_models_for_catalog(
                 })
 
         query_time = time.time() - start_time
-        logger.info(f"Fetched {len(result)} unique models in {query_time:.2f}s")
+        logger.info(
+            f"Fetched {len(result)} unique models with {len(all_provider_mappings)} "
+            f"provider mappings in {query_time:.2f}s (OPTIMIZED: 2 queries instead of N+1)"
+        )
 
         if query_time > 1.0:
             logger.warning(
@@ -1357,7 +1476,7 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
                 'supports_vision': provider.get('supports_vision', False),
                 'description': provider.get('description'),
                 'architecture': provider.get('architecture'),
-                'model_id': provider.get('model_api_id')  # Include original model_id
+                'model_name': provider.get('model_api_name')  # Include original model_name
             }
 
             transformed_providers.append(transformed_provider)

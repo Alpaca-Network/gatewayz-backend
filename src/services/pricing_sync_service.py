@@ -23,6 +23,7 @@ from typing import Any, Dict, List
 from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
 from src.services.pricing_provider_auditor import PricingProviderAuditor
+from src.services.pricing_validation import validate_pricing_update
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ PROVIDER_FORMATS = {
     "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing
     "featherless": PricingFormat.PER_1M_TOKENS,
     "deepinfra": PricingFormat.PER_1M_TOKENS,
-    "together": PricingFormat.PER_1M_TOKENS,
+    "together": PricingFormat.PER_1M_TOKENS,  # ✅ Together uses per-1M (input/output keys)
     "fireworks": PricingFormat.PER_1M_TOKENS,
     "groq": PricingFormat.PER_1M_TOKENS,
     "google": PricingFormat.PER_1K_TOKENS,  # ⚠️ Different!
@@ -48,10 +49,12 @@ PROVIDER_FORMATS = {
     "vertex-ai": PricingFormat.PER_1K_TOKENS,
     "cerebras": PricingFormat.PER_1M_TOKENS,
     "novita": PricingFormat.PER_1M_TOKENS,
+    "nebius": PricingFormat.PER_1M_TOKENS,
     "nearai": PricingFormat.PER_1M_TOKENS,
     "near": PricingFormat.PER_1M_TOKENS,
     "alibaba-cloud": PricingFormat.PER_1M_TOKENS,
     "alibaba": PricingFormat.PER_1M_TOKENS,
+    "aihubmix": PricingFormat.PER_1K_TOKENS,  # AiHubMix uses per-1K format
     "cloudflare-workers-ai": PricingFormat.PER_1M_TOKENS,
     "nosana": PricingFormat.PER_1M_TOKENS,
 }
@@ -60,26 +63,34 @@ PROVIDER_FORMATS = {
 class PricingSyncConfig:
     """Configuration for pricing sync"""
 
-    # Which providers to auto-sync (Phase 2.5: Expanded from 4 to 12 providers)
+    # Which providers to auto-sync (Issue #1038: Expand from 4 to 15 providers)
     # NOTE: Uses Config.PRICING_SYNC_PROVIDERS at runtime (configurable via env var)
     # This is the default fallback list
     AUTO_SYNC_PROVIDERS: list[str] = [
-        # Current (Phase 2)
-        "openrouter",      # ✅ Has API
-        "featherless",     # ✅ Has API
-        "nearai",          # ✅ Has API
-        "alibaba-cloud",   # ✅ Has API
+        # Phase 1 (Original 4 providers)
+        "openrouter",      # ✅ Has API (per-token format)
+        "featherless",     # ✅ Has API (per-1M format)
+        "nearai",          # ✅ Has API (per-1M format)
+        "alibaba-cloud",   # ✅ Has API (per-1M format)
 
-        # Phase 2.5 Additions (expand as APIs become available)
-        # "together",      # ⚠️ API research needed
-        # "fireworks",     # ⚠️ API research needed
-        # "groq",          # ⚠️ API research needed
-        # "deepinfra",     # ⚠️ API research needed
-        # "cerebras",      # ⚠️ API research needed
-        # "novita",        # ⚠️ API research needed
-        # "google",        # ⚠️ Vertex AI pricing API research needed
-        # "xai",           # ⚠️ API research needed
-        # "cloudflare",    # ⚠️ Workers AI pricing research needed
+        # Phase 2 (Issue #1038 - 4 new providers)
+        "together",        # ✅ ADDED: Has API (per-1M, input/output keys)
+        "fireworks",       # ✅ ADDED: Has API (cents per token)
+        "groq",            # ✅ ADDED: Has API (cents per token)
+        "deepinfra",       # ✅ ADDED: Has API (cents per token)
+
+        # Phase 3a (Issue #1038 - 3 new providers)
+        "cerebras",        # ✅ ADDED: SDK-based, pricing in models.list
+        "novita",          # ✅ ADDED: OpenAI-compatible API with pricing
+        "nebius",          # ✅ ADDED: OpenAI-compatible API with pricing
+
+        # Phase 3b (Issue #1038 - 1 additional provider)
+        "aihubmix",        # ✅ ADDED: Per-1K tokens format, API with pricing
+
+        # Future additions (to be implemented)
+        # "google",        # 🔄 Vertex AI pricing API research needed
+        # "xai",           # 🔄 API research needed (no public models.list)
+        # "cloudflare",    # 🔄 Workers AI pricing research needed
         # Add more as provider APIs are discovered and implemented
     ]
 
@@ -342,9 +353,9 @@ class PricingSyncService:
         Returns:
             Result dict with status: "updated", "skipped", or "unchanged"
         """
-        # Find model in database
+        # Find model in database (using model_name as canonical identifier)
         model_result = self.client.table("models").select("id").eq(
-            "model_id", model_id
+            "model_name", model_id
         ).eq("is_active", True).limit(1).execute()
 
         if not model_result.data:
@@ -406,6 +417,49 @@ class PricingSyncService:
             return {
                 "status": "unchanged",
                 "model_id": model_id
+            }
+
+        # Validate pricing before updating (Issue #1038)
+        new_pricing_dict = {
+            "prompt": float(input_price),
+            "completion": float(output_price),
+            "image": 0,
+            "request": 0
+        }
+        old_pricing_dict = None
+        if old_input is not None and old_output is not None:
+            old_pricing_dict = {
+                "prompt": float(old_input),
+                "completion": float(old_output),
+                "image": 0,
+                "request": 0
+            }
+
+        validation_result = validate_pricing_update(
+            model_id,
+            new_pricing_dict,
+            old_pricing_dict
+        )
+
+        # Log validation warnings
+        if validation_result["warnings"]:
+            logger.warning(
+                f"Pricing validation warnings for {model_id}: "
+                f"{', '.join(validation_result['warnings'])}"
+            )
+
+        # Reject if validation failed
+        if not validation_result["is_valid"]:
+            logger.error(
+                f"Pricing validation failed for {model_id}: "
+                f"{', '.join(validation_result['errors'])}"
+            )
+            return {
+                "status": "skipped",
+                "model_id": model_id,
+                "reason": f"Validation failed: {validation_result['errors'][0]}",
+                "validation_errors": validation_result["errors"],
+                "validation_warnings": validation_result["warnings"]
             }
 
         # Prepare pricing data
@@ -471,6 +525,14 @@ class PricingSyncService:
             "near": self.auditor.audit_nearai,
             "alibaba-cloud": self.auditor.audit_alibaba_cloud,
             "alibaba": self.auditor.audit_alibaba_cloud,
+            "together": self.auditor.audit_together,
+            "fireworks": self.auditor.audit_fireworks,
+            "groq": self.auditor.audit_groq,
+            "deepinfra": self.auditor.audit_deepinfra,
+            "cerebras": self.auditor.audit_cerebras,
+            "novita": self.auditor.audit_novita,
+            "nebius": self.auditor.audit_nebius,
+            "aihubmix": self.auditor.audit_aihubmix,
         }
 
         if provider_slug.lower() not in methods:

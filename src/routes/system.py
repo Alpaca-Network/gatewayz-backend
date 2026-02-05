@@ -3,6 +3,8 @@ System endpoints for cache management and gateway health monitoring
 Phase 2 implementation
 """
 
+import asyncio
+import inspect
 import io
 import json
 import logging
@@ -25,19 +27,19 @@ from src.cache import (
 )
 from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
-from src.services.models import (
-    fetch_models_from_aihubmix,
-    fetch_models_from_aimo,
-    fetch_models_from_anannas,
-    fetch_models_from_chutes,
-    fetch_models_from_fal,
-    fetch_models_from_featherless,
-    fetch_models_from_fireworks,
-    fetch_models_from_groq,
-    fetch_models_from_near,
-    fetch_models_from_openrouter,
-    fetch_models_from_together,
-)
+
+# Import fetch_models functions from their respective client files
+from src.services.aihubmix_client import fetch_models_from_aihubmix
+from src.services.aimo_client import fetch_models_from_aimo
+from src.services.anannas_client import fetch_models_from_anannas
+from src.services.chutes_client import fetch_models_from_chutes
+from src.services.fal_image_client import fetch_models_from_fal
+from src.services.featherless_client import fetch_models_from_featherless
+from src.services.fireworks_client import fetch_models_from_fireworks
+from src.services.groq_client import fetch_models_from_groq
+from src.services.near_client import fetch_models_from_near
+from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.together_client import fetch_models_from_together
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
 from src.services.onerouter_client import fetch_models_from_onerouter
@@ -1138,6 +1140,73 @@ async def trigger_gateway_fix(
 # ============================================================================
 
 
+@router.get("/cache/warmer/stats", tags=["cache", "monitoring"])
+async def get_cache_warmer_stats():
+    """
+    Get cache warmer statistics including:
+    - Background refresh counts
+    - Request coalescing effectiveness
+    - Error rates
+    - Currently in-flight refreshes
+
+    Returns detailed metrics about the cache warming system.
+    """
+    try:
+        from src.services.cache_warmer import get_cache_warmer
+        from src.services.model_catalog_cache import get_catalog_cache_stats
+        from src.services.local_memory_cache import get_local_cache
+
+        warmer = get_cache_warmer()
+        warmer_stats = warmer.get_stats()
+
+        # Get catalog cache stats
+        catalog_cache_stats = get_catalog_cache_stats()
+
+        # Get local cache stats
+        local_cache = get_local_cache()
+        local_cache_stats = local_cache.get_stats()
+
+        return {
+            "cache_warmer": {
+                "status": "healthy",
+                "refreshes": warmer_stats["refreshes"],
+                "coalesced_requests": warmer_stats["coalesced"],
+                "errors": warmer_stats["errors"],
+                "skipped": warmer_stats["skipped"],
+                "in_flight": warmer_stats["in_flight"],
+                "description": "Background cache warming prevents thundering herd problems",
+            },
+            "redis_cache": catalog_cache_stats,
+            "local_memory_cache": {
+                **local_cache_stats,
+                "description": "Fallback cache when Redis is unavailable",
+            },
+            "health_summary": {
+                "redis_available": catalog_cache_stats.get("redis_available", False),
+                "local_cache_entries": local_cache_stats["entries"],
+                "stale_hit_rate": round(
+                    local_cache_stats["stale_hits"]
+                    / max(local_cache_stats["total_requests"], 1)
+                    * 100,
+                    2,
+                ),
+                "cache_warmer_effectiveness": round(
+                    (warmer_stats["refreshes"] - warmer_stats["errors"])
+                    / max(warmer_stats["refreshes"], 1)
+                    * 100,
+                    2,
+                )
+                if warmer_stats["refreshes"] > 0
+                else 100.0,
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache warmer stats: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get cache warmer stats: {str(e)}"
+        ) from e
+
+
 @router.get("/cache/status", tags=["cache"])
 async def get_cache_status():
     """
@@ -1323,12 +1392,13 @@ async def refresh_gateway_cache(
         # Get the fetch function dynamically
         fetch_func = get_fetch_function(gateway)
         if fetch_func:
-            # Most fetch functions are sync, so we need to handle both
             try:
-                result = fetch_func()
-                # If it's a coroutine, await it
-                if hasattr(result, "__await__"):
-                    await result
+                if inspect.iscoroutinefunction(fetch_func):
+                    # Async fetch function - await directly
+                    await fetch_func()
+                else:
+                    # Sync fetch function - run in thread to avoid blocking event loop
+                    await asyncio.to_thread(fetch_func)
             except Exception as fetch_error:
                 logger.error(f"Error fetching models from {gateway}: {fetch_error}")
                 raise HTTPException(
@@ -1908,4 +1978,173 @@ async def refresh_pricing_cache_endpoint():
         logger.error(f"Failed to refresh pricing cache: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to refresh pricing cache: {str(e)}"
+        ) from e
+
+
+# ============================================================================
+# Pricing Health Monitoring Endpoints (Issue #1038)
+# ============================================================================
+
+
+@router.get("/health/pricing", tags=["health", "pricing"])
+async def check_pricing_health():
+    """
+    Check overall health of the pricing system.
+
+    Monitors:
+    - Pricing data staleness (alerts if >24h old)
+    - Default pricing usage (models without pricing data)
+    - Provider sync health (last sync status)
+
+    Returns comprehensive health status with actionable information.
+
+    **Example Response:**
+    ```json
+    {
+      "status": "healthy",
+      "timestamp": "2026-02-03T12:00:00Z",
+      "checks": {
+        "staleness": {
+          "status": "healthy",
+          "message": "Pricing data is fresh (2.3h old)",
+          "hours_since_update": 2.3
+        },
+        "default_pricing_usage": {
+          "status": "warning",
+          "message": "5 models using default pricing",
+          "models_using_default": 5
+        },
+        "provider_sync_health": {
+          "status": "healthy",
+          "providers": {
+            "openrouter": {"status": "healthy", "hours_since_sync": 1.5},
+            "featherless": {"status": "healthy", "hours_since_sync": 2.1}
+          }
+        }
+      }
+    }
+    ```
+
+    **Status Values:**
+    - `healthy`: All checks passed
+    - `warning`: Minor issues detected (e.g., stale data, some models using default pricing)
+    - `critical`: Major issues detected (e.g., very stale data, many models using default pricing)
+    - `unknown`: Health check failed
+
+    **Relates to:** Issue #1038 - Pricing System Audit
+    """
+    try:
+        from src.services.pricing_health_monitor import check_pricing_health
+
+        health = await asyncio.to_thread(check_pricing_health)
+
+        # Update Prometheus metric
+        try:
+            from src.services.prometheus_metrics import pricing_health_status
+
+            status_value = {
+                "unknown": 0,
+                "healthy": 1,
+                "warning": 2,
+                "critical": 3
+            }.get(health["status"], 0)
+            pricing_health_status.set(status_value)
+        except (ImportError, AttributeError):
+            pass
+
+        return {
+            "success": True,
+            "data": health,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to check pricing health: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check pricing health: {str(e)}"
+        ) from e
+
+
+@router.get("/health/pricing/staleness", tags=["health", "pricing"])
+async def check_pricing_staleness():
+    """
+    Check if pricing data is stale.
+
+    Returns detailed information about when pricing was last updated.
+
+    Alerts if pricing data is:
+    - **Warning**: >24 hours old
+    - **Critical**: >72 hours old
+
+    **Example Response:**
+    ```json
+    {
+      "status": "healthy",
+      "message": "Pricing data is fresh (2.3h old)",
+      "last_updated": "2026-02-03T09:42:00Z",
+      "hours_since_update": 2.3,
+      "threshold_hours": 24,
+      "critical_threshold_hours": 72
+    }
+    ```
+    """
+    try:
+        from src.services.pricing_health_monitor import get_pricing_health_monitor
+
+        monitor = get_pricing_health_monitor()
+        staleness = await asyncio.to_thread(monitor.check_pricing_staleness)
+
+        return {
+            "success": True,
+            "data": staleness,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to check pricing staleness: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check pricing staleness: {str(e)}"
+        ) from e
+
+
+@router.get("/health/pricing/default-usage", tags=["health", "pricing"])
+async def check_default_pricing_usage():
+    """
+    Check how many models are using default pricing.
+
+    Default pricing ($0.00002/token) indicates missing pricing data and
+    can lead to significant under-billing or over-billing.
+
+    Returns list of models using default pricing with usage statistics.
+
+    **Example Response:**
+    ```json
+    {
+      "status": "warning",
+      "message": "5 models using default pricing",
+      "models_using_default": 5,
+      "details": {
+        "anthropic/claude-3-opus": {
+          "count": 42,
+          "first_seen": 1706543210.5,
+          "last_seen": 1706629610.5,
+          "error_count": 0
+        }
+      }
+    }
+    ```
+    """
+    try:
+        from src.services.pricing_health_monitor import get_pricing_health_monitor
+
+        monitor = get_pricing_health_monitor()
+        usage = await asyncio.to_thread(monitor.check_default_pricing_usage)
+
+        return {
+            "success": True,
+            "data": usage,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to check default pricing usage: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to check default pricing usage: {str(e)}"
         ) from e

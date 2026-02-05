@@ -48,7 +48,8 @@ def get_redis_client() -> redis.Redis | None:
             logger.info("Redis client connected successfully")
 
         except (ConnectionError, RedisError) as e:
-            logger.warning(f"Redis connection failed: {e}")
+            # Log at debug level - graceful fallback to local cache is expected behavior
+            logger.debug(f"Redis unavailable: {e}. Using local memory cache fallback.")
             _redis_client = None
 
     return _redis_client

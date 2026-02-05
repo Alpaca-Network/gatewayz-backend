@@ -1,0 +1,151 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2026-02-03",
+  "description": "Mapping between NotDiamond model identifiers and Gatewayz model IDs",
+  "mappings": {
+    "gpt-4o": {
+      "gatewayz_id": "openai/gpt-4o",
+      "provider": "openai",
+      "available_on": ["openai", "openrouter"]
+    },
+    "gpt-4o-mini": {
+      "gatewayz_id": "openai/gpt-4o-mini",
+      "provider": "openai",
+      "available_on": ["openai", "openrouter"]
+    },
+    "gpt-4-turbo": {
+      "gatewayz_id": "openai/gpt-4-turbo",
+      "provider": "openai",
+      "available_on": ["openai", "openrouter"]
+    },
+    "gpt-3.5-turbo": {
+      "gatewayz_id": "openai/gpt-3.5-turbo",
+      "provider": "openai",
+      "available_on": ["openai", "openrouter"]
+    },
+    "claude-sonnet-4-5": {
+      "gatewayz_id": "anthropic/claude-sonnet-4-5",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "claude-sonnet-4": {
+      "gatewayz_id": "anthropic/claude-sonnet-4",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "claude-3.5-sonnet": {
+      "gatewayz_id": "anthropic/claude-3.5-sonnet",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "claude-3-opus": {
+      "gatewayz_id": "anthropic/claude-3-opus",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "claude-3-sonnet": {
+      "gatewayz_id": "anthropic/claude-3-sonnet",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "claude-3-haiku": {
+      "gatewayz_id": "anthropic/claude-3-haiku",
+      "provider": "anthropic",
+      "available_on": ["anthropic", "openrouter"]
+    },
+    "gemini-2.0-flash-exp": {
+      "gatewayz_id": "google/gemini-2.0-flash-exp",
+      "provider": "google-vertex",
+      "available_on": ["google-vertex", "openrouter"]
+    },
+    "gemini-2.0-flash": {
+      "gatewayz_id": "google/gemini-2.0-flash",
+      "provider": "google-vertex",
+      "available_on": ["google-vertex", "openrouter"]
+    },
+    "gemini-1.5-pro": {
+      "gatewayz_id": "google/gemini-1.5-pro",
+      "provider": "google-vertex",
+      "available_on": ["google-vertex", "openrouter"]
+    },
+    "gemini-1.5-flash": {
+      "gatewayz_id": "google/gemini-1.5-flash",
+      "provider": "google-vertex",
+      "available_on": ["google-vertex", "openrouter"]
+    },
+    "llama-3.3-70b-instruct": {
+      "gatewayz_id": "meta-llama/llama-3.3-70b-instruct",
+      "provider": "together",
+      "available_on": ["together", "groq", "openrouter", "fireworks"]
+    },
+    "llama-3.1-405b-instruct": {
+      "gatewayz_id": "meta-llama/llama-3.1-405b-instruct",
+      "provider": "together",
+      "available_on": ["together", "openrouter", "fireworks"]
+    },
+    "llama-3.1-70b-instruct": {
+      "gatewayz_id": "meta-llama/llama-3.1-70b-instruct",
+      "provider": "together",
+      "available_on": ["together", "groq", "openrouter", "fireworks"]
+    },
+    "llama-3.1-8b-instruct": {
+      "gatewayz_id": "meta-llama/llama-3.1-8b-instruct",
+      "provider": "together",
+      "available_on": ["together", "groq", "openrouter", "fireworks"]
+    },
+    "mistral-large": {
+      "gatewayz_id": "mistralai/mistral-large-latest",
+      "provider": "openrouter",
+      "available_on": ["openrouter"]
+    },
+    "mistral-medium": {
+      "gatewayz_id": "mistralai/mistral-medium-latest",
+      "provider": "openrouter",
+      "available_on": ["openrouter"]
+    },
+    "mixtral-8x7b-instruct": {
+      "gatewayz_id": "mistralai/mixtral-8x7b-instruct",
+      "provider": "together",
+      "available_on": ["together", "openrouter", "fireworks"]
+    },
+    "deepseek-chat": {
+      "gatewayz_id": "deepseek/deepseek-chat",
+      "provider": "openrouter",
+      "available_on": ["openrouter"]
+    },
+    "qwen-2.5-72b-instruct": {
+      "gatewayz_id": "qwen/qwen-2.5-72b-instruct",
+      "provider": "together",
+      "available_on": ["together", "openrouter"]
+    },
+    "qwen-2.5-coder-32b-instruct": {
+      "gatewayz_id": "qwen/qwen-2.5-coder-32b-instruct",
+      "provider": "together",
+      "available_on": ["together", "openrouter"]
+    }
+  },
+  "candidate_models": [
+    "gpt-4o",
+    "gpt-4o-mini",
+    "claude-sonnet-4-5",
+    "claude-sonnet-4",
+    "claude-3.5-sonnet",
+    "gemini-2.0-flash-exp",
+    "gemini-1.5-pro",
+    "llama-3.3-70b-instruct",
+    "llama-3.1-405b-instruct",
+    "mistral-large",
+    "deepseek-chat",
+    "qwen-2.5-72b-instruct"
+  ],
+  "fallback_mappings": {
+    "gpt": "openai",
+    "claude": "anthropic",
+    "gemini": "google-vertex",
+    "llama": "together",
+    "mistral": "openrouter",
+    "mixtral": "together",
+    "deepseek": "openrouter",
+    "qwen": "together"
+  }
+}

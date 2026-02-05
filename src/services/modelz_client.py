@@ -13,6 +13,7 @@ import httpx
 from fastapi import HTTPException
 
 from src.cache import clear_modelz_cache, get_modelz_cache
+from src.utils.model_name_validator import clean_model_name
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +328,9 @@ def fetch_models_from_modelz() -> list[dict[str, Any]]:
             slug = f"modelz/{model_id}"
 
             # Generate display name from model ID
-            display_name = model_id.replace("-", " ").replace("_", " ").title()
+            raw_display_name = model_id.replace("-", " ").replace("_", " ").title()
+            # Clean malformed model names (remove company prefix, parentheses, etc.)
+            display_name = clean_model_name(raw_display_name)
 
             # Extract context length if available
             context_length = token.get("context_length") or token.get("contextLength") or 4096

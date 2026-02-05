@@ -177,31 +177,24 @@ class SlidingWindowRateLimiter:
                 )
                 return result
 
-            # All checks passed
-            # Use the fallback rate limiting system
-            result = await self.fallback_manager.check_rate_limit(
-                api_key=api_key, tokens_used=tokens_used
-            )
+            # All checks passed - request is allowed
+            # Increment concurrency counter BEFORE returning
+            await self.increment_concurrent_requests(api_key)
 
-            # If request is allowed, increment concurrency counter
-            # This must be done BEFORE returning to ensure the counter is updated
-            if result.allowed:
-                await self.increment_concurrent_requests(api_key)
-
-            # Convert fallback result to our format
+            # Build result from our own sliding window check data
             limit_result = RateLimitResult(
-                allowed=result.allowed,
-                remaining_requests=result.remaining_requests,
-                remaining_tokens=result.remaining_tokens,
+                allowed=True,
+                remaining_requests=window_check.get("remaining_requests", config.requests_per_minute),
+                remaining_tokens=window_check.get("remaining_tokens", config.tokens_per_minute),
                 reset_time=(
-                    datetime.fromtimestamp(result.reset_time, tz=timezone.utc)
-                    if result.reset_time
+                    window_check.get("reset_time")
+                    if isinstance(window_check.get("reset_time"), datetime)
                     else datetime.now(timezone.utc) + timedelta(minutes=1)
                 ),
-                retry_after=result.retry_after,
-                reason=result.reason,
-                burst_remaining=0,  # Not tracked in fallback system
-                concurrency_remaining=0,  # Not tracked in fallback system
+                retry_after=None,
+                reason=None,
+                burst_remaining=burst_check["remaining"],
+                concurrency_remaining=concurrency_check["remaining"],
             )
             _populate_rate_limit_headers(
                 limit_result, config, config.requests_per_minute, config.tokens_per_minute
@@ -550,11 +543,14 @@ class RateLimitManager:
         return config
 
     async def _load_key_config_from_db(self, api_key: str) -> RateLimitConfig:
-        """Load rate limit configuration from database"""
-        try:
-            # Import here to avoid circular imports
+        """Load rate limit configuration from database.
 
-            config_data = get_rate_limit_config(api_key)
+        FIX (2026-02-05): Wrapped in asyncio.to_thread() to prevent blocking
+        the event loop. This was a major cause of 499/500 errors.
+        """
+        import asyncio
+        try:
+            config_data = await asyncio.to_thread(get_rate_limit_config, api_key)
             if config_data:
                 return RateLimitConfig(
                     requests_per_minute=config_data.get("requests_per_minute", 250),
@@ -581,47 +577,18 @@ class RateLimitManager:
     async def check_rate_limit(
         self, api_key: str, tokens_used: int = 0, request_type: str = "api"
     ) -> RateLimitResult:
-        """Check rate limit for a specific API key (OPTIMIZED: with short-lived caching)"""
-        # ADMIN BYPASS: Check if this is an admin tier user (skip rate limits)
-        try:
-            from src.db.plans import is_admin_tier_user
-            from src.services.user_lookup_cache import get_user
+        """Check rate limit for a specific API key (OPTIMIZED: with short-lived caching)
 
-            user = get_user(api_key)
-            if user and is_admin_tier_user(user.get("id")):
-                logger.info(f"Admin tier user - bypassing rate limit checks")
-                config = await self.get_key_config(api_key)
-                # Return unlimited rate limit result for admin users
-                return RateLimitResult(
-                    allowed=True,
-                    remaining_requests=2147483647,  # Max int
-                    remaining_tokens=2147483647,
-                    reset_time=datetime.now(timezone.utc) + timedelta(days=365),
-                    retry_after=None,
-                    reason="Admin tier - unlimited access",
-                    burst_remaining=2147483647,
-                    concurrency_remaining=1000,
-                    ratelimit_limit_requests=2147483647,
-                    ratelimit_limit_tokens=2147483647,
-                    ratelimit_reset_requests=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
-                    ratelimit_reset_tokens=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
-                    burst_window_description="unlimited",
-                )
-        except Exception as e:
-            logger.debug(f"Error checking admin tier for rate limiting: {e}")
+        FIX (2026-02-05): All synchronous DB calls are now wrapped in
+        asyncio.to_thread() to prevent blocking the event loop. Previously,
+        synchronous Supabase calls here would block the event loop, causing
+        499/500 errors for concurrent requests (including chat completions)
+        when admin dashboard pages or rate limiter pages were loaded.
+        """
+        import asyncio
 
-        # SEVERE RATE LIMITING: Check for temporary/blocked email domains
-        severe_config = await self._get_severe_rate_limit_config(api_key)
-        if severe_config is not None:
-            # Apply severe rate limiting for suspicious accounts
-            result = await self.rate_limiter.check_rate_limit(api_key, severe_config, tokens_used)
-            if not result.allowed:
-                logger.warning(
-                    f"Severe rate limit exceeded for suspicious account {api_key[:10]}...: {result.reason}"
-                )
-            return result
-
-        # OPTIMIZATION: Check cache first (saves 15-30ms on cache hits)
+        # OPTIMIZATION: Check result cache FIRST before any DB calls
+        # This avoids expensive user lookups on cache hits
         now = time.time()
         cache_key = f"{api_key}:{tokens_used}"
 
@@ -633,6 +600,54 @@ class RateLimitManager:
             else:
                 # Expired, remove from cache
                 del self._result_cache[cache_key]
+
+        # FIX: Fetch user ONCE via asyncio.to_thread() to avoid blocking the
+        # event loop and to eliminate the duplicate get_user() call that was
+        # previously happening (once for admin check, once for severe check).
+        user = None
+        try:
+            from src.services.user_lookup_cache import get_user
+            user = await asyncio.to_thread(get_user, api_key)
+        except Exception as e:
+            logger.debug(f"Error fetching user for rate limiting: {e}")
+
+        # ADMIN BYPASS: Check if this is an admin tier user (skip rate limits)
+        if user:
+            try:
+                from src.db.plans import is_admin_tier_user
+                is_admin = await asyncio.to_thread(is_admin_tier_user, user.get("id"))
+                if is_admin:
+                    logger.info(f"Admin tier user - bypassing rate limit checks")
+                    # Return unlimited rate limit result for admin users
+                    return RateLimitResult(
+                        allowed=True,
+                        remaining_requests=2147483647,  # Max int
+                        remaining_tokens=2147483647,
+                        reset_time=datetime.now(timezone.utc) + timedelta(days=365),
+                        retry_after=None,
+                        reason="Admin tier - unlimited access",
+                        burst_remaining=2147483647,
+                        concurrency_remaining=1000,
+                        ratelimit_limit_requests=2147483647,
+                        ratelimit_limit_tokens=2147483647,
+                        ratelimit_reset_requests=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+                        ratelimit_reset_tokens=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+                        burst_window_description="unlimited",
+                    )
+            except Exception as e:
+                logger.debug(f"Error checking admin tier for rate limiting: {e}")
+
+        # SEVERE RATE LIMITING: Check for temporary/blocked email domains
+        # FIX: Reuse the already-fetched user instead of calling get_user() again
+        severe_config = await self._get_severe_rate_limit_config_with_user(user)
+        if severe_config is not None:
+            # Apply severe rate limiting for suspicious accounts
+            result = await self.rate_limiter.check_rate_limit(api_key, severe_config, tokens_used)
+            if not result.allowed:
+                logger.warning(
+                    f"Severe rate limit exceeded for suspicious account {api_key[:10]}...: {result.reason}"
+                )
+            return result
 
         # Cache miss - do actual check
         config = await self.get_key_config(api_key)
@@ -656,8 +671,13 @@ class RateLimitManager:
         # Also update in database
         await self._save_key_config_to_db(api_key, config)
 
-    async def _get_severe_rate_limit_config(self, api_key: str) -> RateLimitConfig | None:
+    async def _get_severe_rate_limit_config_with_user(
+        self, user: dict | None
+    ) -> RateLimitConfig | None:
         """Check if user should have severe rate limiting applied.
+
+        This version accepts an already-fetched user dict to avoid duplicate
+        get_user() calls in the hot path.
 
         Returns:
             BLOCKED_ACCOUNT_CONFIG for blocked email domains
@@ -665,15 +685,13 @@ class RateLimitManager:
             None for normal accounts (no severe limiting)
         """
         try:
-            from src.services.user_lookup_cache import get_user
+            if not user:
+                return None
+
             from src.utils.security_validators import (
                 is_blocked_email_domain,
                 is_temporary_email_domain,
             )
-
-            user = get_user(api_key)
-            if not user:
-                return None
 
             email = user.get("email", "")
             if not email:
@@ -695,11 +713,23 @@ class RateLimitManager:
                 )
                 return SEVERE_RATE_LIMIT_CONFIG
 
-            # Future enhancement: Apply SEVERE limits to accounts marked as flagged
-            # or suspicious in the database (e.g., user.is_flagged or user.is_suspicious)
-
             return None
 
+        except Exception as e:
+            logger.debug(f"Error checking for severe rate limiting: {e}")
+            return None
+
+    async def _get_severe_rate_limit_config(self, api_key: str) -> RateLimitConfig | None:
+        """Check if user should have severe rate limiting applied.
+
+        Legacy wrapper that fetches user first. Prefer
+        _get_severe_rate_limit_config_with_user() when user is already available.
+        """
+        import asyncio
+        try:
+            from src.services.user_lookup_cache import get_user
+            user = await asyncio.to_thread(get_user, api_key)
+            return await self._get_severe_rate_limit_config_with_user(user)
         except Exception as e:
             logger.debug(f"Error checking for severe rate limiting: {e}")
             return None

@@ -215,14 +215,31 @@ def bulk_upsert_pricing(pricing_records: list[dict]) -> tuple[int, int]:
     try:
         supabase = get_supabase_client()
 
+        # Deduplicate by model_id - keep the last occurrence
+        # This prevents unique constraint violations when the same model_id appears multiple times
+        unique_records = {}
+        for record in pricing_records:
+            model_id = record.get("model_id")
+            if model_id is not None:
+                unique_records[model_id] = record
+
+        deduplicated_records = list(unique_records.values())
+
+        if len(deduplicated_records) < len(pricing_records):
+            duplicates_removed = len(pricing_records) - len(deduplicated_records)
+            logger.warning(
+                f"Removed {duplicates_removed} duplicate model_id entries from pricing records "
+                f"(original: {len(pricing_records)}, deduplicated: {len(deduplicated_records)})"
+            )
+
         # Batch upsert
-        supabase.table("model_pricing").upsert(pricing_records).execute()
+        supabase.table("model_pricing").upsert(deduplicated_records).execute()
 
         # Clear cache
         _pricing_cache.clear()
 
-        logger.info(f"Bulk upserted {len(pricing_records)} pricing records")
-        return (len(pricing_records), 0)
+        logger.info(f"Bulk upserted {len(deduplicated_records)} pricing records")
+        return (len(deduplicated_records), 0)
 
     except Exception as e:
         logger.error(f"Error bulk upserting pricing: {e}")

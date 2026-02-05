@@ -269,3 +269,17 @@ def explain_failover_for_model(model: str) -> dict:
         "failover_order": failover_order,
         "recommendation": recommendation
     }
+
+
+def get_fallback_models_from_db(provider: str) -> list[dict]:
+    """
+    Get fallback models from database for a provider (stub for backward compatibility).
+
+    Args:
+        provider: Provider name
+
+    Returns:
+        Empty list (stub implementation)
+    """
+    logger.warning(f"get_fallback_models_from_db called for {provider} but not implemented")
+    return []

@@ -14,31 +14,29 @@ from src.db.providers_db import (
     get_provider_by_slug,
 )
 from src.services.cerebras_client import fetch_models_from_cerebras
+from src.services.chutes_client import fetch_models_from_chutes
 from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.cohere_client import fetch_models_from_cohere
+from src.services.deepinfra_client import fetch_models_from_deepinfra
+from src.services.featherless_client import fetch_models_from_featherless
+from src.services.fireworks_client import fetch_models_from_fireworks
 from src.services.google_vertex_client import fetch_models_from_google_vertex
+from src.services.groq_client import fetch_models_from_groq
 from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.services.models import (
-    fetch_models_from_aihubmix,
-    fetch_models_from_aimo,
-    fetch_models_from_alibaba,
-    fetch_models_from_anannas,
-    fetch_models_from_anthropic,
-    fetch_models_from_chutes,
-    fetch_models_from_deepinfra,
-    fetch_models_from_fal,
-    fetch_models_from_featherless,
-    fetch_models_from_fireworks,
-    fetch_models_from_groq,
-    fetch_models_from_helicone,
-    fetch_models_from_near,
-    fetch_models_from_openai,
-    fetch_models_from_openrouter,
-    fetch_models_from_together,
-    fetch_models_from_vercel_ai_gateway,
-    fetch_models_from_zai,
-)
+from src.services.aihubmix_client import fetch_models_from_aihubmix
+from src.services.aimo_client import fetch_models_from_aimo
+from src.services.fal_image_client import fetch_models_from_fal
+from src.services.near_client import fetch_models_from_near
+from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.together_client import fetch_models_from_together
+from src.services.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
+from src.services.anannas_client import fetch_models_from_anannas
+from src.services.helicone_client import fetch_models_from_helicone
+from src.services.alibaba_cloud_client import fetch_models_from_alibaba
+from src.services.openai_client import fetch_models_from_openai
+from src.services.anthropic_client import fetch_models_from_anthropic
+from src.services.zai_client import fetch_models_from_zai
 from src.services.modelz_client import fetch_models_from_modelz
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
@@ -111,7 +109,16 @@ def safe_decimal(value: Any) -> Decimal | None:
 
 def extract_modality(model: dict[str, Any]) -> str:
     """Extract modality from normalized model structure"""
-    # Check architecture field first
+    # Check metadata.architecture first (new location)
+    metadata = model.get("metadata", {})
+    if isinstance(metadata, dict):
+        architecture = metadata.get("architecture")
+        if isinstance(architecture, dict):
+            modality = architecture.get("modality")
+            if modality:
+                return modality
+
+    # Fallback to architecture field (deprecated, for backwards compatibility)
     architecture = model.get("architecture")
     if isinstance(architecture, dict):
         modality = architecture.get("modality")
@@ -148,7 +155,13 @@ def extract_pricing(model: dict[str, Any]) -> dict[str, Decimal | None]:
 
 def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
     """Extract capability flags from normalized model"""
-    architecture = model.get("architecture", {})
+    # Check metadata.architecture first (new location)
+    metadata = model.get("metadata", {})
+    architecture = metadata.get("architecture") if isinstance(metadata, dict) else None
+
+    # Fallback to architecture field (deprecated, for backwards compatibility)
+    if not architecture:
+        architecture = model.get("architecture", {})
 
     # Determine capabilities based on modality and architecture
     supports_streaming = model.get("supports_streaming", False)
@@ -183,20 +196,23 @@ def transform_normalized_model_to_db_schema(
         Dictionary matching database schema or None if invalid
     """
     try:
-        # Extract model ID - try various fields
-        model_id = (
+        # Extract model name - try various fields
+        model_name = (
             normalized_model.get("id")
             or normalized_model.get("slug")
             or normalized_model.get("canonical_slug")
             or normalized_model.get("model_id")
+            or normalized_model.get("name")
         )
 
-        if not model_id:
-            logger.warning(f"Skipping model without ID from {provider_slug}: {normalized_model}")
+        if not model_name:
+            logger.warning(f"Skipping model without name from {provider_slug}: {normalized_model}")
             return None
 
-        # Extract model name
-        model_name = normalized_model.get("name") or model_id
+        # Safety validation: ensure name is clean even if normalization missed it
+        from src.utils.model_name_validator import clean_model_name
+
+        model_name = clean_model_name(model_name)
 
         # Extract description
         description = normalized_model.get("description")
@@ -218,9 +234,6 @@ def transform_normalized_model_to_db_schema(
         if isinstance(architecture, dict):
             # Store relevant architecture info
             architecture_str = architecture.get("tokenizer") or architecture.get("instruct_type")
-
-        # Extract top provider
-        top_provider = normalized_model.get("top_provider") or provider_slug
 
         # Extract per-request limits
         per_request_limits = normalized_model.get("per_request_limits")
@@ -252,22 +265,23 @@ def transform_normalized_model_to_db_schema(
         if normalized_model.get("default_parameters"):
             metadata["default_parameters"] = normalized_model["default_parameters"]
 
-        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_id
-        # This is important for providers like Google Vertex where the model_id (e.g., "gemini-3-flash")
+        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_name
+        # This is important for providers like Google Vertex where the model_name (e.g., "gemini-3-flash")
         # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
-        provider_model_id = normalized_model.get("provider_model_id") or model_id
+        provider_model_id = normalized_model.get("provider_model_id") or model_name
+
+        # Store architecture string in metadata (no top-level DB column for it)
+        if architecture_str:
+            metadata["architecture_str"] = architecture_str
 
         # Build model data - pricing is stored separately in model_pricing table
         model_data = {
             "provider_id": provider_id,
-            "model_id": str(model_id),
             "model_name": str(model_name),
             "provider_model_id": str(provider_model_id),
             "description": description,
             "context_length": context_length,
             "modality": modality,
-            "architecture": architecture_str,
-            "top_provider": top_provider,
             "per_request_limits": per_request_limits,
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],
@@ -623,9 +637,11 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     from src.services.model_catalog_cache import (
                         invalidate_full_catalog,
                         invalidate_provider_catalog,
+                        invalidate_unique_models,
+                        invalidate_catalog_stats,
                     )
 
-                    # Invalidate in-memory cache for this provider
+                    # Invalidate in-memory cache for this provider (deprecated, will be removed)
                     clear_models_cache(provider_slug)
 
                     # Invalidate Redis provider-specific cache
@@ -637,6 +653,12 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     # Invalidate Redis full catalog (aggregated view)
                     # This ensures 'all' requests get fresh data too
                     invalidate_full_catalog()
+
+                    # Invalidate unique models cache (since provider changes affect unique models)
+                    invalidate_unique_models()
+
+                    # Invalidate catalog statistics cache
+                    invalidate_catalog_stats()
 
                     logger.info(
                         f"Cache invalidated for {provider_slug} after model sync. "

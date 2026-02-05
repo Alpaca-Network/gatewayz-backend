@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.cache import _cerebras_models_cache
+from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -367,7 +368,9 @@ def _normalize_cerebras_model(model: Any) -> dict[str, Any] | None:
     )
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "cerebras"
 
-    display_name = payload.get("display_name") or payload.get("name") or model_id
+    raw_display_name = payload.get("display_name") or payload.get("name") or model_id
+    # Clean malformed model names (remove company prefix, parentheses, etc.)
+    display_name = clean_model_name(raw_display_name)
     description = payload.get("description") or f"Cerebras hosted model '{display_name}'."
     context_length = (
         payload.get("context_length")
@@ -396,7 +399,6 @@ def _normalize_cerebras_model(model: Any) -> dict[str, Any] | None:
         "context_length": context_length,
         "architecture": normalized_architecture,
         "pricing": _normalize_pricing(payload.get("pricing")),
-        "top_provider": None,
         "per_request_limits": payload.get("limits") or payload.get("rate_limits"),
         "supported_parameters": _extract_supported_parameters(payload),
         "default_parameters": payload.get("default_parameters") or {},

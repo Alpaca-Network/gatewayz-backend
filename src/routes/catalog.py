@@ -263,7 +263,147 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://canopywave.io",
     },
+    "notdiamond": {
+        "name": "NotDiamond",
+        "color": "bg-violet-500",
+        "priority": "fast",
+        "site_url": "https://notdiamond.ai",
+        "icon": "zap",
+    },
 }
+
+
+@router.get("/routers", tags=["routers"])
+async def get_intelligent_routers():
+    """
+    Get available intelligent routers with configurations.
+
+    This endpoint provides documentation for router:* model strings,
+    enabling frontend auto-discovery of intelligent routing capabilities.
+
+    Returns router information including:
+    - id: Unique router identifier
+    - name: Display name for UI
+    - description: Router purpose and capabilities
+    - modes: Available optimization modes
+    - syntax: Primary and alias syntax patterns
+    - use_cases: Recommended use cases
+    """
+    try:
+        routers = [
+            {
+                "id": "general",
+                "name": "General Router",
+                "description": "NotDiamond-powered intelligent routing for general-purpose tasks",
+                "powered_by": "NotDiamond",
+                "modes": [
+                    {
+                        "value": "balanced",
+                        "label": "Balanced",
+                        "description": "Balance quality, cost, and latency",
+                    },
+                    {
+                        "value": "quality",
+                        "label": "Quality",
+                        "description": "Optimize for response quality",
+                    },
+                    {
+                        "value": "cost",
+                        "label": "Cost",
+                        "description": "Optimize for lowest cost",
+                    },
+                    {
+                        "value": "latency",
+                        "label": "Latency",
+                        "description": "Optimize for fastest response",
+                    },
+                ],
+                "syntax": {
+                    "primary": "router:general:<mode>",
+                    "examples": [
+                        "router:general",
+                        "router:general:quality",
+                        "router:general:cost",
+                        "router:general:latency",
+                    ],
+                    "aliases": [
+                        "gatewayz-general",
+                        "gatewayz-general-quality",
+                        "gatewayz-general-cost",
+                        "gatewayz-general-latency",
+                    ],
+                },
+                "use_cases": [
+                    "creative writing",
+                    "summarization",
+                    "Q&A",
+                    "general chat",
+                    "data analysis",
+                ],
+            },
+            {
+                "id": "code",
+                "name": "Code Router",
+                "description": "Code-optimized routing with benchmark-based model selection",
+                "powered_by": "Gatewayz",
+                "modes": [
+                    {
+                        "value": "auto",
+                        "label": "Auto",
+                        "description": "Automatically select best model for task",
+                    },
+                    {
+                        "value": "price",
+                        "label": "Price",
+                        "description": "Optimize for lowest cost",
+                    },
+                    {
+                        "value": "quality",
+                        "label": "Quality",
+                        "description": "Optimize for highest quality",
+                    },
+                    {
+                        "value": "agentic",
+                        "label": "Agentic",
+                        "description": "Premium models for complex multi-step tasks",
+                    },
+                ],
+                "syntax": {
+                    "primary": "router:code:<mode>",
+                    "examples": [
+                        "router:code",
+                        "router:code:price",
+                        "router:code:quality",
+                        "router:code:agentic",
+                    ],
+                    "aliases": [
+                        "gatewayz-code",
+                        "gatewayz-code-price",
+                        "gatewayz-code-quality",
+                        "gatewayz-code-agentic",
+                    ],
+                },
+                "use_cases": [
+                    "code generation",
+                    "debugging",
+                    "refactoring",
+                    "code review",
+                    "architecture design",
+                ],
+            },
+        ]
+
+        return {
+            "data": routers,
+            "total": len(routers),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Error fetching routers: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch routers: {str(e)}",
+        )
 
 
 @router.get("/gateways", tags=["gateways"])
@@ -319,8 +459,69 @@ async def get_gateways():
         # Sort by priority (fast first), then by name
         gateways.sort(key=lambda g: (0 if g["priority"] == "fast" else 1, g["name"]))
 
+        # Add intelligent routers section
+        routers = [
+            {
+                "id": "general",
+                "name": "General Router",
+                "description": "NotDiamond-powered intelligent routing for general-purpose tasks",
+                "modes": ["balanced", "quality", "cost", "latency"],
+                "syntax": {
+                    "primary": "router:general:<mode>",
+                    "examples": [
+                        "router:general",
+                        "router:general:quality",
+                        "router:general:cost",
+                        "router:general:latency",
+                    ],
+                    "aliases": [
+                        "gatewayz-general",
+                        "gatewayz-general-quality",
+                        "gatewayz-general-cost",
+                        "gatewayz-general-latency",
+                    ],
+                },
+                "use_cases": [
+                    "creative writing",
+                    "summarization",
+                    "Q&A",
+                    "general chat",
+                    "data analysis",
+                ],
+            },
+            {
+                "id": "code",
+                "name": "Code Router",
+                "description": "Code-optimized routing with benchmark-based model selection",
+                "modes": ["auto", "price", "quality", "agentic"],
+                "syntax": {
+                    "primary": "router:code:<mode>",
+                    "examples": [
+                        "router:code",
+                        "router:code:price",
+                        "router:code:quality",
+                        "router:code:agentic",
+                    ],
+                    "aliases": [
+                        "gatewayz-code",
+                        "gatewayz-code-price",
+                        "gatewayz-code-quality",
+                        "gatewayz-code-agentic",
+                    ],
+                },
+                "use_cases": [
+                    "code generation",
+                    "debugging",
+                    "refactoring",
+                    "code review",
+                    "architecture design",
+                ],
+            },
+        ]
+
         return {
             "data": gateways,
+            "routers": routers,
             "total": len(gateways),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -690,6 +891,29 @@ async def get_models(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
 
+        # PERFORMANCE: Check response cache FIRST (before expensive provider fetches)
+        # This provides 5-10ms response times for cached requests (vs 500ms-2s uncached)
+        from src.services.catalog_response_cache import (
+            get_cached_catalog_response,
+            cache_catalog_response,
+        )
+
+        # Build cache params from all request parameters
+        cache_params = {
+            "limit": limit,
+            "offset": offset,
+            "provider": provider,
+            "is_private": is_private,
+            "include_huggingface": include_huggingface,
+            "unique_models": unique_models,
+        }
+
+        # Try to get from cache
+        cached_response = await get_cached_catalog_response(gateway_value, cache_params)
+        if cached_response:
+            logger.info(f"✅ Returning cached response for gateway={gateway_value}")
+            return cached_response
+
         openrouter_models: list[dict] = []
         onerouter_models: list[dict] = []
         featherless_models: list[dict] = []
@@ -735,8 +959,17 @@ async def get_models(
                 # the aggregated result directly
                 all_models_list = all_models_from_cache
             else:
-                logger.warning("Aggregated cache returned empty, falling through to individual provider fetches")
-                all_models_list = []
+                # PERFORMANCE FIX: Use parallel fetching instead of sequential
+                # This reduces fetch time from 25*60s = 1500s to ~30s max
+                # Each provider has 15s timeout enforced via nested executor
+                logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
+                try:
+                    from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
+                    all_models_list = await fetch_and_merge_all_providers(timeout=30.0)
+                    logger.info(f"Parallel fetch returned {len(all_models_list)} models")
+                except Exception as e:
+                    logger.error(f"Parallel fetch failed: {e}")
+                    all_models_list = []
         else:
             all_models_list = []
             # Log warning if unique_models is requested for non-all gateway
@@ -746,18 +979,32 @@ async def get_models(
                     "(only applies to gateway='all')"
                 )
 
+        # Import circuit breaker for individual provider fetches
+        from src.utils.circuit_breaker import get_provider_circuit_breaker
+        breaker = get_provider_circuit_breaker()
+
         # Individual provider fetches (only used when gateway != "all" OR cache is empty)
+        # Skip if parallel fetch already populated all_models_list
         if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
-            openrouter_models = get_cached_models("openrouter") or []
-            if not openrouter_models:
-                logger.warning(
-                    "OpenRouter models unavailable (gateway=%s) - possible causes: "
-                    "API key not configured, API is down, network issues, or cache warming incomplete. "
-                    "Continuing with other providers if available.",
-                    gateway_value,
-                )
-                # Don't fail with 503 - this prevents a single provider failure from breaking the entire API
-                # Users will get models from other providers if gateway="all", or empty list if gateway="openrouter"
+            if not breaker.should_skip("openrouter"):
+                try:
+                    openrouter_models = get_cached_models("openrouter") or []
+                    # Record success even for empty results - empty is not a failure
+                    breaker.record_success("openrouter")
+                    if not openrouter_models:
+                        logger.warning(
+                            "OpenRouter models unavailable (gateway=%s) - possible causes: "
+                            "API key not configured, API is down, network issues, or cache warming incomplete. "
+                            "Continuing with other providers if available.",
+                            gateway_value,
+                        )
+                except Exception as e:
+                    # Only record failure for actual exceptions
+                    breaker.record_failure("openrouter", str(e))
+                    logger.error(f"Error fetching openrouter models: {e}")
+                    openrouter_models = []
+            else:
+                logger.info("Skipping openrouter (circuit breaker open)")
 
         if gateway_value in ("onerouter", "all"):
             onerouter_models = get_cached_models("onerouter") or []
@@ -1523,7 +1770,8 @@ async def get_developer_models(
                 enhanced_model = enhance_model_with_huggingface_data(enhanced_model)
             enhanced_models.append(enhanced_model)
 
-        return {
+        # Build response
+        response = {
             "developer": developer_name,
             "models": enhanced_models,
             "total": total_models,
@@ -1532,6 +1780,15 @@ async def get_developer_models(
             "limit": limit,
             "gateway": gateway_value,
         }
+
+        # Cache the response for future requests (fire and forget - don't block response)
+        try:
+            await cache_catalog_response(gateway_value, cache_params, response)
+        except Exception as cache_error:
+            # Log but don't fail the request if caching fails
+            logger.warning(f"Failed to cache response: {cache_error}")
+
+        return response
 
     except HTTPException:
         raise
@@ -2210,6 +2467,156 @@ async def get_low_latency_models_api(
         }
 
     return result
+
+
+@router.get("/models/unique", tags=["models"])
+async def get_unique_models_with_providers(
+    limit: int | None = Query(
+        100, description="Limit number of results (default: 100, max: 1000)", ge=1, le=1000
+    ),
+    offset: int | None = Query(0, description="Offset for pagination", ge=0),
+    min_providers: int | None = Query(
+        None, description="Minimum number of providers (e.g., 2 for models with multiple providers)", ge=1
+    ),
+    sort_by: str = Query(
+        "provider_count",
+        description="Sort by: 'provider_count' (most providers), 'name' (alphabetical), 'cheapest_price' (lowest price)"
+    ),
+    order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
+    include_inactive: bool = Query(False, description="Include inactive models"),
+):
+    """
+    Get unique models with their provider information.
+
+    This endpoint shows deduplicated models (e.g., "GPT-4" appears once) with:
+    - How many providers offer each model
+    - Which providers offer it
+    - Pricing from each provider
+    - Health status and performance metrics per provider
+    - Cheapest and fastest provider for each model
+
+    **Use Cases:**
+    - Find models available from multiple providers
+    - Compare pricing across providers for the same model
+    - Identify the cheapest provider for a specific model
+    - See which providers offer the most models
+
+    **Examples:**
+    - Most widely available models: `?sort_by=provider_count&order=desc`
+    - Models with 3+ providers: `?min_providers=3&sort_by=provider_count`
+    - Cheapest unique models: `?sort_by=cheapest_price&order=asc`
+    - Alphabetical list: `?sort_by=name&order=asc`
+
+    **Response Format:**
+    ```json
+    {
+      "models": [
+        {
+          "id": "gpt-4",
+          "name": "GPT-4",
+          "provider_count": 3,
+          "providers": [
+            {
+              "slug": "openrouter",
+              "name": "OpenRouter",
+              "pricing": {"prompt": "0.03", "completion": "0.06"},
+              "context_length": 8192,
+              "health_status": "healthy",
+              "average_response_time_ms": 1200
+            },
+            {
+              "slug": "groq",
+              "name": "Groq",
+              "pricing": {"prompt": "0.025", "completion": "0.05"},
+              "context_length": 8192,
+              "health_status": "healthy",
+              "average_response_time_ms": 950
+            }
+          ],
+          "cheapest_provider": "groq",
+          "fastest_provider": "groq",
+          "cheapest_prompt_price": 0.025,
+          "fastest_response_time": 950
+        }
+      ],
+      "total": 234,
+      "limit": 100,
+      "offset": 0
+    }
+    ```
+    """
+    try:
+        from src.services.model_catalog_cache import get_cached_unique_models
+        from src.db.models_catalog_db import (
+            get_all_unique_models_for_catalog,
+            transform_unique_models_batch,
+        )
+
+        logger.info(
+            f"Fetching unique models: limit={limit}, offset={offset}, "
+            f"min_providers={min_providers}, sort_by={sort_by}, order={order}"
+        )
+
+        # Try to get from cache first (only for active models with default sorting)
+        api_models = None
+        if not include_inactive and min_providers is None and sort_by == "provider_count" and order == "desc" and offset == 0:
+            api_models = get_cached_unique_models()
+            if api_models:
+                logger.info(f"Using cached unique models ({len(api_models)} models)")
+
+        # If not cached or needs custom filtering, fetch from database
+        if api_models is None:
+            # Fetch unique models from database
+            db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
+
+            # Transform to API format
+            api_models = transform_unique_models_batch(db_unique_models)
+
+        # Filter by minimum providers if specified
+        if min_providers is not None:
+            api_models = [m for m in api_models if m.get("provider_count", 0) >= min_providers]
+
+        # Sort the results
+        if sort_by == "provider_count":
+            api_models.sort(key=lambda m: m.get("provider_count", 0), reverse=(order == "desc"))
+        elif sort_by == "name":
+            api_models.sort(key=lambda m: m.get("name", "").lower(), reverse=(order == "desc"))
+        elif sort_by == "cheapest_price":
+            # Sort by cheapest price, handling None values
+            api_models.sort(
+                key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
+                reverse=(order == "desc")
+            )
+
+        # Calculate total before pagination
+        total = len(api_models)
+
+        # Apply pagination
+        paginated_models = api_models[offset:offset + limit] if limit else api_models[offset:]
+
+        logger.info(
+            f"Returning {len(paginated_models)} unique models "
+            f"(total: {total}, filtered by min_providers={min_providers})"
+        )
+
+        return {
+            "models": paginated_models,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "filters": {
+                "min_providers": min_providers,
+                "include_inactive": include_inactive,
+            },
+            "sort": {
+                "by": sort_by,
+                "order": order,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Error fetching unique models: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch unique models: {str(e)}")
 
 
 @router.post("/models/batch-compare", tags=["comparison"])
