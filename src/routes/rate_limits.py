@@ -507,8 +507,8 @@ async def update_admin_rate_limits(
     try:
         config_dict = request.config.model_dump()
 
-        # Use the set_user_rate_limits function
-        await asyncio.to_thread(set_user_rate_limits, request.api_key, config_dict)
+        # Use the set_user_rate_limits function (async)
+        await set_user_rate_limits(request.api_key, config_dict)
 
         logger.info(
             f"Admin {admin_user.get('username')} updated rate limits for key {request.api_key[:15]}..."
@@ -547,21 +547,30 @@ async def delete_rate_limits(
     - Success status
     - The key will use default rate limits going forward
     """
+    from src.config.supabase_config import get_supabase_client
+
     def _delete_rate_limits_sync(target_api_key: str) -> dict:
         """Synchronous helper to delete rate limits in a thread."""
-        from src.config.supabase_config import get_supabase_client
-
         client = get_supabase_client()
 
-        # Try to delete from rate_limits table
+        # Delete from rate_limit_configs table (migrated from legacy rate_limits table)
+        deleted_from_rate_limit_configs = False
+        api_key_id = None
+        user_id = None
+
         try:
-            result = client.table("rate_limits").delete().eq("api_key", target_api_key).execute()
-            deleted_from_rate_limits = len(result.data) > 0 if result.data else False
+            # Get API key ID and user_id
+            key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", target_api_key).execute()
+            if key_record.data and len(key_record.data) > 0:
+                api_key_id = key_record.data[0]["id"]
+                user_id = key_record.data[0]["user_id"]
+                result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
+                deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
         except Exception as e:
-            logger.debug(f"Could not delete from rate_limits table: {e}")
-            deleted_from_rate_limits = False
+            logger.debug(f"Could not delete from rate_limit_configs table: {e}")
 
         # Try to reset rate_limit_config in api_keys_new table
+        reset_in_api_keys = False
         try:
             result = (
                 client.table("api_keys_new")
@@ -575,10 +584,26 @@ async def delete_rate_limits(
             reset_in_api_keys = len(result.data) > 0 if result.data else False
         except Exception as e:
             logger.debug(f"Could not reset rate_limit_config in api_keys_new: {e}")
-            reset_in_api_keys = False
+
+        # Add audit log entry
+        if user_id and api_key_id:
+            try:
+                client.table("api_key_audit_logs").insert({
+                    "user_id": user_id,
+                    "api_key_id": api_key_id,
+                    "action": "rate_limits_deleted",
+                    "details": {
+                        "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
+                        "reset_in_api_keys": reset_in_api_keys,
+                        "admin_user": admin_user.get('username'),
+                    },
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }).execute()
+            except Exception as audit_error:
+                logger.debug(f"Failed to create audit log: {audit_error}")
 
         return {
-            "deleted_from_rate_limits": deleted_from_rate_limits,
+            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
             "reset_in_api_keys": reset_in_api_keys,
         }
 
@@ -593,7 +618,7 @@ async def delete_rate_limits(
             "status": "success",
             "message": "Rate limits deleted successfully. Key will use default limits.",
             "api_key": api_key[:15] + "...",
-            "deleted_from_rate_limits": result["deleted_from_rate_limits"],
+            "deleted_from_rate_limit_configs": result["deleted_from_rate_limit_configs"],
             "reset_in_api_keys": result["reset_in_api_keys"],
             "default_config": DEFAULT_RATE_LIMIT_CONFIG,
             "timestamp": datetime.now(timezone.utc).isoformat(),
