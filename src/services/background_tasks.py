@@ -315,6 +315,15 @@ async def update_full_model_catalog_loop() -> None:
     
     REFRESH_INTERVAL_SECONDS = 14 * 60  # 14 minutes
     
+    # CRITICAL FIX: Add startup delay to prevent 502 Bad Gateway
+    # Wait for app to fully boot and pass health checks before hitting DB
+    logger.info("Waiting 60s before first model catalog refresh...")
+    try:
+        await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        logger.info("Model catalog refresh task cancelled during startup delay")
+        return
+    
     while True:
         try:
             # Check if we should stop
