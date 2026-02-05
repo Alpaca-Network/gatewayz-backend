@@ -428,7 +428,7 @@ def create_app() -> FastAPI:
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
-        ("admin_pricing_analytics", "Admin Pricing Analytics"),  # Cost tracking and analytics
+        # ("admin_pricing_analytics", "Admin Pricing Analytics"),  # REMOVED - Phase 2 deprecation
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
@@ -445,8 +445,7 @@ def create_app() -> FastAPI:
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
-        ("pricing_audit", "Pricing Audit Dashboard"),
-        ("pricing_sync", "Pricing Sync Service"),
+        # Pricing audit/sync routes removed - deprecated 2026-02 (Phase 3, Issue #1063)
         ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace

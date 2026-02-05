@@ -102,8 +102,7 @@ _pricing_history_dir = _ensure_directory(
 _pricing_backup_dir = _ensure_directory(
     _resolve_path_env("PRICING_BACKUP_DIR", _data_dir / "pricing_backups")
 )
-_pricing_sync_log_file = _resolve_path_env("PRICING_SYNC_LOG_FILE", _data_dir / "pricing_sync.log")
-_pricing_sync_log_file.parent.mkdir(parents=True, exist_ok=True)
+# Pricing sync log file removed - deprecated 2026-02 (Phase 3, Issue #1063)
 _manual_pricing_file = _resolve_path_env("MANUAL_PRICING_FILE", _data_dir / "manual_pricing.json")
 
 
@@ -405,12 +404,8 @@ class Config:
     REDIS_SOCKET_TIMEOUT = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
     REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
 
-    # Pricing Sync Scheduler Configuration (Phase 2.5)
-    PRICING_SYNC_ENABLED = os.environ.get("PRICING_SYNC_ENABLED", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    # Pricing Sync Scheduler Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
+    # Pricing is now synced via model sync (provider_model_sync_service.py)
 
     # ============================================================================
     # MODEL SYNC CONFIGURATION
@@ -430,17 +425,9 @@ class Config:
     # Recommended: 15-30 minutes for balance between freshness and API rate limits
     MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
 
-    # Pricing Sync Configuration (Phase 2 → Phase 3, Issue #1038)
-    # ============================================================================
-    PRICING_SYNC_INTERVAL_HOURS = int(os.environ.get("PRICING_SYNC_INTERVAL_HOURS", "6"))
-    PRICING_SYNC_PROVIDERS = [
-        p.strip()
-        for p in os.environ.get(
-            "PRICING_SYNC_PROVIDERS",
-            "openrouter,featherless,nearai,alibaba-cloud,together,fireworks,groq,deepinfra,cerebras,novita,nebius,aihubmix"  # 4 → 12 providers (Issue #1038)
-        ).split(",")
-        if p.strip()
-    ]
+    # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
+    # Pricing is now synced via model sync (provider_model_sync_service.py)
+    # No separate pricing sync configuration needed
 
     # Metrics Aggregation Configuration
     METRICS_AGGREGATION_ENABLED = os.environ.get("METRICS_AGGREGATION_ENABLED", "true").lower() in {
@@ -459,7 +446,7 @@ class Config:
     DATA_DIR = _data_dir
     PRICING_HISTORY_DIR = _pricing_history_dir
     PRICING_BACKUP_DIR = _pricing_backup_dir
-    PRICING_SYNC_LOG_FILE = _pricing_sync_log_file
+    # PRICING_SYNC_LOG_FILE removed - deprecated 2026-02 (Phase 3, Issue #1063)
     MANUAL_PRICING_FILE = _manual_pricing_file
 
     @classmethod

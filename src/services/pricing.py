@@ -403,54 +403,13 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                     del _pricing_cache[model_id]
                     logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
 
-        # Step 2: Try live API fetch from provider
-        # NOTE: When called from async context (most route handlers), we skip live fetch
-        # here and rely on database/cache. The async version get_model_pricing_async()
-        # should be used from async contexts for live pricing support.
-        try:
-            import asyncio
-            import concurrent.futures
-            from src.services.pricing_live_fetch import fetch_live_pricing
-
-            live_pricing = None
-
-            # Check if we're in an async context
-            try:
-                _ = asyncio.get_running_loop()
-                # We're in an async context - skip live fetch (use get_model_pricing_async instead)
-                # Log once per model to avoid spam
-                logger.debug(
-                    f"[PRICING] Sync get_model_pricing called from async context for {model_id}. "
-                    f"Consider using get_model_pricing_async() for live pricing support."
-                )
-            except RuntimeError:
-                # No running loop - we can safely create one and run the async fetch
-                try:
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    try:
-                        live_pricing = new_loop.run_until_complete(fetch_live_pricing(model_id))
-                    finally:
-                        new_loop.close()
-                except Exception as e:
-                    logger.debug(f"Live pricing fetch in new event loop failed for {model_id}: {e}")
-
-            if live_pricing:
-                # Cache the live result - with thread safety
-                with _pricing_cache_lock:
-                    _pricing_cache[model_id] = {
-                        "data": live_pricing,
-                        "timestamp": time.time()
-                    }
-                logger.info(
-                    f"[LIVE API SUCCESS] Cached pricing for {model_id} from {live_pricing.get('source', 'unknown')}"
-                )
-                return live_pricing
-            else:
-                logger.debug(f"[LIVE API] No pricing available from provider API for {model_id}")
-
-        except Exception as e:
-            logger.warning(f"Live API pricing fetch failed for {model_id}: {e}")
+        # Step 2: Live API fetch - DEPRECATED (Phase 2)
+        # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.
+        # Live pricing fetching is no longer supported. All pricing now comes from:
+        # 1. Database (models_catalog table via model sync)
+        # 2. Manual pricing file (manual_pricing.json)
+        # 3. Default pricing (fallback)
+        logger.debug(f"[PRICING] Live API fetch is deprecated. Using database/manual pricing for {model_id}")
 
         # Step 3: Try database pricing (PHASE 0 FIX)
         try:
@@ -625,28 +584,13 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                     del _pricing_cache[model_id]
                     logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
 
-        # Step 2: Try live API fetch from provider
-        try:
-            from src.services.pricing_live_fetch import fetch_live_pricing
-
-            live_pricing = await fetch_live_pricing(model_id)
-
-            if live_pricing:
-                # Cache the live result - with thread safety
-                with _pricing_cache_lock:
-                    _pricing_cache[model_id] = {
-                        "data": live_pricing,
-                        "timestamp": time.time()
-                    }
-                logger.info(
-                    f"[LIVE API SUCCESS] Cached pricing for {model_id} from {live_pricing.get('source', 'unknown')}"
-                )
-                return live_pricing
-            else:
-                logger.debug(f"[LIVE API] No pricing available from provider API for {model_id}")
-
-        except Exception as e:
-            logger.warning(f"Live API pricing fetch failed for {model_id}: {e}")
+        # Step 2: Live API fetch - DEPRECATED (Phase 2)
+        # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.
+        # Live pricing fetching is no longer supported. All pricing now comes from:
+        # 1. Database (models_catalog table via model sync)
+        # 2. Manual pricing file (manual_pricing.json)
+        # 3. Default pricing (fallback)
+        logger.debug(f"[PRICING] Live API fetch is deprecated. Using database/manual pricing for {model_id}")
 
         # Step 3: Try database pricing (PHASE 0 FIX)
         try:

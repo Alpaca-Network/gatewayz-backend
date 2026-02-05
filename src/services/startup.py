@@ -309,25 +309,7 @@ async def lifespan(app):
 
         _create_background_task(cleanup_stuck_syncs_startup(), name="cleanup_stuck_syncs")
 
-        # Phase 2.5: Start automated pricing sync scheduler
-        async def start_pricing_sync_scheduler():
-            """Start automated pricing sync scheduler (runs every N hours)."""
-            try:
-                from src.config.config import Config
-
-                if not Config.PRICING_SYNC_ENABLED:
-                    logger.info("⏭️  Pricing sync scheduler disabled (PRICING_SYNC_ENABLED=false)")
-                    return
-
-                from src.services.pricing_sync_scheduler import start_pricing_sync_scheduler as start_scheduler
-
-                logger.info(f"🔄 Starting pricing sync scheduler (interval: {Config.PRICING_SYNC_INTERVAL_HOURS}h)...")
-                await start_scheduler()
-                logger.info("✅ Pricing sync scheduler started")
-            except Exception as e:
-                logger.warning(f"Pricing sync scheduler warning: {e}", exc_info=True)
-
-        _create_background_task(start_pricing_sync_scheduler(), name="pricing_sync_scheduler")
+        # Pricing sync scheduler removed - pricing updates via model sync (Phase 3, Issue #1063)
 
         # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
         async def sync_providers_background():
@@ -460,14 +442,7 @@ async def lifespan(app):
         _background_tasks.clear()
 
     try:
-        # Stop pricing sync scheduler (Phase 2.5)
-        try:
-            from src.services.pricing_sync_scheduler import stop_pricing_sync_scheduler
-
-            await stop_pricing_sync_scheduler()
-            logger.info("Pricing sync scheduler stopped")
-        except Exception as e:
-            logger.warning(f"Pricing sync scheduler shutdown warning: {e}")
+        # Pricing sync scheduler shutdown removed (Phase 3, Issue #1063)
 
         # Stop background model sync
         try:
