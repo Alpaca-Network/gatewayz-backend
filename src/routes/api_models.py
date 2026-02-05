@@ -143,7 +143,9 @@ async def get_model_detail(
             "helicone",
         ]:
             # Get models from the detected gateway to derive providers
-            gateway_models = get_cached_models(detected_gateway)
+            # Get models from the detected gateway to derive providers
+            import asyncio
+            gateway_models = await asyncio.to_thread(get_cached_models, detected_gateway)
             if gateway_models:
                 derived_providers = derive_providers_from_models(gateway_models, detected_gateway)
                 annotated_providers = annotate_provider_sources(derived_providers, detected_gateway)
