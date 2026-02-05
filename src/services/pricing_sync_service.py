@@ -353,9 +353,9 @@ class PricingSyncService:
         Returns:
             Result dict with status: "updated", "skipped", or "unchanged"
         """
-        # Find model in database
+        # Find model in database (using model_name as canonical identifier)
         model_result = self.client.table("models").select("id").eq(
-            "model_id", model_id
+            "model_name", model_id
         ).eq("is_active", True).limit(1).execute()
 
         if not model_result.data:
