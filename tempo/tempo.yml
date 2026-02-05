@@ -38,8 +38,21 @@ query_frontend:
 querier:
   max_concurrent_queries: 5
 
+# Metrics generator to create metrics from traces
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: gatewayz
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: "https://prometheus-production-08db.up.railway.app/api/v1/write"
+        send_exemplars: true
+
 # Memory limits for Railway (limited resources)
 overrides:
+  metrics_generator_processors: [service-graphs, span-metrics]
   defaults:
     ingestion:
       max_traces_per_user: 5000

@@ -430,6 +430,16 @@ async def lifespan(app):
 
         _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
 
+        # Initialize model catalog background refresh task (Prevent 499 Deadlocks)
+        async def init_model_catalog_refresh_background():
+            try:
+                from src.services.background_tasks import start_model_catalog_refresh_task
+                start_model_catalog_refresh_task()
+            except Exception as e:
+                logger.warning(f"Model catalog refresh initialization warning: {e}")
+
+        _create_background_task(init_model_catalog_refresh_background(), name="init_model_catalog_refresh")
+
         logger.info("All monitoring and health services started successfully")
 
     except Exception as e:
@@ -503,6 +513,13 @@ async def lifespan(app):
             logger.info("Router health snapshot task stopped")
         except Exception as e:
             logger.warning(f"Router health snapshot shutdown warning: {e}")
+
+        # Stop model catalog refresh task
+        try:
+            from src.services.background_tasks import stop_model_catalog_refresh_task
+            stop_model_catalog_refresh_task()
+        except Exception as e:
+            logger.warning(f"Model catalog refresh shutdown warning: {e}")
 
         # Health monitoring is handled by the dedicated health-service container
         # No health monitor shutdown needed in main API

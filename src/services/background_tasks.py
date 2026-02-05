@@ -290,3 +290,104 @@ def stop_router_health_snapshot_task() -> None:
     if _health_snapshot_task:
         _health_snapshot_task.cancel()
         logger.info("Router health snapshot background task stopped")
+
+
+# === Model Catalog Background Refresh (Prevent 499 Deadlocks) ===
+
+_catalog_refresh_task: asyncio.Task | None = None
+_catalog_refresh_stop_event: asyncio.Event | None = None
+
+
+async def update_full_model_catalog_loop() -> None:
+    """
+    Background task to refresh the full model catalog every 14 minutes.
+    
+    Why this is needed:
+    - Prevents cache TTL (15m) from expiring during user requests.
+    - Eliminates the "thundering herd" of DB queries when cache is cold.
+    - Acts as a DB connection keep-alive during idle periods.
+    - Resource usage is negligible (one efficient query every 14m).
+    """
+    from src.db.models_catalog_db import get_all_models_for_catalog, transform_db_models_batch
+    from src.services.model_catalog_cache import cache_full_catalog
+    
+    logger.info("Starting model catalog background refresh loop (interval: 14m)")
+    
+    REFRESH_INTERVAL_SECONDS = 14 * 60  # 14 minutes
+    
+    while True:
+        try:
+            # Check if we should stop
+            if _catalog_refresh_stop_event and _catalog_refresh_stop_event.is_set():
+                logger.info("Model catalog refresh task stopping")
+                break
+                
+            logger.info("🔄 Background Refresh: Updating full model catalog...")
+            
+            # 1. Fetch from DB (optimized query)
+            # Run in thread pool to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            db_models = await loop.run_in_executor(None, get_all_models_for_catalog, False)
+            
+            # 2. Transform to API format
+            api_models = transform_db_models_batch(db_models)
+            
+            # 3. Update Cache
+            # We set TTL to 15m, but we refresh every 14m to ensure overlap
+            cache_full_catalog(api_models, ttl=900)
+            
+            logger.info(f"✅ Background Refresh: Updated catalog with {len(api_models)} models")
+            
+        except Exception as e:
+            logger.error(f"Error in model catalog refresh loop: {e}", exc_info=True)
+            
+        # Wait for next interval
+        try:
+            # Use wait_for to allow immediate cancellation
+            if _catalog_refresh_stop_event:
+                # Create a future that waits for the stop event
+                wait_task = asyncio.create_task(_catalog_refresh_stop_event.wait())
+                try:
+                    await asyncio.wait_for(wait_task, timeout=REFRESH_INTERVAL_SECONDS)
+                    # If we get here, the stop event was set
+                    break
+                except asyncio.TimeoutError:
+                    # Timeout reached, run loop again
+                    pass
+            else:
+                await asyncio.sleep(REFRESH_INTERVAL_SECONDS)
+        except asyncio.CancelledError:
+            logger.info("Model catalog refresh task cancelled")
+            break
+
+
+def start_model_catalog_refresh_task() -> None:
+    """Start the model catalog refresh background task."""
+    global _catalog_refresh_task, _catalog_refresh_stop_event
+    
+    try:
+        if _catalog_refresh_task and not _catalog_refresh_task.done():
+            logger.warning("Model catalog refresh task already running")
+            return
+
+        loop = asyncio.get_running_loop()
+        _catalog_refresh_stop_event = asyncio.Event()
+        _catalog_refresh_task = loop.create_task(update_full_model_catalog_loop())
+        logger.info("Model catalog refresh background task started")
+    except RuntimeError:
+        logger.warning("Event loop not running, cannot start catalog refresh task")
+    except Exception as e:
+        logger.error(f"Failed to start catalog refresh task: {e}")
+
+
+def stop_model_catalog_refresh_task() -> None:
+    """Stop the model catalog refresh background task."""
+    global _catalog_refresh_task, _catalog_refresh_stop_event
+    
+    if _catalog_refresh_stop_event:
+        _catalog_refresh_stop_event.set()
+        
+    if _catalog_refresh_task:
+        _catalog_refresh_task.cancel()
+        logger.info("Model catalog refresh background task stopped")
+

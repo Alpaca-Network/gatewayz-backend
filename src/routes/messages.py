@@ -488,7 +488,13 @@ async def anthropic_messages(
                     # Fallback to checking cached models
                     from src.services.models import get_cached_models
 
-                    # Try each provider with transformation
+                    # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
+                    # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
+                    import asyncio
+                    all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
+                    all_model_ids = {m.get("id") for m in all_models_catalog}
+
+                    # Try each provider with transformation against the in-memory set
                     for test_provider in [
                         "huggingface",
                         "featherless",
@@ -496,8 +502,7 @@ async def anthropic_messages(
                         "together",
                     ]:
                         transformed = transform_model_id(original_model, test_provider)
-                        provider_models = get_cached_models(test_provider) or []
-                        if any(m.get("id") == transformed for m in provider_models):
+                        if transformed in all_model_ids:
                             provider = test_provider
                             logger.info(
                                 "Auto-detected provider '%s' for model %s (transformed to %s)",
