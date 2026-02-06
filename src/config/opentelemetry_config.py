@@ -7,6 +7,7 @@ with the existing Prometheus metrics and logging infrastructure.
 Features:
 - Automatic FastAPI request tracing
 - HTTPX and Requests library instrumentation
+- Redis cache operation tracing (shows cache.get, cache.set operations)
 - Context propagation for distributed tracing
 - Integration with Railway/Grafana observability stack
 
@@ -34,10 +35,21 @@ try:
     from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
     OPENTELEMETRY_AVAILABLE = True
+
+    # Redis instrumentation - optional, gracefully handle if not installed
+    try:
+        from opentelemetry.instrumentation.redis import RedisInstrumentor
+        REDIS_INSTRUMENTATION_AVAILABLE = True
+    except ImportError:
+        REDIS_INSTRUMENTATION_AVAILABLE = False
+        RedisInstrumentor = None  # type: ignore
+
 except ImportError:
     OPENTELEMETRY_AVAILABLE = False
+    REDIS_INSTRUMENTATION_AVAILABLE = False
     # Define dummy types for type hints
     TracerProvider = None  # type: ignore
+    RedisInstrumentor = None  # type: ignore
 
 from src.config.config import Config
 from src.utils.resilient_span_processor import ResilientSpanProcessor
@@ -113,6 +125,7 @@ class OpenTelemetryConfig:
     - Trace provider with OTLP export to Tempo
     - FastAPI automatic instrumentation
     - HTTP client instrumentation (httpx, requests)
+    - Redis cache instrumentation (cache.get, cache.set operations)
     - Resource attributes (service name, version, environment)
     """
 
@@ -295,6 +308,16 @@ class OpenTelemetryConfig:
             HTTPXClientInstrumentor().instrument()
             RequestsInstrumentor().instrument()
             logger.info("   HTTP client instrumentation enabled")
+
+            # Instrument Redis for cache operation tracing
+            if REDIS_INSTRUMENTATION_AVAILABLE and RedisInstrumentor is not None:
+                try:
+                    RedisInstrumentor().instrument()
+                    logger.info("   Redis instrumentation enabled (cache operations will appear in traces)")
+                except Exception as redis_e:
+                    logger.warning(f"   Redis instrumentation failed (non-fatal): {redis_e}")
+            else:
+                logger.debug("   Redis instrumentation not available (package not installed)")
 
             cls._initialized = True
             logger.info("✅ OpenTelemetry tracing initialized successfully")
