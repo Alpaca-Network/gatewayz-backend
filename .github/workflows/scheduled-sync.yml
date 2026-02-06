@@ -71,15 +71,48 @@ jobs:
         if: steps.health_check.outputs.api_healthy == 'true'
         run: |
           echo "🔄 Starting full model sync..."
+          echo "   Endpoint: $API_URL/admin/model-sync/all"
           echo "   This may take 3-5 minutes..."
+          echo ""
 
           START_TIME=$(date +%s)
-          RESPONSE=$(curl -s -X POST "$API_URL/admin/model-sync/all")
+
+          # Make request with verbose output
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/response.json -X POST "$API_URL/admin/model-sync/all")
+          RESPONSE=$(cat /tmp/response.json)
+
           END_TIME=$(date +%s)
           DURATION=$((END_TIME - START_TIME))
 
-          echo "Response:"
+          echo "📊 Request Details:"
+          echo "   HTTP Status: $HTTP_CODE"
+          echo "   Duration: ${DURATION}s"
+          echo "   Response length: ${#RESPONSE} bytes"
+          echo ""
+
+          # Show raw response for debugging
+          echo "📄 Raw Response (first 500 chars):"
+          echo "$RESPONSE" | head -c 500
+          echo ""
+          echo ""
+
+          # Check if response is valid JSON
+          if ! echo "$RESPONSE" | jq empty 2>/dev/null; then
+            echo "❌ API returned invalid JSON"
+            echo "Full response:"
+            echo "$RESPONSE"
+            echo ""
+            echo "This usually means:"
+            echo "  - API returned an error page (HTML)"
+            echo "  - API is not responding correctly"
+            echo "  - Endpoint does not exist"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "📋 Parsed JSON Response:"
           echo "$RESPONSE" | jq '.'
+          echo ""
 
           # Check if successful
           SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
@@ -87,7 +120,7 @@ jobs:
             MODELS_SYNCED=$(echo "$RESPONSE" | jq -r '.details.total_models_synced // 0')
             PROVIDERS=$(echo "$RESPONSE" | jq -r '.details.providers_processed // 0')
 
-            echo "✅ Model sync completed"
+            echo "✅ Model sync completed successfully"
             echo "   Duration: ${DURATION}s"
             echo "   Providers: $PROVIDERS"
             echo "   Models synced: $MODELS_SYNCED"
