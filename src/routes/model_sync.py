@@ -3,8 +3,10 @@ API routes for model catalog synchronization
 Dynamically fetches and syncs models from provider APIs to database
 
 Phase 3 (Issue #997): Added health monitoring endpoint for scheduled sync
+Phase 4 (Issue #XXXX): Fixed event loop blocking in sync endpoints
 """
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -89,7 +91,8 @@ async def sync_single_provider(
                 detail=f"Provider '{provider_slug}' not found. Available providers: {', '.join(available)}"
             )
 
-        result = sync_provider_models(provider_slug, dry_run=dry_run)
+        # Run blocking sync function in thread pool to avoid blocking event loop
+        result = await asyncio.to_thread(sync_provider_models, provider_slug, dry_run)
 
         if not result["success"]:
             raise HTTPException(
@@ -171,7 +174,8 @@ async def sync_all_provider_models(
                            f"Available: {', '.join(available)}"
                 )
 
-        result = sync_all_providers(provider_slugs=providers, dry_run=dry_run)
+        # Run blocking sync function in thread pool to avoid blocking event loop
+        result = await asyncio.to_thread(sync_all_providers, provider_slugs=providers, dry_run=dry_run)
 
         # Invalidate all catalog caches after successful sync (unless dry_run)
         if not dry_run and result.get("success"):
@@ -309,8 +313,8 @@ async def trigger_full_provider_and_model_sync(
             # For dry run, just call the sync functions without writing
             provider_result = await sync_providers_to_database()
 
-            # Note: sync_all_providers already supports dry_run
-            model_result = sync_all_providers(dry_run=True)
+            # Run blocking sync function in thread pool to avoid blocking event loop
+            model_result = await asyncio.to_thread(sync_all_providers, dry_run=True)
 
             result = {
                 "success": True,
@@ -452,8 +456,8 @@ async def flush_models(
 
         logger.warning("🚨 Flush models endpoint called - proceeding with deletion")
 
-        # Perform flush
-        result = flush_models_table()
+        # Perform flush (run in thread pool to avoid blocking event loop)
+        result = await asyncio.to_thread(flush_models_table)
 
         if not result.get("success"):
             raise HTTPException(
@@ -540,8 +544,8 @@ async def flush_providers(
 
         logger.warning("🚨🚨 Flush providers endpoint called - proceeding with deletion of ALL data")
 
-        # Perform flush
-        result = flush_providers_table()
+        # Perform flush (run in thread pool to avoid blocking event loop)
+        result = await asyncio.to_thread(flush_providers_table)
 
         if not result.get("success"):
             raise HTTPException(
@@ -629,7 +633,7 @@ async def reset_and_resync():
 
         # Step 1: Flush models
         logger.info("Step 1/3: Flushing models table...")
-        flush_result = flush_models_table()
+        flush_result = await asyncio.to_thread(flush_models_table)
 
         if not flush_result.get("success"):
             raise HTTPException(
