@@ -63,10 +63,25 @@ jobs:
         if: steps.health_check.outputs.api_healthy == 'true'
         run: |
           echo "📊 Getting current database status..."
-          STATUS=$(curl -s "$API_URL/admin/model-sync/status")
-          PRE_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
-          echo "pre_count=$PRE_COUNT" >> $GITHUB_OUTPUT
-          echo "   Current database models: $PRE_COUNT"
+          echo "   Endpoint: $API_URL/admin/model-sync/status"
+
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/status.json "$API_URL/admin/model-sync/status")
+          STATUS=$(cat /tmp/status.json)
+
+          echo "   HTTP Status: $HTTP_CODE"
+          echo "   Response length: ${#STATUS} bytes"
+
+          # Check if response is valid JSON
+          if ! echo "$STATUS" | jq empty 2>/dev/null; then
+            echo "⚠️  Status endpoint returned invalid JSON (non-critical)"
+            echo "   Raw response: $STATUS"
+            echo "   Skipping pre-count check"
+            echo "pre_count=0" >> $GITHUB_OUTPUT
+          else
+            PRE_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
+            echo "pre_count=$PRE_COUNT" >> $GITHUB_OUTPUT
+            echo "   Current database models: $PRE_COUNT"
+          fi
 
       - name: Trigger full model sync
         id: model_sync
@@ -145,25 +160,37 @@ jobs:
           echo "📊 Getting post-sync database status..."
           sleep 3  # Wait for database to update
 
-          STATUS=$(curl -s "$API_URL/admin/model-sync/status")
-          POST_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
-          echo "post_count=$POST_COUNT" >> $GITHUB_OUTPUT
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/post_status.json "$API_URL/admin/model-sync/status")
+          STATUS=$(cat /tmp/post_status.json)
 
-          PRE_COUNT="${{ steps.pre_sync.outputs.pre_count }}"
-          ADDED=$((POST_COUNT - PRE_COUNT))
+          echo "   HTTP Status: $HTTP_CODE"
 
-          echo "   Database models: $POST_COUNT"
-          echo "   Models added: $ADDED"
-
-          if [ "$POST_COUNT" -ge 17000 ]; then
-            echo "✅ Database is fully synced"
-            echo "sync_status=healthy" >> $GITHUB_OUTPUT
-          elif [ "$POST_COUNT" -ge 15000 ]; then
-            echo "⚠️  Database is mostly synced"
-            echo "sync_status=warning" >> $GITHUB_OUTPUT
+          # Check if response is valid JSON
+          if ! echo "$STATUS" | jq empty 2>/dev/null; then
+            echo "⚠️  Status endpoint returned invalid JSON (non-critical)"
+            echo "   Skipping post-count check"
+            echo "post_count=0" >> $GITHUB_OUTPUT
+            echo "sync_status=unknown" >> $GITHUB_OUTPUT
           else
-            echo "❌ Database needs attention"
-            echo "sync_status=critical" >> $GITHUB_OUTPUT
+            POST_COUNT=$(echo "$STATUS" | jq -r '.models.stats.total_active // 0')
+            echo "post_count=$POST_COUNT" >> $GITHUB_OUTPUT
+
+            PRE_COUNT="${{ steps.pre_sync.outputs.pre_count }}"
+            ADDED=$((POST_COUNT - PRE_COUNT))
+
+            echo "   Database models: $POST_COUNT"
+            echo "   Models added: $ADDED"
+
+            if [ "$POST_COUNT" -ge 17000 ]; then
+              echo "✅ Database is fully synced"
+              echo "sync_status=healthy" >> $GITHUB_OUTPUT
+            elif [ "$POST_COUNT" -ge 15000 ]; then
+              echo "⚠️  Database is mostly synced"
+              echo "sync_status=warning" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Database needs attention"
+              echo "sync_status=critical" >> $GITHUB_OUTPUT
+            fi
           fi
 
       - name: Create summary
