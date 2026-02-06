@@ -4,10 +4,12 @@ Dynamically fetches and syncs models from provider APIs to database
 
 Phase 3 (Issue #997): Added health monitoring endpoint for scheduled sync
 Phase 4 (Issue #XXXX): Fixed event loop blocking in sync endpoints
+Phase 5: Added comprehensive trace logging for debugging and monitoring
 """
 
 import asyncio
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -82,40 +84,106 @@ async def sync_single_provider(
     Returns:
         Sync results including counts and any errors
     """
+    # TRACE: Function entry
+    start_time = time.time()
+    logger.info(
+        f"🎯 [SYNC-START] Provider sync initiated | "
+        f"provider={provider_slug} | dry_run={dry_run}"
+    )
+
     try:
-        # Validate provider exists
+        # TRACE: Validation phase
+        logger.debug(f"[SYNC-VALIDATE] Checking if provider '{provider_slug}' is registered")
         if provider_slug not in PROVIDER_FETCH_FUNCTIONS:
             available = sorted(PROVIDER_FETCH_FUNCTIONS.keys())
+            logger.error(
+                f"[SYNC-ERROR] Provider not found | "
+                f"provider={provider_slug} | available_count={len(available)}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Provider '{provider_slug}' not found. Available providers: {', '.join(available)}"
             )
 
+        logger.info(f"[SYNC-VALIDATE] ✓ Provider '{provider_slug}' validated")
+
+        # TRACE: Thread execution
+        logger.info(
+            f"[SYNC-EXECUTE] Starting sync in thread pool | "
+            f"provider={provider_slug} | thread_safe=True"
+        )
+        thread_start = time.time()
+
         # Run blocking sync function in thread pool to avoid blocking event loop
         result = await asyncio.to_thread(sync_provider_models, provider_slug, dry_run)
 
+        thread_duration = time.time() - thread_start
+        logger.info(
+            f"[SYNC-EXECUTE] ✓ Thread execution completed | "
+            f"provider={provider_slug} | duration={thread_duration:.2f}s | "
+            f"success={result.get('success', False)}"
+        )
+
+        # TRACE: Result validation
+        logger.debug(
+            f"[SYNC-RESULT] Checking sync result | "
+            f"provider={provider_slug} | success={result.get('success')} | "
+            f"fetched={result.get('models_fetched', 0)} | "
+            f"transformed={result.get('models_transformed', 0)} | "
+            f"synced={result.get('models_synced', 0)} | "
+            f"skipped={result.get('models_skipped', 0)}"
+        )
+
         if not result["success"]:
+            error_msg = result.get("error", "Sync failed")
+            logger.error(
+                f"[SYNC-FAILED] Sync operation failed | "
+                f"provider={provider_slug} | error={error_msg}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Sync failed")
+                detail=error_msg
             )
 
-        # Invalidate catalog cache after successful sync (unless dry_run)
+        logger.info(f"[SYNC-RESULT] ✓ Sync successful | provider={provider_slug}")
+
+        # TRACE: Cache invalidation phase
         if not dry_run:
+            logger.debug(f"[SYNC-CACHE] Starting cache invalidation | provider={provider_slug}")
             try:
                 from src.services.catalog_response_cache import invalidate_catalog_cache
+                cache_start = time.time()
                 deleted_count = invalidate_catalog_cache(provider_slug)
-                logger.info(f"Invalidated {deleted_count} cache entries for {provider_slug}")
+                cache_duration = time.time() - cache_start
+                logger.info(
+                    f"[SYNC-CACHE] ✓ Cache invalidated | "
+                    f"provider={provider_slug} | entries_deleted={deleted_count} | "
+                    f"duration={cache_duration:.2f}s"
+                )
             except Exception as cache_error:
                 # Don't fail sync if cache invalidation fails
-                logger.warning(f"Failed to invalidate cache for {provider_slug}: {cache_error}")
+                logger.warning(
+                    f"[SYNC-CACHE] ⚠ Cache invalidation failed (non-critical) | "
+                    f"provider={provider_slug} | error={cache_error}"
+                )
+        else:
+            logger.debug(f"[SYNC-CACHE] Skipping cache invalidation (dry_run=True)")
 
+        # TRACE: Build response
+        total_duration = time.time() - start_time
         message = (
             f"{'[DRY RUN] ' if dry_run else ''}"
             f"Synced {result.get('models_synced', 0)} models from {provider_slug}. "
             f"Fetched: {result.get('models_fetched', 0)}, "
             f"Transformed: {result.get('models_transformed', 0)}, "
             f"Skipped: {result.get('models_skipped', 0)}"
+        )
+
+        logger.info(
+            f"✅ [SYNC-COMPLETE] Provider sync completed successfully | "
+            f"provider={provider_slug} | total_duration={total_duration:.2f}s | "
+            f"models_synced={result.get('models_synced', 0)} | "
+            f"dry_run={dry_run}"
         )
 
         return SyncResponse(
@@ -125,9 +193,20 @@ async def sync_single_provider(
         )
 
     except HTTPException:
+        total_duration = time.time() - start_time
+        logger.warning(
+            f"⚠ [SYNC-HTTP-ERROR] HTTP exception in sync endpoint | "
+            f"provider={provider_slug} | duration={total_duration:.2f}s"
+        )
         raise
     except Exception as e:
-        logger.error(f"Error in sync endpoint: {e}", exc_info=True)
+        total_duration = time.time() - start_time
+        logger.error(
+            f"❌ [SYNC-EXCEPTION] Unexpected error in sync endpoint | "
+            f"provider={provider_slug} | duration={total_duration:.2f}s | "
+            f"error_type={type(e).__name__} | error={str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -162,41 +241,102 @@ async def sync_all_provider_models(
         POST /admin/model-sync/all?providers=openrouter&providers=deepinfra
         POST /admin/model-sync/all?dry_run=true
     """
+    # TRACE: Function entry
+    start_time = time.time()
+    provider_count = len(providers) if providers else len(PROVIDER_FETCH_FUNCTIONS)
+    logger.info(
+        f"🎯 [BULK-SYNC-START] Bulk provider sync initiated | "
+        f"provider_count={provider_count} | dry_run={dry_run} | "
+        f"specific_providers={bool(providers)}"
+    )
+
     try:
-        # Validate providers if specified
+        # TRACE: Validation phase
         if providers:
+            logger.debug(
+                f"[BULK-SYNC-VALIDATE] Validating provider list | "
+                f"requested={providers}"
+            )
             invalid_providers = [p for p in providers if p not in PROVIDER_FETCH_FUNCTIONS]
             if invalid_providers:
                 available = sorted(PROVIDER_FETCH_FUNCTIONS.keys())
+                logger.error(
+                    f"[BULK-SYNC-ERROR] Invalid providers detected | "
+                    f"invalid={invalid_providers} | available_count={len(available)}"
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid providers: {', '.join(invalid_providers)}. "
                            f"Available: {', '.join(available)}"
                 )
+            logger.info(f"[BULK-SYNC-VALIDATE] ✓ All providers validated | count={len(providers)}")
+        else:
+            logger.info(f"[BULK-SYNC-VALIDATE] Syncing all providers | count={provider_count}")
+
+        # TRACE: Thread execution
+        logger.info(
+            f"[BULK-SYNC-EXECUTE] Starting bulk sync in thread pool | "
+            f"provider_count={provider_count} | thread_safe=True"
+        )
+        thread_start = time.time()
 
         # Run blocking sync function in thread pool to avoid blocking event loop
         result = await asyncio.to_thread(sync_all_providers, provider_slugs=providers, dry_run=dry_run)
 
-        # Invalidate all catalog caches after successful sync (unless dry_run)
+        thread_duration = time.time() - thread_start
+        logger.info(
+            f"[BULK-SYNC-EXECUTE] ✓ Thread execution completed | "
+            f"duration={thread_duration:.2f}s | "
+            f"providers_processed={result.get('providers_processed', 0)} | "
+            f"success={result.get('success', False)}"
+        )
+
+        # TRACE: Result analysis
+        error_count = len(result.get("errors", []))
+        success_count = result.get("providers_processed", 0) - error_count
+        logger.info(
+            f"[BULK-SYNC-RESULT] Sync results summary | "
+            f"providers_processed={result.get('providers_processed', 0)} | "
+            f"success_count={success_count} | error_count={error_count} | "
+            f"total_models_synced={result.get('total_models_synced', 0)} | "
+            f"total_models_fetched={result.get('total_models_fetched', 0)}"
+        )
+
+        # TRACE: Cache invalidation phase
         if not dry_run and result.get("success"):
+            logger.debug("[BULK-SYNC-CACHE] Starting bulk cache invalidation")
             try:
                 from src.services.catalog_response_cache import invalidate_catalog_cache
+                cache_start = time.time()
                 deleted_count = invalidate_catalog_cache()  # None = invalidate all
-                logger.info(f"Invalidated {deleted_count} cache entries after bulk sync")
+                cache_duration = time.time() - cache_start
+                logger.info(
+                    f"[BULK-SYNC-CACHE] ✓ All caches invalidated | "
+                    f"entries_deleted={deleted_count} | duration={cache_duration:.2f}s"
+                )
             except Exception as cache_error:
-                logger.warning(f"Failed to invalidate cache after bulk sync: {cache_error}")
+                logger.warning(
+                    f"[BULK-SYNC-CACHE] ⚠ Cache invalidation failed (non-critical) | "
+                    f"error={cache_error}"
+                )
+        else:
+            reason = "dry_run=True" if dry_run else "sync_failed"
+            logger.debug(f"[BULK-SYNC-CACHE] Skipping cache invalidation | reason={reason}")
 
-        # Even if there are errors, we return 200 with details
-        # Only raise if catastrophic failure
+        # TRACE: Catastrophic failure check
         if not result.get("providers_processed"):
+            error_msg = result.get("error", "Sync failed completely")
+            logger.error(
+                f"[BULK-SYNC-CATASTROPHIC] Complete sync failure | "
+                f"error={error_msg}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("error", "Sync failed completely")
+                detail=error_msg
             )
 
-        error_count = len(result.get("errors", []))
-        success_count = result["providers_processed"] - error_count
-
+        # TRACE: Build response
+        total_duration = time.time() - start_time
         message = (
             f"{'[DRY RUN] ' if dry_run else ''}"
             f"Processed {result['providers_processed']} providers. "
@@ -207,6 +347,16 @@ async def sync_all_provider_models(
             f"Skipped: {result.get('total_models_skipped', 0)})"
         )
 
+        status_emoji = "✅" if result.get("success", False) else "⚠"
+        logger.info(
+            f"{status_emoji} [BULK-SYNC-COMPLETE] Bulk sync completed | "
+            f"total_duration={total_duration:.2f}s | "
+            f"providers_processed={result.get('providers_processed', 0)} | "
+            f"models_synced={result.get('total_models_synced', 0)} | "
+            f"success_rate={success_count}/{result.get('providers_processed', 0)} | "
+            f"dry_run={dry_run}"
+        )
+
         return SyncResponse(
             success=result.get("success", False),
             message=message,
@@ -214,9 +364,20 @@ async def sync_all_provider_models(
         )
 
     except HTTPException:
+        total_duration = time.time() - start_time
+        logger.warning(
+            f"⚠ [BULK-SYNC-HTTP-ERROR] HTTP exception in bulk sync endpoint | "
+            f"duration={total_duration:.2f}s"
+        )
         raise
     except Exception as e:
-        logger.error(f"Error in sync all endpoint: {e}", exc_info=True)
+        total_duration = time.time() - start_time
+        logger.error(
+            f"❌ [BULK-SYNC-EXCEPTION] Unexpected error in bulk sync endpoint | "
+            f"duration={total_duration:.2f}s | "
+            f"error_type={type(e).__name__} | error={str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
