@@ -1,4 +1,4 @@
-name: Scheduled Model & Pricing Sync
+name: Scheduled Model Sync
 
 on:
   schedule:
@@ -13,15 +13,11 @@ on:
 
   workflow_dispatch:
     inputs:
-      sync_type:
-        description: 'Sync type'
+      dry_run:
+        description: 'Dry run (fetch but don''t write to database)'
         required: false
-        default: 'full'
-        type: choice
-        options:
-          - full
-          - models_only
-          - pricing_only
+        default: false
+        type: boolean
 
 env:
   API_URL: ${{ secrets.API_URL || 'https://api.gatewayz.ai' }}
@@ -29,7 +25,7 @@ env:
 
 jobs:
   sync-models:
-    name: Sync Models & Pricing
+    name: Sync Models
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -72,9 +68,7 @@ jobs:
 
       - name: Trigger full model sync
         id: model_sync
-        if: |
-          steps.health_check.outputs.api_healthy == 'true' &&
-          (github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'models_only' || github.event.inputs.sync_type == '')
+        if: steps.health_check.outputs.api_healthy == 'true'
         run: |
           echo "🔄 Starting full model sync..."
           echo "   This may take 3-5 minutes..."
@@ -108,68 +102,6 @@ jobs:
             echo "success=false" >> $GITHUB_OUTPUT
             exit 1
           fi
-
-      - name: Trigger pricing sync
-        id: pricing_sync
-        if: |
-          steps.health_check.outputs.api_healthy == 'true' &&
-          steps.model_sync.outputs.success == 'true' &&
-          (github.event.inputs.sync_type == 'full' || github.event.inputs.sync_type == 'pricing_only' || github.event.inputs.sync_type == '')
-        run: |
-          echo "🔄 Starting pricing sync..."
-
-          if [ -z "$ADMIN_KEY" ]; then
-            echo "⚠️  ADMIN_KEY not configured, skipping pricing sync"
-            echo "skipped=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          RESPONSE=$(curl -s -X POST "$API_URL/admin/pricing/sync/$ADMIN_KEY")
-          echo "$RESPONSE" | jq '.'
-
-          # Extract sync ID
-          SYNC_ID=$(echo "$RESPONSE" | jq -r '.sync_id // empty')
-          if [ -n "$SYNC_ID" ]; then
-            echo "✅ Pricing sync queued"
-            echo "   Sync ID: $SYNC_ID"
-            echo "sync_id=$SYNC_ID" >> $GITHUB_OUTPUT
-            echo "skipped=false" >> $GITHUB_OUTPUT
-          else
-            echo "⚠️  Could not queue pricing sync"
-            echo "skipped=true" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Wait for pricing sync completion
-        if: |
-          steps.pricing_sync.outputs.sync_id != '' &&
-          steps.pricing_sync.outputs.skipped != 'true'
-        timeout-minutes: 5
-        run: |
-          SYNC_ID="${{ steps.pricing_sync.outputs.sync_id }}"
-          echo "⏳ Waiting for pricing sync $SYNC_ID to complete..."
-
-          for i in {1..30}; do
-            sleep 10
-
-            STATUS_RESPONSE=$(curl -s "$API_URL/admin/pricing/sync/$ADMIN_KEY/status/$SYNC_ID")
-            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // "unknown"')
-            PROGRESS=$(echo "$STATUS_RESPONSE" | jq -r '.progress_percent // 0')
-
-            echo "   Check $i/30: $STATUS ($PROGRESS%)"
-
-            if [ "$STATUS" = "completed" ]; then
-              MODELS_UPDATED=$(echo "$STATUS_RESPONSE" | jq -r '.models_updated // 0')
-              echo "✅ Pricing sync completed: $MODELS_UPDATED models updated"
-              exit 0
-            elif [ "$STATUS" = "failed" ]; then
-              ERROR=$(echo "$STATUS_RESPONSE" | jq -r '.error_message // "Unknown error"')
-              echo "❌ Pricing sync failed: $ERROR"
-              exit 1
-            fi
-          done
-
-          echo "⚠️  Pricing sync still running after 5 minutes"
-          echo "   This is normal for large syncs. Check logs later."
 
       - name: Get post-sync database count
         id: post_sync
