@@ -16,14 +16,14 @@
             "interval": 30,
             "timeout": 60,
             "initialDelay": 60,
-            "path": "/health"
+            "path": "/health/railway"
           },
           "readiness": {
             "enabled": true,
             "interval": 10,
             "timeout": 60,
             "initialDelay": 45,
-            "path": "/health"
+            "path": "/health/railway"
           }
         },
         "requestTimeout": 1800,

@@ -99,6 +99,106 @@ async def health_quick():
     }
 
 
+@router.get("/health/railway", tags=["health"])
+async def health_railway():
+    """
+    Railway-specific health check with validation
+
+    This endpoint validates that critical services are operational:
+    - Database connectivity (with timeout)
+    - Redis availability (via cached health data)
+    - Minimum gateway health threshold (at least 30% gateways healthy)
+
+    Returns:
+    - HTTP 200 if system is operational
+    - HTTP 503 if system is degraded or unhealthy
+
+    Use this for Railway health checks to prevent marking the service as healthy
+    when it's actually unable to process requests.
+    """
+    try:
+        # Check 1: Database connectivity (with timeout)
+        db_status = get_initialization_status()
+        if db_status.get("has_error"):
+            logger.warning(f"Railway health check failed: Database unavailable - {db_status.get('error_type')}")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "unhealthy",
+                    "reason": "database_unavailable",
+                    "error": db_status.get("error_type"),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        # Check 2: Redis/health cache availability
+        cached_system = simple_health_cache.get_system_health()
+        if not cached_system:
+            logger.warning("Railway health check failed: Health cache unavailable")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "unhealthy",
+                    "reason": "health_cache_unavailable",
+                    "message": "Health monitoring service not responding",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+
+        # Check 3: Minimum gateway health threshold
+        healthy_gateways = cached_system.get("healthy_gateways", 0)
+        total_gateways = cached_system.get("total_gateways", 0)
+
+        # Require at least 30% of gateways to be healthy
+        min_healthy_threshold = 0.30
+        if total_gateways > 0:
+            gateway_health_rate = healthy_gateways / total_gateways
+            if gateway_health_rate < min_healthy_threshold:
+                logger.warning(
+                    f"Railway health check failed: Only {healthy_gateways}/{total_gateways} gateways healthy "
+                    f"({gateway_health_rate * 100:.1f}% < {min_healthy_threshold * 100}% threshold)"
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "status": "unhealthy",
+                        "reason": "insufficient_healthy_gateways",
+                        "healthy_gateways": healthy_gateways,
+                        "total_gateways": total_gateways,
+                        "health_rate": f"{gateway_health_rate * 100:.1f}%",
+                        "threshold": f"{min_healthy_threshold * 100}%",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+
+        # All checks passed
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "health_cache": "available",
+            "gateways": {
+                "healthy": healthy_gateways,
+                "total": total_gateways,
+                "health_rate": f"{(healthy_gateways / total_gateways * 100):.1f}%" if total_gateways > 0 else "0%",
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Railway health check error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unhealthy",
+                "reason": "health_check_error",
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+
+
 @router.get("/health/system", response_model=SystemHealthResponse, tags=["health"])
 async def get_system_health(
     api_key: str = Depends(get_api_key),

@@ -7,10 +7,13 @@ restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 # Health check configuration for Railway
-# Using /health/quick endpoint for ultra-fast checks with no I/O operations
-# This prevents false-positive failures during high database/Redis load
-# /health/quick has zero DB queries, zero Redis ops, and returns instantly
-healthcheckPath = "/health/quick"
+# Using /health/railway endpoint for proper health validation
+# This endpoint validates:
+# - Database connectivity
+# - Redis/health cache availability
+# - Minimum gateway health threshold (30%)
+# Returns HTTP 503 if system is degraded to trigger Railway restarts
+healthcheckPath = "/health/railway"
 healthcheckTimeout = 30
 healthcheckInterval = 20
 initialDelaySeconds = 45
