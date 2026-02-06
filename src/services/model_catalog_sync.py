@@ -235,9 +235,6 @@ def transform_normalized_model_to_db_schema(
             # Store relevant architecture info
             architecture_str = architecture.get("tokenizer") or architecture.get("instruct_type")
 
-        # Extract per-request limits
-        per_request_limits = normalized_model.get("per_request_limits")
-
         # Extract pricing
         pricing = extract_pricing(normalized_model)
 
@@ -282,7 +279,6 @@ def transform_normalized_model_to_db_schema(
             "description": description,
             "context_length": context_length,
             "modality": modality,
-            "per_request_limits": per_request_limits,
             # Capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
