@@ -1,4 +1,5 @@
 name: Scheduled Model Sync
+# Updated: 2026-02-06 - Added error handling for status endpoints
 
 on:
   schedule:
