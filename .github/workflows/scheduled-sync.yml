@@ -20,7 +20,9 @@ on:
         type: boolean
 
 env:
-  API_URL: ${{ secrets.API_URL || 'https://api.gatewayz.ai' }}
+  # Use direct Railway URL to bypass Cloudflare timeout (524 error)
+  # Cloudflare has ~100s timeout, but sync takes 2-5 minutes
+  API_URL: ${{ secrets.RAILWAY_API_URL || secrets.API_URL || 'https://api.gatewayz.ai' }}
   ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
 
 jobs:
