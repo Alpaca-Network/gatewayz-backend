@@ -198,11 +198,15 @@ def create_app() -> FastAPI:
     logger.info(f"   Allowed Headers: {allowed_headers}")
 
     # OPTIMIZED: Add security middleware first to block bots before heavy logic
-    from src.config.redis_config import get_async_redis_client
+    from src.config.redis_config import get_redis_client
     try:
-        redis_client = get_async_redis_client()
-        app.add_middleware(SecurityMiddleware, redis_client=redis_client)
-        logger.info("  🛡️  Security middleware enabled (IP tiering & fingerprinting)")
+        redis_client = get_redis_client()
+        if redis_client:
+            app.add_middleware(SecurityMiddleware, redis_client=redis_client)
+            logger.info("  🛡️  Security middleware enabled (IP tiering & fingerprinting)")
+        else:
+            app.add_middleware(SecurityMiddleware)
+            logger.warning("  🛡️  Security middleware enabled with LOCAL fallback (Redis not available)")
     except Exception as e:
         # Fallback to in-memory limiting if redis is unavailable
         app.add_middleware(SecurityMiddleware)

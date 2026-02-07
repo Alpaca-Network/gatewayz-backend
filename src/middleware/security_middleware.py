@@ -8,6 +8,7 @@ and 499 timeout spikes. It implements:
 3. Global Velocity Protection (System-wide shield during high error spikes)
 """
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -174,22 +175,26 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         """
         Generic sliding window rate limit check.
         Returns True if allowed, False if blocked.
+
+        Note: Redis client is synchronous, so we use asyncio.to_thread to avoid
+        blocking the event loop.
         """
         now = int(time.time())
         bucket = now // window
         full_key = f"sec_rl:{key}:{bucket}"
-        
+
         if self.redis:
             try:
                 # Use Redis for distributed limiting
-                count = await self.redis.incr(full_key)
+                # Wrap synchronous Redis calls in to_thread to avoid blocking event loop
+                count = await asyncio.to_thread(self.redis.incr, full_key)
                 if count == 1:
-                    await self.redis.expire(full_key, window * 2)
+                    await asyncio.to_thread(self.redis.expire, full_key, window * 2)
                 return count <= limit
             except Exception as e:
                 logger.error(f"Redis security limit error: {e}")
                 # Fallback to local
-        
+
         # Local in-memory fallback
         if full_key not in self._local_cache:
             self._local_cache[full_key] = 0
@@ -197,7 +202,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             if now - self._last_cleanup > 300:
                 self._local_cache = {k: v for k, v in self._local_cache.items() if k.startswith(f"sec_rl:{key}:")}
                 self._last_cleanup = now
-                
+
         self._local_cache[full_key] += 1
         return self._local_cache[full_key] <= limit
 
