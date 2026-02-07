@@ -440,7 +440,7 @@ PROVIDER_ROUTING = {
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.pricing import calculate_cost
+from src.services.pricing import calculate_cost, calculate_cost_async
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
@@ -1077,7 +1077,7 @@ async def _process_stream_completion_background(
             operation_name=f"stream_completion_{provider}_{model}",
         ) as trace_ctx:
             # Calculate cost for tracing
-            cost = calculate_cost(model, prompt_tokens, completion_tokens)
+            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
 
             # Set token usage and cost on trace span
             trace_ctx.set_token_usage(
@@ -1116,12 +1116,12 @@ async def _process_stream_completion_background(
                 # Record anonymous usage for rate limiting (IMPORTANT: prevents abuse)
                 if client_ip:
                     try:
-                        record_anonymous_request(client_ip, model)
+                        await _to_thread(record_anonymous_request, client_ip, model)
                     except Exception as e:
                         logger.warning(f"Failed to record anonymous request: {e}")
 
                 # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
-                cost = calculate_cost(model, prompt_tokens, completion_tokens)
+                cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
                 await _record_inference_metrics_and_health(
                     provider=provider,
                     model=model,
@@ -1730,7 +1730,7 @@ async def chat_completions(
                         client_ip = request.client.host or "unknown"
 
                 # Validate anonymous request (model whitelist + rate limit)
-                anon_validation = validate_anonymous_request(client_ip, req.model)
+                anon_validation = await _to_thread(validate_anonymous_request, client_ip, req.model)
                 if not anon_validation["allowed"]:
                     logger.warning(
                         "Anonymous request denied (request_id=%s, ip=%s, model=%s, reason=%s)",
@@ -2065,7 +2065,8 @@ async def chat_completions(
                         conversation_id = str(session_id) if session_id else None
 
                         # Route the request (fail-open, < 2ms target)
-                        router_decision = route_request(
+                        router_decision = await _to_thread(
+                            route_request,
                             messages=messages,
                             tools=getattr(req, "tools", None),
                             response_format=getattr(req, "response_format", None),
@@ -2884,7 +2885,7 @@ async def chat_completions(
                         trace_total_tokens = usage.get("total_tokens", 0)
 
                         # Calculate cost for tracing
-                        trace_cost = calculate_cost(
+                        trace_cost = await calculate_cost_async(
                             request_model, trace_prompt_tokens, trace_completion_tokens
                         )
 
@@ -3061,7 +3062,7 @@ async def chat_completions(
             )
             await _to_thread(increment_api_key_usage, api_key)
         else:
-            cost = calculate_cost(model, prompt_tokens, completion_tokens)
+            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
 
         # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
         await _record_inference_metrics_and_health(

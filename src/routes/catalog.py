@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -559,7 +560,7 @@ async def get_gateways_status():
 
             # Get cached model count
             try:
-                models = get_cached_models(gateway_id)
+                models = await asyncio.to_thread(get_cached_models, gateway_id)
                 model_count = len(models) if models else 0
             except Exception as e:
                 model_count = 0
@@ -747,7 +748,7 @@ async def get_providers(
         provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
-            raw_providers = get_cached_providers()
+            raw_providers = await asyncio.to_thread(get_cached_providers)
             if not raw_providers and gateway_value == "openrouter":
                 # Graceful degradation - log warning and continue with empty providers
                 logger.warning("OpenRouter provider data unavailable - returning empty response")
@@ -757,7 +758,7 @@ async def get_providers(
                 "openrouter",
             )
             provider_groups.append(enhanced_openrouter)
-            openrouter_models = get_cached_models("openrouter") or []
+            openrouter_models = await asyncio.to_thread(get_cached_models, "openrouter") or []
 
         # Add support for other gateways
         other_gateways = [
@@ -778,7 +779,7 @@ async def get_providers(
 
         for gw in other_gateways:
             if gateway_value in (gw, "all"):
-                gw_models = get_cached_models(gw) or []
+                gw_models = await asyncio.to_thread(get_cached_models, gw) or []
                 all_models[gw] = gw_models
                 if gw_models:
                     derived_providers = derive_providers_from_models(gw_models, gw)
@@ -948,7 +949,7 @@ async def get_models(
         # Instead of calling each provider individually (slow!)
         if gateway_value == "all":
             logger.info(f"Using aggregated multi-provider catalog cache for gateway=all (unique_models={unique_models})")
-            all_models_from_cache = get_cached_models("all", use_unique_models=unique_models) or []
+            all_models_from_cache = await asyncio.to_thread(get_cached_models, "all", use_unique_models=unique_models) or []
             # The aggregated catalog is returned directly without individual provider calls
             # We still need to populate all_models dict for the response structure
             # The models already have source_gateway field populated
@@ -1606,7 +1607,7 @@ async def get_specific_model(
         provider_groups: list[list[dict]] = []
 
         # Always try to get OpenRouter providers for cross-reference
-        openrouter_providers = get_cached_providers()
+        openrouter_providers = await asyncio.to_thread(get_cached_providers)
         if openrouter_providers:
             enhanced_openrouter = annotate_provider_sources(
                 enhance_providers_with_logos_and_sites(openrouter_providers),
