@@ -12,6 +12,7 @@ This service provides:
 All data is stored in Redis with appropriate TTLs to prevent unbounded growth.
 """
 
+import asyncio
 import json
 import logging
 import time
