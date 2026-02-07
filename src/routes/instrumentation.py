@@ -52,7 +52,8 @@ async def instrumentation_health():
         from src.config.langfuse_config import LangfuseConfig
         langfuse_initialized = LangfuseConfig.is_initialized()
     except ImportError:
-        pass
+        # Langfuse package not installed, continue without it
+        logger.debug("Langfuse not available for health check - package not installed")
 
     return {
         "status": "healthy",
