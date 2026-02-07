@@ -16,6 +16,7 @@ Note: Langfuse is optional. If not installed or configured, tracing will be grac
 """
 
 import logging
+import threading
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -40,65 +41,76 @@ class LangfuseConfig:
 
     This class handles initialization of the Langfuse client
     for LLM tracing, scoring, and analytics.
+
+    Thread-safe: Uses a lock to guard state transitions in initialize() and shutdown().
     """
 
     _initialized = False
     _client: Optional["Langfuse"] = None
+    _lock = threading.Lock()
 
     @classmethod
     def initialize(cls) -> bool:
         """
         Initialize Langfuse client if enabled and configured.
 
+        Thread-safe: Uses double-checked locking pattern.
+
         Returns:
             bool: True if initialization succeeded, False if disabled or failed
         """
+        # Fast path: already initialized
         if cls._initialized:
-            logger.debug("Langfuse already initialized")
             return True
 
-        if not LANGFUSE_AVAILABLE:
-            logger.info("Langfuse not available (langfuse package not installed)")
-            return False
+        with cls._lock:
+            # Double-check after acquiring lock
+            if cls._initialized:
+                logger.debug("Langfuse already initialized")
+                return True
 
-        if not Config.LANGFUSE_ENABLED:
-            logger.info("Langfuse tracing disabled (LANGFUSE_ENABLED=false)")
-            return False
+            if not LANGFUSE_AVAILABLE:
+                logger.info("Langfuse not available (langfuse package not installed)")
+                return False
 
-        # Validate required configuration
-        if not Config.LANGFUSE_PUBLIC_KEY:
-            logger.warning("Langfuse disabled: LANGFUSE_PUBLIC_KEY not configured")
-            return False
+            if not Config.LANGFUSE_ENABLED:
+                logger.info("Langfuse tracing disabled (LANGFUSE_ENABLED=false)")
+                return False
 
-        if not Config.LANGFUSE_SECRET_KEY:
-            logger.warning("Langfuse disabled: LANGFUSE_SECRET_KEY not configured")
-            return False
+            # Validate required configuration
+            if not Config.LANGFUSE_PUBLIC_KEY:
+                logger.warning("Langfuse disabled: LANGFUSE_PUBLIC_KEY not configured")
+                return False
 
-        try:
-            logger.info("Initializing Langfuse LLM observability...")
-            logger.info(f"   Host: {Config.LANGFUSE_HOST}")
-            logger.info(f"   Debug: {Config.LANGFUSE_DEBUG}")
+            if not Config.LANGFUSE_SECRET_KEY:
+                logger.warning("Langfuse disabled: LANGFUSE_SECRET_KEY not configured")
+                return False
 
-            # Initialize Langfuse client
-            cls._client = Langfuse(
-                public_key=Config.LANGFUSE_PUBLIC_KEY,
-                secret_key=Config.LANGFUSE_SECRET_KEY,
-                host=Config.LANGFUSE_HOST,
-                debug=Config.LANGFUSE_DEBUG,
-                flush_interval=Config.LANGFUSE_FLUSH_INTERVAL,
-            )
+            try:
+                logger.info("Initializing Langfuse LLM observability...")
+                logger.info(f"   Host: {Config.LANGFUSE_HOST}")
+                logger.info(f"   Debug: {Config.LANGFUSE_DEBUG}")
 
-            # Verify connection by checking auth
-            # Note: Langfuse SDK batches requests, so this just validates config
-            logger.debug("Langfuse client created, connection will be verified on first trace")
+                # Initialize Langfuse client
+                cls._client = Langfuse(
+                    public_key=Config.LANGFUSE_PUBLIC_KEY,
+                    secret_key=Config.LANGFUSE_SECRET_KEY,
+                    host=Config.LANGFUSE_HOST,
+                    debug=Config.LANGFUSE_DEBUG,
+                    flush_interval=Config.LANGFUSE_FLUSH_INTERVAL,
+                )
 
-            cls._initialized = True
-            logger.info("Langfuse LLM observability initialized successfully")
-            return True
+                # Verify connection by checking auth
+                # Note: Langfuse SDK batches requests, so this just validates config
+                logger.debug("Langfuse client created, connection will be verified on first trace")
 
-        except Exception as e:
-            logger.error(f"Failed to initialize Langfuse: {e}", exc_info=True)
-            return False
+                cls._initialized = True
+                logger.info("Langfuse LLM observability initialized successfully")
+                return True
+
+            except Exception as e:
+                logger.error(f"Failed to initialize Langfuse: {e}", exc_info=True)
+                return False
 
     @classmethod
     def get_client(cls) -> Optional["Langfuse"]:
@@ -142,25 +154,28 @@ class LangfuseConfig:
         """
         Gracefully shutdown Langfuse and flush any pending traces.
 
+        Thread-safe: Uses lock to prevent concurrent shutdown/initialize races.
+
         Should be called during application shutdown to ensure all traces
         are exported before the application exits.
         """
-        if not cls._initialized:
-            return
+        with cls._lock:
+            if not cls._initialized:
+                return
 
-        try:
-            logger.info("Shutting down Langfuse...")
-            if cls._client:
-                # Flush pending traces before shutdown
-                cls._client.flush()
-                # Shutdown the client
-                cls._client.shutdown()
-            logger.info("Langfuse shutdown complete")
-        except Exception as e:
-            logger.error(f"Error during Langfuse shutdown: {e}", exc_info=True)
-        finally:
-            cls._initialized = False
-            cls._client = None
+            try:
+                logger.info("Shutting down Langfuse...")
+                if cls._client:
+                    # Flush pending traces before shutdown
+                    cls._client.flush()
+                    # Shutdown the client
+                    cls._client.shutdown()
+                logger.info("Langfuse shutdown complete")
+            except Exception as e:
+                logger.error(f"Error during Langfuse shutdown: {e}", exc_info=True)
+            finally:
+                cls._initialized = False
+                cls._client = None
 
     @classmethod
     def create_trace(
@@ -470,15 +485,15 @@ class LangfuseGenerationContext:
         output_tokens: int = 0,
         total_tokens: Optional[int] = None,
     ) -> "LangfuseGenerationContext":
-        """Set token usage for the generation."""
+        """Set token usage for the generation.
+
+        Uses the generic Langfuse format (input, output, total).
+        Langfuse SDK v2 internally maps OpenAI-style keys if needed.
+        """
         self._usage = {
             "input": input_tokens,
             "output": output_tokens,
             "total": total_tokens or (input_tokens + output_tokens),
-            # Also include OpenAI-style keys for compatibility
-            "prompt_tokens": input_tokens,
-            "completion_tokens": output_tokens,
-            "total_tokens": total_tokens or (input_tokens + output_tokens),
         }
         return self
 
@@ -517,8 +532,21 @@ class LangfuseGenerationContext:
         return self
 
     def set_error(self, error: Exception) -> "LangfuseGenerationContext":
-        """Record an error on the generation."""
-        self._output = {"error": str(error), "error_type": type(error).__name__}
+        """Record an error on the generation.
+
+        Merges error info into existing output rather than overwriting,
+        so any partial response data is preserved alongside the error.
+        """
+        # Merge error into existing output if it's a dict, otherwise create new
+        if isinstance(self._output, dict):
+            self._output["error"] = str(error)
+            self._output["error_type"] = type(error).__name__
+        else:
+            # Preserve previous output in a separate field if it exists
+            prev_output = self._output
+            self._output = {"error": str(error), "error_type": type(error).__name__}
+            if prev_output is not None:
+                self._output["partial_output"] = prev_output
         self._metadata["error"] = True
         return self
 
