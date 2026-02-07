@@ -392,6 +392,7 @@ def is_connection_error(error: Exception) -> bool:
         "http2 connection",
         "stream reset",
         "goaway",
+        "bad file descriptor",
     ]
 
     return any(indicator in error_message for indicator in connection_indicators)

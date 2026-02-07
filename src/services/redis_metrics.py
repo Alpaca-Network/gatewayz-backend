@@ -152,8 +152,8 @@ class RedisMetrics:
             # 7. Update health score
             await self._update_health_score_pipe(pipe, provider, success)
 
-            # Execute all operations atomically (sync operation, no await needed)
-            pipe.execute()
+            # Execute all operations atomically in a thread to avoid blocking the event loop
+            await asyncio.to_thread(pipe.execute)
 
             logger.debug(
                 f"Recorded metrics: {provider}/{model} - "
@@ -174,7 +174,7 @@ class RedisMetrics:
         # We can't easily get current value in a pipeline, so we'll do this separately
         # This is a minor inconsistency but acceptable for health scores
         try:
-            current = self.redis.zscore("provider_health", provider)
+            current = await asyncio.to_thread(self.redis.zscore, "provider_health", provider)
             if current is None:
                 current = 100.0
 

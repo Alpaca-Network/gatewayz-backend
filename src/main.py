@@ -20,6 +20,7 @@ from src.constants import (
     TAURI_DESKTOP_PROTOCOL_URL,
 )
 from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
+from src.middleware.security_middleware import SecurityMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -194,11 +195,18 @@ def create_app() -> FastAPI:
         "baggage",
     ]
 
-    # Log CORS configuration for debugging
-    logger.info("🌐 CORS Configuration:")
-    logger.info(f"   Environment: {Config.APP_ENV}")
-    logger.info(f"   Allowed Origins: {allowed_origins}")
     logger.info(f"   Allowed Headers: {allowed_headers}")
+
+    # OPTIMIZED: Add security middleware first to block bots before heavy logic
+    from src.config.redis_config import get_async_redis_client
+    try:
+        redis_client = get_async_redis_client()
+        app.add_middleware(SecurityMiddleware, redis_client=redis_client)
+        logger.info("  🛡️  Security middleware enabled (IP tiering & fingerprinting)")
+    except Exception as e:
+        # Fallback to in-memory limiting if redis is unavailable
+        app.add_middleware(SecurityMiddleware)
+        logger.warning(f"  🛡️  Security middleware enabled with LOCAL fallback (Redis error: {e})")
 
     # OPTIMIZED: Add request timeout middleware first to prevent 504 Gateway Timeouts
     # Middleware order matters! Last added = first executed

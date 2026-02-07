@@ -6,6 +6,7 @@ The frontend calls /api/models/detail with query parameters instead of the RESTf
 path-based endpoint /v1/models/{provider}/{model}.
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -96,7 +97,7 @@ async def get_model_detail(
         )
 
         # Fetch model data from appropriate gateway
-        model_data = fetch_specific_model(provider_name, model_name, gateway)
+        model_data = await asyncio.to_thread(fetch_specific_model, provider_name, model_name, gateway)
 
         if not model_data:
             gateway_msg = f" from gateway '{gateway}'" if gateway else ""
@@ -144,7 +145,6 @@ async def get_model_detail(
         ]:
             # Get models from the detected gateway to derive providers
             # Get models from the detected gateway to derive providers
-            import asyncio
             gateway_models = await asyncio.to_thread(get_cached_models, detected_gateway)
             if gateway_models:
                 derived_providers = derive_providers_from_models(gateway_models, detected_gateway)

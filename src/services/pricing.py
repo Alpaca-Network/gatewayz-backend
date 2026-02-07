@@ -3,6 +3,7 @@ Pricing Service
 Handles model pricing calculations and credit cost computation
 """
 
+import asyncio
 import logging
 import threading
 import time
@@ -594,7 +595,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
         # Step 3: Try database pricing (PHASE 0 FIX)
         try:
-            db_pricing = _get_pricing_from_database(model_id, candidate_ids)
+            db_pricing = await asyncio.to_thread(_get_pricing_from_database, model_id, candidate_ids)
             if db_pricing:
                 # Cache the database result - with thread safety
                 with _pricing_cache_lock:
@@ -609,7 +610,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
         # Step 4: Fallback to provider API cache (for resilience)
         try:
-            cache_pricing = _get_pricing_from_cache_fallback(model_id, candidate_ids)
+            cache_pricing = await asyncio.to_thread(_get_pricing_from_cache_fallback, model_id, candidate_ids)
             if cache_pricing:
                 # Cache the fallback result
                 _pricing_cache[model_id] = {

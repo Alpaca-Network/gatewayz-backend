@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -47,7 +48,8 @@ async def create_api_key(request: UserRegistrationRequest):
             raise HTTPException(status_code=400, detail="Invalid environment tag")
 
         # Create a user account and generate an API key for a dashboard user
-        user_data = create_enhanced_user(
+        user_data = await asyncio.to_thread(
+            create_enhanced_user,
             username=request.username,
             email=request.email,
             auth_method=request.auth_method,
@@ -93,7 +95,7 @@ async def create_api_key(request: UserRegistrationRequest):
 @router.post("/admin/add_credits", tags=["admin"])
 async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(require_admin)):
     try:
-        user = get_user(req.api_key)
+        user = await asyncio.to_thread(get_user, req.api_key)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
@@ -101,14 +103,15 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
         description = req.reason if req.reason else "Admin credit adjustment"
 
         # Add credits to a user account with description
-        add_credits_to_user(
+        await asyncio.to_thread(
+            add_credits_to_user,
             user_id=user["id"],
             credits=req.credits,
             transaction_type="admin_credit",
             description=description,
         )
 
-        updated_user = get_user(req.api_key)
+        updated_user = await asyncio.to_thread(get_user, req.api_key)
 
         return {
             "status": "success",
@@ -130,7 +133,7 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
 @router.get("/admin/balance", tags=["admin"])
 async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
     try:
-        users = get_all_users()
+        users = await asyncio.to_thread(get_all_users)
 
         user_balances = []
         for user in users:
@@ -153,7 +156,7 @@ async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
 @router.get("/admin/monitor", tags=["admin"])
 async def admin_monitor(admin_user: dict = Depends(require_admin)):
     try:
-        monitor_data = get_admin_monitor_data()
+        monitor_data = await asyncio.to_thread(get_admin_monitor_data)
 
         if not monitor_data:
             raise HTTPException(status_code=500, detail="Failed to retrieve monitoring data")
@@ -222,7 +225,7 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
         _provider_cache["data"] = None
         _provider_cache["timestamp"] = None
 
-        providers = get_cached_providers()
+        providers = await asyncio.to_thread(get_cached_providers)
 
         return {
             "status": "success",
@@ -365,8 +368,8 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
     """Debug models and providers data for troubleshooting"""
     try:
         # Get raw data
-        models = get_cached_models()
-        providers = get_cached_providers()
+        models = await asyncio.to_thread(get_cached_models)
+        providers = await asyncio.to_thread(get_cached_providers)
 
         # Sample some models and providers
         sample_models = models[:3] if models else []
