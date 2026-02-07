@@ -496,10 +496,17 @@ def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
     try:
         supabase = get_supabase_client()
         serialized_data = _serialize_model_data(model_data)
+
+        # CRITICAL FIX: Remove 'model_id' field if present (column was dropped in migration 20260131000002)
+        # The model_id column was removed from the models table. Some legacy code or provider clients
+        # may still be passing model_id in the data, which causes PostgreSQL error:
+        # "record 'new' has no field 'model_id'"
+        cleaned_data = {k: v for k, v in serialized_data.items() if k != "model_id"}
+
         response = (
             supabase.table("models")
             .upsert(
-                serialized_data,
+                cleaned_data,
                 on_conflict="provider_id,provider_model_id"
             )
             .execute()
@@ -530,10 +537,60 @@ def bulk_upsert_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]
         # Serialize Decimal objects to floats
         serialized_models = [_serialize_model_data(model) for model in models_data]
 
+        # CRITICAL FIX: Remove 'model_id' field if present (column was dropped in migration 20260131000002)
+        # The model_id column was removed from the models table. Some legacy code or provider clients
+        # may still be passing model_id in the data, which causes PostgreSQL error:
+        # "record 'new' has no field 'model_id'"
+        # This filter ensures we don't attempt to insert/update the non-existent column.
+        cleaned_models = []
+        for model in serialized_models:
+            # Create a copy without model_id
+            cleaned_model = {k: v for k, v in model.items() if k != "model_id"}
+            cleaned_models.append(cleaned_model)
+
+        # CRITICAL FIX: Deduplicate models by (provider_id, provider_model_id) to prevent
+        # PostgreSQL error: "ON CONFLICT DO UPDATE command cannot affect row a second time"
+        # This error occurs when the same (provider_id, provider_model_id) pair appears
+        # multiple times in the batch. We keep the last occurrence of each unique pair.
+        seen_keys = {}
+        deduplicated_models = []
+        duplicates_removed = 0
+
+        for model in cleaned_models:
+            provider_id = model.get("provider_id")
+            provider_model_id = model.get("provider_model_id")
+
+            if provider_id is None or provider_model_id is None:
+                logger.warning(f"Skipping model with missing provider_id or provider_model_id: {model.get('model_name', 'unknown')}")
+                continue
+
+            key = (provider_id, provider_model_id)
+
+            # If we've seen this key before, we're replacing the old value
+            if key in seen_keys:
+                duplicates_removed += 1
+                logger.debug(f"Duplicate model found: provider_id={provider_id}, provider_model_id={provider_model_id}")
+
+            seen_keys[key] = model
+
+        # Convert dict values back to list
+        deduplicated_models = list(seen_keys.values())
+
+        if duplicates_removed > 0:
+            logger.warning(
+                f"Removed {duplicates_removed} duplicate models from batch "
+                f"(original: {len(cleaned_models)}, deduplicated: {len(deduplicated_models)})"
+            )
+
+        # If no models remain after deduplication, return early
+        if not deduplicated_models:
+            logger.warning("No models to upsert after deduplication and validation")
+            return []
+
         response = (
             supabase.table("models")
             .upsert(
-                serialized_models,
+                deduplicated_models,
                 on_conflict="provider_id,provider_model_id"
             )
             .execute()

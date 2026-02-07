@@ -196,23 +196,37 @@ def transform_normalized_model_to_db_schema(
         Dictionary matching database schema or None if invalid
     """
     try:
-        # Extract model name - try various fields
+        # CRITICAL: Extract provider_model_id FIRST (the provider's actual API identifier)
+        # This is what the provider API expects (e.g., "openai/gpt-4", "gemini-1.5-pro-preview")
+        provider_model_id = (
+            normalized_model.get("provider_model_id")  # Explicit provider ID if set
+            or normalized_model.get("id")  # Most providers use "id" field
+            or normalized_model.get("slug")  # Some use "slug"
+        )
+
+        if not provider_model_id:
+            logger.warning(f"Skipping model without provider_model_id from {provider_slug}: {normalized_model}")
+            return None
+
+        # Extract model_name (common display name - NOT necessarily unique)
+        # This is just a human-readable name like "GPT-4", "Claude 3 Opus", etc.
+        # Can be duplicate across providers (e.g., multiple providers may have "GPT-4")
+        # Prefer name > id as fallback (id is provider-specific, so use as last resort)
         model_name = (
-            normalized_model.get("id")
-            or normalized_model.get("slug")
-            or normalized_model.get("canonical_slug")
-            or normalized_model.get("model_id")
-            or normalized_model.get("name")
+            normalized_model.get("name")  # Best: explicit display name
+            or normalized_model.get("model_id")  # Legacy: old model_id field (being phased out)
+            or normalized_model.get("id")  # Fallback: use provider ID if no display name
         )
 
         if not model_name:
-            logger.warning(f"Skipping model without name from {provider_slug}: {normalized_model}")
+            logger.warning(f"Skipping model without model_name from {provider_slug}: {normalized_model}")
             return None
 
         # Safety validation: ensure name is clean even if normalization missed it
         from src.utils.model_name_validator import clean_model_name
 
         model_name = clean_model_name(model_name)
+        provider_model_id = clean_model_name(provider_model_id)
 
         # Extract description
         description = normalized_model.get("description")
@@ -262,14 +276,17 @@ def transform_normalized_model_to_db_schema(
         if normalized_model.get("default_parameters"):
             metadata["default_parameters"] = normalized_model["default_parameters"]
 
-        # Extract provider_model_id - use explicit field if available, otherwise fall back to model_name
-        # This is important for providers like Google Vertex where the model_name (e.g., "gemini-3-flash")
-        # differs from the provider_model_id (e.g., "gemini-3-flash-preview")
-        provider_model_id = normalized_model.get("provider_model_id") or model_name
-
         # Store architecture string in metadata (no top-level DB column for it)
         if architecture_str:
             metadata["architecture_str"] = architecture_str
+
+        # NOTE: Both provider_model_id and model_name were extracted at the beginning of this function
+        # - provider_model_id (lines 201-209): Provider's UNIQUE API identifier
+        #   (e.g., "openai/gpt-4", "gemini-1.5-pro-preview")
+        #   Used for making API calls to the provider
+        # - model_name (lines 215-219): Common display name (NOT unique, can be duplicate)
+        #   (e.g., "GPT-4", "Claude 3 Opus")
+        #   Used for display purposes only
 
         # Build model data - pricing is stored separately in model_pricing table
         model_data = {
