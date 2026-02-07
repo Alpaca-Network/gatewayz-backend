@@ -398,6 +398,7 @@ class AITracer:
 
         # Create Langfuse context if available
         langfuse_ctx = None
+        langfuse_cm = None
         if LANGFUSE_AVAILABLE and LangfuseConfig and LangfuseConfig.is_initialized():
             try:
                 # Use the async context manager from LangfuseTracer
@@ -413,70 +414,64 @@ class AITracer:
                 logger.debug(f"AITracer: Failed to create Langfuse context: {e}")
                 langfuse_ctx = None
                 langfuse_cm = None
-        else:
-            langfuse_cm = None
 
-        if tracer:
-            logger.debug(f"AITracer: Creating span '{span_name}' with gen_ai.system={provider}")
-            with tracer.start_as_current_span(
-                span_name,
-                kind=SpanKind.CLIENT,
-                attributes={
-                    # Custom attributes (backward compatibility)
-                    "ai.provider": provider,
-                    "ai.model": model,
-                    "ai.request_type": request_type.value,
-                    "service.operation": "model_inference",
-                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
-                    "gen_ai.system": provider,
-                    "gen_ai.request.model": model,
-                    "gen_ai.operation.name": request_type.value,
-                },
-            ) as span:
-                ctx = AISpanContext(
-                    span=span,
-                    provider=provider,
-                    model=model,
-                    langfuse_ctx=langfuse_ctx,
-                )
-                logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
+        # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
+        # This prevents context leaks if OTel span creation fails
+        try:
+            if tracer:
+                logger.debug(f"AITracer: Creating span '{span_name}' with gen_ai.system={provider}")
+                with tracer.start_as_current_span(
+                    span_name,
+                    kind=SpanKind.CLIENT,
+                    attributes={
+                        # Custom attributes (backward compatibility)
+                        "ai.provider": provider,
+                        "ai.model": model,
+                        "ai.request_type": request_type.value,
+                        "service.operation": "model_inference",
+                        # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                        "gen_ai.system": provider,
+                        "gen_ai.request.model": model,
+                        "gen_ai.operation.name": request_type.value,
+                    },
+                ) as span:
+                    ctx = AISpanContext(
+                        span=span,
+                        provider=provider,
+                        model=model,
+                        langfuse_ctx=langfuse_ctx,
+                    )
+                    logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
+                    try:
+                        yield ctx
+                        # Set success status if no error
+                        span.set_status(Status(StatusCode.OK))
+                        # Record total duration
+                        duration_ms = (time.time() - ctx.start_time) * 1000
+                        span.set_attribute("ai.duration_ms", duration_ms)
+                        logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
+                    except Exception as e:
+                        ctx.set_error(e)
+                        if langfuse_ctx:
+                            langfuse_ctx.set_error(e)
+                        raise
+            else:
+                logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
+                # OpenTelemetry not available, yield context with Langfuse only
+                ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
                 try:
                     yield ctx
-                    # Set success status if no error
-                    span.set_status(Status(StatusCode.OK))
-                    # Record total duration
-                    duration_ms = (time.time() - ctx.start_time) * 1000
-                    span.set_attribute("ai.duration_ms", duration_ms)
-                    logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
                 except Exception as e:
-                    ctx.set_error(e)
                     if langfuse_ctx:
                         langfuse_ctx.set_error(e)
                     raise
-                finally:
-                    # Close Langfuse context
-                    if langfuse_cm:
-                        try:
-                            await langfuse_cm.__aexit__(None, None, None)
-                        except Exception as e:
-                            logger.debug(f"AITracer: Error closing Langfuse context: {e}")
-        else:
-            logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
-            # OpenTelemetry not available, yield context with Langfuse only
-            ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
-            try:
-                yield ctx
-            except Exception as e:
-                if langfuse_ctx:
-                    langfuse_ctx.set_error(e)
-                raise
-            finally:
-                # Close Langfuse context
-                if langfuse_cm:
-                    try:
-                        await langfuse_cm.__aexit__(None, None, None)
-                    except Exception as e:
-                        logger.debug(f"AITracer: Error closing Langfuse context: {e}")
+        finally:
+            # Always close Langfuse context to prevent leaks
+            if langfuse_cm:
+                try:
+                    await langfuse_cm.__aexit__(None, None, None)
+                except Exception as e:
+                    logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 
     @classmethod
     @contextmanager
@@ -517,58 +512,56 @@ class AITracer:
                 langfuse_ctx = None
                 langfuse_cm = None
 
-        if tracer:
-            with tracer.start_as_current_span(
-                span_name,
-                kind=SpanKind.CLIENT,
-                attributes={
-                    # Custom attributes (backward compatibility)
-                    "ai.provider": provider,
-                    "ai.model": model,
-                    "ai.request_type": request_type.value,
-                    "service.operation": "model_inference",
-                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
-                    "gen_ai.system": provider,
-                    "gen_ai.request.model": model,
-                    "gen_ai.operation.name": request_type.value,
-                },
-            ) as span:
-                ctx = AISpanContext(
-                    span=span,
-                    provider=provider,
-                    model=model,
-                    langfuse_ctx=langfuse_ctx,
-                )
+        # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
+        # This prevents context leaks if OTel span creation fails
+        try:
+            if tracer:
+                with tracer.start_as_current_span(
+                    span_name,
+                    kind=SpanKind.CLIENT,
+                    attributes={
+                        # Custom attributes (backward compatibility)
+                        "ai.provider": provider,
+                        "ai.model": model,
+                        "ai.request_type": request_type.value,
+                        "service.operation": "model_inference",
+                        # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                        "gen_ai.system": provider,
+                        "gen_ai.request.model": model,
+                        "gen_ai.operation.name": request_type.value,
+                    },
+                ) as span:
+                    ctx = AISpanContext(
+                        span=span,
+                        provider=provider,
+                        model=model,
+                        langfuse_ctx=langfuse_ctx,
+                    )
+                    try:
+                        yield ctx
+                        span.set_status(Status(StatusCode.OK))
+                        duration_ms = (time.time() - ctx.start_time) * 1000
+                        span.set_attribute("ai.duration_ms", duration_ms)
+                    except Exception as e:
+                        ctx.set_error(e)
+                        if langfuse_ctx:
+                            langfuse_ctx.set_error(e)
+                        raise
+            else:
+                ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
                 try:
                     yield ctx
-                    span.set_status(Status(StatusCode.OK))
-                    duration_ms = (time.time() - ctx.start_time) * 1000
-                    span.set_attribute("ai.duration_ms", duration_ms)
                 except Exception as e:
-                    ctx.set_error(e)
                     if langfuse_ctx:
                         langfuse_ctx.set_error(e)
                     raise
-                finally:
-                    if langfuse_cm:
-                        try:
-                            langfuse_cm.__exit__(None, None, None)
-                        except Exception as e:
-                            logger.debug(f"AITracer: Error closing Langfuse context: {e}")
-        else:
-            ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
-            try:
-                yield ctx
-            except Exception as e:
-                if langfuse_ctx:
-                    langfuse_ctx.set_error(e)
-                raise
-            finally:
-                if langfuse_cm:
-                    try:
-                        langfuse_cm.__exit__(None, None, None)
-                    except Exception as e:
-                        logger.debug(f"AITracer: Error closing Langfuse context: {e}")
+        finally:
+            # Always close Langfuse context to prevent leaks
+            if langfuse_cm:
+                try:
+                    langfuse_cm.__exit__(None, None, None)
+                except Exception as e:
+                    logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 
     @classmethod
     @asynccontextmanager
