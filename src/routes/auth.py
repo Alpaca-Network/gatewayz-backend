@@ -48,6 +48,11 @@ from src.services.email_verification import (
     EmailVerificationResult,
 )
 from src.utils.sentry_context import capture_error
+from src.services.partner_trial_service import (
+    PartnerTrialService,
+    is_partner_code,
+    get_partner_config,
+)
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -581,6 +586,51 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
         )
 
 
+def _apply_partner_trial_background(
+    user_id: int,
+    api_key: str,
+    partner_code: str,
+    signup_source: str | None = None,
+):
+    """Apply partner-specific trial configuration in background.
+
+    This is called for new users who sign up through a partner landing page
+    (e.g., Redbeard) to upgrade them from standard 3-day trial to the
+    partner-specific trial (e.g., 14-day Pro trial with $20 credits).
+    """
+    try:
+        logger.info(
+            f"Background task: Applying partner trial for user {user_id} "
+            f"with partner code {partner_code}"
+        )
+
+        result = PartnerTrialService.start_partner_trial(
+            user_id=user_id,
+            api_key=api_key,
+            partner_code=partner_code,
+            signup_source=signup_source,
+        )
+
+        if result.get("success"):
+            logger.info(
+                f"Background task: Partner trial applied successfully for user {user_id}: "
+                f"{result.get('trial_duration_days')} days, "
+                f"${result.get('trial_credits_usd')} credits, "
+                f"{result.get('trial_tier')} tier"
+            )
+        else:
+            logger.warning(
+                f"Background task: Failed to apply partner trial for user {user_id}: "
+                f"{result.get('error', 'Unknown error')}"
+            )
+
+    except Exception as e:
+        logger.error(
+            f"Background task: Error applying partner trial for user {user_id}: {e}",
+            exc_info=True,
+        )
+
+
 def _process_referral_code_background(
     referral_code: str, user_id: str, username: str, is_new_user: bool = True
 ):
@@ -588,6 +638,10 @@ def _process_referral_code_background(
 
     OPTIMIZATION: Moved from main auth flow to background task to reduce
     latency on auth endpoint. Referral tracking is non-critical for login success.
+
+    NOTE: This function is ONLY called for user-to-user referral codes,
+    NOT for partner codes (like REDBEARD). Partner codes are handled
+    separately by _apply_partner_trial_background().
     """
     try:
         logger.info(f"Background task: Processing referral code '{referral_code}' for user {user_id}")
@@ -1152,18 +1206,36 @@ async def privy_auth(
                         status_code=500, detail="Failed to create user account"
                     ) from fallback_error
 
-            # OPTIMIZATION: Process referral code in background to avoid blocking auth response
-            # Referral tracking is non-critical for successful login/signup
+            # OPTIMIZATION: Process referral/partner code in background
+            # Distinguish between partner codes (REDBEARD) and user referral codes
             referral_code_valid = False
+            partner_trial_applied = False
             if request.referral_code:
-                logger.info(f"Queuing referral code processing for new user: {request.referral_code}")
-                background_tasks.add_task(
-                    _process_referral_code_background,
-                    referral_code=request.referral_code,
-                    user_id=user_data["user_id"],
-                    username=username,
-                    is_new_user=True,
-                )
+                code_upper = request.referral_code.upper()
+                if is_partner_code(code_upper):
+                    # Partner code (e.g., REDBEARD) - apply partner-specific trial
+                    logger.info(
+                        f"Partner code detected for new user: {code_upper}. "
+                        f"Queuing partner trial application."
+                    )
+                    background_tasks.add_task(
+                        _apply_partner_trial_background,
+                        user_id=user_data["user_id"],
+                        api_key=user_data["primary_api_key"],
+                        partner_code=code_upper,
+                        signup_source=f"landing_page:{code_upper.lower()}",
+                    )
+                    partner_trial_applied = True
+                else:
+                    # User-to-user referral code - process normally
+                    logger.info(f"Queuing referral code processing for new user: {request.referral_code}")
+                    background_tasks.add_task(
+                        _process_referral_code_background,
+                        referral_code=request.referral_code,
+                        user_id=user_data["user_id"],
+                        username=username,
+                        is_new_user=True,
+                    )
                 # We don't know if it's valid until processed in background, so assume it might be valid
                 # This is logged/tracked in the background task
 
@@ -1193,6 +1265,7 @@ async def privy_auth(
                 "initial_credits": user_data["credits"],
                 "referral_code": request.referral_code,
                 "referral_code_valid": referral_code_valid,
+                "partner_trial_applied": partner_trial_applied,
             }
             background_tasks.add_task(
                 _log_registration_activity_background,
