@@ -132,26 +132,21 @@ async def health_railway():
             )
 
         # Check 2: Redis/health cache availability
+        # NOTE: Health cache may not be populated during initial startup.
+        # The health-service container populates this cache asynchronously.
+        # We should not fail the health check if the cache is empty during startup,
+        # as the API can still process requests without the health cache.
         cached_system = simple_health_cache.get_system_health()
-        if not cached_system:
-            logger.warning("Railway health check failed: Health cache unavailable")
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "status": "unhealthy",
-                    "reason": "health_cache_unavailable",
-                    "message": "Health monitoring service not responding",
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+        health_cache_available = cached_system is not None
 
-        # Check 3: Minimum gateway health threshold
-        healthy_gateways = cached_system.get("healthy_gateways", 0)
-        total_gateways = cached_system.get("total_gateways", 0)
+        # Check 3: Minimum gateway health threshold (only if cache is available)
+        healthy_gateways = cached_system.get("healthy_gateways", 0) if cached_system else 0
+        total_gateways = cached_system.get("total_gateways", 0) if cached_system else 0
 
         # Require at least 30% of gateways to be healthy
+        # Only enforce this check if we have health cache data
         min_healthy_threshold = 0.30
-        if total_gateways > 0:
+        if health_cache_available and total_gateways > 0:
             gateway_health_rate = healthy_gateways / total_gateways
             if gateway_health_rate < min_healthy_threshold:
                 logger.warning(
@@ -172,15 +167,17 @@ async def health_railway():
                 )
 
         # All checks passed
+        # Note: If health cache is not available, we're in "warming up" mode
+        # but the service can still process requests
         return {
             "status": "healthy",
             "database": "connected",
-            "health_cache": "available",
+            "health_cache": "available" if health_cache_available else "warming_up",
             "gateways": {
                 "healthy": healthy_gateways,
                 "total": total_gateways,
-                "health_rate": f"{(healthy_gateways / total_gateways * 100):.1f}%" if total_gateways > 0 else "0%",
-            },
+                "health_rate": f"{(healthy_gateways / total_gateways * 100):.1f}%" if total_gateways > 0 else "n/a",
+            } if health_cache_available else {"status": "warming_up"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
