@@ -242,19 +242,26 @@ class SlidingWindowRateLimiter:
         }
 
     async def _check_burst_limit(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
-        """Check burst limit using token bucket algorithm"""
+        """Check burst limit using token bucket algorithm
+
+        FIX (2026-02-06): Removed invalid `await` on sync Redis pipeline operations.
+        Pipeline commands queue up and execute together - they don't return awaitables.
+        Used asyncio.to_thread() to wrap the blocking execute() call.
+        """
+        import asyncio
         now = time.time()
         key = f"burst:{api_key}"
 
         if self.redis_client:
             # Use Redis for distributed burst limiting
-            pipe = self.redis_client.pipeline()
+            # Step 1: Get current state
+            def _get_burst_state():
+                pipe = self.redis_client.pipeline()
+                pipe.hget(key, "tokens")
+                pipe.hget(key, "last_refill")
+                return pipe.execute()
 
-            # Get current burst tokens
-            await pipe.hget(key, "tokens")
-            await pipe.hget(key, "last_refill")
-
-            results = pipe.execute()
+            results = await asyncio.to_thread(_get_burst_state)
             current_tokens = float(results[0] or 0)
             last_refill = float(results[1] or now)
 
@@ -265,10 +272,14 @@ class SlidingWindowRateLimiter:
 
             if current_tokens >= 1:
                 # Consume one token
-                await pipe.hset(key, "tokens", current_tokens - 1)
-                await pipe.hset(key, "last_refill", now)
-                await pipe.expire(key, 300)  # Expire after 5 minutes
-                pipe.execute()
+                def _consume_token():
+                    pipe = self.redis_client.pipeline()
+                    pipe.hset(key, "tokens", current_tokens - 1)
+                    pipe.hset(key, "last_refill", now)
+                    pipe.expire(key, 300)  # Expire after 5 minutes
+                    return pipe.execute()
+
+                await asyncio.to_thread(_consume_token)
 
                 return {
                     "allowed": True,
@@ -332,23 +343,31 @@ class SlidingWindowRateLimiter:
         now: datetime,
         window_start: datetime,
     ) -> dict[str, Any]:
-        """Check sliding window using Redis"""
-        pipe = self.redis_client.pipeline()
+        """Check sliding window using Redis
+
+        FIX (2026-02-06): Removed invalid `await` on sync Redis pipeline operations.
+        Pipeline commands queue up and execute together - they don't return awaitables.
+        Used asyncio.to_thread() to wrap the blocking execute() calls.
+        """
+        import asyncio
 
         # Get current usage for different time windows
         minute_key = f"rate_limit:{api_key}:minute:{now.strftime('%Y%m%d%H%M')}"
         hour_key = f"rate_limit:{api_key}:hour:{now.strftime('%Y%m%d%H')}"
         day_key = f"rate_limit:{api_key}:day:{now.strftime('%Y%m%d')}"
 
-        # Get current counts
-        await pipe.get(f"{minute_key}:requests")
-        await pipe.get(f"{minute_key}:tokens")
-        await pipe.get(f"{hour_key}:requests")
-        await pipe.get(f"{hour_key}:tokens")
-        await pipe.get(f"{day_key}:requests")
-        await pipe.get(f"{day_key}:tokens")
+        # Get current counts - wrap sync Redis calls in thread
+        def _get_current_counts():
+            pipe = self.redis_client.pipeline()
+            pipe.get(f"{minute_key}:requests")
+            pipe.get(f"{minute_key}:tokens")
+            pipe.get(f"{hour_key}:requests")
+            pipe.get(f"{hour_key}:tokens")
+            pipe.get(f"{day_key}:requests")
+            pipe.get(f"{day_key}:tokens")
+            return pipe.execute()
 
-        results = pipe.execute()
+        results = await asyncio.to_thread(_get_current_counts)
 
         minute_requests = int(results[0] or 0)
         minute_tokens = int(results[1] or 0)
@@ -420,23 +439,26 @@ class SlidingWindowRateLimiter:
                 "reason": "Day token limit exceeded",
             }
 
-        # All checks passed, update counters
-        await pipe.incr(f"{minute_key}:requests")
-        await pipe.incrby(f"{minute_key}:tokens", tokens_used)
-        await pipe.incr(f"{hour_key}:requests")
-        await pipe.incrby(f"{hour_key}:tokens", tokens_used)
-        await pipe.incr(f"{day_key}:requests")
-        await pipe.incrby(f"{day_key}:tokens", tokens_used)
+        # All checks passed, update counters - wrap sync Redis calls in thread
+        def _update_counters():
+            pipe = self.redis_client.pipeline()
+            pipe.incr(f"{minute_key}:requests")
+            pipe.incrby(f"{minute_key}:tokens", tokens_used)
+            pipe.incr(f"{hour_key}:requests")
+            pipe.incrby(f"{hour_key}:tokens", tokens_used)
+            pipe.incr(f"{day_key}:requests")
+            pipe.incrby(f"{day_key}:tokens", tokens_used)
 
-        # Set expiration times
-        await pipe.expire(f"{minute_key}:requests", 120)  # 2 minutes
-        await pipe.expire(f"{minute_key}:tokens", 120)
-        await pipe.expire(f"{hour_key}:requests", 7200)  # 2 hours
-        await pipe.expire(f"{hour_key}:tokens", 7200)
-        await pipe.expire(f"{day_key}:requests", 172800)  # 2 days
-        await pipe.expire(f"{day_key}:tokens", 172800)
+            # Set expiration times
+            pipe.expire(f"{minute_key}:requests", 120)  # 2 minutes
+            pipe.expire(f"{minute_key}:tokens", 120)
+            pipe.expire(f"{hour_key}:requests", 7200)  # 2 hours
+            pipe.expire(f"{hour_key}:tokens", 7200)
+            pipe.expire(f"{day_key}:requests", 172800)  # 2 days
+            pipe.expire(f"{day_key}:tokens", 172800)
+            return pipe.execute()
 
-        pipe.execute()
+        await asyncio.to_thread(_update_counters)
 
         return {
             "allowed": True,
