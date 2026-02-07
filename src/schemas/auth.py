@@ -24,7 +24,18 @@ class PrivyLinkedAccount(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v):
-        """Validate account type is a known provider"""
+        """Normalize and validate account type"""
+        # Normalize common Privy account type variations
+        type_mappings = {
+            "github_oauth": "github",
+            "sms": "phone",  # Privy sends 'sms' but we use 'phone'
+            "twitter_oauth": "twitter",
+            "discord_oauth": "discord",
+        }
+        normalized = type_mappings.get(v, v)
+
+        # Accept all known and likely Privy account types
+        # Being permissive here since unknown types shouldn't break auth
         valid_types = {
             "email",
             "phone",
@@ -33,10 +44,19 @@ class PrivyLinkedAccount(BaseModel):
             "apple_oauth",
             "discord",
             "farcaster",
+            "twitter",
+            "passkey",
+            "smart_wallet",
+            "cross_app",
+            "wallet",  # Allow wallet type to pass through (filtered in frontend but be safe)
         }
-        if v not in valid_types:
-            raise ValueError(f"Account type must be one of {valid_types}, got {v}")
-        return v
+
+        # Log but don't reject unknown types - just pass them through
+        if normalized not in valid_types:
+            import logging
+            logging.getLogger(__name__).warning(f"Unknown linked account type: {v} (normalized: {normalized})")
+
+        return normalized
 
     @field_validator("email", "address")
     @classmethod
@@ -81,7 +101,7 @@ class PrivySigninRequest(BaseModel):
 
 class PrivyAuthRequest(BaseModel):
     user: PrivyUserData
-    token: str
+    token: str | None = None  # Privy access token (optional - not currently used for validation)
     email: str | None = None  # Optional top-level email field for frontend to send
     privy_access_token: str | None = None
     refresh_token: str | None = None
@@ -90,14 +110,6 @@ class PrivyAuthRequest(BaseModel):
     referral_code: str | None = None  # Referral code if user signed up with one
     environment_tag: str | None = "live"  # Environment tag for API keys (live, test, development)
     auto_create_api_key: bool | None = True  # Whether to automatically create API keys for new users
-
-    @field_validator("token")
-    @classmethod
-    def validate_token(cls, v):
-        """Validate token is not empty"""
-        if not v or not v.strip():
-            raise ValueError("Token cannot be empty")
-        return v
 
     @field_validator("environment_tag")
     @classmethod
