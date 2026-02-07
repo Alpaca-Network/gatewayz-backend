@@ -27,14 +27,11 @@ logger = logging.getLogger(__name__)
 # Try to import Langfuse - it's optional
 try:
     from langfuse import Langfuse
-    from langfuse.decorators import langfuse_context, observe
 
     LANGFUSE_AVAILABLE = True
 except ImportError:
     LANGFUSE_AVAILABLE = False
     Langfuse = None  # type: ignore
-    langfuse_context = None  # type: ignore
-    observe = None  # type: ignore
 
 
 class LangfuseConfig:

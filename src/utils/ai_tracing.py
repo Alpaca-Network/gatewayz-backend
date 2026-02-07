@@ -415,6 +415,9 @@ class AITracer:
                 langfuse_ctx = None
                 langfuse_cm = None
 
+        # Track exception info for proper Langfuse error level propagation
+        exc_info: tuple = (None, None, None)
+
         # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
         # This prevents context leaks if OTel span creation fails
         try:
@@ -454,6 +457,9 @@ class AITracer:
                         ctx.set_error(e)
                         if langfuse_ctx:
                             langfuse_ctx.set_error(e)
+                        # Capture exception info for __aexit__
+                        import sys
+                        exc_info = sys.exc_info()
                         raise
             else:
                 logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
@@ -464,12 +470,16 @@ class AITracer:
                 except Exception as e:
                     if langfuse_ctx:
                         langfuse_ctx.set_error(e)
+                    # Capture exception info for __aexit__
+                    import sys
+                    exc_info = sys.exc_info()
                     raise
         finally:
             # Always close Langfuse context to prevent leaks
+            # Pass exception info to __aexit__ for proper error level
             if langfuse_cm:
                 try:
-                    await langfuse_cm.__aexit__(None, None, None)
+                    await langfuse_cm.__aexit__(*exc_info)
                 except Exception as e:
                     logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 
@@ -512,6 +522,9 @@ class AITracer:
                 langfuse_ctx = None
                 langfuse_cm = None
 
+        # Track exception info for proper Langfuse error level propagation
+        exc_info: tuple = (None, None, None)
+
         # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
         # This prevents context leaks if OTel span creation fails
         try:
@@ -546,6 +559,9 @@ class AITracer:
                         ctx.set_error(e)
                         if langfuse_ctx:
                             langfuse_ctx.set_error(e)
+                        # Capture exception info for __exit__
+                        import sys
+                        exc_info = sys.exc_info()
                         raise
             else:
                 ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
@@ -554,12 +570,16 @@ class AITracer:
                 except Exception as e:
                     if langfuse_ctx:
                         langfuse_ctx.set_error(e)
+                    # Capture exception info for __exit__
+                    import sys
+                    exc_info = sys.exc_info()
                     raise
         finally:
             # Always close Langfuse context to prevent leaks
+            # Pass exception info to __exit__ for proper error level
             if langfuse_cm:
                 try:
-                    langfuse_cm.__exit__(None, None, None)
+                    langfuse_cm.__exit__(*exc_info)
                 except Exception as e:
                     logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 

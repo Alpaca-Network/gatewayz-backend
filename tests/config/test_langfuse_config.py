@@ -1,8 +1,7 @@
 """
 Comprehensive tests for Langfuse LLM observability configuration.
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 
 
 class TestLangfuseConfig:
@@ -10,8 +9,8 @@ class TestLangfuseConfig:
 
     def test_module_imports(self):
         """Test that module imports successfully"""
-        import src.config.langfuse_config
-        assert src.config.langfuse_config is not None
+        from src.config import langfuse_config
+        assert langfuse_config is not None
 
     def test_module_has_expected_attributes(self):
         """Test module has expected public API"""

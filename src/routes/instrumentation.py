@@ -46,7 +46,13 @@ async def instrumentation_health():
     Returns:
         dict: Status of Loki, Tempo, and Langfuse integration
     """
-    from src.config.langfuse_config import LangfuseConfig
+    # Guard Langfuse import - it's optional
+    langfuse_initialized = False
+    try:
+        from src.config.langfuse_config import LangfuseConfig
+        langfuse_initialized = LangfuseConfig.is_initialized()
+    except ImportError:
+        pass
 
     return {
         "status": "healthy",
@@ -65,7 +71,7 @@ async def instrumentation_health():
         },
         "langfuse": {
             "enabled": Config.LANGFUSE_ENABLED,
-            "initialized": LangfuseConfig.is_initialized(),
+            "initialized": langfuse_initialized,
             "host": Config.LANGFUSE_HOST if Config.LANGFUSE_ENABLED else None,
             "environment": Config.APP_ENV,
         },
