@@ -18,13 +18,13 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
-from src.cache import (
+from src.services.model_catalog_cache import (
     clear_models_cache,
-    clear_modelz_cache,
     clear_providers_cache,
-    get_models_cache,
-    get_providers_cache,
+    get_gateway_cache_metadata as get_models_cache,
+    get_provider_cache_metadata as get_providers_cache,
 )
+from src.services.modelz_client import clear_modelz_cache
 from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
 

@@ -11,7 +11,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from src.cache import initialize_fal_cache_from_catalog
 from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
@@ -119,12 +118,9 @@ async def lifespan(app):
         # The lazy proxy will retry connection on first actual database access
 
     try:
-        # Initialize Fal.ai model cache from static catalog
-        try:
-            initialize_fal_cache_from_catalog()
-            logger.info("Fal.ai model cache initialized from catalog")
-        except Exception as e:
-            logger.warning(f"Fal.ai cache initialization warning: {e}")
+        # NOTE: Fal.ai cache now uses Redis and initializes automatically on first access
+        # No manual initialization needed - removed legacy initialize_fal_cache_from_catalog() call
+        logger.debug("Fal.ai cache will initialize on-demand via Redis")
 
         # Initialize FastAPI instrumentation synchronously (must complete before serving)
         # This instruments middleware which cannot be safely modified after app starts

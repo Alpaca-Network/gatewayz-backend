@@ -630,62 +630,50 @@ def sync_provider_models(
             models_synced = len(synced_models) if synced_models else 0
             logger.info(f"Successfully synced {models_synced} models for {provider_slug}")
 
-            # Sync pricing for the synced models
-            if synced_models:
-                try:
-                    from src.services.pricing_sync_background import sync_pricing_on_model_update
+            # Pricing is now synced directly during model sync via metadata.pricing_raw
+            # The separate pricing sync service has been deprecated
 
-                    # Extract model IDs from synced models
-                    model_ids = [m.get("id") for m in synced_models if m.get("id")]
+            # Invalidate caches to ensure fresh data is served immediately
+            # Phase 2 (Issue #995): After DB sync, invalidate caches so next
+            # request fetches from fresh database (in DB-first mode) or
+            # re-fetches from provider API (in legacy mode)
+            try:
+                from src.services.model_catalog_cache import (
+                    clear_models_cache,
+                    invalidate_full_catalog,
+                    invalidate_provider_catalog,
+                    invalidate_unique_models,
+                    invalidate_catalog_stats,
+                )
 
-                    if model_ids:
-                        logger.info(f"Syncing pricing for {len(model_ids)} models...")
-                        pricing_stats = sync_pricing_on_model_update(model_ids)
-                        logger.info(f"Pricing sync complete: {pricing_stats}")
-                except Exception as pricing_e:
-                    logger.warning(f"Pricing sync failed for {provider_slug}: {pricing_e}")
+                # Invalidate in-memory cache for this provider (deprecated, will be removed)
+                clear_models_cache(provider_slug)
 
-                # Invalidate caches to ensure fresh data is served immediately
-                # Phase 2 (Issue #995): After DB sync, invalidate caches so next
-                # request fetches from fresh database (in DB-first mode) or
-                # re-fetches from provider API (in legacy mode)
-                try:
-                    from src.cache import clear_models_cache
-                    from src.services.model_catalog_cache import (
-                        invalidate_full_catalog,
-                        invalidate_provider_catalog,
-                        invalidate_unique_models,
-                        invalidate_catalog_stats,
-                    )
+                # Invalidate Redis provider-specific cache only
+                # NOTE: invalidate_provider_catalog() auto-cascades to invalidate_full_catalog()
+                # In batch_mode, we skip that cascade since the caller will do it once at the end
+                if batch_mode:
+                    # Provider-only invalidation (skip full/unique/stats — caller handles those)
+                    cache = __import__(
+                        "src.services.model_catalog_cache", fromlist=["get_model_catalog_cache"]
+                    ).get_model_catalog_cache()
+                    key = cache._generate_key(cache.PREFIX_PROVIDER, provider_slug)
+                    if cache.redis_client:
+                        cache.redis_client.delete(key)
+                        cache._stats["invalidations"] += 1
+                    logger.debug(f"Cache INVALIDATE (batch): Provider catalog for {provider_slug}")
+                else:
+                    # Full invalidation cascade (single-provider sync)
+                    invalidate_provider_catalog(provider_slug)
+                    invalidate_unique_models()
+                    invalidate_catalog_stats()
 
-                    # Invalidate in-memory cache for this provider (deprecated, will be removed)
-                    clear_models_cache(provider_slug)
-
-                    # Invalidate Redis provider-specific cache only
-                    # NOTE: invalidate_provider_catalog() auto-cascades to invalidate_full_catalog()
-                    # In batch_mode, we skip that cascade since the caller will do it once at the end
-                    if batch_mode:
-                        # Provider-only invalidation (skip full/unique/stats — caller handles those)
-                        cache = __import__(
-                            "src.services.model_catalog_cache", fromlist=["get_model_catalog_cache"]
-                        ).get_model_catalog_cache()
-                        key = cache._generate_key(cache.PREFIX_PROVIDER, provider_slug)
-                        if cache.redis_client:
-                            cache.redis_client.delete(key)
-                            cache._stats["invalidations"] += 1
-                        logger.debug(f"Cache INVALIDATE (batch): Provider catalog for {provider_slug}")
-                    else:
-                        # Full invalidation cascade (single-provider sync)
-                        invalidate_provider_catalog(provider_slug)
-                        invalidate_unique_models()
-                        invalidate_catalog_stats()
-
-                    logger.info(
-                        f"Cache invalidated for {provider_slug} after model sync. "
-                        f"Next request will fetch from database (DB-first) or API (legacy)."
-                    )
-                except Exception as cache_e:
-                    logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
+                logger.info(
+                    f"Cache invalidated for {provider_slug} after model sync. "
+                    f"Next request will fetch from database (DB-first) or API (legacy)."
+                )
+            except Exception as cache_e:
+                logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
         else:
             models_synced = 0
             logger.info(f"DRY RUN: Would sync {len(db_models)} models for {provider_slug}")

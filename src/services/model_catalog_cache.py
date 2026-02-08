@@ -1169,3 +1169,70 @@ def invalidate_catalog_stats() -> bool:
     """Invalidate cached catalog statistics"""
     cache = get_model_catalog_cache()
     return cache.invalidate_catalog_stats()
+
+
+# ============================================================================
+# Backward Compatibility Wrappers for Routes
+# ============================================================================
+# These functions provide dict-like cache info compatible with old src.cache API
+# Allows route files to migrate away from src.cache imports cleanly
+
+
+def get_gateway_cache_metadata(gateway_name: str) -> dict[str, Any]:
+    """
+    Get cache metadata for a gateway (backward compatibility wrapper).
+
+    Returns dict with keys matching old cache.py format:
+    - data: List of cached models or None
+    - timestamp: Cache timestamp or None
+    - ttl: Time to live in seconds
+
+    Args:
+        gateway_name: Gateway slug (e.g., "openrouter", "anthropic")
+
+    Returns:
+        Cache info dict
+    """
+    cached_data = get_cached_gateway_catalog(gateway_name)
+    return {
+        "data": cached_data,
+        "timestamp": None,  # Could be enhanced to fetch actual timestamp from Redis TTL
+        "ttl": 1800,  # 30 minutes - matches TTL_GATEWAY
+    }
+
+
+def get_provider_cache_metadata() -> dict[str, Any]:
+    """
+    Get providers cache metadata (backward compatibility wrapper).
+
+    Returns dict with keys matching old cache.py format:
+    - data: List of cached providers or None
+    - timestamp: Cache timestamp or None
+    - ttl: Time to live in seconds
+
+    Returns:
+        Cache info dict
+    """
+    # Note: providers are typically stored under a specific key
+    # For backward compatibility, we return provider catalog data
+    cached_data = get_cached_provider_catalog("providers")
+    return {
+        "data": cached_data,
+        "timestamp": None,
+        "ttl": 1800,  # 30 minutes
+    }
+
+
+def clear_models_cache(gateway: str) -> None:
+    """
+    Clear cache for a specific gateway (backward compatibility wrapper).
+
+    Args:
+        gateway: Gateway name to clear cache for
+    """
+    invalidate_gateway_catalog(gateway)
+
+
+def clear_providers_cache() -> None:
+    """Clear providers cache (backward compatibility wrapper)."""
+    invalidate_provider_catalog("providers")

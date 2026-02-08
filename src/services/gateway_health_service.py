@@ -22,42 +22,78 @@ from src.services.prometheus_metrics import (
     track_gateway_health_check,
     record_auto_fix_attempt,
 )
-from src.cache import (
-    _aihubmix_models_cache,
-    _aimo_models_cache,
-    _alibaba_models_cache,
-    _anannas_models_cache,
-    _anthropic_models_cache,
-    _canopywave_models_cache,
-    _cerebras_models_cache,
-    _chutes_models_cache,
-    _clarifai_models_cache,
-    _cloudflare_workers_ai_models_cache,
-    _deepinfra_models_cache,
-    _fal_models_cache,
-    _featherless_models_cache,
-    _fireworks_models_cache,
-    _google_vertex_models_cache,
-    _groq_models_cache,
-    _helicone_models_cache,
-    _huggingface_models_cache,
-    _models_cache,
-    _modelz_cache,
-    _morpheus_models_cache,
-    _near_models_cache,
-    _nebius_models_cache,
-    _novita_models_cache,
-    _onerouter_models_cache,
-    _openai_models_cache,
-    _simplismart_models_cache,
-    _sybil_models_cache,
-    _together_models_cache,
-    _vercel_ai_gateway_models_cache,
-    _xai_models_cache,
-)
+from src.services.model_catalog_cache import get_cached_gateway_catalog, get_gateway_cache_metadata
 from src.config import Config
 
 logger = logging.getLogger(__name__)
+
+
+# Helper function to create a cache-like dict for Redis-backed catalogs
+def _get_redis_cache_wrapper(provider_slug: str) -> dict:
+    """
+    Create a dict-like wrapper for Redis-backed provider caches.
+    This maintains compatibility with existing health check code.
+    """
+    return {
+        "data": get_cached_gateway_catalog(provider_slug),
+        "timestamp": get_gateway_cache_metadata(provider_slug).get("timestamp"),
+        "provider": provider_slug,
+    }
+
+
+# Create cache wrappers for all providers (lazy-loaded via property access)
+class _CacheWrapper:
+    """Lazy wrapper that fetches cache data from Redis on access"""
+    def __init__(self, provider_slug: str):
+        self.provider_slug = provider_slug
+
+    def get(self, key: str, default=None):
+        """Dict-like get method"""
+        cache_data = _get_redis_cache_wrapper(self.provider_slug)
+        return cache_data.get(key, default)
+
+    def __getitem__(self, key: str):
+        """Dict-like bracket access"""
+        cache_data = _get_redis_cache_wrapper(self.provider_slug)
+        return cache_data[key]
+
+    def __setitem__(self, key: str, value):
+        """Dict-like assignment (no-op for health checks - they only read)"""
+        logger.debug(f"Cache write attempted for {self.provider_slug}.{key} (ignored in Redis mode)")
+
+
+# Create cache wrapper instances for all providers
+_models_cache = _CacheWrapper("openrouter")
+_featherless_models_cache = _CacheWrapper("featherless")
+_chutes_models_cache = _CacheWrapper("chutes")
+_groq_models_cache = _CacheWrapper("groq")
+_fireworks_models_cache = _CacheWrapper("fireworks")
+_together_models_cache = _CacheWrapper("together")
+_deepinfra_models_cache = _CacheWrapper("deepinfra")
+_cerebras_models_cache = _CacheWrapper("cerebras")
+_xai_models_cache = _CacheWrapper("xai")
+_nebius_models_cache = _CacheWrapper("nebius")
+_novita_models_cache = _CacheWrapper("novita")
+_huggingface_models_cache = _CacheWrapper("huggingface")
+_aimo_models_cache = _CacheWrapper("aimo")
+_near_models_cache = _CacheWrapper("near")
+_fal_models_cache = _CacheWrapper("fal")
+_aihubmix_models_cache = _CacheWrapper("aihubmix")
+_anannas_models_cache = _CacheWrapper("anannas")
+_onerouter_models_cache = _CacheWrapper("onerouter")
+_google_vertex_models_cache = _CacheWrapper("google-vertex")
+_cloudflare_workers_ai_models_cache = _CacheWrapper("cloudflare-workers-ai")
+_vercel_ai_gateway_models_cache = _CacheWrapper("vercel-ai-gateway")
+_helicone_models_cache = _CacheWrapper("helicone")
+_openai_models_cache = _CacheWrapper("openai")
+_anthropic_models_cache = _CacheWrapper("anthropic")
+_clarifai_models_cache = _CacheWrapper("clarifai")
+_alibaba_models_cache = _CacheWrapper("alibaba")
+_simplismart_models_cache = _CacheWrapper("simplismart")
+_modelz_cache = _CacheWrapper("modelz")
+_canopywave_models_cache = _CacheWrapper("canopywave")
+_sybil_models_cache = _CacheWrapper("sybil")
+_morpheus_models_cache = _CacheWrapper("morpheus")
 
 # Gateway configuration with API endpoints
 GATEWAY_CONFIG = {

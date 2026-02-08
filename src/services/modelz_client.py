@@ -12,13 +12,51 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from src.cache import clear_modelz_cache, get_modelz_cache
+from src.config.redis_config import get_redis_manager
 from src.utils.model_name_validator import clean_model_name
 
 logger = logging.getLogger(__name__)
 
 # Modelz uses Alpaca Network's backend API for their model registry
 MODELZ_BASE_URL = "https://backend.alpacanetwork.ai"
+MODELZ_CACHE_TTL = 3600  # 1 hour
+
+
+def get_modelz_cache() -> dict[str, Any]:
+    """Get Modelz cache from Redis.
+
+    Returns a dictionary with keys: data, timestamp, ttl
+    """
+    try:
+        redis_manager = get_redis_manager()
+        data = redis_manager.get_json("modelz:tokens")
+        timestamp_str = redis_manager.get("modelz:timestamp")
+
+        timestamp = None
+        if timestamp_str:
+            try:
+                timestamp = float(timestamp_str)
+            except (ValueError, TypeError):
+                pass
+
+        return {
+            "data": data,
+            "timestamp": timestamp,
+            "ttl": MODELZ_CACHE_TTL
+        }
+    except Exception as e:
+        logger.debug(f"Failed to get modelz cache: {e}")
+        return {"data": None, "timestamp": None, "ttl": MODELZ_CACHE_TTL}
+
+
+def clear_modelz_cache() -> None:
+    """Clear Modelz cache from Redis."""
+    try:
+        redis_manager = get_redis_manager()
+        redis_manager.delete("modelz:tokens")
+        redis_manager.delete("modelz:timestamp")
+    except Exception as e:
+        logger.warning(f"Failed to clear modelz cache: {e}")
 
 
 def _parse_modelz_response(data: Any) -> list[dict[str, Any]]:
@@ -75,10 +113,13 @@ def _update_modelz_cache(tokens: list[dict[str, Any]]) -> None:
     Args:
         tokens: List of token dictionaries to cache
     """
-    cache = get_modelz_cache()
-    cache["data"] = tokens
-    cache["timestamp"] = time.time()
-    logger.info(f"Cached {len(tokens)} Modelz tokens for {cache['ttl']}s")
+    try:
+        redis_manager = get_redis_manager()
+        redis_manager.set_json("modelz:tokens", tokens, ttl=MODELZ_CACHE_TTL)
+        redis_manager.set("modelz:timestamp", str(time.time()), ttl=MODELZ_CACHE_TTL)
+        logger.info(f"Cached {len(tokens)} Modelz tokens for {MODELZ_CACHE_TTL}s")
+    except Exception as e:
+        logger.warning(f"Failed to update modelz cache: {e}")
 
 
 async def get_modelz_client() -> httpx.AsyncClient:

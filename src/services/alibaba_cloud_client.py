@@ -12,8 +12,9 @@ try:  # pragma: no cover - defensive import for differing OpenAI SDKs
 except ImportError:  # pragma: no cover
     AuthenticationError = Exception  # type: ignore[assignment]
 
-from src.cache import _alibaba_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.config import Config
+from src.config.redis_config import get_redis_manager
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
@@ -409,16 +410,23 @@ def _is_alibaba_quota_error_cached() -> bool:
     Returns True if a quota error was recently recorded and we should skip
     making API calls to avoid log spam.
     """
-    if not _alibaba_models_cache.get("quota_error"):
-        return False
+    try:
+        redis_manager = get_redis_manager()
+        quota_error = redis_manager.get_json("alibaba:quota_error")
+        if not quota_error:
+            return False
 
-    timestamp = _alibaba_models_cache.get("quota_error_timestamp")
-    if not timestamp:
-        return False
+        timestamp_str = redis_manager.get("alibaba:quota_error_timestamp")
+        if not timestamp_str:
+            return False
 
-    backoff = _alibaba_models_cache.get("quota_error_backoff", 900)  # Default 15 min
-    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
-    return age < backoff
+        timestamp = datetime.fromisoformat(timestamp_str)
+        backoff = int(redis_manager.get("alibaba:quota_error_backoff") or "900")  # Default 15 min
+        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+        return age < backoff
+    except Exception as e:
+        logger.debug(f"Failed to check alibaba quota error cache: {e}")
+        return False
 
 
 def _set_alibaba_quota_error():
@@ -430,17 +438,26 @@ def _set_alibaba_quota_error():
     check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
     the 1-hour cache TTL would override our 15-minute quota error backoff.
     """
-    _alibaba_models_cache["quota_error"] = True
-    _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
-    _alibaba_models_cache["data"] = []
-    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
-    # is called and can check the quota_error_backoff
+    try:
+        redis_manager = get_redis_manager()
+        redis_manager.set_json("alibaba:quota_error", True, ttl=900)  # 15 min TTL
+        redis_manager.set("alibaba:quota_error_timestamp", datetime.now(timezone.utc).isoformat(), ttl=900)
+        redis_manager.set("alibaba:quota_error_backoff", "900", ttl=900)  # 15 min backoff
+        # Clear the model cache
+        cache_gateway_catalog("alibaba", [])
+    except Exception as e:
+        logger.warning(f"Failed to set alibaba quota error state: {e}")
 
 
 def _clear_alibaba_quota_error():
     """Clear quota error state after successful fetch."""
-    _alibaba_models_cache["quota_error"] = False
-    _alibaba_models_cache["quota_error_timestamp"] = None
+    try:
+        redis_manager = get_redis_manager()
+        redis_manager.delete("alibaba:quota_error")
+        redis_manager.delete("alibaba:quota_error_timestamp")
+        redis_manager.delete("alibaba:quota_error_backoff")
+    except Exception as e:
+        logger.debug(f"Failed to clear alibaba quota error state: {e}")
 
 
 def normalize_alibaba_model(model) -> dict | None:
@@ -509,8 +526,7 @@ def fetch_models_from_alibaba():
         ):
             logger.debug("Alibaba Cloud API key not configured - skipping model fetch")
             # Cache empty result to avoid repeated warnings
-            _alibaba_models_cache["data"] = []
-            _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+            cache_gateway_catalog("alibaba", [])
             return []
 
         # Check if we're in quota error backoff period
@@ -519,7 +535,7 @@ def fetch_models_from_alibaba():
                 "Alibaba Cloud quota error in backoff period - skipping API call. "
                 "Will retry after backoff expires."
             )
-            return _alibaba_models_cache.get("data", [])
+            return get_cached_gateway_catalog("alibaba") or []
 
         response = list_alibaba_models()
 
@@ -532,25 +548,22 @@ def fetch_models_from_alibaba():
             m for m in (normalize_alibaba_model(model) for model in response.data if model) if m
         ]
 
-        _alibaba_models_cache["data"] = normalized_models
-        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("alibaba", normalized_models)
         # Clear any previous quota error state on success
         _clear_alibaba_quota_error()
 
         logger.info(f"Fetched {len(normalized_models)} models from Alibaba Cloud")
-        return _alibaba_models_cache["data"]
+        return normalized_models
     except QuotaExceededError:
         # Quota exceeded - cache the failure state to prevent repeated API calls
         _set_alibaba_quota_error()
         logger.warning(
-            "Alibaba Cloud quota exceeded. Caching empty result for %d seconds. "
-            "Please check your plan and billing details.",
-            _alibaba_models_cache.get("quota_error_backoff", 900),
+            "Alibaba Cloud quota exceeded. Caching empty result for 900 seconds. "
+            "Please check your plan and billing details."
         )
         return []
     except Exception as e:
-        from src.cache import clear_gateway_error
-
         error_msg = sanitize_for_logging(str(e))
         # Check if it's a 401 authentication error
         if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:

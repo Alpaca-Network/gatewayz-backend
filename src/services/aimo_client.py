@@ -4,7 +4,13 @@ from datetime import datetime, timezone
 import httpx
 from openai import OpenAI
 
-from src.cache import _aimo_models_cache, clear_gateway_error, is_gateway_in_error_state, set_gateway_error
+from src.services.model_catalog_cache import (
+    cache_gateway_catalog,
+    get_cached_gateway_catalog,
+    clear_gateway_error,
+    is_gateway_in_error_state,
+    set_gateway_error,
+)
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
@@ -250,11 +256,11 @@ def fetch_models_from_aimo():
     """
     if not Config.AIMO_API_KEY:
         logger.debug("AIMO API key not configured, using cached data if available")
-        return _aimo_models_cache.get("data", [])
+        return get_cached_gateway_catalog("aimo") or []
 
     # Circuit breaker: skip fetch if gateway is in error state (exponential backoff)
     if is_gateway_in_error_state("aimo"):
-        cached_data = _aimo_models_cache.get("data", [])
+        cached_data = get_cached_gateway_catalog("aimo") or []
         if cached_data:
             logger.debug("AIMO gateway in error state, returning cached data (%d models)", len(cached_data))
             return cached_data
@@ -328,13 +334,10 @@ def fetch_models_from_aimo():
                     f"deduplicated to {len(deduplicated_models)} unique models"
                 )
 
-                _aimo_models_cache["data"] = deduplicated_models
-                _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+                # Cache models in Redis with automatic TTL and error tracking
+                cache_gateway_catalog("aimo", deduplicated_models)
 
-                # Clear error state on successful fetch
-                clear_gateway_error("aimo")
-
-                return _aimo_models_cache["data"]
+                return deduplicated_models
 
             except httpx.TimeoutException:
                 last_error = f"Timeout at {url} after {Config.AIMO_FETCH_TIMEOUT}s"
@@ -373,13 +376,14 @@ def fetch_models_from_aimo():
                 continue
 
     # All retries exhausted - use stale cache if available (stale-while-revalidate)
-    if _aimo_models_cache.get("data"):
+    cached_data = get_cached_gateway_catalog("aimo") or []
+    if cached_data:
         logger.warning(
             "AIMO fetch failed after all retries, returning stale cached data. Last error: %s",
             last_error,
         )
         set_gateway_error("aimo", f"Using stale cache: {last_error}")
-        return _aimo_models_cache["data"]
+        return cached_data
 
     # No cached data available
     error_msg = last_error or "Unknown error during AIMO fetch"

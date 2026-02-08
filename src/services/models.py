@@ -11,39 +11,8 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter
 
-from src.cache import (
-    _FAL_CACHE_INIT_DEFERRED,
-    _aihubmix_models_cache,
-    _aimo_models_cache,
-    _alibaba_models_cache,
-    _anannas_models_cache,
-    _canopywave_models_cache,
-    _cerebras_models_cache,
-    _chutes_models_cache,
-    _clarifai_models_cache,
-    _cloudflare_workers_ai_models_cache,
-    _deepinfra_models_cache,
-    _fal_models_cache,
-    _featherless_models_cache,
-    _fireworks_models_cache,
-    _google_vertex_models_cache,
-    _groq_models_cache,
-    _helicone_models_cache,
-    _huggingface_cache,
-    _huggingface_models_cache,
-    _models_cache,
-    _morpheus_models_cache,
-    _multi_provider_catalog_cache,
-    _near_models_cache,
-    _nebius_models_cache,
-    _novita_models_cache,
-    _onerouter_models_cache,
-    _simplismart_models_cache,
-    _sybil_models_cache,
-    _together_models_cache,
-    _vercel_ai_gateway_models_cache,
-    _xai_models_cache,
-    _zai_models_cache,
+from src.services.model_catalog_cache import (
+    # Cache helper functions
     clear_gateway_error,
     get_gateway_error_message,
     is_cache_fresh,
@@ -52,6 +21,7 @@ from src.cache import (
     should_revalidate_in_background,
 )
 from src.config import Config
+from src.config.redis_config import get_redis_manager
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
@@ -76,6 +46,9 @@ from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
+
+# Constants
+FAL_CACHE_INIT_DEFERRED = "FAL cache initialization deferred"
 
 
 def get_fallback_models_from_db(provider_slug: str) -> list[dict] | None:
@@ -430,25 +403,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# Initialize FAL models cache on module import for better performance
-# This ensures FAL models are available immediately without lazy loading
-try:
-    from src.cache import initialize_fal_cache_from_catalog
-
-    initialize_fal_cache_from_catalog()
-except ImportError:
-    # Initialization will be deferred to first request if import fails
-    logger.debug(f"{_FAL_CACHE_INIT_DEFERRED} on import")
-
-# Initialize Featherless models cache on module import for better performance
-# This ensures Featherless cache structure is ready even if no static catalog exists
-try:
-    from src.cache import initialize_featherless_cache_from_catalog
-
-    initialize_featherless_cache_from_catalog()
-except ImportError:
-    # Initialization will be deferred to first request if import fails
-    logger.debug("Featherless cache initialization deferred on import")
+# NOTE: FAL and Featherless cache initialization has been migrated to Redis.
+# The old cache.py initialization functions are no longer needed.
+# Cache initialization now happens automatically when models are first fetched.
+logger.debug("FAL and Featherless caches now use Redis - initialization on-demand")
 
 
 def load_featherless_catalog_export() -> list:
@@ -765,8 +723,13 @@ def _build_multi_provider_catalog() -> AggregatedCatalog:
 
 def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     catalog = _build_multi_provider_catalog()
-    _multi_provider_catalog_cache["data"] = catalog
-    _multi_provider_catalog_cache["timestamp"] = datetime.now(timezone.utc)
+    try:
+        redis_manager = get_redis_manager()
+        # Store the catalog in Redis with 1-hour TTL
+        redis_manager.set_json("multi_provider_catalog:data", catalog.to_dict() if hasattr(catalog, 'to_dict') else catalog.__dict__, ttl=3600)
+        redis_manager.set("multi_provider_catalog:timestamp", datetime.now(timezone.utc).isoformat(), ttl=3600)
+    except Exception as e:
+        logger.warning(f"Failed to cache multi-provider catalog in Redis: {e}")
     return catalog
 
 
@@ -2438,9 +2401,12 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
 def get_cached_huggingface_model(hugging_face_id: str):
     """Get cached Hugging Face model data or fetch if not cached"""
     try:
-        # Check if we have cached data for this specific model
-        if hugging_face_id in _huggingface_cache["data"]:
-            return _huggingface_cache["data"][hugging_face_id]
+        # Check if we have cached data for this specific model in Redis
+        redis_manager = get_redis_manager()
+        cache_key = f"huggingface:model:{hugging_face_id}"
+        cached_data = redis_manager.get_json(cache_key)
+        if cached_data:
+            return cached_data
 
         # Fetch from Hugging Face API
         return fetch_huggingface_model(hugging_face_id)
@@ -2460,9 +2426,13 @@ def fetch_huggingface_model(hugging_face_id: str):
 
         model_data = response.json()
 
-        # Cache the result
-        _huggingface_cache["data"][hugging_face_id] = model_data
-        _huggingface_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache the result in Redis with 1-hour TTL
+        try:
+            redis_manager = get_redis_manager()
+            cache_key = f"huggingface:model:{hugging_face_id}"
+            redis_manager.set_json(cache_key, model_data, ttl=3600)
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache HuggingFace model {hugging_face_id}: {cache_error}")
 
         return model_data
     except httpx.HTTPStatusError as e:
@@ -3019,44 +2989,9 @@ def normalize_anannas_model(model) -> dict | None:
         return None
 
 
-def _is_alibaba_quota_error_cached() -> bool:
-    """Check if we're in a quota error backoff period.
-
-    Returns True if a quota error was recently recorded and we should skip
-    making API calls to avoid log spam.
-    """
-    if not _alibaba_models_cache.get("quota_error"):
-        return False
-
-    timestamp = _alibaba_models_cache.get("quota_error_timestamp")
-    if not timestamp:
-        return False
-
-    backoff = _alibaba_models_cache.get("quota_error_backoff", 900)  # Default 15 min
-    age = (datetime.now(timezone.utc) - timestamp).total_seconds()
-    return age < backoff
-
-
-def _set_alibaba_quota_error():
-    """Record a quota error with backoff timing.
-
-    Note: We intentionally do NOT set the main cache timestamp here.
-    This ensures that the cache appears "stale" so that get_cached_models()
-    will call fetch_models_from_alibaba(), where the quota error backoff
-    check (_is_alibaba_quota_error_cached) is evaluated. If we set timestamp,
-    the 1-hour cache TTL would override our 15-minute quota error backoff.
-    """
-    _alibaba_models_cache["quota_error"] = True
-    _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
-    _alibaba_models_cache["data"] = []
-    # Don't set timestamp - let the cache appear stale so fetch_models_from_alibaba
-    # is called and can check the quota_error_backoff
-
-
-def _clear_alibaba_quota_error():
-    """Clear quota error state after successful fetch."""
-    _alibaba_models_cache["quota_error"] = False
-    _alibaba_models_cache["quota_error_timestamp"] = None
+# NOTE: Alibaba quota error tracking functions have been migrated to
+# src/services/alibaba_cloud_client.py where they belong.
+# They are no longer needed here.
 
 
 def normalize_alibaba_model(model) -> dict | None:

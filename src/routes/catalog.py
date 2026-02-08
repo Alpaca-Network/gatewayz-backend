@@ -545,8 +545,7 @@ async def get_gateways_status():
     - Cache age
     - Last error message (if any)
     """
-    from src.cache import (
-        _gateway_error_cache,
+    from src.services.model_catalog_cache import (
         get_gateway_error_message,
         is_gateway_in_error_state,
     )

@@ -5,7 +5,14 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.cache import _huggingface_cache, _models_cache, _provider_cache
+# Cache management functions migrated to model_catalog_cache
+# Old direct cache dict access replaced with new API calls
+from src.services.model_catalog_cache import (
+    get_gateway_cache_metadata,
+    get_provider_cache_metadata,
+    invalidate_gateway_catalog,
+    invalidate_provider_catalog,
+)
 from src.config import Config
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
@@ -222,8 +229,7 @@ async def admin_set_rate_limit(req: SetRateLimitRequest, admin_user: dict = Depe
 async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
     try:
         # Invalidate provider cache to force refresh
-        _provider_cache["data"] = None
-        _provider_cache["timestamp"] = None
+        invalidate_provider_catalog("providers")
 
         providers = await asyncio.to_thread(get_cached_providers)
 
@@ -242,19 +248,20 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
 @router.get("/admin/cache-status", tags=["admin"])
 async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     try:
+        provider_cache = get_provider_cache_metadata()
         cache_age = None
-        if _provider_cache["timestamp"]:
-            cache_age = (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+        if provider_cache.get("timestamp"):
+            cache_age = (datetime.now(timezone.utc) - provider_cache["timestamp"]).total_seconds()
 
         return {
             "status": "success",
             "cache_info": {
-                "has_data": _provider_cache["data"] is not None,
+                "has_data": provider_cache.get("data") is not None,
                 "cache_age_seconds": cache_age,
-                "ttl_seconds": _provider_cache["ttl"],
-                "is_valid": cache_age is not None and cache_age < _provider_cache["ttl"],
+                "ttl_seconds": provider_cache.get("ttl", 1800),
+                "is_valid": cache_age is not None and cache_age < provider_cache.get("ttl", 1800),
                 "total_cached_providers": (
-                    len(_provider_cache["data"]) if _provider_cache["data"] else 0
+                    len(provider_cache["data"]) if provider_cache.get("data") else 0
                 ),
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -269,18 +276,22 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
 async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
     """Get Hugging Face cache status and statistics"""
     try:
+        hf_cache = get_gateway_cache_metadata("huggingface")
         cache_age = None
-        if _huggingface_cache["timestamp"]:
+        if hf_cache.get("timestamp"):
             cache_age = (
-                datetime.now(timezone.utc) - _huggingface_cache["timestamp"]
+                datetime.now(timezone.utc) - hf_cache["timestamp"]
             ).total_seconds()
+
+        hf_data = hf_cache.get("data") or []
+        cached_ids = [model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")]
 
         return {
             "huggingface_cache": {
                 "age_seconds": cache_age,
-                "is_valid": cache_age is not None and cache_age < _huggingface_cache["ttl"],
-                "total_cached_models": len(_huggingface_cache["data"]),
-                "cached_model_ids": list(_huggingface_cache["data"].keys()),
+                "is_valid": cache_age is not None and cache_age < hf_cache.get("ttl", 1800),
+                "total_cached_models": len(hf_data),
+                "cached_model_ids": cached_ids,
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -296,8 +307,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
 async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
     """Clear Hugging Face cache to force refresh on the next request"""
     try:
-        _huggingface_cache["data"] = {}
-        _huggingface_cache["timestamp"] = None
+        invalidate_gateway_catalog("huggingface")
 
         return {
             "message": "Hugging Face cache cleared successfully",
@@ -401,24 +411,28 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                     }
                 )
 
+        # Get cache metadata for debugging
+        models_cache_meta = get_gateway_cache_metadata("openrouter")  # Using openrouter as main models cache
+        providers_cache_meta = get_provider_cache_metadata()
+
         return {
             "models_cache": {
                 "total_models": len(models) if models else 0,
                 "sample_models": sample_models,
-                "cache_timestamp": _models_cache.get("timestamp"),
+                "cache_timestamp": models_cache_meta.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _models_cache["timestamp"]).total_seconds()
-                    if _models_cache.get("timestamp")
+                    (datetime.now(timezone.utc) - models_cache_meta["timestamp"]).total_seconds()
+                    if models_cache_meta.get("timestamp")
                     else None
                 ),
             },
             "providers_cache": {
                 "total_providers": len(providers) if providers else 0,
                 "sample_providers": sample_providers,
-                "cache_timestamp": _provider_cache.get("timestamp"),
+                "cache_timestamp": providers_cache_meta.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
-                    if _provider_cache.get("timestamp")
+                    (datetime.now(timezone.utc) - providers_cache_meta["timestamp"]).total_seconds()
+                    if providers_cache_meta.get("timestamp")
                     else None
                 ),
             },
