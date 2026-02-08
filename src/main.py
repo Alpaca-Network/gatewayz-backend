@@ -416,6 +416,7 @@ def create_app() -> FastAPI:
     # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
+        ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
         ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints

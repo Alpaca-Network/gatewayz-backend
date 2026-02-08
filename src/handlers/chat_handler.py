@@ -10,7 +10,8 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, Optional, Union
+from fastapi import Request
 
 from src.db.chat_completion_requests import save_chat_completion_request
 from src.db.users import deduct_credits, get_user, record_usage
@@ -61,16 +62,23 @@ class ChatInferenceHandler:
     All chat endpoints (OpenAI, Anthropic, AI SDK) use this same handler.
     """
 
-    def __init__(self, api_key: str, background_tasks: Optional[Any] = None):
+    def __init__(
+        self, 
+        api_key: str, 
+        background_tasks: Optional[Any] = None,
+        request: Optional[Request] = None
+    ):
         """
         Initialize the handler with user context.
 
         Args:
             api_key: User's API key for authentication and billing
             background_tasks: FastAPI BackgroundTasks for async operations
+            request: FastAPI Request object for disconnect detection
         """
         self.api_key = api_key
         self.background_tasks = background_tasks
+        self.request = request
         self.user: Optional[Dict[str, Any]] = None
         self.trial: Optional[Dict[str, Any]] = None
         self.request_id = str(uuid.uuid4())
@@ -858,6 +866,12 @@ class ChatInferenceHandler:
             chunk_count = 0
 
             async for provider_chunk in stream:
+                # CRITICAL: Check for client disconnect to prevent zombie requests (499)
+                if self.request and await self.request.is_disconnected():
+                    logger.warning(f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})")
+                    finish_reason = "client_disconnected"
+                    break
+
                 chunk_count += 1
 
                 # Extract delta content
