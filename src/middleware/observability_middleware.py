@@ -171,6 +171,15 @@ class ObservabilityMiddleware:
                 method=method, endpoint=endpoint, status_code=status_code, app_name=APP_NAME
             )
 
+            # Slow request logging for performance diagnostics
+            # 10s is a conservative threshold for "unusually slow" non-streaming requests
+            # We skip this for streaming to avoid noise
+            if duration > 10.0 and not is_streaming and not path == "/metrics":
+                logger.warning(
+                    f"🐢 SLOW REQUEST: {method} {path} took {duration:.2f}s "
+                    f"(status={status_code}, size={response_size}b)"
+                )
+
             # Decrement in-progress requests gauge
             fastapi_requests_in_progress.labels(
                 app_name=APP_NAME, method=method, path=endpoint

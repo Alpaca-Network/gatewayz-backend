@@ -1342,6 +1342,7 @@ async def stream_generator(
     request_id=None,
     api_key_id=None,
     client_ip=None,
+    request: Optional[Request] = None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -1412,6 +1413,11 @@ async def stream_generator(
                         raise e
 
         async for chunk in iterate_stream():
+            # CRITICAL: Check for client disconnect to prevent zombie requests (499)
+            if request and await request.is_disconnected():
+                logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
+                break
+
             chunk_count += 1
 
             # TTFC: Track time to first chunk for performance monitoring
@@ -2467,8 +2473,8 @@ async def chat_completions(
                         {"messages": messages, "model": original_model, "stream": True, **optional}
                     )
 
-                    # Create unified handler with user context
-                    handler = ChatInferenceHandler(api_key, background_tasks)
+                    # Create unified handler with user context (pass request for disconnect detection)
+                    handler = ChatInferenceHandler(api_key, background_tasks, request=request)
 
                     # Process stream through unified pipeline
                     internal_stream = handler.process_stream(internal_request)
@@ -2617,6 +2623,7 @@ async def chat_completions(
                                 request_id=request_id,
                                 api_key_id=api_key_id,
                                 client_ip=client_ip if is_anonymous else None,
+                                request=request,
                             ),
                             media_type="text/event-stream",
                             headers=stream_headers,
@@ -2727,8 +2734,8 @@ async def chat_completions(
                     {"messages": messages, "model": original_model, "stream": False, **optional}
                 )
 
-                # Create unified handler with user context
-                handler = ChatInferenceHandler(api_key, background_tasks)
+                # Create unified handler with user context (pass request for disconnect detection)
+                handler = ChatInferenceHandler(api_key, background_tasks, request=request)
 
                 # Wrap with AITracer for gen_ai.* telemetry + track duration for Prometheus
                 inference_start = time.time()

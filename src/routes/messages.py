@@ -543,8 +543,8 @@ async def anthropic_messages(
             adapter = AnthropicChatAdapter()
             internal_request = adapter.to_internal_request(anthropic_request)
 
-            # Create unified handler with user context
-            handler = ChatInferenceHandler(api_key, background_tasks)
+            # Create unified handler with user context (pass request for disconnect detection)
+            handler = ChatInferenceHandler(api_key, background_tasks, request=request)
 
             # Process request through unified pipeline
             internal_response = await handler.process(internal_request)
