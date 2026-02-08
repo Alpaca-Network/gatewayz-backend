@@ -219,6 +219,20 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
     logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
 
+    # Add concurrency control middleware (global admission gate)
+    from src.middleware.concurrency_middleware import ConcurrencyMiddleware
+
+    app.add_middleware(
+        ConcurrencyMiddleware,
+        limit=Config.CONCURRENCY_LIMIT,
+        queue_size=Config.CONCURRENCY_QUEUE_SIZE,
+        queue_timeout=Config.CONCURRENCY_QUEUE_TIMEOUT,
+    )
+    logger.info(
+        f"  🚦 Concurrency middleware enabled "
+        f"(limit={Config.CONCURRENCY_LIMIT}, queue={Config.CONCURRENCY_QUEUE_SIZE})"
+    )
+
     # Add request ID middleware for error tracking and correlation
     from src.middleware.request_id_middleware import RequestIDMiddleware
 

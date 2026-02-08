@@ -16,6 +16,7 @@ instead of directly calling provider APIs.
 
 import json
 import logging
+import threading
 from typing import Any
 
 from src.config.redis_config import get_redis_client, is_redis_available
@@ -700,6 +701,12 @@ class ModelCatalogCache:
 # Global cache instance
 _model_catalog_cache: ModelCatalogCache | None = None
 
+# Stampede protection locks — prevent multiple threads from rebuilding cache simultaneously
+# after invalidation. Only one thread fetches from DB while others wait for the result.
+_rebuild_lock_full_catalog = threading.Lock()
+_rebuild_lock_unique_models = threading.Lock()
+_rebuild_locks_provider: dict[str, threading.Lock] = {}
+
 
 def get_model_catalog_cache() -> ModelCatalogCache:
     """Get or create global model catalog cache instance"""
@@ -762,34 +769,45 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
     step_logger.success(result="MISS")
 
     # Step 3: Fetch from database (cache miss everywhere)
-    step_logger.step(3, "Fetching from database", cache_layer="database")
-    try:
-        from src.db.models_catalog_db import (
-            get_all_models_for_catalog,
-            transform_db_models_batch,
-        )
+    # Use stampede lock to prevent thundering herd — only one thread rebuilds
+    step_logger.step(3, "Acquiring rebuild lock", cache_layer="stampede_protection")
+    with _rebuild_lock_full_catalog:
+        # Double-check: another thread may have rebuilt while we waited for the lock
+        cached = cache.get_full_catalog()
+        if cached is not None:
+            set_local_catalog("all", cached)
+            step_logger.success(result="REBUILT_BY_OTHER_THREAD", count=len(cached))
+            step_logger.complete(source="redis_after_lock", models=len(cached))
+            return cached
 
-        db_models = get_all_models_for_catalog(include_inactive=False)
-        step_logger.success(db_models=len(db_models))
+        step_logger.step(3, "Fetching from database", cache_layer="database")
+        try:
+            from src.db.models_catalog_db import (
+                get_all_models_for_catalog,
+                transform_db_models_batch,
+            )
 
-        # Step 4: Transform to API format
-        step_logger.step(4, "Transforming models to API format", count=len(db_models))
-        api_models = transform_db_models_batch(db_models)
-        step_logger.success(api_models=len(api_models))
+            db_models = get_all_models_for_catalog(include_inactive=False)
+            step_logger.success(db_models=len(db_models))
 
-        # Step 5: Populate caches
-        step_logger.step(5, "Populating caches", targets="redis+local")
-        cache.set_full_catalog(api_models, ttl=900)
-        set_local_catalog("all", api_models)
-        step_logger.success(redis="updated", local="updated", ttl=900)
+            # Step 4: Transform to API format
+            step_logger.step(4, "Transforming models to API format", count=len(db_models))
+            api_models = transform_db_models_batch(db_models)
+            step_logger.success(api_models=len(api_models))
 
-        step_logger.complete(source="database", models=len(api_models), cache_status="populated")
-        return api_models
+            # Step 5: Populate caches
+            step_logger.step(5, "Populating caches", targets="redis+local")
+            cache.set_full_catalog(api_models, ttl=900)
+            set_local_catalog("all", api_models)
+            step_logger.success(redis="updated", local="updated", ttl=900)
 
-    except Exception as e:
-        step_logger.failure(e, source="database")
-        logger.error(f"Error fetching catalog from database: {e}")
-        return []
+            step_logger.complete(source="database", models=len(api_models), cache_status="populated")
+            return api_models
+
+        except Exception as e:
+            step_logger.failure(e, source="database")
+            logger.error(f"Error fetching catalog from database: {e}")
+            return []
 
 
 def invalidate_full_catalog() -> bool:
@@ -872,35 +890,43 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
 
         return local_data
 
-    # 3. Cache miss everywhere - fetch from database
+    # 3. Cache miss everywhere - fetch from database with stampede protection
     logger.debug(f"Cache MISS (all layers): Fetching {provider_name} catalog from database")
 
-    try:
-        from src.db.models_catalog_db import (
-            get_models_by_gateway_for_catalog,
-            transform_db_models_batch,
-        )
+    lock = _rebuild_locks_provider.setdefault(provider_name, threading.Lock())
+    with lock:
+        # Double-check: another thread may have rebuilt while we waited
+        cached = cache.get_provider_catalog(provider_name)
+        if cached is not None:
+            set_local_catalog(provider_name, cached)
+            return cached
 
-        # Fetch from database
-        db_models = get_models_by_gateway_for_catalog(
-            gateway_slug=provider_name,
-            include_inactive=False
-        )
+        try:
+            from src.db.models_catalog_db import (
+                get_models_by_gateway_for_catalog,
+                transform_db_models_batch,
+            )
 
-        # Transform to API format
-        api_models = transform_db_models_batch(db_models)
+            # Fetch from database
+            db_models = get_models_by_gateway_for_catalog(
+                gateway_slug=provider_name,
+                include_inactive=False
+            )
 
-        # Cache in both Redis and local memory
-        cache.set_provider_catalog(provider_name, api_models, ttl=1800)
-        set_local_catalog(provider_name, api_models)
+            # Transform to API format
+            api_models = transform_db_models_batch(db_models)
 
-        logger.info(f"Fetched {len(api_models)} models for {provider_name} from database and cached")
+            # Cache in both Redis and local memory
+            cache.set_provider_catalog(provider_name, api_models, ttl=1800)
+            set_local_catalog(provider_name, api_models)
 
-        return api_models
+            logger.info(f"Fetched {len(api_models)} models for {provider_name} from database and cached")
 
-    except Exception as e:
-        logger.error(f"Error fetching {provider_name} catalog from database: {e}")
-        return []
+            return api_models
+
+        except Exception as e:
+            logger.error(f"Error fetching {provider_name} catalog from database: {e}")
+            return []
 
 
 def invalidate_provider_catalog(provider_name: str) -> bool:
@@ -997,35 +1023,43 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
 
         return local_data
 
-    # 3. Cache miss everywhere - fetch from database
+    # 3. Cache miss everywhere - fetch from database with stampede protection
     logger.debug(f"Cache MISS (all layers): Fetching {gateway_name} catalog from database")
 
-    try:
-        from src.db.models_catalog_db import (
-            get_models_by_gateway_for_catalog,
-            transform_db_models_batch,
-        )
+    lock = _rebuild_locks_provider.setdefault(gateway_name, threading.Lock())
+    with lock:
+        # Double-check: another thread may have rebuilt while we waited
+        cached = cache.get_gateway_catalog(gateway_name)
+        if cached is not None:
+            set_local_catalog(gateway_name, cached)
+            return cached
 
-        # Fetch from database
-        db_models = get_models_by_gateway_for_catalog(
-            gateway_slug=gateway_name,
-            include_inactive=False
-        )
+        try:
+            from src.db.models_catalog_db import (
+                get_models_by_gateway_for_catalog,
+                transform_db_models_batch,
+            )
 
-        # Transform to API format
-        api_models = transform_db_models_batch(db_models)
+            # Fetch from database
+            db_models = get_models_by_gateway_for_catalog(
+                gateway_slug=gateway_name,
+                include_inactive=False
+            )
 
-        # Cache in both Redis and local memory
-        cache.set_gateway_catalog(gateway_name, api_models, ttl=1800)
-        set_local_catalog(gateway_name, api_models)
+            # Transform to API format
+            api_models = transform_db_models_batch(db_models)
 
-        logger.info(f"Fetched {len(api_models)} models for {gateway_name} from database and cached")
+            # Cache in both Redis and local memory
+            cache.set_gateway_catalog(gateway_name, api_models, ttl=1800)
+            set_local_catalog(gateway_name, api_models)
 
-        return api_models
+            logger.info(f"Fetched {len(api_models)} models for {gateway_name} from database and cached")
 
-    except Exception as e:
-        logger.error(f"Error fetching {gateway_name} catalog from database: {e}")
-        return []
+            return api_models
+
+        except Exception as e:
+            logger.error(f"Error fetching {gateway_name} catalog from database: {e}")
+            return []
 
 
 def invalidate_gateway_catalog(gateway_name: str) -> bool:
@@ -1069,32 +1103,39 @@ def get_cached_unique_models() -> list[dict[str, Any]] | None:
             logger.debug("Local cache HIT: unique models")
         return local_data
 
-    # 3. Cache miss everywhere - compute from database
+    # 3. Cache miss everywhere - compute from database with stampede protection
     logger.debug("Cache MISS (all layers): Computing unique models from database")
 
-    try:
-        from src.db.models_catalog_db import (
-            get_all_unique_models_for_catalog,
-            transform_db_models_batch,
-        )
+    with _rebuild_lock_unique_models:
+        # Double-check: another thread may have rebuilt while we waited
+        cached = cache.get_unique_models()
+        if cached is not None:
+            set_local_catalog("unique", cached)
+            return cached
 
-        # Fetch unique models from database
-        db_models = get_all_unique_models_for_catalog(include_inactive=False)
+        try:
+            from src.db.models_catalog_db import (
+                get_all_unique_models_for_catalog,
+                transform_db_models_batch,
+            )
 
-        # Transform to API format
-        api_models = transform_db_models_batch(db_models)
+            # Fetch unique models from database
+            db_models = get_all_unique_models_for_catalog(include_inactive=False)
 
-        # Cache in both Redis and local memory
-        cache.set_unique_models(api_models, ttl=1800)
-        set_local_catalog("unique", api_models)
+            # Transform to API format
+            api_models = transform_db_models_batch(db_models)
 
-        logger.info(f"Computed {len(api_models)} unique models from database and cached")
+            # Cache in both Redis and local memory
+            cache.set_unique_models(api_models, ttl=1800)
+            set_local_catalog("unique", api_models)
 
-        return api_models
+            logger.info(f"Computed {len(api_models)} unique models from database and cached")
 
-    except Exception as e:
-        logger.error(f"Error computing unique models from database: {e}")
-        return []
+            return api_models
+
+        except Exception as e:
+            logger.error(f"Error computing unique models from database: {e}")
+            return []
 
 
 def cache_unique_models(unique_models: list[dict[str, Any]], ttl: int | None = None) -> bool:
