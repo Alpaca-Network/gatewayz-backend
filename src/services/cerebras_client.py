@@ -121,12 +121,15 @@ def make_cerebras_request_openai(messages, model, **kwargs):
         Response object from Cerebras API
     """
     try:
+        from src.utils.provider_timing import ProviderTimingContext
+
         client = get_cerebras_client()
 
         # Log request for debugging
         logger.debug(f"Cerebras request - model: {model}, messages: {len(messages)}")
 
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+        with ProviderTimingContext("cerebras", model, "non_stream"):
+            response = client.chat.completions.create(model=model, messages=messages, **kwargs)
 
         return response
     except Exception as e:
@@ -146,14 +149,17 @@ def make_cerebras_request_openai_stream(messages, model, **kwargs):
         Streaming response generator from Cerebras API
     """
     try:
+        from src.utils.provider_timing import ProviderTimingContext
+
         client = get_cerebras_client()
 
         # Log request for debugging
         logger.debug(f"Cerebras streaming request - model: {model}, messages: {len(messages)}")
 
-        stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
-        )
+        with ProviderTimingContext("cerebras", model, "stream"):
+            stream = client.chat.completions.create(
+                model=model, messages=messages, stream=True, **kwargs
+            )
 
         return stream
     except Exception as e:

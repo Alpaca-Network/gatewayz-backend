@@ -550,6 +550,23 @@ provider_response_time = get_or_create_metric(
     buckets=(0.1, 0.5, 1, 2.5, 5, 10),
 )
 
+# ==================== Provider Response Duration Metrics (Detailed Timing) ====================
+# Fine-grained provider response timing with focus on slow requests (30-60s range)
+provider_response_duration = get_or_create_metric(
+    Histogram,
+    "provider_response_duration_seconds",
+    "Provider response duration in seconds (detailed buckets for slow request detection)",
+    ["provider", "model", "status"],  # status: success, error
+    buckets=(0.1, 0.5, 1, 2.5, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 90, 120),
+)
+
+provider_slow_requests_total = get_or_create_metric(
+    Counter,
+    "provider_slow_requests_total",
+    "Total slow provider requests (>30s) by severity level",
+    ["provider", "model", "severity"],  # severity: slow (30-45s), very_slow (>45s)
+)
+
 # ==================== Zero-Model Event Metrics ====================
 # These metrics track when gateways/providers return zero models
 # Critical for monitoring provider health and fallback activation

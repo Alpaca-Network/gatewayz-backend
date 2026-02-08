@@ -136,12 +136,17 @@ def get_openrouter_client():
 
 def _make_openrouter_request_openai_internal(messages, model, **kwargs):
     """Internal function to make request to OpenRouter (called by circuit breaker)"""
+    from src.utils.provider_timing import ProviderTimingContext
+
     client = get_openrouter_client()
     # Normalize message roles (e.g., developer -> system) for compatibility
     normalized_messages = _normalize_message_roles(messages)
     # Merge provider settings to allow access to all model endpoints
     merged_kwargs = _merge_extra_body(kwargs)
-    response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
+
+    # Track provider timing
+    with ProviderTimingContext("openrouter", model, "non_stream"):
+        response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
     return response
 
 
@@ -315,14 +320,19 @@ def process_openrouter_response(response):
 
 def _make_openrouter_request_openai_stream_internal(messages, model, **kwargs):
     """Internal function to make streaming request to OpenRouter (called by circuit breaker)"""
+    from src.utils.provider_timing import ProviderTimingContext
+
     client = get_openrouter_client()
     # Normalize message roles (e.g., developer -> system) for compatibility
     normalized_messages = _normalize_message_roles(messages)
     # Merge provider settings to allow access to all model endpoints
     merged_kwargs = _merge_extra_body(kwargs)
-    stream = client.chat.completions.create(
-        model=model, messages=normalized_messages, stream=True, **merged_kwargs
-    )
+
+    # Track provider timing
+    with ProviderTimingContext("openrouter", model, "stream_sync"):
+        stream = client.chat.completions.create(
+            model=model, messages=normalized_messages, stream=True, **merged_kwargs
+        )
     return stream
 
 
@@ -489,15 +499,20 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
     Returns:
         AsyncIterator of streaming chunks
     """
+    from src.utils.provider_timing import ProviderTimingContext
+
     try:
         client = get_openrouter_async_client()
         # Normalize message roles (e.g., developer -> system) for compatibility
         normalized_messages = _normalize_message_roles(messages)
         # Merge provider settings to allow access to all model endpoints
         merged_kwargs = _merge_extra_body(kwargs)
-        stream = await client.chat.completions.create(
-            model=model, messages=normalized_messages, stream=True, **merged_kwargs
-        )
+
+        # Track provider timing
+        async with ProviderTimingContext("openrouter", model, "stream_async"):
+            stream = await client.chat.completions.create(
+                model=model, messages=normalized_messages, stream=True, **merged_kwargs
+            )
         return stream
     except APIStatusError as e:
         # Handle 402 Payment Required errors specifically (credit exhaustion)

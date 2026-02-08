@@ -59,11 +59,15 @@ def get_groq_client():
 
 def _make_groq_request_openai_internal(messages, model, **kwargs):
     """Internal function to make request to Groq (called by circuit breaker)."""
+    from src.utils.provider_timing import ProviderTimingContext
+
     logger.info(f"Making Groq request with model: {model}")
     logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
     client = get_groq_client()
-    response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+
+    with ProviderTimingContext("groq", model, "non_stream"):
+        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
 
     logger.info(f"Groq request successful for model: {model}")
     return response
@@ -111,13 +115,17 @@ def make_groq_request_openai(messages, model, **kwargs):
 
 def _make_groq_request_openai_stream_internal(messages, model, **kwargs):
     """Internal function to make streaming request to Groq (called by circuit breaker)."""
+    from src.utils.provider_timing import ProviderTimingContext
+
     logger.info(f"Making Groq streaming request with model: {model}")
     logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
     client = get_groq_client()
-    stream = client.chat.completions.create(
-        model=model, messages=messages, stream=True, **kwargs
-    )
+
+    with ProviderTimingContext("groq", model, "stream"):
+        stream = client.chat.completions.create(
+            model=model, messages=messages, stream=True, **kwargs
+        )
 
     logger.info(f"Groq streaming request initiated for model: {model}")
     return stream

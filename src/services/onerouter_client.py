@@ -41,8 +41,13 @@ def make_onerouter_request_openai(messages, model, **kwargs):
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     try:
+        from src.utils.provider_timing import ProviderTimingContext
+
         client = get_onerouter_client()
-        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+
+        with ProviderTimingContext("onerouter", model, "non_stream"):
+            response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+
         return response
     except Exception as e:
         logger.error(f"Infron AI request failed: {e}")
@@ -64,10 +69,15 @@ def make_onerouter_request_openai_stream(messages, model, **kwargs):
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     try:
+        from src.utils.provider_timing import ProviderTimingContext
+
         client = get_onerouter_client()
-        stream = client.chat.completions.create(
-            model=model, messages=messages, stream=True, **kwargs
-        )
+
+        with ProviderTimingContext("onerouter", model, "stream"):
+            stream = client.chat.completions.create(
+                model=model, messages=messages, stream=True, **kwargs
+            )
+
         return stream
     except Exception as e:
         logger.error(f"Infron AI streaming request failed: {e}")
