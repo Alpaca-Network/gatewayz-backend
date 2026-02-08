@@ -532,13 +532,17 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
         return None
 
 
-def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str, Any]:
+def sync_provider_models(
+    provider_slug: str, dry_run: bool = False, batch_mode: bool = False
+) -> dict[str, Any]:
     """
     Sync models for a specific provider
 
     Args:
         provider_slug: Provider slug (e.g., 'openrouter', 'deepinfra')
         dry_run: If True, fetch but don't write to database
+        batch_mode: If True, only invalidate provider-specific cache (skip
+            full catalog / unique / stats invalidation — caller handles those)
 
     Returns:
         Dictionary with sync results
@@ -657,21 +661,24 @@ def sync_provider_models(provider_slug: str, dry_run: bool = False) -> dict[str,
                     # Invalidate in-memory cache for this provider (deprecated, will be removed)
                     clear_models_cache(provider_slug)
 
-                    # Invalidate Redis provider-specific cache
-                    # Next request will:
-                    # - DB-first mode: Read from fresh database
-                    # - Legacy mode: Re-fetch from provider API
-                    invalidate_provider_catalog(provider_slug)
-
-                    # Invalidate Redis full catalog (aggregated view)
-                    # This ensures 'all' requests get fresh data too
-                    invalidate_full_catalog()
-
-                    # Invalidate unique models cache (since provider changes affect unique models)
-                    invalidate_unique_models()
-
-                    # Invalidate catalog statistics cache
-                    invalidate_catalog_stats()
+                    # Invalidate Redis provider-specific cache only
+                    # NOTE: invalidate_provider_catalog() auto-cascades to invalidate_full_catalog()
+                    # In batch_mode, we skip that cascade since the caller will do it once at the end
+                    if batch_mode:
+                        # Provider-only invalidation (skip full/unique/stats — caller handles those)
+                        cache = __import__(
+                            "src.services.model_catalog_cache", fromlist=["get_model_catalog_cache"]
+                        ).get_model_catalog_cache()
+                        key = cache._generate_key(cache.PREFIX_PROVIDER, provider_slug)
+                        if cache.redis_client:
+                            cache.redis_client.delete(key)
+                            cache._stats["invalidations"] += 1
+                        logger.debug(f"Cache INVALIDATE (batch): Provider catalog for {provider_slug}")
+                    else:
+                        # Full invalidation cascade (single-provider sync)
+                        invalidate_provider_catalog(provider_slug)
+                        invalidate_unique_models()
+                        invalidate_catalog_stats()
 
                     logger.info(
                         f"Cache invalidated for {provider_slug} after model sync. "
@@ -737,7 +744,7 @@ def sync_all_providers(
 
         for provider_slug in providers_to_sync:
             logger.info(f"\n{'='*60}\nSyncing provider: {provider_slug}\n{'='*60}")
-            result = sync_provider_models(provider_slug, dry_run=dry_run)
+            result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
 
             if result["success"]:
@@ -747,6 +754,24 @@ def sync_all_providers(
                 total_synced += result.get("models_synced", 0)
             else:
                 errors.append({"provider": provider_slug, "error": result.get("error")})
+
+        # Invalidate global caches ONCE after all providers are done
+        # (instead of 35+ times per provider in the loop)
+        if total_synced > 0 and not dry_run:
+            try:
+                from src.services.model_catalog_cache import (
+                    invalidate_full_catalog,
+                    invalidate_unique_models,
+                    invalidate_catalog_stats,
+                )
+                invalidate_full_catalog()
+                invalidate_unique_models()
+                invalidate_catalog_stats()
+                logger.info(
+                    f"Global caches invalidated once after syncing {len(providers_to_sync)} providers"
+                )
+            except Exception as cache_e:
+                logger.warning(f"Post-sync global cache invalidation failed: {cache_e}")
 
         success = len(errors) == 0
 

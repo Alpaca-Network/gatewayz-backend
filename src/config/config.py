@@ -404,6 +404,11 @@ class Config:
     REDIS_SOCKET_TIMEOUT = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
     REDIS_SOCKET_CONNECT_TIMEOUT = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "5"))
 
+    # Concurrency Control (global server-level admission gate)
+    CONCURRENCY_LIMIT = int(os.environ.get("CONCURRENCY_LIMIT", "20"))
+    CONCURRENCY_QUEUE_SIZE = int(os.environ.get("CONCURRENCY_QUEUE_SIZE", "50"))
+    CONCURRENCY_QUEUE_TIMEOUT = float(os.environ.get("CONCURRENCY_QUEUE_TIMEOUT", "10.0"))
+
     # Pricing Sync Scheduler Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
 
