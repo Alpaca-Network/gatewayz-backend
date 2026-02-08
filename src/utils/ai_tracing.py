@@ -10,8 +10,10 @@ AI inference workloads, tracking:
 - Circuit breaker states
 - Latency breakdowns (queue time, inference time, network time)
 
-These traces integrate with Tempo for distributed tracing visualization
-and can be correlated with Loki logs and Prometheus metrics.
+These traces integrate with:
+- Tempo for distributed tracing visualization
+- Langfuse for LLM-specific observability and analytics
+- Loki logs and Prometheus metrics for correlation
 
 Usage:
     from src.utils.ai_tracing import AITracer, trace_model_call
@@ -49,6 +51,21 @@ except ImportError:
     Status = None  # type: ignore
     StatusCode = None  # type: ignore
 
+# Try to import Langfuse - it's optional
+try:
+    from src.config.langfuse_config import (
+        LangfuseConfig,
+        LangfuseTracer,
+        LangfuseGenerationContext,
+    )
+
+    LANGFUSE_AVAILABLE = True
+except ImportError:
+    LANGFUSE_AVAILABLE = False
+    LangfuseConfig = None  # type: ignore
+    LangfuseTracer = None  # type: ignore
+    LangfuseGenerationContext = None  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -79,13 +96,20 @@ class AISpanContext:
     Context object for AI trace spans with helper methods.
 
     Provides a clean interface for setting AI-specific attributes
-    on OpenTelemetry spans.
+    on OpenTelemetry spans and Langfuse generations.
     """
 
     span: Optional[Span] = None
     start_time: float = field(default_factory=time.time)
     provider: str = ""
     model: str = ""
+    # Langfuse context for LLM-specific observability
+    langfuse_ctx: Optional["LangfuseGenerationContext"] = None
+    # Track input/output for Langfuse generation logging
+    _input_data: Any = None
+    _output_data: Any = None
+    _usage_data: Optional[dict] = None
+    _cost_usd: Optional[float] = None
 
     def set_token_usage(
         self,
@@ -97,9 +121,19 @@ class AISpanContext:
 
         Sets both custom ai.* attributes (for backward compatibility) and
         standardized gen_ai.* semantic conventions (for observability tools).
+        Also updates Langfuse generation if available.
         """
+        total = total_tokens or (input_tokens + output_tokens)
+
+        # Store for Langfuse
+        self._usage_data = {
+            "input": input_tokens,
+            "output": output_tokens,
+            "total": total,
+        }
+
+        # OpenTelemetry attributes
         if self.span and OTEL_AVAILABLE:
-            total = total_tokens or (input_tokens + output_tokens)
             # Custom attributes (backward compatibility)
             self.span.set_attribute("ai.tokens.input", input_tokens)
             self.span.set_attribute("ai.tokens.output", output_tokens)
@@ -108,14 +142,42 @@ class AISpanContext:
             self.span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
             self.span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
             self.span.set_attribute("gen_ai.usage.total_tokens", total)
+
+        # Langfuse generation
+        if self.langfuse_ctx:
+            self.langfuse_ctx.set_usage(input_tokens, output_tokens, total)
+
         return self
 
     def set_cost(self, cost_usd: float) -> "AISpanContext":
         """Set the cost of this inference call in USD."""
+        # Store for Langfuse
+        self._cost_usd = cost_usd
+
+        # OpenTelemetry attributes
         if self.span and OTEL_AVAILABLE:
             self.span.set_attribute("ai.cost.usd", cost_usd)
             # Also set gen_ai.* convention for compatibility
             self.span.set_attribute("gen_ai.usage.cost", cost_usd)
+
+        # Langfuse generation
+        if self.langfuse_ctx:
+            self.langfuse_ctx.set_cost(cost_usd)
+
+        return self
+
+    def set_input(self, input_data: Any) -> "AISpanContext":
+        """Set the input data for this inference call (for Langfuse)."""
+        self._input_data = input_data
+        if self.langfuse_ctx:
+            self.langfuse_ctx.set_input(input_data)
+        return self
+
+    def set_output(self, output_data: Any) -> "AISpanContext":
+        """Set the output data for this inference call (for Langfuse)."""
+        self._output_data = output_data
+        if self.langfuse_ctx:
+            self.langfuse_ctx.set_output(output_data)
         return self
 
     def set_response_model(
@@ -304,15 +366,23 @@ class AITracer:
         model: str,
         request_type: AIRequestType = AIRequestType.CHAT_COMPLETION,
         operation_name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ):
         """
         Async context manager for tracing AI inference calls.
+
+        Traces are sent to both OpenTelemetry (Tempo) and Langfuse (if enabled).
 
         Args:
             provider: AI provider name (e.g., "openrouter", "anthropic")
             model: Model identifier (e.g., "gpt-4", "claude-3-opus")
             request_type: Type of AI request
             operation_name: Optional custom operation name for the span
+            user_id: Optional user ID for Langfuse user-level analytics
+            session_id: Optional session ID for Langfuse session tracking
+            metadata: Optional metadata dict for both OTel and Langfuse
 
         Yields:
             AISpanContext: Context object for setting additional attributes
@@ -326,40 +396,92 @@ class AITracer:
         tracer = cls._get_tracer()
         span_name = operation_name or f"{provider}/{model}"
 
-        if tracer:
-            logger.debug(f"AITracer: Creating span '{span_name}' with gen_ai.system={provider}")
-            with tracer.start_as_current_span(
-                span_name,
-                kind=SpanKind.CLIENT,
-                attributes={
-                    # Custom attributes (backward compatibility)
-                    "ai.provider": provider,
-                    "ai.model": model,
-                    "ai.request_type": request_type.value,
-                    "service.operation": "model_inference",
-                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
-                    "gen_ai.system": provider,
-                    "gen_ai.request.model": model,
-                    "gen_ai.operation.name": request_type.value,
-                },
-            ) as span:
-                ctx = AISpanContext(span=span, provider=provider, model=model)
-                logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
+        # Create Langfuse context if available
+        langfuse_ctx = None
+        langfuse_cm = None
+        if LANGFUSE_AVAILABLE and LangfuseConfig and LangfuseConfig.is_initialized():
+            try:
+                # Use the async context manager from LangfuseTracer
+                langfuse_cm = LangfuseTracer.trace_generation(
+                    provider=provider,
+                    model=model,
+                    user_id=user_id,
+                    session_id=session_id,
+                    metadata=metadata,
+                )
+                langfuse_ctx = await langfuse_cm.__aenter__()
+            except Exception as e:
+                logger.debug(f"AITracer: Failed to create Langfuse context: {e}")
+                langfuse_ctx = None
+                langfuse_cm = None
+
+        # Track exception info for proper Langfuse error level propagation
+        exc_info: tuple = (None, None, None)
+
+        # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
+        # This prevents context leaks if OTel span creation fails
+        try:
+            if tracer:
+                logger.debug(f"AITracer: Creating span '{span_name}' with gen_ai.system={provider}")
+                with tracer.start_as_current_span(
+                    span_name,
+                    kind=SpanKind.CLIENT,
+                    attributes={
+                        # Custom attributes (backward compatibility)
+                        "ai.provider": provider,
+                        "ai.model": model,
+                        "ai.request_type": request_type.value,
+                        "service.operation": "model_inference",
+                        # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                        "gen_ai.system": provider,
+                        "gen_ai.request.model": model,
+                        "gen_ai.operation.name": request_type.value,
+                    },
+                ) as span:
+                    ctx = AISpanContext(
+                        span=span,
+                        provider=provider,
+                        model=model,
+                        langfuse_ctx=langfuse_ctx,
+                    )
+                    logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
+                    try:
+                        yield ctx
+                        # Set success status if no error
+                        span.set_status(Status(StatusCode.OK))
+                        # Record total duration
+                        duration_ms = (time.time() - ctx.start_time) * 1000
+                        span.set_attribute("ai.duration_ms", duration_ms)
+                        logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
+                    except Exception as e:
+                        ctx.set_error(e)
+                        if langfuse_ctx:
+                            langfuse_ctx.set_error(e)
+                        # Capture exception info for __aexit__
+                        import sys
+                        exc_info = sys.exc_info()
+                        raise
+            else:
+                logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
+                # OpenTelemetry not available, yield context with Langfuse only
+                ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
                 try:
                     yield ctx
-                    # Set success status if no error
-                    span.set_status(Status(StatusCode.OK))
-                    # Record total duration
-                    duration_ms = (time.time() - ctx.start_time) * 1000
-                    span.set_attribute("ai.duration_ms", duration_ms)
-                    logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
                 except Exception as e:
-                    ctx.set_error(e)
+                    if langfuse_ctx:
+                        langfuse_ctx.set_error(e)
+                    # Capture exception info for __aexit__
+                    import sys
+                    exc_info = sys.exc_info()
                     raise
-        else:
-            logger.warning(f"AITracer: No tracer available for '{span_name}' - tracing disabled")
-            # OpenTelemetry not available, yield dummy context
-            yield AISpanContext(provider=provider, model=model)
+        finally:
+            # Always close Langfuse context to prevent leaks
+            # Pass exception info to __aexit__ for proper error level
+            if langfuse_cm:
+                try:
+                    await langfuse_cm.__aexit__(*exc_info)
+                except Exception as e:
+                    logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 
     @classmethod
     @contextmanager
@@ -369,42 +491,97 @@ class AITracer:
         model: str,
         request_type: AIRequestType = AIRequestType.CHAT_COMPLETION,
         operation_name: Optional[str] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        metadata: Optional[dict] = None,
     ):
         """
         Synchronous context manager for tracing AI inference calls.
 
         Same as trace_inference but for synchronous code.
+        Traces are sent to both OpenTelemetry (Tempo) and Langfuse (if enabled).
         """
         tracer = cls._get_tracer()
         span_name = operation_name or f"{provider}/{model}"
 
-        if tracer:
-            with tracer.start_as_current_span(
-                span_name,
-                kind=SpanKind.CLIENT,
-                attributes={
-                    # Custom attributes (backward compatibility)
-                    "ai.provider": provider,
-                    "ai.model": model,
-                    "ai.request_type": request_type.value,
-                    "service.operation": "model_inference",
-                    # Standardized gen_ai.* semantic conventions (OpenLLMetry)
-                    "gen_ai.system": provider,
-                    "gen_ai.request.model": model,
-                    "gen_ai.operation.name": request_type.value,
-                },
-            ) as span:
-                ctx = AISpanContext(span=span, provider=provider, model=model)
+        # Create Langfuse context if available
+        langfuse_ctx = None
+        langfuse_cm = None
+        if LANGFUSE_AVAILABLE and LangfuseConfig and LangfuseConfig.is_initialized():
+            try:
+                langfuse_cm = LangfuseTracer.trace_generation_sync(
+                    provider=provider,
+                    model=model,
+                    user_id=user_id,
+                    session_id=session_id,
+                    metadata=metadata,
+                )
+                langfuse_ctx = langfuse_cm.__enter__()
+            except Exception as e:
+                logger.debug(f"AITracer: Failed to create Langfuse context: {e}")
+                langfuse_ctx = None
+                langfuse_cm = None
+
+        # Track exception info for proper Langfuse error level propagation
+        exc_info: tuple = (None, None, None)
+
+        # Wrap entire tracing logic in try/finally to ensure Langfuse context is always closed
+        # This prevents context leaks if OTel span creation fails
+        try:
+            if tracer:
+                with tracer.start_as_current_span(
+                    span_name,
+                    kind=SpanKind.CLIENT,
+                    attributes={
+                        # Custom attributes (backward compatibility)
+                        "ai.provider": provider,
+                        "ai.model": model,
+                        "ai.request_type": request_type.value,
+                        "service.operation": "model_inference",
+                        # Standardized gen_ai.* semantic conventions (OpenLLMetry)
+                        "gen_ai.system": provider,
+                        "gen_ai.request.model": model,
+                        "gen_ai.operation.name": request_type.value,
+                    },
+                ) as span:
+                    ctx = AISpanContext(
+                        span=span,
+                        provider=provider,
+                        model=model,
+                        langfuse_ctx=langfuse_ctx,
+                    )
+                    try:
+                        yield ctx
+                        span.set_status(Status(StatusCode.OK))
+                        duration_ms = (time.time() - ctx.start_time) * 1000
+                        span.set_attribute("ai.duration_ms", duration_ms)
+                    except Exception as e:
+                        ctx.set_error(e)
+                        if langfuse_ctx:
+                            langfuse_ctx.set_error(e)
+                        # Capture exception info for __exit__
+                        import sys
+                        exc_info = sys.exc_info()
+                        raise
+            else:
+                ctx = AISpanContext(provider=provider, model=model, langfuse_ctx=langfuse_ctx)
                 try:
                     yield ctx
-                    span.set_status(Status(StatusCode.OK))
-                    duration_ms = (time.time() - ctx.start_time) * 1000
-                    span.set_attribute("ai.duration_ms", duration_ms)
                 except Exception as e:
-                    ctx.set_error(e)
+                    if langfuse_ctx:
+                        langfuse_ctx.set_error(e)
+                    # Capture exception info for __exit__
+                    import sys
+                    exc_info = sys.exc_info()
                     raise
-        else:
-            yield AISpanContext(provider=provider, model=model)
+        finally:
+            # Always close Langfuse context to prevent leaks
+            # Pass exception info to __exit__ for proper error level
+            if langfuse_cm:
+                try:
+                    langfuse_cm.__exit__(*exc_info)
+                except Exception as e:
+                    logger.debug(f"AITracer: Error closing Langfuse context: {e}")
 
     @classmethod
     @asynccontextmanager

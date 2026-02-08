@@ -394,6 +394,30 @@ class Config:
     ARIZE_API_KEY = os.environ.get("ARIZE_API_KEY")
     ARIZE_PROJECT_NAME = os.environ.get("ARIZE_PROJECT_NAME", "GATEWAYZ")
 
+    # Langfuse LLM Observability Configuration
+    # Langfuse provides tracing, scoring, and analytics for LLM applications
+    # See: https://langfuse.com or self-host at https://github.com/langfuse/langfuse
+    LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY")
+    LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    # Enable debug mode for Langfuse SDK (logs all SDK operations)
+    LANGFUSE_DEBUG = os.environ.get("LANGFUSE_DEBUG", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # Flush interval in seconds for batching traces (default: 1 second)
+    LANGFUSE_FLUSH_INTERVAL = float(os.environ.get("LANGFUSE_FLUSH_INTERVAL", "1.0"))
+    # Enable OpenAI SDK auto-instrumentation via Langfuse
+    LANGFUSE_OPENAI_INSTRUMENTATION = os.environ.get(
+        "LANGFUSE_OPENAI_INSTRUMENTATION", "false"
+    ).lower() in {"1", "true", "yes"}
+
     # Redis Configuration (for real-time metrics and rate limiting)
     REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
         "1",

@@ -65,6 +65,11 @@ openinference-instrumentation-openai>=0.1.41
 # Auto-instruments OpenAI, Anthropic SDKs with gen_ai.* semantic conventions
 traceloop-sdk>=0.36.0
 
+# Langfuse - LLM Observability & Analytics
+# Provides tracing, scoring, and analytics for LLM applications
+# See: https://langfuse.com
+langfuse>=2.0.0
+
 # Testing dependencies
 pytest==7.4.3
 pytest-cov==4.1.0
