@@ -1796,3 +1796,96 @@ def get_metrics_summary() -> dict:
     except Exception as e:
         logger.warning(f"Could not retrieve metrics summary: {type(e).__name__}")
         return {"enabled": False}
+
+
+# ==================== Redis INFO Metrics ====================
+# Scraped from Redis INFO on every Prometheus /metrics request.
+# Metric names match the standard redis_exporter convention so
+# the Grafana Redis-Cache dashboard queries work out of the box.
+
+redis_up = get_or_create_metric(
+    Gauge, "redis_up",
+    "Whether Redis is reachable (1=UP, 0=DOWN)",
+)
+
+redis_uptime_in_seconds = get_or_create_metric(
+    Gauge, "redis_uptime_in_seconds",
+    "Redis server uptime in seconds",
+)
+
+redis_memory_used_bytes = get_or_create_metric(
+    Gauge, "redis_memory_used_bytes",
+    "Total bytes allocated by Redis",
+)
+
+redis_memory_max_bytes = get_or_create_metric(
+    Gauge, "redis_memory_max_bytes",
+    "Maximum memory configured (maxmemory)",
+)
+
+redis_connected_clients = get_or_create_metric(
+    Gauge, "redis_connected_clients",
+    "Number of connected client connections",
+)
+
+redis_commands_processed_total = get_or_create_metric(
+    Gauge, "redis_commands_processed_total",
+    "Total number of commands processed by Redis",
+)
+
+redis_keyspace_hits_total = get_or_create_metric(
+    Gauge, "redis_keyspace_hits_total",
+    "Total number of successful key lookups",
+)
+
+redis_keyspace_misses_total = get_or_create_metric(
+    Gauge, "redis_keyspace_misses_total",
+    "Total number of failed key lookups",
+)
+
+redis_expired_keys_total = get_or_create_metric(
+    Gauge, "redis_expired_keys_total",
+    "Total number of keys expired by TTL",
+)
+
+redis_evicted_keys_total = get_or_create_metric(
+    Gauge, "redis_evicted_keys_total",
+    "Total number of keys evicted due to maxmemory policy",
+)
+
+
+def collect_redis_info():
+    """Scrape Redis INFO and update Prometheus gauges.
+
+    Called automatically before each /metrics response via the
+    metrics endpoint in main.py. Uses the existing Redis client
+    from redis_config — no extra connections needed.
+    """
+    try:
+        from src.config.redis_config import get_redis_client
+
+        client = get_redis_client()
+        if not client:
+            redis_up.set(0)
+            return
+
+        client.ping()
+        redis_up.set(1)
+
+        info = client.info()
+
+        redis_uptime_in_seconds.set(info.get("uptime_in_seconds", 0))
+        redis_memory_used_bytes.set(info.get("used_memory", 0))
+        maxmem = info.get("maxmemory", 0)
+        if maxmem and maxmem > 0:
+            redis_memory_max_bytes.set(maxmem)
+        redis_connected_clients.set(info.get("connected_clients", 0))
+        redis_commands_processed_total.set(info.get("total_commands_processed", 0))
+        redis_keyspace_hits_total.set(info.get("keyspace_hits", 0))
+        redis_keyspace_misses_total.set(info.get("keyspace_misses", 0))
+        redis_expired_keys_total.set(info.get("expired_keys", 0))
+        redis_evicted_keys_total.set(info.get("evicted_keys", 0))
+
+    except Exception as e:
+        redis_up.set(0)
+        logger.debug(f"Redis INFO collection failed: {e}")
