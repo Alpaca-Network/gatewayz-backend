@@ -313,10 +313,7 @@ def create_app() -> FastAPI:
         - Rate limiting metrics
         - Provider health metrics
         - Business metrics (credits, tokens, subscriptions)
-        - Redis INFO metrics (memory, keyspace, clients, commands)
         """
-        # Refresh Redis INFO gauges on each scrape
-        prometheus_metrics.collect_redis_info()
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
