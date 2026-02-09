@@ -23,6 +23,59 @@ from src.config.redis_config import get_redis_client, is_redis_available
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency at module load time.
+# These are resolved on first use inside _prom_cache_hit / _prom_cache_miss / _prom_invalidation.
+_prom_loaded = False
+_catalog_hits = None
+_catalog_misses = None
+_catalog_invalidations = None
+_catalog_size = None
+
+
+def _ensure_prom():
+    """Lazy-load Prometheus counters on first use."""
+    global _prom_loaded, _catalog_hits, _catalog_misses, _catalog_invalidations, _catalog_size
+    if _prom_loaded:
+        return
+    try:
+        from src.services.prometheus_metrics import (
+            catalog_cache_hits,
+            catalog_cache_misses,
+            catalog_cache_invalidations,
+            catalog_cache_size_bytes,
+        )
+        _catalog_hits = catalog_cache_hits
+        _catalog_misses = catalog_cache_misses
+        _catalog_invalidations = catalog_cache_invalidations
+        _catalog_size = catalog_cache_size_bytes
+    except Exception:
+        pass  # metrics unavailable — non-fatal
+    _prom_loaded = True
+
+
+def _prom_cache_hit(gateway: str = "all"):
+    _ensure_prom()
+    if _catalog_hits:
+        _catalog_hits.labels(gateway=gateway).inc()
+
+
+def _prom_cache_miss(gateway: str = "all"):
+    _ensure_prom()
+    if _catalog_misses:
+        _catalog_misses.labels(gateway=gateway).inc()
+
+
+def _prom_invalidation(gateway: str = "all", reason: str = "model_sync"):
+    _ensure_prom()
+    if _catalog_invalidations:
+        _catalog_invalidations.labels(gateway=gateway, reason=reason).inc()
+
+
+def _prom_cache_size(gateway: str, size_bytes: int):
+    _ensure_prom()
+    if _catalog_size:
+        _catalog_size.labels(gateway=gateway).set(size_bytes)
+
 
 class ModelCatalogCache:
     """High-performance model catalog caching with Redis backend"""
@@ -78,10 +131,12 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
+                _prom_cache_hit("all")
                 logger.debug("Cache HIT: Full model catalog")
                 return json.loads(cached_data)
             else:
                 self._stats["misses"] += 1
+                _prom_cache_miss("all")
                 logger.debug("Cache MISS: Full model catalog")
                 return None
 
@@ -114,6 +169,7 @@ class ModelCatalogCache:
             serialized_data = json.dumps(catalog)
             self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
+            _prom_cache_size("all", len(serialized_data))
             logger.info(f"Cache SET: Full model catalog ({len(catalog)} models, TTL: {ttl}s)")
             return True
 
@@ -141,6 +197,7 @@ class ModelCatalogCache:
         try:
             self.redis_client.delete(key)
             self._stats["invalidations"] += 1
+            _prom_invalidation("all", "model_sync")
             logger.info("Cache INVALIDATE: Full model catalog")
             return True
 
@@ -169,10 +226,12 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
+                _prom_cache_hit(provider_name)
                 logger.debug(f"Cache HIT: Provider catalog for {provider_name}")
                 return json.loads(cached_data)
             else:
                 self._stats["misses"] += 1
+                _prom_cache_miss(provider_name)
                 logger.debug(f"Cache MISS: Provider catalog for {provider_name}")
                 return None
 
@@ -207,6 +266,7 @@ class ModelCatalogCache:
             serialized_data = json.dumps(catalog)
             self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
+            _prom_cache_size(provider_name, len(serialized_data))
             logger.debug(
                 f"Cache SET: Provider catalog for {provider_name} "
                 f"({len(catalog)} models, TTL: {ttl}s)"
@@ -235,6 +295,7 @@ class ModelCatalogCache:
         try:
             self.redis_client.delete(key)
             self._stats["invalidations"] += 1
+            _prom_invalidation(provider_name, "model_sync")
             # Also invalidate full catalog since it depends on provider catalogs
             self.invalidate_full_catalog()
             logger.info(f"Cache INVALIDATE: Provider catalog for {provider_name}")
