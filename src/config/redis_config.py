@@ -286,3 +286,8 @@ def is_redis_available() -> bool:
     """Check if Redis is available"""
     config = get_redis_config()
     return config.is_available()
+
+
+def get_redis_manager() -> RedisConfig:
+    """Get Redis manager instance (alias for get_redis_config)"""
+    return get_redis_config()

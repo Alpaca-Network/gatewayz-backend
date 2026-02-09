@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -2119,11 +2119,15 @@ async def chat_completions(
         # Normalize model string to handle hyphenated aliases
         from src.services.general_router import normalize_model_string
 
-        normalized_model = normalize_model_string(original_model) if original_model else original_model
+        normalized_model = (
+            normalize_model_string(original_model) if original_model else original_model
+        )
 
         # Check for general router
         GENERAL_ROUTER_PREFIX = "router:general"
-        is_general_route = normalized_model and normalized_model.lower().startswith(GENERAL_ROUTER_PREFIX)
+        is_general_route = normalized_model and normalized_model.lower().startswith(
+            GENERAL_ROUTER_PREFIX
+        )
 
         if is_general_route:
             with tracker.stage("general_routing"):
@@ -2135,9 +2139,7 @@ async def chat_completions(
                     )
 
                     # Parse mode from model string
-                    is_general_router, router_mode = parse_general_router(
-                        normalized_model.lower()
-                    )
+                    is_general_router, router_mode = parse_general_router(normalized_model.lower())
 
                     if is_general_router:
                         # Route using NotDiamond
@@ -2165,10 +2167,13 @@ async def chat_completions(
                     logger.warning("General router failed: %s", str(e))
                     try:
                         from src.services.prometheus_metrics import track_general_router_fallback
+
                         track_general_router_fallback(reason="exception", mode="balanced")
                     except ImportError:
                         # Prometheus metrics are optional; skip tracking if not available
-                        logger.debug("Prometheus metrics not available for general router fallback tracking")
+                        logger.debug(
+                            "Prometheus metrics not available for general router fallback tracking"
+                        )
                     req.model = "anthropic/claude-sonnet-4"
 
         # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
@@ -2213,7 +2218,10 @@ async def chat_completions(
                                 "Code router: no valid user message found, using default model"
                             )
                             try:
-                                from src.services.prometheus_metrics import track_code_router_fallback
+                                from src.services.prometheus_metrics import (
+                                    track_code_router_fallback,
+                                )
+
                                 track_code_router_fallback(reason="empty_message")
                             except ImportError:
                                 # Prometheus metrics are optional - silently skip if not available
@@ -2222,6 +2230,7 @@ async def chat_completions(
                         else:
                             # Extract context from messages
                             from src.services.code_classifier import get_classifier
+
                             classifier = get_classifier()
                             context = classifier.extract_context_from_messages(messages)
 
@@ -2254,6 +2263,7 @@ async def chat_completions(
                     )
                     try:
                         from src.services.prometheus_metrics import track_code_router_fallback
+
                         track_code_router_fallback(reason="exception")
                     except ImportError:
                         # Prometheus metrics are optional - silently skip if not available
@@ -2291,7 +2301,9 @@ async def chat_completions(
             provider_locked = not req_provider_missing
 
             # Use routed model for provider detection when code routing is active
-            model_for_provider_detection = req.model if is_code_route and req.model else original_model
+            model_for_provider_detection = (
+                req.model if is_code_route and req.model else original_model
+            )
             override_provider = detect_provider_from_model_id(model_for_provider_detection)
             if override_provider:
                 override_provider = override_provider.lower()
@@ -2352,6 +2364,7 @@ async def chat_completions(
                     # This prevents 499 errors caused by sequential DB fetches when cache is cold.
                     # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
                     import asyncio
+
                     all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
                     all_model_ids = {m.get("id") for m in all_models_catalog}
 
@@ -3194,6 +3207,7 @@ async def chat_completions(
         if code_router_decision:
             try:
                 from src.services.code_router import get_routing_metadata
+
                 routing_metadata = get_routing_metadata(code_router_decision)
                 processed["routing_metadata"] = routing_metadata
             except Exception as e:
@@ -3741,6 +3755,7 @@ async def unified_responses(
                 # This prevents 499 errors caused by sequential DB fetches when cache is cold.
                 # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
                 import asyncio
+
                 all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
                 all_model_ids = {m.get("id") for m in all_models_catalog}
 

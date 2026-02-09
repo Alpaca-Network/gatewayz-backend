@@ -4,12 +4,14 @@ from datetime import datetime, timezone
 import httpx
 from openai import OpenAI
 
-from src.services.model_catalog_cache import (
-    cache_gateway_catalog,
-    get_cached_gateway_catalog,
+from src.cache import (
     clear_gateway_error,
     is_gateway_in_error_state,
     set_gateway_error,
+)
+from src.services.model_catalog_cache import (
+    cache_gateway_catalog,
+    get_cached_gateway_catalog,
 )
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
@@ -167,7 +169,9 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     canonical_slug = model_name_normalized.lower()
 
     # Get display name from API or generate from model name
-    raw_display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    raw_display_name = (
+        aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    )
     # Clean malformed model names (remove company prefix with colon, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     base_description = (
@@ -262,7 +266,9 @@ def fetch_models_from_aimo():
     if is_gateway_in_error_state("aimo"):
         cached_data = get_cached_gateway_catalog("aimo") or []
         if cached_data:
-            logger.debug("AIMO gateway in error state, returning cached data (%d models)", len(cached_data))
+            logger.debug(
+                "AIMO gateway in error state, returning cached data (%d models)", len(cached_data)
+            )
             return cached_data
         logger.debug("AIMO gateway in error state, no cached data available")
         return []
