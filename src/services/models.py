@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter
 
-from src.services.model_catalog_cache import (
+from src.cache import (
     # Cache helper functions
     clear_gateway_error,
     get_gateway_error_message,
@@ -90,9 +90,7 @@ def get_fallback_models_from_db(provider_slug: str) -> list[dict] | None:
 
         return None
     except Exception as e:
-        logger.warning(
-            f"Failed to get fallback models from database for {provider_slug}: {e}"
-        )
+        logger.warning(f"Failed to get fallback models from database for {provider_slug}: {e}")
         return None
 
 
@@ -166,6 +164,7 @@ def _convert_db_model_to_raw(db_model: dict, provider_slug: str) -> dict | None:
     except Exception as e:
         logger.warning(f"Failed to convert database model: {e}")
         return None
+
 
 # Global lock and flag to prevent circular dependencies during catalog building
 # Using a global lock instead of threading.local() to ensure the flag is visible
@@ -343,7 +342,9 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
         return cache["data"]
     elif cache_age < stale_ttl:
         # Stale but still usable (stale-while-revalidate)
-        logger.debug(f"{provider_slug} serving stale cache (age: {cache_age:.1f}s, stale_ttl: {stale_ttl}s)")
+        logger.debug(
+            f"{provider_slug} serving stale cache (age: {cache_age:.1f}s, stale_ttl: {stale_ttl}s)"
+        )
         _register_canonical_records(provider_slug, cache["data"])
         return cache["data"]
 
@@ -488,7 +489,11 @@ def load_featherless_catalog_export() -> list:
                         "supported_parameters": [],
                         "default_parameters": {},
                         "provider_slug": row.get("provider_slug")
-                        or (provider_model_id.split("/")[0] if "/" in provider_model_id else "featherless"),
+                        or (
+                            provider_model_id.split("/")[0]
+                            if "/" in provider_model_id
+                            else "featherless"
+                        ),
                         "provider_site_url": None,
                         "model_logo_url": None,
                         "source_gateway": "featherless",
@@ -574,7 +579,7 @@ def get_all_models_parallel():
                 logger.info(
                     "Skipping %s in parallel fetch - gateway in error state: %s",
                     sanitize_for_logging(gw),
-                    sanitize_for_logging(error_msg or "unknown error")[:100]
+                    sanitize_for_logging(error_msg or "unknown error")[:100],
                 )
             else:
                 active_gateways.append(gw)
@@ -583,7 +588,7 @@ def get_all_models_parallel():
             "Fetching from %d/%d active gateways (%d in error state)",
             len(active_gateways),
             len(gateways),
-            len(gateways) - len(active_gateways)
+            len(gateways) - len(active_gateways),
         )
 
         # Use ThreadPoolExecutor to fetch all gateways in parallel
@@ -602,7 +607,9 @@ def get_all_models_parallel():
                 for future in as_completed(futures, timeout=45):
                     gateway_name = futures[future]
                     try:
-                        models = future.result(timeout=5)  # Short timeout since future is already complete
+                        models = future.result(
+                            timeout=5
+                        )  # Short timeout since future is already complete
                         if models:
                             all_models.extend(models)
                             logger.debug(
@@ -726,8 +733,14 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     try:
         redis_manager = get_redis_manager()
         # Store the catalog in Redis with 1-hour TTL
-        redis_manager.set_json("multi_provider_catalog:data", catalog.to_dict() if hasattr(catalog, 'to_dict') else catalog.__dict__, ttl=3600)
-        redis_manager.set("multi_provider_catalog:timestamp", datetime.now(timezone.utc).isoformat(), ttl=3600)
+        redis_manager.set_json(
+            "multi_provider_catalog:data",
+            catalog.to_dict() if hasattr(catalog, "to_dict") else catalog.__dict__,
+            ttl=3600,
+        )
+        redis_manager.set(
+            "multi_provider_catalog:timestamp", datetime.now(timezone.utc).isoformat(), ttl=3600
+        )
     except Exception as e:
         logger.warning(f"Failed to cache multi-provider catalog in Redis: {e}")
     return catalog
@@ -849,7 +862,7 @@ def get_cached_unique_models_catalog():
             # Check if cached data has the unique models structure
             if cached and isinstance(cached, list) and len(cached) > 0:
                 # If first item has 'providers' array, it's unique models format
-                if 'providers' in cached[0] and isinstance(cached[0]['providers'], list):
+                if "providers" in cached[0] and isinstance(cached[0]["providers"], list):
                     logger.info("Cache hit for unique models catalog")
                     return cached
 
@@ -864,10 +877,7 @@ def get_cached_unique_models_catalog():
         logger.info(f"Fetched {len(api_models)} unique models in {query_time:.2f}s")
 
         if query_time > 1.0:
-            logger.warning(
-                f"Slow unique models fetch: {query_time:.2f}s "
-                f"(threshold: 1.0s)"
-            )
+            logger.warning(f"Slow unique models fetch: {query_time:.2f}s (threshold: 1.0s)")
 
         # Cache result (TTL: 900 seconds = 15 minutes)
         cache.set_full_catalog(api_models, ttl=900)
@@ -877,8 +887,6 @@ def get_cached_unique_models_catalog():
     except Exception as e:
         logger.error(f"Error getting unique models catalog: {e}")
         return []
-
-
 
 
 def normalize_featherless_model(featherless_model: dict) -> dict:
@@ -958,13 +966,13 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     # pricing_per_hour / 1,000,000 = per-token price
     prompt_price = str(pricing_per_hour / 1000000) if pricing_per_hour > 0 else "0"
 
-    raw_display_name = chutes_model.get("name", provider_model_id.replace("-", " ").replace("_", " ").title())
+    raw_display_name = chutes_model.get(
+        "name", provider_model_id.replace("-", " ").replace("_", " ").title()
+    )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
 
-    description = (
-        f"Chutes.ai hosted {model_type} model: {provider_model_id}. Pricing: ${pricing_per_hour}/hr."
-    )
+    description = f"Chutes.ai hosted {model_type} model: {provider_model_id}. Pricing: ${pricing_per_hour}/hr."
 
     # Determine modality based on type
     modality_map = {
@@ -1038,7 +1046,8 @@ def normalize_groq_model(groq_model: dict) -> dict:
     provider_slug = "groq"
 
     raw_display_name = (
-        groq_model.get("display_name") or provider_model_id.replace("-", " ").replace("_", " ").title()
+        groq_model.get("display_name")
+        or provider_model_id.replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
@@ -1225,7 +1234,9 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = fireworks_model.get("owned_by")
-    base_description = fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
+    base_description = (
+        fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
+    )
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:
@@ -1317,7 +1328,9 @@ def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id_lower:
                     return model
 
-        logger.warning("Model %s not found in OpenRouter catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in OpenRouter catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -1346,7 +1359,9 @@ def normalize_together_model(together_model: dict) -> dict:
     # Clean malformed model names (remove parentheses with size info, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = together_model.get("owned_by") or together_model.get("organization")
-    base_description = together_model.get("description") or f"Together hosted model {provider_model_id}."
+    base_description = (
+        together_model.get("description") or f"Together hosted model {provider_model_id}."
+    )
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:
@@ -1450,7 +1465,9 @@ def normalize_aimo_model(aimo_model: dict) -> dict:
     canonical_slug = model_name_normalized.lower()
 
     # Get display name from API or generate from model name
-    raw_display_name = aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    raw_display_name = (
+        aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
+    )
     # Clean malformed model names (remove company prefix with colon, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     base_description = (
@@ -1593,14 +1610,14 @@ def normalize_near_model(near_model: dict) -> dict:
         input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
         # Per-token price = amount × 10^scale
         if input_amount > 0:
-            pricing["prompt"] = str(input_amount * (10 ** input_scale))
+            pricing["prompt"] = str(input_amount * (10**input_scale))
 
     if output_cost and isinstance(output_cost, dict):
         output_amount = output_cost.get("amount", 0)
         output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
         # Per-token price = amount × 10^scale
         if output_amount > 0:
-            pricing["completion"] = str(output_amount * (10 ** output_scale))
+            pricing["completion"] = str(output_amount * (10**output_scale))
 
     # Fallback to old pricing format for backward compatibility
     if not pricing["prompt"] and not pricing["completion"]:
@@ -1671,14 +1688,19 @@ def normalize_fal_model(fal_model: dict) -> dict | None:
     # API returns "endpoint_id", static catalog uses "id"
     provider_model_id = fal_model.get("endpoint_id") or fal_model.get("id")
     if not provider_model_id:
-        logger.warning("Fal.ai model missing 'id'/'endpoint_id' field: %s", sanitize_for_logging(str(fal_model)))
+        logger.warning(
+            "Fal.ai model missing 'id'/'endpoint_id' field: %s",
+            sanitize_for_logging(str(fal_model)),
+        )
         return None
 
     # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
     provider_slug = provider_model_id.split("/")[0] if "/" in provider_model_id else "fal-ai"
 
     # Use title (API) or name (catalog) or derive from ID
-    raw_display_name = fal_model.get("title") or fal_model.get("name") or provider_model_id.split("/")[-1]
+    raw_display_name = (
+        fal_model.get("title") or fal_model.get("name") or provider_model_id.split("/")[-1]
+    )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
 
@@ -1870,7 +1892,9 @@ def fetch_specific_model_from_together(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning("Model %s not found in Together catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Together catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -1902,7 +1926,9 @@ def fetch_specific_model_from_featherless(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning("Model %s not found in Featherless catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Featherless catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -1944,7 +1970,9 @@ def fetch_specific_model_from_deepinfra(provider_name: str, model_name: str):
                 # Normalize to our schema
                 return normalize_deepinfra_model(model)
 
-        logger.warning("Model %s not found in DeepInfra catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in DeepInfra catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -1972,7 +2000,9 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
     model_type = deepinfra_model.get("type") or deepinfra_model.get("reported_type") or "text"
 
     # Build description with deprecation notice if applicable
-    base_description = deepinfra_model.get("description") or f"DeepInfra hosted model: {provider_model_id}."
+    base_description = (
+        deepinfra_model.get("description") or f"DeepInfra hosted model: {provider_model_id}."
+    )
     if deepinfra_model.get("deprecated"):
         replaced_by = deepinfra_model.get("replaced_by")
         if replaced_by:
@@ -2092,7 +2122,9 @@ def fetch_specific_model_from_chutes(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning("Model %s not found in Chutes catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Chutes catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -2121,7 +2153,9 @@ def fetch_specific_model_from_groq(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning("Model %s not found in Groq catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Groq catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -2150,7 +2184,9 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == model_id.lower():
                     return model
 
-        logger.warning("Model %s not found in Fireworks catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Fireworks catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -2181,7 +2217,9 @@ def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id_lower:
                     return model
 
-        logger.warning("Model %s not found in Hugging Face catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Hugging Face catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -2206,7 +2244,9 @@ def fetch_specific_model_from_fal(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id_lower:
                     return model
 
-        logger.warning("Model %s not found in Fal.ai catalog", sanitize_for_logging(provider_model_id))
+        logger.warning(
+            "Model %s not found in Fal.ai catalog", sanitize_for_logging(provider_model_id)
+        )
         return None
     except Exception as e:
         logger.error(
@@ -2242,7 +2282,7 @@ def fetch_specific_model_from_google_vertex(provider_name: str, model_name: str)
 
         logger.warning(
             "Model %s not found in Google Vertex AI catalog",
-            sanitize_for_logging(provider_model_id)
+            sanitize_for_logging(provider_model_id),
         )
         return None
     except Exception as e:
@@ -2673,7 +2713,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     provider_model_id = model.get("id") or model.get("model_id")
     if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
-        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        logger.debug(
+            "AiHubMix model missing both 'id' and 'model_id' fields: %s",
+            sanitize_for_logging(str(model)),
+        )
         return None
 
     try:
@@ -2688,7 +2731,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         normalized_pricing = normalize_pricing_dict(pricing_data, PricingFormat.PER_1K_TOKENS)
 
         # Filter out models with zero pricing (free models can drain credits)
-        if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
+        if (
+            float(normalized_pricing.get("prompt", 0)) == 0
+            and float(normalized_pricing.get("completion", 0)) == 0
+        ):
             logger.debug(f"Filtering out AiHubMix model {provider_model_id} with zero pricing")
             return None
 
@@ -2753,12 +2799,19 @@ def normalize_aihubmix_model(model) -> dict | None:
         provider_model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
         raw_model_name = getattr(model, "name", provider_model_id)
         created_at = getattr(model, "created_at", None)
-        description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
+        description = (
+            getattr(model, "description", None)
+            or getattr(model, "desc", None)
+            or "Model from AiHubMix"
+        )
         context_length = getattr(model, "context_length", 4096)
 
     if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
-        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        logger.debug(
+            "AiHubMix model missing both 'id' and 'model_id' fields: %s",
+            sanitize_for_logging(str(model)),
+        )
         return None
 
     # Clean malformed model names (remove company prefix, parentheses, etc.)
@@ -3097,7 +3150,11 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         modality = MODALITY_TEXT_TO_TEXT
         input_modalities = ["text"]
         output_modalities = ["text"]
-        if "vision" in provider_model_id or "gpt-4o" in provider_model_id or "gpt-4-turbo" in provider_model_id:
+        if (
+            "vision" in provider_model_id
+            or "gpt-4o" in provider_model_id
+            or "gpt-4-turbo" in provider_model_id
+        ):
             modality = "text+image->text"
             input_modalities = ["text", "image"]
 
@@ -3131,7 +3188,14 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
             "architecture": architecture,
             "pricing": pricing,
             "per_request_limits": None,
-            "supported_parameters": ["temperature", "max_tokens", "top_p", "frequency_penalty", "presence_penalty", "stop"],
+            "supported_parameters": [
+                "temperature",
+                "max_tokens",
+                "top_p",
+                "frequency_penalty",
+                "presence_penalty",
+                "stop",
+            ],
             "default_parameters": {},
             "provider_slug": provider_slug,
             "provider_site_url": "https://openai.com",
@@ -3171,7 +3235,9 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
         provider_slug = "anthropic"
 
         # Use display_name from API, fall back to formatted provider_model_id
-        raw_display_name = anthropic_model.get("display_name") or anthropic_model.get("name", provider_model_id)
+        raw_display_name = anthropic_model.get("display_name") or anthropic_model.get(
+            "name", provider_model_id
+        )
         # Clean malformed model names (remove company prefix, parentheses, etc.)
         display_name = clean_model_name(raw_display_name)
         created_at = anthropic_model.get("created_at")
@@ -3229,7 +3295,13 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
             "architecture": architecture,
             "pricing": pricing,
             "per_request_limits": None,
-            "supported_parameters": ["temperature", "max_tokens", "top_p", "top_k", "stop_sequences"],
+            "supported_parameters": [
+                "temperature",
+                "max_tokens",
+                "top_p",
+                "top_k",
+                "stop_sequences",
+            ],
             "default_parameters": {},
             "provider_slug": provider_slug,
             "provider_site_url": "https://anthropic.com",
