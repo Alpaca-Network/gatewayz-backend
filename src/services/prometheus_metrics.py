@@ -571,38 +571,44 @@ provider_slow_requests_total = get_or_create_metric(
 # These metrics track when gateways/providers return zero models
 # Critical for monitoring provider health and fallback activation
 
-gateway_zero_model_events = get_or_create_metric(Counter,
+gateway_zero_model_events = get_or_create_metric(
+    Counter,
     "gateway_zero_model_events_total",
     "Total zero-model events by gateway (when API returns 0 models)",
     ["gateway", "reason"],  # reason: api_empty, cache_empty, below_threshold, timeout
 )
 
-gateway_model_count = get_or_create_metric(Gauge,
+gateway_model_count = get_or_create_metric(
+    Gauge,
     "gateway_model_count",
     "Current number of models available per gateway",
     ["gateway"],
 )
 
-gateway_fallback_activations = get_or_create_metric(Counter,
+gateway_fallback_activations = get_or_create_metric(
+    Counter,
     "gateway_fallback_activations_total",
     "Total fallback activations when primary gateway returns zero models",
     ["primary_gateway", "fallback_source"],  # fallback_source: database, cache, static
 )
 
-gateway_recovery_events = get_or_create_metric(Counter,
+gateway_recovery_events = get_or_create_metric(
+    Counter,
     "gateway_recovery_events_total",
     "Total recovery events when gateway returns models after zero-model state",
     ["gateway"],
 )
 
-gateway_health_check_duration = get_or_create_metric(Histogram,
+gateway_health_check_duration = get_or_create_metric(
+    Histogram,
     "gateway_health_check_duration_seconds",
     "Duration of gateway health checks",
     ["gateway", "status"],  # status: healthy, unhealthy, timeout
     buckets=(0.1, 0.5, 1, 2.5, 5, 10, 30),
 )
 
-gateway_auto_fix_attempts = get_or_create_metric(Counter,
+gateway_auto_fix_attempts = get_or_create_metric(
+    Counter,
     "gateway_auto_fix_attempts_total",
     "Total auto-fix attempts for failing gateways",
     ["gateway", "result"],  # result: success, failure
@@ -695,6 +701,41 @@ queue_size = get_or_create_metric(
     "queue_size",
     "Queue size for prioritization",
     ["queue_name"],
+)
+
+# ==================== Redis INFO Metrics ====================
+# Scraped from Redis INFO on every Prometheus /metrics request.
+# Metric names match the standard redis_exporter convention so
+# the Grafana Redis-Cache dashboard queries work out of the box.
+
+redis_up = get_or_create_metric(
+    Gauge,
+    "redis_up",
+    "Whether Redis is reachable (1=UP, 0=DOWN)",
+)
+
+redis_memory_used_bytes = get_or_create_metric(
+    Gauge,
+    "redis_memory_used_bytes",
+    "Total bytes allocated by Redis",
+)
+
+redis_connected_clients = get_or_create_metric(
+    Gauge,
+    "redis_connected_clients",
+    "Number of connected client connections",
+)
+
+redis_expired_keys_total = get_or_create_metric(
+    Gauge,
+    "redis_expired_keys_total",
+    "Total number of keys expired by TTL",
+)
+
+redis_evicted_keys_total = get_or_create_metric(
+    Gauge,
+    "redis_evicted_keys_total",
+    "Total number of keys evicted due to maxmemory policy",
 )
 
 # ==================== Performance Stage Metrics ====================
@@ -983,6 +1024,7 @@ def track_provider_response_time(provider: str, duration: float):
 
 # ==================== Zero-Model Event Helper Functions ====================
 
+
 def record_zero_model_event(gateway: str, reason: str = "api_empty"):
     """
     Record a zero-model event for a gateway.
@@ -1022,8 +1064,7 @@ def record_fallback_activation(primary_gateway: str, fallback_source: str = "dat
             - "static": Static fallback model list
     """
     gateway_fallback_activations.labels(
-        primary_gateway=primary_gateway,
-        fallback_source=fallback_source
+        primary_gateway=primary_gateway, fallback_source=fallback_source
     ).inc()
 
 
@@ -1796,3 +1837,33 @@ def get_metrics_summary() -> dict:
     except Exception as e:
         logger.warning(f"Could not retrieve metrics summary: {type(e).__name__}")
         return {"enabled": False}
+
+
+def collect_redis_info():
+    """Scrape Redis INFO and update Prometheus gauges.
+
+    Called automatically before each /metrics response via the
+    metrics endpoint in main.py. Uses the existing Redis client
+    from redis_config — no extra connections needed.
+    """
+    try:
+        from src.config.redis_config import get_redis_client
+
+        client = get_redis_client()
+        if not client:
+            redis_up.set(0)
+            return
+
+        client.ping()
+        redis_up.set(1)
+
+        info = client.info()
+
+        redis_memory_used_bytes.set(info.get("used_memory", 0))
+        redis_connected_clients.set(info.get("connected_clients", 0))
+        redis_expired_keys_total.set(info.get("expired_keys", 0))
+        redis_evicted_keys_total.set(info.get("evicted_keys", 0))
+
+    except Exception as e:
+        redis_up.set(0)
+        logger.debug(f"Redis INFO collection failed: {e}")
