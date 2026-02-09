@@ -417,9 +417,12 @@ class Config:
     # ============================================================================
 
     # Model Sync Configuration
-    # Controls scheduled background sync of models from provider APIs to database
+    # Controls scheduled background sync of models from provider APIs to database.
+    # Disabled by default — the sync blocks resources for 10-20 minutes and causes
+    # 499 errors. Models are already in the DB from initial sync and rarely change.
+    # Re-enable with ENABLE_SCHEDULED_MODEL_SYNC=true when container has enough RAM.
     ENABLE_SCHEDULED_MODEL_SYNC: bool = os.environ.get(
-        "ENABLE_SCHEDULED_MODEL_SYNC", "true"
+        "ENABLE_SCHEDULED_MODEL_SYNC", "false"
     ).lower() in {
         "1",
         "true",
