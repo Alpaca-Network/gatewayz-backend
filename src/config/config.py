@@ -430,6 +430,17 @@ class Config:
     # Recommended: 15-30 minutes for balance between freshness and API rate limits
     MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
 
+    # Providers to skip during scheduled sync (comma-separated slugs).
+    # Featherless is skipped by default because it returns 17,796 models in
+    # a single API call (~50MB), which causes OOM on Railway containers.
+    # Their models are already in the DB from initial sync and rarely change.
+    # Set to empty string to sync all providers: MODEL_SYNC_SKIP_PROVIDERS=""
+    MODEL_SYNC_SKIP_PROVIDERS: set[str] = {
+        s.strip() for s in
+        os.environ.get("MODEL_SYNC_SKIP_PROVIDERS", "featherless").split(",")
+        if s.strip()
+    }
+
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
     # No separate pricing sync configuration needed

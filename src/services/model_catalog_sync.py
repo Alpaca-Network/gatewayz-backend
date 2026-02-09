@@ -700,12 +700,20 @@ def sync_all_providers(
         Dictionary with overall sync results
     """
     try:
+        from src.config.config import Config
+
         # Get providers to sync
         if provider_slugs:
             providers_to_sync = provider_slugs
         else:
-            # Use all providers that have fetch functions
-            providers_to_sync = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            # Use all providers that have fetch functions, minus skipped ones
+            skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
+            all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            providers_to_sync = [p for p in all_providers if p not in skip_set]
+            if skip_set:
+                logger.info(
+                    f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
+                )
 
         logger.info(f"Starting model sync for {len(providers_to_sync)} providers...")
 
