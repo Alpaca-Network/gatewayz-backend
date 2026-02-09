@@ -726,15 +726,15 @@ redis_connected_clients = get_or_create_metric(
     "Number of connected client connections",
 )
 
-redis_expired_keys_total = get_or_create_metric(
+redis_expired_keys = get_or_create_metric(
     Gauge,
-    "redis_expired_keys_total",
+    "redis_expired_keys",
     "Total number of keys expired by TTL",
 )
 
-redis_evicted_keys_total = get_or_create_metric(
+redis_evicted_keys = get_or_create_metric(
     Gauge,
-    "redis_evicted_keys_total",
+    "redis_evicted_keys",
     "Total number of keys evicted due to maxmemory policy",
 )
 
@@ -1861,8 +1861,8 @@ def collect_redis_info():
 
         redis_memory_used_bytes.set(info.get("used_memory", 0))
         redis_connected_clients.set(info.get("connected_clients", 0))
-        redis_expired_keys_total.set(info.get("expired_keys", 0))
-        redis_evicted_keys_total.set(info.get("evicted_keys", 0))
+        redis_expired_keys.set(info.get("expired_keys", 0))
+        redis_evicted_keys.set(info.get("evicted_keys", 0))
 
     except Exception as e:
         redis_up.set(0)
