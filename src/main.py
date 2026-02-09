@@ -199,6 +199,7 @@ def create_app() -> FastAPI:
 
     # OPTIMIZED: Add security middleware first to block bots before heavy logic
     from src.config.redis_config import get_redis_client
+
     try:
         redis_client = get_redis_client()
         if redis_client:
@@ -206,7 +207,9 @@ def create_app() -> FastAPI:
             logger.info("  🛡️  Security middleware enabled (IP tiering & fingerprinting)")
         else:
             app.add_middleware(SecurityMiddleware)
-            logger.warning("  🛡️  Security middleware enabled with LOCAL fallback (Redis not available)")
+            logger.warning(
+                "  🛡️  Security middleware enabled with LOCAL fallback (Redis not available)"
+            )
     except Exception as e:
         # Fallback to in-memory limiting if redis is unavailable
         app.add_middleware(SecurityMiddleware)
@@ -313,7 +316,10 @@ def create_app() -> FastAPI:
         - Rate limiting metrics
         - Provider health metrics
         - Business metrics (credits, tokens, subscriptions)
+        - Redis INFO metrics (memory, keyspace, clients, commands)
         """
+        # Refresh Redis INFO gauges on each scrape
+        prometheus_metrics.collect_redis_info()
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
