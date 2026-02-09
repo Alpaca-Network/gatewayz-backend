@@ -57,8 +57,13 @@ async def run_scheduled_model_sync():
     logger.info("=" * 80)
 
     try:
-        # Sync all providers
-        result = sync_all_providers(dry_run=False)
+        # Sync all providers in a background thread so the event loop stays
+        # free to serve incoming HTTP requests.  sync_all_providers() is fully
+        # synchronous (HTTP calls + DB writes) and would otherwise block every
+        # request for the 10-20 minutes it takes to finish.
+        import asyncio
+
+        result = await asyncio.to_thread(sync_all_providers, dry_run=False)
 
         # Calculate duration
         end_time = datetime.now(timezone.utc)
