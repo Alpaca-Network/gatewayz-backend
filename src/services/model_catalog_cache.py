@@ -218,11 +218,14 @@ class ModelCatalogCache:
             logger.warning(f"Cache SET error for provider {provider_name}: {e}")
             return False
 
-    def invalidate_provider_catalog(self, provider_name: str) -> bool:
+    def invalidate_provider_catalog(self, provider_name: str, cascade: bool = True) -> bool:
         """Invalidate cached catalog for a specific provider.
 
         Args:
             provider_name: Provider name
+            cascade: If True, also invalidate full catalog (default).
+                     Set to False during batch operations where the caller
+                     handles global invalidation once at the end.
 
         Returns:
             True if successful, False otherwise
@@ -235,9 +238,9 @@ class ModelCatalogCache:
         try:
             self.redis_client.delete(key)
             self._stats["invalidations"] += 1
-            # Also invalidate full catalog since it depends on provider catalogs
-            self.invalidate_full_catalog()
-            logger.info(f"Cache INVALIDATE: Provider catalog for {provider_name}")
+            if cascade:
+                self.invalidate_full_catalog()
+            logger.info(f"Cache INVALIDATE: Provider catalog for {provider_name} (cascade={cascade})")
             return True
 
         except Exception as e:
@@ -518,18 +521,19 @@ class ModelCatalogCache:
         ttl = ttl or self.TTL_GATEWAY
         return self.set_provider_catalog(gateway_name, catalog, ttl=ttl)
 
-    def invalidate_gateway_catalog(self, gateway_name: str) -> bool:
+    def invalidate_gateway_catalog(self, gateway_name: str, cascade: bool = True) -> bool:
         """Invalidate cached catalog for a specific gateway.
 
         This is an alias for invalidate_provider_catalog to support consistent naming.
 
         Args:
             gateway_name: Gateway name
+            cascade: If True, also invalidate full catalog (default).
 
         Returns:
             True if successful, False otherwise
         """
-        return self.invalidate_provider_catalog(gateway_name)
+        return self.invalidate_provider_catalog(gateway_name, cascade=cascade)
 
     # Catalog Statistics Caching
 
@@ -929,10 +933,10 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
             return []
 
 
-def invalidate_provider_catalog(provider_name: str) -> bool:
+def invalidate_provider_catalog(provider_name: str, cascade: bool = True) -> bool:
     """Invalidate cached provider catalog"""
     cache = get_model_catalog_cache()
-    return cache.invalidate_provider_catalog(provider_name)
+    return cache.invalidate_provider_catalog(provider_name, cascade=cascade)
 
 
 def get_catalog_cache_stats() -> dict[str, Any]:
@@ -1062,10 +1066,10 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
             return []
 
 
-def invalidate_gateway_catalog(gateway_name: str) -> bool:
+def invalidate_gateway_catalog(gateway_name: str, cascade: bool = True) -> bool:
     """Invalidate cached gateway catalog"""
     cache = get_model_catalog_cache()
-    return cache.invalidate_gateway_catalog(gateway_name)
+    return cache.invalidate_gateway_catalog(gateway_name, cascade=cascade)
 
 
 # Unique models convenience functions
@@ -1223,14 +1227,15 @@ def get_provider_cache_metadata() -> dict[str, Any]:
     }
 
 
-def clear_models_cache(gateway: str) -> None:
+def clear_models_cache(gateway: str, cascade: bool = True) -> None:
     """
     Clear cache for a specific gateway (backward compatibility wrapper).
 
     Args:
         gateway: Gateway name to clear cache for
+        cascade: If True, also invalidate full catalog (default).
     """
-    invalidate_gateway_catalog(gateway)
+    invalidate_gateway_catalog(gateway, cascade=cascade)
 
 
 def clear_providers_cache() -> None:

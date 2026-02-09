@@ -633,38 +633,24 @@ def sync_provider_models(
             # Pricing is now synced directly during model sync via metadata.pricing_raw
             # The separate pricing sync service has been deprecated
 
-            # Invalidate caches to ensure fresh data is served immediately
-            # Phase 2 (Issue #995): After DB sync, invalidate caches so next
-            # request fetches from fresh database (in DB-first mode) or
-            # re-fetches from provider API (in legacy mode)
+            # Invalidate caches to ensure fresh data is served on next request.
+            # In batch_mode, only invalidate provider-specific cache (no cascade
+            # to full catalog). The caller (sync_all_providers) handles global
+            # invalidation ONCE at the end instead of 38+ times per provider.
             try:
                 from src.services.model_catalog_cache import (
-                    clear_models_cache,
-                    invalidate_full_catalog,
                     invalidate_provider_catalog,
                     invalidate_unique_models,
                     invalidate_catalog_stats,
                 )
 
-                # Invalidate in-memory cache for this provider (deprecated, will be removed)
-                clear_models_cache(provider_slug)
-
-                # Invalidate Redis provider-specific cache only
-                # NOTE: invalidate_provider_catalog() auto-cascades to invalidate_full_catalog()
-                # In batch_mode, we skip that cascade since the caller will do it once at the end
                 if batch_mode:
-                    # Provider-only invalidation (skip full/unique/stats — caller handles those)
-                    cache = __import__(
-                        "src.services.model_catalog_cache", fromlist=["get_model_catalog_cache"]
-                    ).get_model_catalog_cache()
-                    key = cache._generate_key(cache.PREFIX_PROVIDER, provider_slug)
-                    if cache.redis_client:
-                        cache.redis_client.delete(key)
-                        cache._stats["invalidations"] += 1
-                    logger.debug(f"Cache INVALIDATE (batch): Provider catalog for {provider_slug}")
+                    # Provider-only: cascade=False prevents invalidating full catalog
+                    invalidate_provider_catalog(provider_slug, cascade=False)
+                    logger.debug(f"Cache INVALIDATE (batch, no cascade): Provider {provider_slug}")
                 else:
-                    # Full invalidation cascade (single-provider sync)
-                    invalidate_provider_catalog(provider_slug)
+                    # Single-provider sync: full cascade
+                    invalidate_provider_catalog(provider_slug, cascade=True)
                     invalidate_unique_models()
                     invalidate_catalog_stats()
 
@@ -730,8 +716,10 @@ def sync_all_providers(
         total_synced = 0
         errors = []
 
-        for provider_slug in providers_to_sync:
-            logger.info(f"\n{'='*60}\nSyncing provider: {provider_slug}\n{'='*60}")
+        import gc
+
+        for i, provider_slug in enumerate(providers_to_sync, 1):
+            logger.info(f"\n{'='*60}\nSyncing provider ({i}/{len(providers_to_sync)}): {provider_slug}\n{'='*60}")
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
 
@@ -742,6 +730,12 @@ def sync_all_providers(
                 total_synced += result.get("models_synced", 0)
             else:
                 errors.append({"provider": provider_slug, "error": result.get("error")})
+
+            # Free memory after each provider to prevent accumulation.
+            # Large providers like featherless (17k+ models) can hold ~50MB
+            # in fetch/transform buffers that Python's GC won't collect
+            # immediately without an explicit nudge.
+            gc.collect()
 
         # Invalidate global caches ONCE after all providers are done
         # (instead of 35+ times per provider in the loop)
