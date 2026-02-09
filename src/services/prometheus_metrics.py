@@ -714,46 +714,16 @@ redis_up = get_or_create_metric(
     "Whether Redis is reachable (1=UP, 0=DOWN)",
 )
 
-redis_uptime_in_seconds = get_or_create_metric(
-    Gauge,
-    "redis_uptime_in_seconds",
-    "Redis server uptime in seconds",
-)
-
 redis_memory_used_bytes = get_or_create_metric(
     Gauge,
     "redis_memory_used_bytes",
     "Total bytes allocated by Redis",
 )
 
-redis_memory_max_bytes = get_or_create_metric(
-    Gauge,
-    "redis_memory_max_bytes",
-    "Maximum memory configured (maxmemory)",
-)
-
 redis_connected_clients = get_or_create_metric(
     Gauge,
     "redis_connected_clients",
     "Number of connected client connections",
-)
-
-redis_commands_processed_total = get_or_create_metric(
-    Gauge,
-    "redis_commands_processed_total",
-    "Total number of commands processed by Redis",
-)
-
-redis_keyspace_hits_total = get_or_create_metric(
-    Gauge,
-    "redis_keyspace_hits_total",
-    "Total number of successful key lookups",
-)
-
-redis_keyspace_misses_total = get_or_create_metric(
-    Gauge,
-    "redis_keyspace_misses_total",
-    "Total number of failed key lookups",
 )
 
 redis_expired_keys_total = get_or_create_metric(
@@ -1889,15 +1859,8 @@ def collect_redis_info():
 
         info = client.info()
 
-        redis_uptime_in_seconds.set(info.get("uptime_in_seconds", 0))
         redis_memory_used_bytes.set(info.get("used_memory", 0))
-        maxmem = info.get("maxmemory", 0)
-        if maxmem and maxmem > 0:
-            redis_memory_max_bytes.set(maxmem)
         redis_connected_clients.set(info.get("connected_clients", 0))
-        redis_commands_processed_total.set(info.get("total_commands_processed", 0))
-        redis_keyspace_hits_total.set(info.get("keyspace_hits", 0))
-        redis_keyspace_misses_total.set(info.get("keyspace_misses", 0))
         redis_expired_keys_total.set(info.get("expired_keys", 0))
         redis_evicted_keys_total.set(info.get("evicted_keys", 0))
 
