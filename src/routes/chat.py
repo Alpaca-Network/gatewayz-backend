@@ -2362,9 +2362,7 @@ async def chat_completions(
 
                     # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
                     # This prevents 499 errors caused by sequential DB fetches when cache is cold.
-                    # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
-                    import asyncio
-
+                    # Run in thread to avoid blocking event loop during DB fetch
                     all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
                     all_model_ids = {m.get("id") for m in all_models_catalog}
 
@@ -3753,9 +3751,7 @@ async def unified_responses(
 
                 # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
                 # This prevents 499 errors caused by sequential DB fetches when cache is cold.
-                # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
-                import asyncio
-
+                # Run in thread to avoid blocking event loop during DB fetch
                 all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
                 all_model_ids = {m.get("id") for m in all_models_catalog}
 
