@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _anthropic_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_anthropic_pooled_client
@@ -308,14 +308,13 @@ def fetch_models_from_anthropic():
             if norm_model is not None
         ]
 
-        _anthropic_models_cache["data"] = normalized_models
-        _anthropic_models_cache["timestamp"] = datetime.now(timezone.utc)
+        cache_gateway_catalog("anthropic", normalized_models)
 
         # Clear error state on successful fetch
         clear_gateway_error("anthropic")
 
         logger.info(f"Fetched {len(normalized_models)} Anthropic models from API")
-        return _anthropic_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("Anthropic HTTP error: %s", error_msg)

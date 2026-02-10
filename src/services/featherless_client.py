@@ -5,7 +5,7 @@ from pathlib import Path
 
 import httpx
 
-from src.cache import _featherless_models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_featherless_pooled_client
@@ -387,21 +387,16 @@ def fetch_models_from_featherless():
                     f"Combined Featherless catalog now includes {len(normalized_models)} models from API + export"
                 )
 
-        _featherless_models_cache["data"] = normalized_models
-        _featherless_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        # Clear error state on successful fetch
-        clear_gateway_error("featherless")
-
+        cache_gateway_catalog("featherless", normalized_models)
         logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
-        return _featherless_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("Featherless HTTP error: %s", error_msg)
-        set_gateway_error("featherless", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from Featherless: %s", error_msg)
-        set_gateway_error("featherless", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None

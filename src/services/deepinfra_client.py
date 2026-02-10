@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import httpx
 from openai import OpenAI
 
-from src.cache import _deepinfra_models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
@@ -279,21 +279,16 @@ def fetch_models_from_deepinfra():
             if norm_model is not None
         ]
 
-        _deepinfra_models_cache["data"] = normalized_models
-        _deepinfra_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        # Clear error state on successful fetch
-        clear_gateway_error("deepinfra")
-
+        cache_gateway_catalog("deepinfra", normalized_models)
         logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
-        return _deepinfra_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("DeepInfra HTTP error: %s", error_msg)
-        set_gateway_error("deepinfra", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from DeepInfra: %s", error_msg, exc_info=True)
-        set_gateway_error("deepinfra", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None

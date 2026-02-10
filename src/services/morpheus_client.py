@@ -118,12 +118,12 @@ def fetch_models_from_morpheus():
 
     Updates the cache after fetching to prevent repeated API calls on failures.
     """
-    from src.cache import _morpheus_models_cache
+    from src.services.model_catalog_cache import cache_gateway_catalog
 
     def _cache_and_return(models: list) -> list:
         """Update cache with models and timestamp, then return models."""
-        _morpheus_models_cache["data"] = models
-        _morpheus_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("morpheus", models)
         return models
 
     try:

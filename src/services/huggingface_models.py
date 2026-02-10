@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _huggingface_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.config import Config
 from src.services.pricing_lookup import enrich_model_with_pricing
 
@@ -84,20 +84,14 @@ def fetch_models_from_huggingface_api(
         List of normalized model dictionaries or None on error
     """
     try:
-        # Check cache first
-        if (
-            use_cache
-            and _huggingface_models_cache["data"]
-            and _huggingface_models_cache["timestamp"]
-        ):
-            cache_age = (
-                datetime.now(timezone.utc) - _huggingface_models_cache["timestamp"]
-            ).total_seconds()
-            if cache_age < _huggingface_models_cache["ttl"]:
+        # Check cache first (Redis cache handles TTL internally)
+        if use_cache:
+            cached_models = get_cached_gateway_catalog("huggingface")
+            if cached_models:
                 logger.info(
-                    f"Using cached Hugging Face models ({len(_huggingface_models_cache['data'])} models, age: {cache_age:.0f}s)"
+                    f"Using cached Hugging Face models ({len(cached_models)} models)"
                 )
-                return _huggingface_models_cache["data"]
+                return cached_models
 
         logger.info("Fetching models from Hugging Face Models API Hub using multi-sort strategy")
 
@@ -261,12 +255,11 @@ def fetch_models_from_huggingface_api(
 
         logger.info(f"Normalized {len(normalized_models)} models")
 
-        # Cache the results
+        # Cache the results (Redis cache handles TTL internally)
         if use_cache:
-            _huggingface_models_cache["data"] = normalized_models
-            _huggingface_models_cache["timestamp"] = datetime.now(timezone.utc)
+            cache_gateway_catalog("huggingface", normalized_models)
             logger.info(
-                f"Cached {len(normalized_models)} Hugging Face models with TTL {_huggingface_models_cache['ttl']}s"
+                f"Cached {len(normalized_models)} Hugging Face models"
             )
 
         return normalized_models

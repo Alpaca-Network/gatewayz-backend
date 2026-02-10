@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _helicone_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
@@ -469,11 +469,11 @@ def fetch_models_from_helicone():
             m for m in (normalize_helicone_model(model) for model in response.data if model) if m
         ]
 
-        _helicone_models_cache["data"] = normalized_models
-        _helicone_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("helicone", normalized_models)
 
         logger.info(f"Fetched {len(normalized_models)} models from Helicone AI Gateway")
-        return _helicone_models_cache["data"]
+        return normalized_models
     except Exception as e:
         logger.error(
             "Failed to fetch models from Helicone AI Gateway: %s", sanitize_for_logging(str(e))

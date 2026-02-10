@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.cache import _cerebras_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
@@ -222,8 +222,7 @@ def fetch_models_from_cerebras():
     """
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        _cerebras_models_cache["data"] = models
-        _cerebras_models_cache["timestamp"] = datetime.now(timezone.utc)
+        cache_gateway_catalog("cerebras", models)
         return models
 
     try:

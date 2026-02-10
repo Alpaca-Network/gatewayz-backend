@@ -1701,7 +1701,7 @@ def fetch_models_from_google_vertex():
     """
     from datetime import datetime
 
-    from src.cache import _google_vertex_models_cache
+    from src.services.model_catalog_cache import cache_gateway_catalog
 
     logger.info("Fetching Google Vertex AI model catalog")
 
@@ -1754,8 +1754,7 @@ def fetch_models_from_google_vertex():
             )
 
         # Update cache
-        _google_vertex_models_cache["data"] = normalized_models
-        _google_vertex_models_cache["timestamp"] = datetime.now(UTC)
+        cache_gateway_catalog("google-vertex", normalized_models)
 
         return normalized_models
 

@@ -3,12 +3,8 @@
 DEPRECATED: This module is being phased out in favor of the unified Redis-based
 caching system in src/services/model_catalog_cache.py.
 
-The in-memory cache dictionaries in this module are no longer recommended for use.
-Instead, use the ModelCatalogCache class which provides:
-- Redis-backed distributed caching
-- Local memory fallback for resilience
-- Automatic cache invalidation
-- Better observability and metrics
+COMPATIBILITY LAYER ACTIVE: This module now delegates to Redis-based cache system
+while maintaining backward compatibility with existing code.
 
 Migration path:
 - Old: get_models_cache("openrouter")
@@ -21,251 +17,168 @@ This module will be removed in a future version.
 import logging
 import warnings
 from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # FAL cache initialization messages
 _FAL_CACHE_INIT_DEFERRED = "FAL cache initialization deferred"
 
-# Cache dictionaries for models and providers
-_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,  # 2 hours stale-while-revalidate
-}
 
-# Unified multi-provider catalog cache (canonical + provider adapters)
-# Note: data initialized to [] instead of None to distinguish between
-# "not yet cached" (timestamp=None) and "cached but empty" (timestamp set, data=[])
-_multi_provider_catalog_cache = {
-    "data": [],
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for aggregated catalog snapshots (increased from 15min to reduce expensive rebuilds)
-    "stale_ttl": 7200,  # 2 hours stale-while-revalidate
-}
-
-_featherless_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Featherless catalog
-    "stale_ttl": 7200,
-}
-
-_huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
-
-_provider_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
-
-_chutes_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Chutes catalog
-    "stale_ttl": 7200,
-}
-
-_groq_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 1800,  # 30 minute TTL for Groq catalog
-    "stale_ttl": 3600,
-}
-
-_fireworks_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 1800,  # 30 minute TTL for Fireworks catalog
-    "stale_ttl": 3600,
-}
-
-_together_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 1800,  # 30 minute TTL for Together catalog
-    "stale_ttl": 3600,
-}
-
-# Modelz cache (for token data)
-_modelz_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 1800,  # 30 minute TTL for Modelz token data
-    "stale_ttl": 3600,
-}
+# ============================================================================
+# COMPATIBILITY LAYER: Wrapper class that delegates to Redis-based cache
+# ============================================================================
 
 
-# DeepInfra cache (individual models only)
-_deepinfra_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,
-}
+class _CacheDict(dict):
+    """
+    Compatibility wrapper that makes cache dictionaries delegate to Redis.
 
-# Portkey-based individual provider caches
-_cerebras_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,
-}
+    This allows existing code using _xxx_models_cache["data"] to work
+    without changes, while actually using the new Redis-based cache system.
 
-_nebius_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,
-}
+    Example:
+        # OLD CODE (still works):
+        if _openrouter_models_cache["data"] is not None:
+            return _openrouter_models_cache["data"]
 
-_xai_models_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}  # 1 hour TTL
+        # Internally delegates to:
+        get_cached_gateway_catalog("openrouter")
+    """
 
-_zai_models_cache = {
+    def __init__(self, provider_slug: str):
+        """Initialize cache wrapper for a specific provider.
+
+        Args:
+            provider_slug: Provider/gateway slug (e.g., "openrouter", "anthropic")
+        """
+        self.provider_slug = provider_slug
+        self._deprecation_warned = False
+
+        # Initialize with expected cache structure
+        super().__init__({
+            "data": None,
+            "timestamp": None,
+            "ttl": 3600,
+            "stale_ttl": 7200,
+        })
+
+    def __getitem__(self, key: str) -> Any:
+        """Get cache value - delegates to Redis for 'data' key."""
+        if key == "data":
+            # Log deprecation warning once per cache instance
+            if not self._deprecation_warned:
+                logger.debug(
+                    f"DEPRECATION: Direct cache access for {self.provider_slug}. "
+                    f"Use get_cached_gateway_catalog('{self.provider_slug}') instead."
+                )
+                self._deprecation_warned = True
+
+            # Delegate to Redis-based cache
+            try:
+                from src.services.model_catalog_cache import get_cached_gateway_catalog
+                cached_data = get_cached_gateway_catalog(self.provider_slug)
+
+                # Update internal timestamp when data is retrieved
+                if cached_data is not None:
+                    super().__setitem__("timestamp", datetime.now(UTC))
+
+                return cached_data
+            except Exception as e:
+                logger.error(f"Error fetching from Redis cache for {self.provider_slug}: {e}")
+                # Fall back to in-memory value on error
+                return super().__getitem__(key)
+
+        # For other keys (timestamp, ttl, etc), use normal dict behavior
+        return super().__getitem__(key)
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set cache value - delegates to Redis for 'data' key."""
+        if key == "data":
+            # Log deprecation warning
+            logger.debug(
+                f"DEPRECATION: Direct cache write for {self.provider_slug}. "
+                f"Use set_cached_gateway_catalog('{self.provider_slug}', data) instead."
+            )
+
+            # Delegate to Redis-based cache
+            try:
+                from src.services.model_catalog_cache import cache_gateway_catalog
+                if value is not None:
+                    cache_gateway_catalog(self.provider_slug, value)
+                    # Update internal timestamp
+                    super().__setitem__("timestamp", datetime.now(UTC))
+            except Exception as e:
+                logger.error(f"Error writing to Redis cache for {self.provider_slug}: {e}")
+
+            # Also update in-memory for fallback
+            super().__setitem__(key, value)
+        else:
+            # For other keys, use normal dict behavior
+            super().__setitem__(key, value)
+
+
+# ============================================================================
+# Cache dictionaries - Now using Redis-backed wrappers
+# ============================================================================
+
+# OpenRouter (primary gateway)
+_models_cache = _CacheDict("openrouter")
+
+# Multi-provider catalog (uses "all" as gateway slug)
+_multi_provider_catalog_cache = _CacheDict("all")
+
+# Major provider caches
+_featherless_models_cache = _CacheDict("featherless")
+_chutes_models_cache = _CacheDict("chutes")
+_groq_models_cache = _CacheDict("groq")
+_fireworks_models_cache = _CacheDict("fireworks")
+_together_models_cache = _CacheDict("together")
+_modelz_cache = _CacheDict("modelz")
+
+# Legacy caches (special handling needed)
+_huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
+_provider_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
+
+
+# DeepInfra and Portkey-based providers
+_deepinfra_models_cache = _CacheDict("deepinfra")
+_cerebras_models_cache = _CacheDict("cerebras")
+_nebius_models_cache = _CacheDict("nebius")
+_xai_models_cache = _CacheDict("xai")
+_zai_models_cache = _CacheDict("zai")
+_novita_models_cache = _CacheDict("novita")
+_huggingface_models_cache = _CacheDict("huggingface")
+_aimo_models_cache = _CacheDict("aimo")
+_near_models_cache = _CacheDict("near")
+_fal_models_cache = _CacheDict("fal")
+_google_vertex_models_cache = _CacheDict("google-vertex")
+
+# Gateway and provider caches
+_vercel_ai_gateway_models_cache = _CacheDict("vercel-ai-gateway")
+_helicone_models_cache = _CacheDict("helicone")
+_aihubmix_models_cache = _CacheDict("aihubmix")
+_anannas_models_cache = _CacheDict("anannas")
+_onerouter_models_cache = _CacheDict("onerouter")
+_cloudflare_workers_ai_models_cache = _CacheDict("cloudflare-workers-ai")
+_clarifai_models_cache = _CacheDict("clarifai")
+_openai_models_cache = _CacheDict("openai")
+_anthropic_models_cache = _CacheDict("anthropic")
+_simplismart_models_cache = _CacheDict("simplismart")
+_sybil_models_cache = _CacheDict("sybil")
+_canopywave_models_cache = _CacheDict("canopywave")
+_morpheus_models_cache = _CacheDict("morpheus")
+
+# Special case: Alibaba cache with quota error tracking
+# Keep as regular dict since it has special fields beyond standard cache structure
+_alibaba_models_cache = {
     "data": None,
     "timestamp": None,
     "ttl": 3600,
     "stale_ttl": 7200,
-}  # 1 hour TTL for Z.AI
-
-_novita_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,
-}
-
-_huggingface_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL
-    "stale_ttl": 7200,
-}
-
-_aimo_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for AIMO catalog
-    "stale_ttl": 7200,
-}
-
-_near_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Near AI catalog
-    "stale_ttl": 7200,
-}
-
-_fal_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Fal.ai catalog
-    "stale_ttl": 7200,
-}
-
-_google_vertex_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Google Vertex AI models
-    "stale_ttl": 7200,
-}
-
-_vercel_ai_gateway_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Vercel AI Gateway catalog
-    "stale_ttl": 7200,
-}
-
-_helicone_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Helicone AI Gateway catalog
-    "stale_ttl": 7200,
-}
-
-_aihubmix_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for AiHubMix catalog
-    "stale_ttl": 7200,
-}
-
-_anannas_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Anannas catalog
-    "stale_ttl": 7200,
-}
-
-_alibaba_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Alibaba Cloud catalog
-    "stale_ttl": 7200,
-    "quota_error": False,  # Track if quota error occurred
-    "quota_error_timestamp": None,  # When the quota error was recorded
-    "quota_error_backoff": 900,  # 15 minutes backoff for quota errors
-}
-
-_onerouter_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Infron AI (formerly OneRouter) catalog
-    "stale_ttl": 7200,
-}
-
-_cloudflare_workers_ai_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Cloudflare Workers AI catalog
-    "stale_ttl": 7200,
-}
-
-_clarifai_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Clarifai catalog
-    "stale_ttl": 7200,
-}
-
-_openai_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for OpenAI catalog
-    "stale_ttl": 7200,
-}
-
-_anthropic_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Anthropic catalog
-    "stale_ttl": 7200,
-}
-
-_simplismart_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Simplismart catalog
-    "stale_ttl": 7200,
-}
-
-_sybil_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Sybil catalog
-    "stale_ttl": 7200,
-}
-
-_canopywave_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Canopy Wave catalog
-    "stale_ttl": 7200,
-}
-
-_morpheus_models_cache = {
-    "data": None,
-    "timestamp": None,
-    "ttl": 3600,  # 1 hour TTL for Morpheus AI Gateway catalog
-    "stale_ttl": 7200,
+    "quota_error": False,
+    "quota_error_timestamp": None,
+    "quota_error_backoff": 900,
 }
 
 # BACKWARD COMPATIBILITY: Alias for old cache name
@@ -334,46 +247,66 @@ def get_providers_cache():
 
 
 def clear_models_cache(gateway: str):
-    """Clear cache for a specific gateway"""
-    cache_map = {
-        "openrouter": _models_cache,
-        "featherless": _featherless_models_cache,
-        "deepinfra": _deepinfra_models_cache,
-        "chutes": _chutes_models_cache,
-        "groq": _groq_models_cache,
-        "fireworks": _fireworks_models_cache,
-        "together": _together_models_cache,
-        "google-vertex": _google_vertex_models_cache,
-        "cerebras": _cerebras_models_cache,
-        "nebius": _nebius_models_cache,
-        "xai": _xai_models_cache,
-        "zai": _zai_models_cache,
-        "novita": _novita_models_cache,
-        "huggingface": _huggingface_models_cache,
-        "hug": _huggingface_models_cache,  # Alias for backward compatibility
-        "helicone": _helicone_models_cache,
-        "aimo": _aimo_models_cache,
-        "near": _near_models_cache,
-        "fal": _fal_models_cache,
-        "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "aihubmix": _aihubmix_models_cache,
-        "anannas": _anannas_models_cache,
-        "alibaba": _alibaba_models_cache,
-        "onerouter": _onerouter_models_cache,
-        "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
-        "clarifai": _clarifai_models_cache,
-        "openai": _openai_models_cache,
-        "anthropic": _anthropic_models_cache,
-        "simplismart": _simplismart_models_cache,
-        "sybil": _sybil_models_cache,
-        "canopywave": _canopywave_models_cache,
-        "morpheus": _morpheus_models_cache,
-        "modelz": _modelz_cache,
-    }
-    cache = cache_map.get(gateway.lower())
-    if cache:
-        cache["data"] = None
-        cache["timestamp"] = None
+    """Clear cache for a specific gateway
+
+    DEPRECATED: Use invalidate_provider_catalog() from src.services.model_catalog_cache instead.
+    This function now delegates to the new cache system for compatibility.
+    """
+    warnings.warn(
+        f"clear_models_cache('{gateway}') is deprecated. "
+        f"Use invalidate_provider_catalog('{gateway}') from src.services.model_catalog_cache instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    # Delegate to new cache system
+    try:
+        from src.services.model_catalog_cache import invalidate_provider_catalog
+        invalidate_provider_catalog(gateway)
+        logger.debug(f"Delegated clear_models_cache('{gateway}') to invalidate_provider_catalog()")
+    except Exception as e:
+        logger.error(f"Error delegating clear_models_cache to new cache system: {e}")
+
+        # Fallback: clear in-memory cache
+        cache_map = {
+            "openrouter": _models_cache,
+            "featherless": _featherless_models_cache,
+            "deepinfra": _deepinfra_models_cache,
+            "chutes": _chutes_models_cache,
+            "groq": _groq_models_cache,
+            "fireworks": _fireworks_models_cache,
+            "together": _together_models_cache,
+            "google-vertex": _google_vertex_models_cache,
+            "cerebras": _cerebras_models_cache,
+            "nebius": _nebius_models_cache,
+            "xai": _xai_models_cache,
+            "zai": _zai_models_cache,
+            "novita": _novita_models_cache,
+            "huggingface": _huggingface_models_cache,
+            "hug": _huggingface_models_cache,
+            "helicone": _helicone_models_cache,
+            "aimo": _aimo_models_cache,
+            "near": _near_models_cache,
+            "fal": _fal_models_cache,
+            "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
+            "aihubmix": _aihubmix_models_cache,
+            "anannas": _anannas_models_cache,
+            "alibaba": _alibaba_models_cache,
+            "onerouter": _onerouter_models_cache,
+            "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
+            "clarifai": _clarifai_models_cache,
+            "openai": _openai_models_cache,
+            "anthropic": _anthropic_models_cache,
+            "simplismart": _simplismart_models_cache,
+            "sybil": _sybil_models_cache,
+            "canopywave": _canopywave_models_cache,
+            "morpheus": _morpheus_models_cache,
+            "modelz": _modelz_cache,
+        }
+        cache = cache_map.get(gateway.lower())
+        if cache:
+            cache["data"] = None
+            cache["timestamp"] = None
 
 
 def clear_providers_cache():
@@ -484,19 +417,35 @@ def initialize_featherless_cache_from_catalog():
         logger.debug(f"Featherless cache init deferred: {type(error).__name__}")
 
 
+# ============================================================================
 # Error state caching functions
+# DEPRECATED: Error handling now automatic via circuit breaker in new cache
+# ============================================================================
+
+
 def set_gateway_error(gateway: str, error_message: str):
     """Cache error state for a gateway with exponential backoff
+
+    DEPRECATED: Error state tracking is now handled automatically by the Redis-based
+    cache system via circuit breaker pattern. This function is kept for compatibility
+    but does nothing in the new system.
 
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
         error_message: The error message to cache
     """
+    warnings.warn(
+        f"set_gateway_error('{gateway}') is deprecated. "
+        "Error tracking is now handled automatically by the cache layer.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    # Keep the old behavior for backward compatibility with non-migrated code
     current_error = _gateway_error_cache.get(gateway)
     failure_count = 1
 
     if current_error:
-        # Increment failure count for exponential backoff
         failure_count = current_error.get("failure_count", 0) + 1
 
     _gateway_error_cache[gateway] = {
@@ -506,7 +455,7 @@ def set_gateway_error(gateway: str, error_message: str):
     }
 
     logger.debug(
-        f"Cached error state for {gateway} (failure #{failure_count}): {error_message[:100]}"
+        f"[DEPRECATED] Cached error state for {gateway} (failure #{failure_count}): {error_message[:100]}"
     )
 
 
@@ -533,18 +482,28 @@ def get_gateway_error_ttl(failure_count: int) -> int:
 def is_gateway_in_error_state(gateway: str) -> bool:
     """Check if a gateway is currently in error state
 
+    DEPRECATED: Error state tracking is now handled automatically by the Redis-based
+    cache system via circuit breaker pattern. This function is kept for compatibility.
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
 
     Returns:
         True if gateway is in error state and TTL hasn't expired, False otherwise
     """
+    warnings.warn(
+        f"is_gateway_in_error_state('{gateway}') is deprecated. "
+        "Error tracking is now handled automatically by the cache layer.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    # Keep old behavior for backward compatibility
     error_state = _gateway_error_cache.get(gateway)
 
     if not error_state:
         return False
 
-    # Check if error TTL has expired
     timestamp = error_state.get("timestamp")
     failure_count = error_state.get("failure_count", 1)
 
@@ -555,7 +514,6 @@ def is_gateway_in_error_state(gateway: str) -> bool:
     age = (datetime.now(UTC) - timestamp).total_seconds()
 
     if age >= ttl:
-        # TTL expired, clear error state
         clear_gateway_error(gateway)
         return False
 
@@ -565,12 +523,23 @@ def is_gateway_in_error_state(gateway: str) -> bool:
 def clear_gateway_error(gateway: str):
     """Clear error state for a gateway (called after successful fetch)
 
+    DEPRECATED: Error state tracking is now handled automatically by the Redis-based
+    cache system via circuit breaker pattern. This function is kept for compatibility.
+
     Args:
         gateway: The gateway name (e.g., "fireworks", "deepinfra")
     """
+    warnings.warn(
+        f"clear_gateway_error('{gateway}') is deprecated. "
+        "Error tracking is now handled automatically by the cache layer.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+
+    # Keep old behavior for backward compatibility
     if gateway in _gateway_error_cache:
         del _gateway_error_cache[gateway]
-        logger.debug(f"Cleared error state for {gateway}")
+        logger.debug(f"[DEPRECATED] Cleared error state for {gateway}")
 
 
 def get_gateway_error_message(gateway: str) -> str | None:

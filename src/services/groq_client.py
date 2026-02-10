@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _groq_models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
@@ -336,21 +336,16 @@ def fetch_models_from_groq():
             if norm_model is not None
         ]
 
-        _groq_models_cache["data"] = normalized_models
-        _groq_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        # Clear error state on successful fetch
-        clear_gateway_error("groq")
-
+        cache_gateway_catalog("groq", normalized_models)
         logger.info(f"Fetched {len(normalized_models)} Groq models")
-        return _groq_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("Groq HTTP error: %s", error_msg)
-        set_gateway_error("groq", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from Groq: %s", error_msg)
-        set_gateway_error("groq", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None

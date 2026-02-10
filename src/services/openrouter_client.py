@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter
 from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
-from src.cache import _models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
@@ -733,25 +733,23 @@ def fetch_models_from_openrouter():
 
         # Step 4: Cache the results
         step_logger.step(4, "Caching models", provider="openrouter")
-        _models_cache["data"] = filtered_models
-        _models_cache["timestamp"] = datetime.now(timezone.utc)
-        clear_gateway_error("openrouter")
+        cache_gateway_catalog("openrouter", filtered_models)
         step_logger.success(cached_count=len(filtered_models), cache_status="updated")
 
         step_logger.complete(total_models=len(filtered_models), provider="openrouter")
-        return _models_cache["data"]
+        return filtered_models
     except httpx.TimeoutException as e:
         error_msg = f"Request timeout after 30s: {sanitize_for_logging(str(e))}"
         logger.error("OpenRouter timeout error: %s", error_msg)
-        set_gateway_error("openrouter", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("OpenRouter HTTP error: %s", error_msg)
-        set_gateway_error("openrouter", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from OpenRouter: %s", error_msg)
-        set_gateway_error("openrouter", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None

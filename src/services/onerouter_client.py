@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _onerouter_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
@@ -235,8 +235,8 @@ def fetch_models_from_onerouter():
 
     def _cache_and_return(models: list[dict]) -> list[dict]:
         """Cache models and return them"""
-        _onerouter_models_cache["data"] = models
-        _onerouter_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("onerouter", models)
         return models
 
     try:

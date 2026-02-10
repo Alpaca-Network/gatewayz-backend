@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _fireworks_models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_fireworks_pooled_client
@@ -259,25 +259,16 @@ def fetch_models_from_fireworks():
             if norm_model is not None
         ]
 
-        _fireworks_models_cache["data"] = normalized_models
-        _fireworks_models_cache["timestamp"] = datetime.now(timezone.utc)
-
-        # Clear error state on successful fetch
-        clear_gateway_error("fireworks")
-
+        cache_gateway_catalog("fireworks", normalized_models)
         logger.info(f"Fetched {len(normalized_models)} Fireworks models")
-        return _fireworks_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("Fireworks HTTP error: %s", error_msg)
-
-        # Cache error state to prevent continuous retries
-        set_gateway_error("fireworks", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None
     except Exception as e:
         error_msg = sanitize_for_logging(str(e))
         logger.error("Failed to fetch models from Fireworks: %s", error_msg)
-
-        # Cache error state to prevent continuous retries
-        set_gateway_error("fireworks", error_msg)
+        # Error tracking now automatic via Redis cache circuit breaker
         return None

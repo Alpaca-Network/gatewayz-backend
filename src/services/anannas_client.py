@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from openai import OpenAI
 
-from src.cache import _anannas_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
@@ -262,11 +262,11 @@ def fetch_models_from_anannas():
             m for m in (normalize_anannas_model(model) for model in response.data if model) if m
         ]
 
-        _anannas_models_cache["data"] = normalized_models
-        _anannas_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("anannas", normalized_models)
 
         logger.info(f"Fetched {len(normalized_models)} models from Anannas")
-        return _anannas_models_cache["data"]
+        return normalized_models
     except Exception as e:
         logger.error("Failed to fetch models from Anannas: %s", sanitize_for_logging(str(e)))
         return []

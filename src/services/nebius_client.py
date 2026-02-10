@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from src.cache import _nebius_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
@@ -189,8 +189,8 @@ def fetch_models_from_nebius():
     """
 
     def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        _nebius_models_cache["data"] = models
-        _nebius_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("nebius", models)
         return models
 
     try:

@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from src.cache import _huggingface_models_cache
+from src.services.model_catalog_cache import get_cached_gateway_catalog
 from src.config import Config
 
 # Initialize logging
@@ -141,7 +141,7 @@ def _resolve_model_id_case(model_id: str) -> str:
         has_suffix = True
 
     # Check cache for the correct case
-    cache_data = _huggingface_models_cache.get("data")
+    cache_data = get_cached_gateway_catalog("huggingface")
     if cache_data:
         lookup_lower = lookup_id.lower()
         for cached_model in cache_data:

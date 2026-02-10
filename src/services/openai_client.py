@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _openai_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
@@ -294,14 +294,13 @@ def fetch_models_from_openai():
             if norm_model is not None
         ]
 
-        _openai_models_cache["data"] = normalized_models
-        _openai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        cache_gateway_catalog("openai", normalized_models)
 
         # Clear error state on successful fetch
         clear_gateway_error("openai")
 
         logger.info(f"Fetched {len(normalized_models)} OpenAI models")
-        return _openai_models_cache["data"]
+        return normalized_models
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
         logger.error("OpenAI HTTP error: %s", error_msg)

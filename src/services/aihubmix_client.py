@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from openai import OpenAI
 
-from src.cache import _aihubmix_models_cache, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog, clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
@@ -394,14 +394,14 @@ def fetch_models_from_aihubmix():
             if m
         ]
 
-        _aihubmix_models_cache["data"] = normalized_models
-        _aihubmix_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("aihubmix", normalized_models)
 
         # Clear error state on success
         clear_gateway_error("aihubmix")
 
         logger.info(f"Fetched {len(normalized_models)} models from AiHubMix")
-        return _aihubmix_models_cache["data"]
+        return normalized_models
     except requests.exceptions.Timeout as e:
         error_msg = f"AiHubMix API timeout: {sanitize_for_logging(str(e))}"
         logger.error(error_msg)

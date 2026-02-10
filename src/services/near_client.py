@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from src.cache import _near_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
@@ -297,11 +297,11 @@ def fetch_models_from_near():
                 # Normalize models
                 normalized_models = [normalize_near_model(model) for model in raw_models if model]
 
-                _near_models_cache["data"] = normalized_models
-                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                # Cache models in Redis with automatic TTL and error tracking
+                cache_gateway_catalog("near", normalized_models)
 
                 logger.info(f"Fetched {len(normalized_models)} Near AI models from API")
-                return _near_models_cache["data"]
+                return normalized_models
         except (httpx.HTTPStatusError, httpx.RequestError) as e:
             logger.warning(
                 "Near AI API request failed: %s. Using fallback model list.",
@@ -320,10 +320,10 @@ def fetch_models_from_near():
             normalized_models = [m for m in normalized_models if m]  # Filter out None
 
             if normalized_models:
-                _near_models_cache["data"] = normalized_models
-                _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+                # Cache models in Redis with automatic TTL and error tracking
+                cache_gateway_catalog("near", normalized_models)
                 logger.info(f"Using {len(normalized_models)} Near AI models from database fallback")
-                return _near_models_cache["data"]
+                return normalized_models
 
         # Static fallback as last resort (if database is empty)
         # Reference: https://cloud.near.ai/models for current available models
@@ -374,11 +374,11 @@ def fetch_models_from_near():
 
         normalized_models = [normalize_near_model(model) for model in fallback_models if model]
 
-        _near_models_cache["data"] = normalized_models
-        _near_models_cache["timestamp"] = datetime.now(timezone.utc)
+        # Cache models in Redis with automatic TTL and error tracking
+        cache_gateway_catalog("near", normalized_models)
 
         logger.info(f"Using {len(normalized_models)} static fallback Near AI models")
-        return _near_models_cache["data"]
+        return normalized_models
     except Exception as e:
         logger.error(f"Failed to fetch models from Near AI: {e}")
         return []

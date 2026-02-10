@@ -20,8 +20,8 @@ Model ID Format:
 import logging
 from datetime import datetime, timezone
 
-from src.cache import _clarifai_models_cache
 from src.config import Config
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
 from src.services.pricing_lookup import enrich_model_with_pricing
@@ -159,9 +159,8 @@ def fetch_models_from_clarifai():
     """
 
     def _cache_and_return(models: list[dict]) -> list[dict]:
-        """Cache models and return them"""
-        _clarifai_models_cache["data"] = models
-        _clarifai_models_cache["timestamp"] = datetime.now(timezone.utc)
+        """Cache models in Redis with automatic TTL and error tracking"""
+        cache_gateway_catalog("clarifai", models)
         return models
 
     try:

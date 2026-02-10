@@ -5,8 +5,8 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from src.cache import _chutes_models_cache
 from src.config import Config
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
@@ -231,11 +231,11 @@ def fetch_models_from_chutes():
 
             normalized_models = [normalize_chutes_model(model) for model in raw_models if model]
 
-            _chutes_models_cache["data"] = normalized_models
-            _chutes_models_cache["timestamp"] = datetime.now(timezone.utc)
+            # Cache models in Redis with automatic TTL and error tracking
+            cache_gateway_catalog("chutes", normalized_models)
 
             logger.info(f"Loaded {len(normalized_models)} models from Chutes static catalog")
-            return _chutes_models_cache["data"]
+            return normalized_models
 
         # If static catalog doesn't exist, try API (if key is configured)
         if Config.CHUTES_API_KEY:

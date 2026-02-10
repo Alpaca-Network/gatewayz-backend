@@ -31,7 +31,7 @@ import httpx
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
-from src.cache import _canopywave_models_cache
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_canopywave_pooled_client
@@ -187,8 +187,8 @@ def _cache_and_return(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     Returns:
         The same list of models.
     """
-    _canopywave_models_cache["data"] = models
-    _canopywave_models_cache["timestamp"] = datetime.now(timezone.utc)
+    # Cache models in Redis with automatic TTL and error tracking
+    cache_gateway_catalog("canopywave", models)
     return models
 
 
