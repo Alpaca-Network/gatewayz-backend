@@ -1,0 +1,126 @@
+{
+  "category": "reasoning",
+  "description": "Multi-step coding reasoning and problem-solving tasks",
+  "test_cases": [
+    {
+      "id": "rs_001",
+      "difficulty": "medium",
+      "prompt": "You have an array of integers. You need to find if there exist three indices i, j, k such that arr[i] < arr[j] > arr[k] where i < j < k. Explain your approach step-by-step, then implement it in Python.",
+      "expected_behavior": "Should identify this as finding a 'peak' with elements on both sides, explain the approach, then implement",
+      "evaluation_criteria": ["correct_reasoning", "step_by_step_explanation", "correct_implementation", "time_complexity_analysis"],
+      "tags": ["array", "reasoning", "medium"]
+    },
+    {
+      "id": "rs_002",
+      "difficulty": "medium",
+      "prompt": "Design an algorithm to check if a given sudoku board is valid. The board is represented as a 9x9 2D array. Explain your reasoning about what needs to be validated and how, then implement it.",
+      "expected_behavior": "Should identify row, column, and 3x3 box constraints, explain validation strategy, then implement",
+      "evaluation_criteria": ["complete_constraint_identification", "clear_reasoning", "correct_implementation"],
+      "tags": ["matrix", "validation", "medium"]
+    },
+    {
+      "id": "rs_003",
+      "difficulty": "medium",
+      "prompt": "Given a string containing digits, return all possible valid IP addresses. An IP address has 4 parts separated by dots, each part is 0-255. Explain your approach to generating and validating combinations.",
+      "expected_behavior": "Should reason about backtracking, constraint checking, and implement correctly",
+      "evaluation_criteria": ["backtracking_reasoning", "constraint_handling", "correct_implementation"],
+      "tags": ["backtracking", "string", "medium"]
+    },
+    {
+      "id": "rs_004",
+      "difficulty": "medium",
+      "prompt": "You're given a list of intervals. Merge all overlapping intervals. First explain what makes intervals overlap and your strategy for merging, then implement.",
+      "expected_behavior": "Should identify sorting as key step, explain merge logic, implement correctly",
+      "evaluation_criteria": ["correct_insight_about_sorting", "clear_merge_logic", "correct_implementation"],
+      "tags": ["intervals", "sorting", "medium"]
+    },
+    {
+      "id": "rs_005",
+      "difficulty": "medium",
+      "prompt": "Design a function to evaluate a reverse Polish notation expression. Explain how RPN works and why a stack is the right data structure, then implement.",
+      "expected_behavior": "Should explain RPN evaluation process, stack usage, and implement correctly",
+      "evaluation_criteria": ["rpn_understanding", "stack_reasoning", "correct_implementation"],
+      "tags": ["stack", "expression", "medium"]
+    },
+    {
+      "id": "rs_006",
+      "difficulty": "medium",
+      "prompt": "Given n stairs, you can climb 1 or 2 steps at a time. How many distinct ways can you reach the top? First identify the pattern/recurrence, then optimize your solution.",
+      "expected_behavior": "Should identify Fibonacci pattern, start with recursion, then optimize to O(1) space",
+      "evaluation_criteria": ["pattern_recognition", "optimization_reasoning", "correct_implementation"],
+      "tags": ["dynamic_programming", "optimization", "medium"]
+    },
+    {
+      "id": "rs_007",
+      "difficulty": "medium",
+      "prompt": "Implement a function to find the kth largest element in an unsorted array. Explain at least two approaches with different time complexities, then implement the most efficient one.",
+      "expected_behavior": "Should discuss sorting O(n log n), heap O(n log k), and quickselect O(n) average",
+      "evaluation_criteria": ["multiple_approaches", "complexity_analysis", "optimal_implementation"],
+      "tags": ["algorithm", "selection", "medium"]
+    },
+    {
+      "id": "rs_008",
+      "difficulty": "medium",
+      "prompt": "Given a binary tree, determine if it is height-balanced (heights of left and right subtrees differ by at most 1). Explain how to avoid redundant height calculations.",
+      "expected_behavior": "Should identify bottom-up approach to avoid O(n^2), implement O(n) solution",
+      "evaluation_criteria": ["optimization_insight", "correct_approach", "efficient_implementation"],
+      "tags": ["tree", "recursion", "medium"]
+    },
+    {
+      "id": "rs_009",
+      "difficulty": "hard",
+      "prompt": "Design a system to detect a cycle in a linked list. Explain why Floyd's algorithm (tortoise and hare) works mathematically, then implement it and also find the cycle start.",
+      "expected_behavior": "Should explain the math behind why fast/slow pointers meet, implement both cycle detection and finding start",
+      "evaluation_criteria": ["mathematical_explanation", "algorithm_correctness", "complete_implementation"],
+      "tags": ["linked_list", "algorithm", "hard"]
+    },
+    {
+      "id": "rs_010",
+      "difficulty": "hard",
+      "prompt": "Implement a function to find the longest increasing subsequence in an array. Explain the O(n^2) DP approach first, then optimize to O(n log n) using binary search.",
+      "expected_behavior": "Should explain both approaches clearly, implement both or the optimized version",
+      "evaluation_criteria": ["dp_reasoning", "optimization_insight", "correct_implementation"],
+      "tags": ["dynamic_programming", "optimization", "hard"]
+    },
+    {
+      "id": "rs_011",
+      "difficulty": "hard",
+      "prompt": "Given a matrix of 0s and 1s, find the largest rectangle containing only 1s. Explain how this problem relates to the largest rectangle in histogram problem.",
+      "expected_behavior": "Should connect to histogram problem, explain layer-by-layer approach, implement correctly",
+      "evaluation_criteria": ["problem_decomposition", "connection_to_histogram", "correct_implementation"],
+      "tags": ["matrix", "stack", "hard"]
+    },
+    {
+      "id": "rs_012",
+      "difficulty": "hard",
+      "prompt": "Design an algorithm for the 'edit distance' problem: find minimum operations (insert, delete, replace) to convert string A to B. Explain the recurrence relation before implementing.",
+      "expected_behavior": "Should derive the DP recurrence, explain base cases, implement bottom-up solution",
+      "evaluation_criteria": ["recurrence_derivation", "base_case_handling", "correct_implementation"],
+      "tags": ["dynamic_programming", "string", "hard"]
+    },
+    {
+      "id": "rs_013",
+      "difficulty": "hard",
+      "prompt": "Implement a trie (prefix tree) with insert, search, and startsWith methods. Explain the time and space complexity tradeoffs compared to a hash set.",
+      "expected_behavior": "Should explain trie structure, prefix matching advantage, implement all methods",
+      "evaluation_criteria": ["trie_understanding", "complexity_analysis", "complete_implementation"],
+      "tags": ["data_structure", "trie", "hard"]
+    },
+    {
+      "id": "rs_014",
+      "difficulty": "hard",
+      "prompt": "Given a graph represented as an adjacency list, implement topological sort. Explain when topological sort is possible and detect if the graph has a cycle.",
+      "expected_behavior": "Should explain DAG requirement, implement with cycle detection, use either DFS or Kahn's",
+      "evaluation_criteria": ["dag_understanding", "cycle_detection", "correct_implementation"],
+      "tags": ["graph", "topological_sort", "hard"]
+    },
+    {
+      "id": "rs_015",
+      "difficulty": "hard",
+      "prompt": "Design a function to solve the N-Queens problem: place N queens on an NxN chessboard so no two queens attack each other. Explain your pruning strategy to make backtracking efficient.",
+      "expected_behavior": "Should explain column, diagonal tracking for O(1) validation, implement backtracking",
+      "evaluation_criteria": ["pruning_strategy", "backtracking_logic", "efficient_validation"],
+      "tags": ["backtracking", "optimization", "hard"]
+    }
+  ]
+}

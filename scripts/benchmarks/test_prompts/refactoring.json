@@ -1,0 +1,86 @@
+{
+  "category": "refactoring",
+  "description": "Code improvement and modernization tasks",
+  "test_cases": [
+    {
+      "id": "rf_001",
+      "difficulty": "medium",
+      "prompt": "Refactor this code to be more Pythonic and readable:\n\n```python\ndef process_items(items):\n    result = []\n    i = 0\n    while i < len(items):\n        item = items[i]\n        if item != None:\n            if item > 0:\n                result.append(item * 2)\n        i = i + 1\n    return result\n```",
+      "expected_behavior": "Should use list comprehension, 'is not None', for loop, += 1",
+      "evaluation_criteria": ["uses_list_comprehension", "proper_none_check", "cleaner_code", "maintains_behavior"],
+      "tags": ["pythonic", "list_comprehension", "medium"]
+    },
+    {
+      "id": "rf_002",
+      "difficulty": "medium",
+      "prompt": "Refactor this code to reduce duplication:\n\n```python\ndef create_user(name, email):\n    if not name or len(name) < 2:\n        raise ValueError('Name must be at least 2 characters')\n    if not email or '@' not in email:\n        raise ValueError('Invalid email')\n    return {'name': name, 'email': email, 'created': datetime.now()}\n\ndef update_user(user, name, email):\n    if not name or len(name) < 2:\n        raise ValueError('Name must be at least 2 characters')\n    if not email or '@' not in email:\n        raise ValueError('Invalid email')\n    user['name'] = name\n    user['email'] = email\n    user['updated'] = datetime.now()\n    return user\n```",
+      "expected_behavior": "Should extract validation into separate function(s)",
+      "evaluation_criteria": ["reduces_duplication", "extracts_validation", "maintains_behavior", "clean_separation"],
+      "tags": ["dry", "validation", "medium"]
+    },
+    {
+      "id": "rf_003",
+      "difficulty": "medium",
+      "prompt": "Refactor this callback-heavy code to use async/await:\n\n```python\ndef fetch_user_data(user_id, callback):\n    def on_user_fetched(user):\n        def on_posts_fetched(posts):\n            def on_comments_fetched(comments):\n                callback({'user': user, 'posts': posts, 'comments': comments})\n            fetch_comments(posts, on_comments_fetched)\n        fetch_posts(user, on_posts_fetched)\n    fetch_user(user_id, on_user_fetched)\n```",
+      "expected_behavior": "Should convert to clean async/await with proper error handling",
+      "evaluation_criteria": ["uses_async_await", "cleaner_structure", "error_handling", "maintains_logic"],
+      "tags": ["async", "callback_hell", "medium"]
+    },
+    {
+      "id": "rf_004",
+      "difficulty": "medium",
+      "prompt": "Refactor this code to use dataclasses and type hints:\n\n```python\nclass Product:\n    def __init__(self, name, price, quantity, category):\n        self.name = name\n        self.price = price\n        self.quantity = quantity\n        self.category = category\n    \n    def __repr__(self):\n        return f'Product({self.name}, {self.price}, {self.quantity}, {self.category})'\n    \n    def __eq__(self, other):\n        return (self.name == other.name and \n                self.price == other.price and\n                self.quantity == other.quantity and\n                self.category == other.category)\n```",
+      "expected_behavior": "Should use @dataclass decorator with proper type hints",
+      "evaluation_criteria": ["uses_dataclass", "proper_type_hints", "reduces_boilerplate", "maintains_behavior"],
+      "tags": ["dataclass", "type_hints", "medium"]
+    },
+    {
+      "id": "rf_005",
+      "difficulty": "medium",
+      "prompt": "Refactor this code to use context managers properly:\n\n```python\ndef process_files(input_path, output_path):\n    input_file = open(input_path, 'r')\n    try:\n        output_file = open(output_path, 'w')\n        try:\n            for line in input_file:\n                output_file.write(line.upper())\n        finally:\n            output_file.close()\n    finally:\n        input_file.close()\n```",
+      "expected_behavior": "Should use 'with' statements, possibly combined",
+      "evaluation_criteria": ["uses_with_statement", "cleaner_code", "proper_resource_management", "maintains_behavior"],
+      "tags": ["context_manager", "file_handling", "medium"]
+    },
+    {
+      "id": "rf_006",
+      "difficulty": "medium",
+      "prompt": "Refactor this code to use proper error handling patterns:\n\n```python\ndef divide_numbers(a, b):\n    try:\n        result = a / b\n        return result\n    except:\n        return None\n\ndef process_data(data):\n    try:\n        parsed = json.loads(data)\n        value = parsed['key']['nested']\n        return divide_numbers(value, 2)\n    except:\n        return None\n```",
+      "expected_behavior": "Should catch specific exceptions, possibly use custom exceptions, better error reporting",
+      "evaluation_criteria": ["specific_exceptions", "informative_errors", "proper_exception_hierarchy", "maintains_behavior"],
+      "tags": ["exception_handling", "error_patterns", "medium"]
+    },
+    {
+      "id": "rf_007",
+      "difficulty": "hard",
+      "prompt": "Refactor this class to follow SOLID principles:\n\n```python\nclass OrderProcessor:\n    def __init__(self, db_connection):\n        self.db = db_connection\n    \n    def process_order(self, order):\n        # Validate order\n        if not order.get('items'):\n            raise ValueError('No items')\n        if not order.get('customer_email'):\n            raise ValueError('No email')\n        \n        # Calculate total\n        total = sum(item['price'] * item['qty'] for item in order['items'])\n        if total > 1000:\n            total *= 0.9  # 10% discount\n        \n        # Save to database\n        self.db.execute('INSERT INTO orders ...')\n        \n        # Send email\n        import smtplib\n        server = smtplib.SMTP('smtp.gmail.com')\n        server.send_message(f'Order total: {total}')\n        \n        # Generate report\n        report = f'Order processed: {total}'\n        with open('report.txt', 'a') as f:\n            f.write(report)\n        \n        return total\n```",
+      "expected_behavior": "Should separate concerns: validation, pricing, persistence, notification, reporting into separate classes/functions",
+      "evaluation_criteria": ["single_responsibility", "dependency_injection", "testability", "maintains_behavior"],
+      "tags": ["solid", "architecture", "hard"]
+    },
+    {
+      "id": "rf_008",
+      "difficulty": "hard",
+      "prompt": "Refactor this code to use the Strategy pattern:\n\n```python\ndef calculate_shipping(order, method):\n    if method == 'standard':\n        if order['weight'] < 1:\n            return 5.0\n        elif order['weight'] < 5:\n            return 10.0\n        else:\n            return 15.0\n    elif method == 'express':\n        if order['weight'] < 1:\n            return 15.0\n        elif order['weight'] < 5:\n            return 25.0\n        else:\n            return 40.0\n    elif method == 'overnight':\n        return 50.0 + order['weight'] * 5\n    elif method == 'international':\n        base = 30.0\n        per_kg = 10.0\n        return base + order['weight'] * per_kg\n    else:\n        raise ValueError(f'Unknown method: {method}')\n```",
+      "expected_behavior": "Should create shipping strategy classes with a common interface",
+      "evaluation_criteria": ["uses_strategy_pattern", "extensible_design", "cleaner_code", "maintains_behavior"],
+      "tags": ["design_pattern", "strategy", "hard"]
+    },
+    {
+      "id": "rf_009",
+      "difficulty": "hard",
+      "prompt": "Refactor this synchronous code to be async with proper concurrency:\n\n```python\nimport requests\nimport time\n\ndef fetch_all_user_data(user_ids):\n    results = []\n    for user_id in user_ids:\n        user = requests.get(f'https://api.example.com/users/{user_id}').json()\n        posts = requests.get(f'https://api.example.com/users/{user_id}/posts').json()\n        comments = requests.get(f'https://api.example.com/users/{user_id}/comments').json()\n        results.append({'user': user, 'posts': posts, 'comments': comments})\n    return results\n\n# Takes 30+ seconds for 10 users\n```",
+      "expected_behavior": "Should use aiohttp with asyncio.gather for concurrent requests",
+      "evaluation_criteria": ["proper_async", "concurrent_requests", "error_handling", "significant_speedup"],
+      "tags": ["async", "concurrency", "hard"]
+    },
+    {
+      "id": "rf_010",
+      "difficulty": "hard",
+      "prompt": "Refactor this class to use composition over inheritance:\n\n```python\nclass Animal:\n    def __init__(self, name):\n        self.name = name\n\nclass FlyingAnimal(Animal):\n    def fly(self):\n        return f'{self.name} is flying'\n\nclass SwimmingAnimal(Animal):\n    def swim(self):\n        return f'{self.name} is swimming'\n\nclass WalkingAnimal(Animal):\n    def walk(self):\n        return f'{self.name} is walking'\n\n# Problem: How to create a Duck that can fly, swim, AND walk?\n# Multiple inheritance leads to diamond problem\nclass Duck(FlyingAnimal, SwimmingAnimal, WalkingAnimal):\n    pass\n```",
+      "expected_behavior": "Should use composition with behavior classes/mixins, possibly protocols",
+      "evaluation_criteria": ["uses_composition", "avoids_diamond_problem", "flexible_design", "maintains_behavior"],
+      "tags": ["composition", "inheritance", "hard"]
+    }
+  ]
+}
