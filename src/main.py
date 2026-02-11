@@ -76,8 +76,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         dsn=Config.SENTRY_DSN,
         # Add data like request headers and IP for users
         send_default_pii=True,
-        # Enable sending logs to Sentry
-        enable_logs=True,
         # Set environment (development, staging, production)
         environment=Config.SENTRY_ENVIRONMENT,
         # Release tracking for Sentry release management
