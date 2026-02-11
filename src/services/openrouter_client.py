@@ -8,7 +8,10 @@ import httpx
 from fastapi import APIRouter
 from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
-from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.model_catalog_cache import (
+    update_provider_catalog_incremental,
+    get_cached_gateway_catalog,
+)
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
@@ -731,10 +734,31 @@ def fetch_models_from_openrouter():
             filter_rate=f"{(filtered_count/len(raw_models)*100):.1f}%"
         )
 
-        # Step 4: Cache the results
-        step_logger.step(4, "Caching models", provider="openrouter")
-        cache_gateway_catalog("openrouter", filtered_models)
-        step_logger.success(cached_count=len(filtered_models), cache_status="updated")
+        # Step 4: Smart incremental cache update (only updates changed models)
+        step_logger.step(4, "Smart caching models (incremental update)", provider="openrouter")
+        cache_result = update_provider_catalog_incremental("openrouter", filtered_models)
+
+        if cache_result.get("success"):
+            step_logger.success(
+                cached_count=len(filtered_models),
+                changed=cache_result.get("changed", 0),
+                added=cache_result.get("added", 0),
+                deleted=cache_result.get("deleted", 0),
+                unchanged=cache_result.get("unchanged", 0),
+                efficiency=f"{cache_result.get('efficiency_percent', 0)}%",
+                cache_status="smart_updated"
+            )
+            logger.info(
+                f"Smart cache: OpenRouter | "
+                f"Changed: {cache_result.get('changed', 0)}, "
+                f"Added: {cache_result.get('added', 0)}, "
+                f"Deleted: {cache_result.get('deleted', 0)}, "
+                f"Unchanged: {cache_result.get('unchanged', 0)} "
+                f"(Efficiency: {cache_result.get('efficiency_percent', 0)}%)"
+            )
+        else:
+            step_logger.success(cached_count=len(filtered_models), cache_status="fallback_updated")
+            logger.warning(f"Smart cache update failed, used fallback: {cache_result.get('error', 'unknown')}")
 
         step_logger.complete(total_models=len(filtered_models), provider="openrouter")
         return filtered_models

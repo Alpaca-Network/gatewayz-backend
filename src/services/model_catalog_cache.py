@@ -1730,3 +1730,551 @@ def _fetch_provider_models_from_db(provider_name: str) -> list[dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error fetching {provider_name} from database: {e}")
         return []
+
+
+# ============================================================================
+# Unique Models Caching (Phase 4 - Deduplicated Cross-Provider View)
+# ============================================================================
+
+
+def cache_unique_model(
+    model_name: str,
+    model_data: dict[str, Any],
+    ttl: int | None = None
+) -> bool:
+    """
+    Cache a single unique model with its provider relationships.
+
+    Args:
+        model_name: Cleaned model name (e.g., "GPT-4")
+        model_data: Model data including providers array
+        ttl: Time to live in seconds (default: TTL_UNIQUE)
+
+    Returns:
+        True if cached successfully, False otherwise
+    """
+    cache = get_model_catalog_cache()
+    ttl = ttl or cache.TTL_UNIQUE
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = f"models:unique:{model_name}"
+        cache.redis_client.setex(key, ttl, json.dumps(model_data))
+        cache._stats["sets"] += 1
+        logger.debug(f"Cached unique model: {model_name} (TTL: {ttl}s)")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error caching unique model {model_name}: {e}")
+        return False
+
+
+def get_cached_unique_model(model_name: str) -> dict[str, Any] | None:
+    """
+    Get a single cached unique model.
+
+    Args:
+        model_name: Cleaned model name (e.g., "GPT-4")
+
+    Returns:
+        Model data dict or None if not found
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return None
+
+        key = f"models:unique:{model_name}"
+        cached_data = cache.redis_client.get(key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            logger.debug(f"Cache HIT: unique model {model_name}")
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            logger.debug(f"Cache MISS: unique model {model_name}")
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error getting unique model {model_name}: {e}")
+        return None
+
+
+def update_unique_models_incremental(
+    new_unique_models: list[dict[str, Any]],
+    ttl: int | None = None
+) -> dict[str, Any]:
+    """
+    Update unique models cache incrementally - only update what changed.
+
+    This is the smart caching for deduplicated models:
+    1. Fetches current cache
+    2. Detects which unique models changed
+    3. Only updates changed/added unique models
+    4. Removes deleted unique models
+    5. Skips unchanged models entirely
+
+    Args:
+        new_unique_models: New unique models list from database
+        ttl: Time to live in seconds
+
+    Returns:
+        dict with operation stats
+    """
+    cache = get_model_catalog_cache()
+    ttl = ttl or cache.TTL_UNIQUE
+
+    try:
+        # Get current cached index
+        cached_index = []
+        if cache.redis_client and is_redis_available():
+            index_data = cache.redis_client.get("models:unique:index")
+            if index_data:
+                cached_index = json.loads(index_data)
+
+        # Build lookup for cached models
+        cached_by_name = {}
+        for model_name in cached_index:
+            cached_model = get_cached_unique_model(model_name)
+            if cached_model:
+                cached_by_name[model_name] = cached_model
+
+        # Build lookup for new models
+        new_by_name = {}
+        for model in new_unique_models:
+            model_name = model.get("model_name") or model.get("name") or model.get("id")
+            if model_name:
+                new_by_name[model_name] = model
+
+        # Find delta
+        changed = []
+        added = []
+        unchanged_count = 0
+
+        for model_name, new_model in new_by_name.items():
+            if model_name in cached_by_name:
+                # Check if changed
+                if has_unique_model_changed(cached_by_name[model_name], new_model):
+                    changed.append(new_model)
+                else:
+                    unchanged_count += 1
+            else:
+                # New unique model
+                added.append(new_model)
+
+        # Find deleted
+        deleted_names = [
+            name for name in cached_by_name.keys()
+            if name not in new_by_name
+        ]
+
+        # Update changed models
+        updated_count = 0
+        for model in changed:
+            model_name = model.get("model_name") or model.get("name") or model.get("id")
+            if model_name and cache_unique_model(model_name, model, ttl):
+                updated_count += 1
+
+        # Add new models
+        added_count = 0
+        for model in added:
+            model_name = model.get("model_name") or model.get("name") or model.get("id")
+            if model_name and cache_unique_model(model_name, model, ttl):
+                added_count += 1
+
+        # Remove deleted models
+        deleted_count = 0
+        for model_name in deleted_names:
+            if invalidate_unique_model(model_name):
+                deleted_count += 1
+
+        # Update index
+        if cache.redis_client and is_redis_available():
+            new_index = list(new_by_name.keys())
+            cache.redis_client.setex(
+                "models:unique:index",
+                ttl,
+                json.dumps(new_index)
+            )
+
+        logger.info(
+            f"Incremental unique models update | "
+            f"Changed: {updated_count}, Added: {added_count}, Deleted: {deleted_count}, "
+            f"Unchanged: {unchanged_count} (skipped) | "
+            f"Efficiency: {round(unchanged_count / max(len(cached_by_name), 1) * 100, 1)}%"
+        )
+
+        return {
+            "success": True,
+            "changed": updated_count,
+            "added": added_count,
+            "deleted": deleted_count,
+            "unchanged": unchanged_count,
+            "total_operations": updated_count + added_count + deleted_count,
+            "efficiency_percent": round(unchanged_count / max(len(cached_by_name), 1) * 100, 1)
+        }
+
+    except Exception as e:
+        logger.error(f"Error in incremental unique models update: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def has_unique_model_changed(old_model: dict[str, Any], new_model: dict[str, Any]) -> bool:
+    """
+    Detect if a unique model has actually changed.
+
+    Compares the model and its provider relationships to determine if update is needed.
+
+    Args:
+        old_model: Previously cached unique model
+        new_model: Newly fetched unique model from database
+
+    Returns:
+        True if model changed, False otherwise
+    """
+    if not old_model or not new_model:
+        return True
+
+    # Compare model count
+    if old_model.get("model_count") != new_model.get("model_count"):
+        return True
+
+    # Compare provider array
+    old_providers = old_model.get("providers", [])
+    new_providers = new_model.get("providers", [])
+
+    if len(old_providers) != len(new_providers):
+        return True
+
+    # Build provider lookups by provider_id
+    old_by_id = {p.get("provider_id"): p for p in old_providers}
+    new_by_id = {p.get("provider_id"): p for p in new_providers}
+
+    # Check if provider set changed
+    if set(old_by_id.keys()) != set(new_by_id.keys()):
+        return True
+
+    # Check if any provider pricing changed
+    for provider_id, new_provider in new_by_id.items():
+        old_provider = old_by_id.get(provider_id)
+        if not old_provider:
+            continue
+
+        # Compare pricing
+        old_pricing = old_provider.get("pricing", {})
+        new_pricing = new_provider.get("pricing", {})
+
+        if str(old_pricing) != str(new_pricing):
+            return True
+
+    # No changes detected
+    return False
+
+
+def invalidate_unique_model(model_name: str) -> bool:
+    """
+    Invalidate a single cached unique model.
+
+    Args:
+        model_name: Cleaned model name to invalidate
+
+    Returns:
+        True if invalidated successfully
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = f"models:unique:{model_name}"
+        cache.redis_client.delete(key)
+        cache._stats["invalidations"] += 1
+        logger.debug(f"Invalidated unique model: {model_name}")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error invalidating unique model {model_name}: {e}")
+        return False
+
+
+# ============================================================================
+# Relationship Caching (Phase 5 - Provider-Model Mappings)
+# ============================================================================
+
+
+def cache_model_relationships_by_unique(
+    model_name: str,
+    relationship_data: dict[str, Any],
+    ttl: int | None = None
+) -> bool:
+    """
+    Cache provider relationships for a unique model.
+
+    Stores "which providers offer this model" data.
+
+    Args:
+        model_name: Unique model name
+        relationship_data: Relationship data with provider mappings
+        ttl: Time to live in seconds
+
+    Returns:
+        True if cached successfully
+    """
+    cache = get_model_catalog_cache()
+    ttl = ttl or cache.TTL_UNIQUE
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = f"models:relationships:unique:{model_name}"
+        cache.redis_client.setex(key, ttl, json.dumps(relationship_data))
+        cache._stats["sets"] += 1
+        logger.debug(f"Cached relationships for unique model: {model_name}")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error caching relationships for {model_name}: {e}")
+        return False
+
+
+def get_cached_model_relationships_by_unique(model_name: str) -> dict[str, Any] | None:
+    """
+    Get cached provider relationships for a unique model.
+
+    Args:
+        model_name: Unique model name
+
+    Returns:
+        Relationship data or None if not found
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return None
+
+        key = f"models:relationships:unique:{model_name}"
+        cached_data = cache.redis_client.get(key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error getting relationships for {model_name}: {e}")
+        return None
+
+
+def cache_model_relationships_by_provider(
+    provider_slug: str,
+    relationship_data: dict[str, Any],
+    ttl: int | None = None
+) -> bool:
+    """
+    Cache unique model relationships for a provider.
+
+    Stores "which unique models this provider offers" data.
+
+    Args:
+        provider_slug: Provider slug
+        relationship_data: Relationship data with unique models
+        ttl: Time to live in seconds
+
+    Returns:
+        True if cached successfully
+    """
+    cache = get_model_catalog_cache()
+    ttl = ttl or cache.TTL_PROVIDER
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = f"models:relationships:provider:{provider_slug}"
+        cache.redis_client.setex(key, ttl, json.dumps(relationship_data))
+        cache._stats["sets"] += 1
+        logger.debug(f"Cached relationships for provider: {provider_slug}")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error caching relationships for provider {provider_slug}: {e}")
+        return False
+
+
+def get_cached_model_relationships_by_provider(provider_slug: str) -> dict[str, Any] | None:
+    """
+    Get cached unique model relationships for a provider.
+
+    Args:
+        provider_slug: Provider slug
+
+    Returns:
+        Relationship data or None if not found
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return None
+
+        key = f"models:relationships:provider:{provider_slug}"
+        cached_data = cache.redis_client.get(key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error getting relationships for provider {provider_slug}: {e}")
+        return None
+
+
+# ============================================================================
+# Provider Metadata Caching (Phase 6)
+# ============================================================================
+
+
+def cache_provider_metadata(
+    provider_id: int,
+    provider_data: dict[str, Any],
+    ttl: int = 3600
+) -> bool:
+    """
+    Cache provider metadata.
+
+    Args:
+        provider_id: Provider ID
+        provider_data: Provider metadata
+        ttl: Time to live (default: 1 hour)
+
+    Returns:
+        True if cached successfully
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = f"providers:provider:{provider_id}"
+        cache.redis_client.setex(key, ttl, json.dumps(provider_data))
+        cache._stats["sets"] += 1
+        logger.debug(f"Cached provider metadata: {provider_id}")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error caching provider metadata {provider_id}: {e}")
+        return False
+
+
+def get_cached_provider_metadata(provider_id: int) -> dict[str, Any] | None:
+    """
+    Get cached provider metadata.
+
+    Args:
+        provider_id: Provider ID
+
+    Returns:
+        Provider data or None if not found
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return None
+
+        key = f"providers:provider:{provider_id}"
+        cached_data = cache.redis_client.get(key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error getting provider metadata {provider_id}: {e}")
+        return None
+
+
+def cache_providers_index(provider_ids: list[int], ttl: int = 3600) -> bool:
+    """
+    Cache list of all provider IDs.
+
+    Args:
+        provider_ids: List of provider IDs
+        ttl: Time to live (default: 1 hour)
+
+    Returns:
+        True if cached successfully
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return False
+
+        key = "providers:index"
+        cache.redis_client.setex(key, ttl, json.dumps(provider_ids))
+        cache._stats["sets"] += 1
+        logger.debug(f"Cached providers index: {len(provider_ids)} providers")
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error caching providers index: {e}")
+        return False
+
+
+def get_cached_providers_index() -> list[int] | None:
+    """
+    Get cached list of all provider IDs.
+
+    Returns:
+        List of provider IDs or None if not found
+    """
+    cache = get_model_catalog_cache()
+
+    try:
+        if not cache.redis_client or not is_redis_available():
+            return None
+
+        key = "providers:index"
+        cached_data = cache.redis_client.get(key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Error getting providers index: {e}")
+        return None
