@@ -1,0 +1,262 @@
+[
+  {
+    "test_name": "Simple Hello",
+    "prompt": "Hello, tell me about yourself in 2-3 sentences.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\nI'm an AI language model designed to assist with information, answer questions, and help with various tasks. Trained on diverse data, I can engage in conversations, provide explanations, and support your needs. How can I assist you today?",
+      "reasoning": "Okay, the user asked me to introduce myself in 2-3 sentences. That's a straightforward request, but I should make it engaging and informative. \n\nHmm, they might be testing my capabilities or just curious. Since they kept it brief, I'll match that conciseness while covering my core purpose: being an AI assistant. \n\nI'll highlight my role in helping with information and tasks, mention my training scope, and keep it friendly with an offer for further assistance. The tone should approachable but professional. \n\nNoticing they didn't specify a topic, I'll end with an open invitation for their next question to encourage interaction. Simple but complete!",
+      "ttfb_seconds": 0.8194882350508124,
+      "ttfc_seconds": 0.8199549401178956,
+      "total_duration_seconds": 2.154745897045359,
+      "input_tokens": 18,
+      "output_tokens": 50,
+      "reasoning_tokens": 135,
+      "total_tokens": 203,
+      "cost_usd": 0.00018384,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 18,
+          "total_tokens": 203,
+          "reasoning_tokens": 135,
+          "completion_tokens": 50,
+          "prompt_tokens_details": {
+            "cached_tokens": 17
+          },
+          "cost_usd_total": 0.00018384,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00018315,
+          "cost_usd_cached_input": 5.1e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 0.7387166118714958,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 0.7387166118714958,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Python Function",
+    "prompt": "Write a Python function to check if a string is a palindrome. Include docstring and type hints.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nTo solve this problem, we need to determine if a given string is a palindrome. A palindrome is a string that reads the same forwards and backwards, ignoring non-alphanumeric characters and differences in case. \n\n### Approach\n1. **Preprocess the String**: Convert the string to lowercase to handle case insensitivity. Remove all non-alphanumeric characters (like spaces, punctuation, etc.) to focus only on relevant characters.\n2. **Check Palindrome**: Compare the preprocessed string with its reverse. If they are identical, the string is a palindrome; otherwise, it is not.\n\n### Solution Code\n```python\ndef is_palindrome(s: str) -> bool:\n    \"\"\"\n    Check if a string is a palindrome.\n    \n    A palindrome is a string that reads the same forwards and backwards, \n    ignoring non-alphanumeric characters and case.\n    \n    Args:\n        s (str): The input string to check.\n        \n    Returns:\n        bool: True if the string is a palindrome, False otherwise.\n        \n    Examples:\n        >>> is_palindrome(\"A man, a plan, a canal: Panama\")\n        True\n        >>> is_palindrome(\"race a car\")\n        False\n        >>> is_palindrome(\" \")\n        True\n    \"\"\"\n    cleaned = ''.join(char.lower() for char in s if char.isalnum())\n    return cleaned == cleaned[::-1]\n```\n\n### Explanation\n1. **Preprocessing**:\n   - Convert each character in the string to lowercase using `char.lower()` to ensure case insensitivity.\n   - Filter out non-alphanumeric characters using `char.isalnum()`, which checks if a character is alphanumeric.\n   - Combine the filtered characters into a new string using `''.join(...)`.\n\n2. **Palindrome Check**:\n   - Compare the cleaned string with its reverse. The reverse is obtained using slicing: `cleaned[::-1]`.\n   - If the cleaned string and its reverse are identical, return `True`; otherwise, return `False`.\n\nThis approach efficiently checks for palindromes by focusing only on relevant characters and ignoring case, providing an optimal and clear solution.",
+      "reasoning": "We are going to write a function that checks if a string is a palindrome.\n A palindrome is a string that reads the same forwards and backwards, ignoring non-alphanumeric characters and case.\n Steps:\n 1. We'll convert the string to lowercase to ignore case.\n 2. Remove non-alphanumeric characters (like spaces, punctuation, etc.). We can use isalnum() to check.\n 3. Compare the cleaned string with its reverse.\n\n However, note: the problem doesn't specify whether to ignore non-alphanumeric and case. \n But typically, in palindrome checks, we do ignore non-alphanumeric and case.\n\n Let's design the function accordingly.\n\n Example: \n   \"A man, a plan, a canal: Panama\" should be considered a palindrome.\n\n But note: the problem says \"a string\", so we must clarify the requirements.\n Since the problem doesn't specify, we'll assume we need to ignore non-alphanumeric and case.\n\n Alternatively, if we are to consider exactly the string (with all characters and case), then we wouldn't clean.\n\n However, the classic palindrome check for phrases ignores non-alphanumeric and case.\n\n Since the problem is ambiguous, let's note that in the docstring and provide a function that does the classic check.\n\n We'll write the function to ignore non-alphanumeric characters and convert to lowercase.\n\n Implementation:\n\n Option 1: Using two pointers from start and end.\n Option 2: Clean the string and then check if it equals its reverse.\n\n We'll go with Option 2 for simplicity.\n\n Steps in the function:\n  1. Convert the string to lower case.\n  2. Create a new string that includes only alphanumeric characters.\n  3. Check if the cleaned string is equal to its reverse.\n\n Let's write the code accordingly.",
+      "ttfb_seconds": 0.49513840209692717,
+      "ttfc_seconds": 0.49533789698034525,
+      "total_duration_seconds": 6.794995412928984,
+      "input_tokens": 25,
+      "output_tokens": 433,
+      "reasoning_tokens": 361,
+      "total_tokens": 819,
+      "cost_usd": 0.00078696,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 25,
+          "total_tokens": 819,
+          "reasoning_tokens": 361,
+          "completion_tokens": 433,
+          "prompt_tokens_details": {
+            "cached_tokens": 24
+          },
+          "cost_usd_total": 0.00078696,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00078606,
+          "cost_usd_cached_input": 7.2e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 1.6121545750647783,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 1.6121545750647783,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Debugging",
+    "prompt": "Debug this Python code:\n```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n)\n```\nExplain the bug and provide the fix.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nThe bug in the provided code is that the recursive call `factorial(n)` does not decrement the value of `n`. This means the function will keep calling itself with the same value indefinitely, leading to a `RecursionError` (maximum recursion depth exceeded) for any input `n > 0`.\n\n### Explanation:\n- **Base Case**: The condition `if n == 0` correctly returns `1` for `factorial(0)`.\n- **Recursive Case**: The line `return n * factorial(n)` incorrectly calls `factorial(n)` again instead of `factorial(n-1)`. This causes infinite recursion because `n` never changes, preventing the base case from being reached (except when `n = 0`).\n\n### Fix:\nChange `factorial(n)` to `factorial(n-1)` in the recursive call to ensure `n` decreases by 1 in each step, eventually reaching the base case.\n\n### Corrected Code:\n```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n-1)\n```\n\n### Example:\n- **Input**: `factorial(3)`\n  - `3 * factorial(2)`\n    - `2 * factorial(1)`\n      - `1 * factorial(0)`\n        - Returns `1`\n      - Returns `1 * 1 = 1`\n    - Returns `2 * 1 = 2`\n  - Returns `3 * 2 = 6`\n\n### Additional Note:\nThis implementation assumes `n` is a non-negative integer. Handling negative inputs would require additional error checking (e.g., raising a `ValueError`), but the original code does not address this.",
+      "reasoning": "We are given a recursive function to compute the factorial of a number n.\n The factorial of 0 is 1, and for any positive integer n, factorial(n) = n * factorial(n-1).\n\n Let's look at the code:\n\n def factorial(n):\n     if n == 0:\n         return 1\n     return n * factorial(n)\n\n The bug is in the recursive call. Instead of calling `factorial(n-1)`, the code calls `factorial(n)` again.\n This means that the function will keep calling itself with the same value of `n` until it eventually causes a recursion depth error (unless n is 0).\n\n Why is that? Because without decrementing n, the base case (n==0) will never be reached (unless n is 0 initially).\n\n For example, if we call factorial(3):\n   - It will check if 3==0? No.\n   - Then return 3 * factorial(3)\n   - Then inside the next call, again 3==0? No -> return 3 * factorial(3)\n   - And so on, leading to infinite recursion.\n\n Correction:\n We should change the recursive call to `factorial(n-1)`.\n\n Fixed code:\n\n def factorial(n):\n     if n == 0:\n         return 1\n     return n * factorial(n-1)\n\n However, note that this function does not handle negative numbers. The problem statement doesn't specify, but typically factorial is defined for non-negative integers.\n If we want to handle negative numbers, we might add a check. But the original code does not have that, so we'll stick to the non-negative case.\n\n Let me also note that the recursion depth might be a problem for large n, but that is a separate issue.\n\n Therefore, the fix is to change `factorial(n)` to `factorial(n-1)` in the return statement.",
+      "ttfb_seconds": 0.5079488309565932,
+      "ttfc_seconds": 0.5081206520553678,
+      "total_duration_seconds": 6.392320604994893,
+      "input_tokens": 47,
+      "output_tokens": 356,
+      "reasoning_tokens": 388,
+      "total_tokens": 791,
+      "cost_usd": 0.00073812,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 47,
+          "total_tokens": 791,
+          "reasoning_tokens": 388,
+          "completion_tokens": 356,
+          "prompt_tokens_details": {
+            "cached_tokens": 46
+          },
+          "cost_usd_total": 0.00073812,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.0007365599999999999,
+          "cost_usd_cached_input": 1.38e-06
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 0.7455840520560741,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 0.7455840520560741,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Algorithm Explanation",
+    "prompt": "Explain how quicksort works with a simple example. Be concise.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n",
+      "reasoning": "We are going to explain quicksort with a simple example.\n Steps:\n 1. Choose a pivot element (commonly the last, first, or middle element).\n 2. Partition the array: rearrange so all elements less than pivot come before, and all greater come after.\n 3. Recursively apply to the sub-arrays.\n\n Example: [3, 6, 8, 10, 1, 2, 1] with pivot chosen as the last element (1).\n\n First call: \n   Pivot = 1 (last element)\n   We traverse the array and move elements less than or equal to 1 to the left, and greater to the right.\n   After partition: [1, 1, 2, 10, 8, 6, 3]  (Note: the pivot is now at the end, but we'll adjust to have it in the correct position)\n\n However, note: the pivot (1) is already at the end. We need to put it in the correct position so that the left part is <= pivot and right part is >= pivot.\n\n Let's do it step by step:\n\n We'll use the Lomuto partition scheme for simplicity (though Hoare is also common).\n\n Lomuto:\n   pivot = arr[high] (last element)\n   i = low - 1\n   for j from low to high-1:\n        if arr[j] <= pivot:\n            i++\n            swap arr[i] and arr[j]\n   then swap arr[i+1] and arr[high] -> now pivot is at i+1\n\n Example with [3, 6, 8, 10, 1, 2, 1] (low=0, high=6, pivot=1)\n\n   i = -1\n   j from 0 to 5:\n      j=0: 3 <= 1? no.\n      j=1: 6 <= 1? no.\n      j=2: 8 <= 1? no.\n      j=3: 10 <= 1? no.\n      j=4: 1 <= 1? yes -> i=0, swap arr[0] and arr[4]: [1, 6, 8, 10, 3, 2, 1]\n      j=5: 2 <= 1? no.\n\n   Then swap arr[i+1] (arr[1]) with arr[high] (arr[6]): [1, 1, 8, 10, 3, 2, 6]\n\n   Now the pivot (1) is at index 1. The array is partitioned: \n        left: [1] (from index0 to index0) \n        right: [8,10,3,2,6] (from index2 to index6)\n\n But note: the pivot we placed at index1 is the last element of the left part. However, we have two 1's? \n Actually, the pivot we used was the last element (1) and we swapped it to position 1. The element at index0 was swapped from index4 (which was 1) so now we have two 1's at the beginning.\n\n Now we recursively sort the left part [1] and the right part [8,10,3,2,6].\n\n Left part [1] is already sorted.\n\n Right part: [8,10,3,2,6] with pivot=6 (last element)\n\n   i = 1 (but note: in the recursive call, low=2, high=6 -> so we consider the subarray starting at index2: [8,10,3,2,6])\n   i = 1 (but we are at low=2, so we adjust: i = low-1 = 1? Actually, we are only looking at indices 2 to 6.)\n\n   Let me reindex the subarray: \n        arr[2]=8, arr[3]=10, arr[4]=3, arr[5]=2, arr[6]=6 -> pivot=6\n\n   i = 1 (but we are in the context of the whole array, but we are only looking from index2 to 6). We'll set i = 1 (so that we start at index2 by using j from 2 to 5).\n\n   j=2: 8<=6? no.\n   j=3: 10<=6? no.\n   j=4: 3<=6? yes -> i=2 (so swap arr[2] with arr[4]): [8,10,3,2,6] becomes [3,10,8,2,6] (within the subarray: indices2 and4",
+      "ttfb_seconds": 0.4676163799595088,
+      "ttfc_seconds": 0.467847908847034,
+      "total_duration_seconds": 8.444744833977893,
+      "input_tokens": 19,
+      "output_tokens": 2,
+      "reasoning_tokens": 998,
+      "total_tokens": 1019,
+      "cost_usd": 0.00099072,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 19,
+          "total_tokens": 1019,
+          "reasoning_tokens": 998,
+          "completion_tokens": 2,
+          "prompt_tokens_details": {
+            "cached_tokens": 18
+          },
+          "cost_usd_total": 0.00099072,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00099,
+          "cost_usd_cached_input": 5.4e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 1.7943391259759665,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 1.7943391259759665,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Code Refactoring",
+    "prompt": "Refactor this code to be more Pythonic:\n```python\nresult = []\nfor i in range(len(items)):\n    if items[i] > 0:\n        result.append(items[i] * 2)\n```",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nTo refactor the given code into a more Pythonic solution, we can leverage list comprehensions for better readability and conciseness. The original code iterates over indices, checks for positive values, and appends doubled values to a new list. Here's the optimized version:\n\n```python\nresult = [x * 2 for x in items if x > 0]\n```\n\n**Explanation:**\n- **List Comprehension:** Replaces the explicit loop and conditional check with a single line. This is idiomatic Python for creating new lists based on existing iterables.\n- **Direct Element Access:** Iterating directly over `items` (using `x` instead of `items[i]`) avoids index-based lookup, which is cleaner and more efficient.\n- **Conditional Filtering:** The `if x > 0` clause filters elements inline, eliminating the need for a separate `if` statement inside the loop.\n\n**Benefits:**\n- **Conciseness:** Reduces 4 lines of code to 1.\n- **Readability:** Clearly expresses the transformation (doubling) and filtering (positive values) in a single, declarative statement.\n- **Performance:** List comprehensions are generally faster than equivalent `for` loops in Python due to optimized internal implementation.\n\nThis approach maintains the exact functionality while adhering to Python's principles of simplicity and clarity.",
+      "reasoning": "We are going to refactor the code to be more Pythonic.\n The original code iterates over the indices of the list `items` (using `range(len(items))`), \n then accesses the element by index, checks if it is positive, and if so, appends the doubled value to `result`.\n\n A more Pythonic approach is to use a list comprehension, which is more concise and readable.\n\n Steps:\n 1. Instead of iterating by index, we can iterate directly over the elements of `items`.\n 2. We can use a condition to filter only positive numbers.\n 3. For each positive number, we double it and include it in the new list.\n\n We can write this in one line with a list comprehension: `result = [x * 2 for x in items if x > 0]`\n\n However, note that the original code does not modify the original list and creates a new list with the transformed positive elements.\n\n Let's write the refactored code accordingly.",
+      "ttfb_seconds": 0.6435642000287771,
+      "ttfc_seconds": 0.64378641708754,
+      "total_duration_seconds": 4.396109316963702,
+      "input_tokens": 48,
+      "output_tokens": 279,
+      "reasoning_tokens": 203,
+      "total_tokens": 530,
+      "cost_usd": 0.00047877,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 48,
+          "total_tokens": 530,
+          "reasoning_tokens": 203,
+          "completion_tokens": 279,
+          "prompt_tokens_details": {
+            "cached_tokens": 47
+          },
+          "cost_usd_total": 0.00047877,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00047718,
+          "cost_usd_cached_input": 1.4099999999999998e-06
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 0.4488499460276216,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 0.4488499460276216,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429",
+      "raw_response": null
+    }
+  }
+]
