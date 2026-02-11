@@ -43,15 +43,15 @@ sentry-sdk[fastapi]>=2.0.0
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
 
-# OpenTelemetry
-opentelemetry-api==1.28.0
-opentelemetry-sdk==1.28.0
-opentelemetry-instrumentation==0.49b0
-opentelemetry-instrumentation-fastapi==0.49b0
-opentelemetry-instrumentation-httpx==0.49b0
-opentelemetry-instrumentation-requests==0.49b0
-opentelemetry-instrumentation-redis==0.49b0
-opentelemetry-exporter-otlp==1.28.0
+# OpenTelemetry - use >= to allow traceloop-sdk to resolve compatible versions
+opentelemetry-api>=1.28.0
+opentelemetry-sdk>=1.28.0
+opentelemetry-instrumentation>=0.49b0
+opentelemetry-instrumentation-fastapi>=0.49b0
+opentelemetry-instrumentation-httpx>=0.49b0
+opentelemetry-instrumentation-requests>=0.49b0
+opentelemetry-instrumentation-redis>=0.49b0
+opentelemetry-exporter-otlp>=1.28.0
 
 # Loki Logging
 python-json-logger>=2.0.7
@@ -63,7 +63,8 @@ openinference-instrumentation-openai>=0.1.41
 
 # OpenLLMetry (Traceloop SDK) - Standardized LLM Observability
 # Auto-instruments OpenAI, Anthropic SDKs with gen_ai.* semantic conventions
-traceloop-sdk>=0.36.0
+# Pinned to 0.36.2 to avoid pulling incompatible instrumentation sub-dependencies
+traceloop-sdk==0.36.2
 
 # Langfuse - LLM Observability & Analytics
 # Provides tracing, scoring, and analytics for LLM applications
