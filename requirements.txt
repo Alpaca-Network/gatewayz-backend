@@ -16,14 +16,13 @@ redis==5.0.1
 anyio>=4.0.0  # Updated: FastAPI 0.115+ supports anyio 4.x
 stripe==13.0.1
 tenacity==8.2.3
-google-cloud-aiplatform==1.62.0
+google-cloud-aiplatform
 google-auth==2.28.0
 
 # Provider SDKs - Pinned to specific versions to prevent pip backtracking
 # Clarifai requires fsspec==2024.6.1, which conflicts with huggingface-hub's looser constraint
 fsspec==2024.6.1
 cerebras-cloud-sdk==1.0.0
-xai-sdk==1.0.0
 # Clarifai pinned to avoid backtracking through 50+ versions (issue: complex dependency tree with fsspec, rich, schema)
 clarifai==11.1.0
 huggingface-hub==0.23.0
@@ -48,13 +47,14 @@ sentry-sdk[fastapi]==2.0.0
 APScheduler==3.10.4
 
 # OpenTelemetry - Pinned to prevent dependency resolution backtracking
+# packaging==24.0 (removed)
 opentelemetry-api==1.33.1
 opentelemetry-sdk==1.33.1
-opentelemetry-instrumentation==0.54b0
-opentelemetry-instrumentation-fastapi==0.54b0
-opentelemetry-instrumentation-httpx==0.54b0
-opentelemetry-instrumentation-requests==0.54b0
-opentelemetry-instrumentation-redis==0.54b0
+opentelemetry-instrumentation
+opentelemetry-instrumentation-fastapi
+opentelemetry-instrumentation-httpx
+opentelemetry-instrumentation-requests
+opentelemetry-instrumentation-redis
 opentelemetry-exporter-otlp==1.33.1
 
 # Loki Logging
