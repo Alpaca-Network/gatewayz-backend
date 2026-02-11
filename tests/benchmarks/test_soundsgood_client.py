@@ -33,6 +33,7 @@ class TestCompletionResponse:
             cost_usd_input=0.00001,
             cost_usd_output=0.00009,
             ttfb_seconds=0.5,
+            ttfc_seconds=0.6,
             total_duration_seconds=1.2,
             raw_response={"id": "chatcmpl-123"},
         )
@@ -59,6 +60,7 @@ class TestCompletionResponse:
             cost_usd_input=0.00001,
             cost_usd_output=0.00009,
             ttfb_seconds=0.3,
+            ttfc_seconds=None,
             total_duration_seconds=0.8,
             raw_response={},
         )
@@ -303,7 +305,7 @@ class TestHealthCheck:
         """Test successful health check."""
         client = SoundsgoodClient(model_config)
 
-        # Mock the complete method
+        # Mock the complete method with AsyncMock since it's an async method
         mock_response = CompletionResponse(
             id="test",
             model="test",
@@ -318,11 +320,12 @@ class TestHealthCheck:
             cost_usd_input=0.0,
             cost_usd_output=0.0,
             ttfb_seconds=0.1,
+            ttfc_seconds=None,
             total_duration_seconds=0.2,
             raw_response={},
         )
 
-        with patch.object(client, "complete", return_value=mock_response) as mock_complete:
+        with patch.object(client, "complete", new_callable=AsyncMock, return_value=mock_response) as mock_complete:
             result = await client.health_check()
 
         assert result is True
@@ -333,7 +336,7 @@ class TestHealthCheck:
         """Test failed health check."""
         client = SoundsgoodClient(model_config)
 
-        with patch.object(client, "complete", side_effect=Exception("API Error")):
+        with patch.object(client, "complete", new_callable=AsyncMock, side_effect=Exception("API Error")):
             result = await client.health_check()
 
         assert result is False
@@ -357,11 +360,12 @@ class TestHealthCheck:
             cost_usd_input=0.0,
             cost_usd_output=0.0,
             ttfb_seconds=0.1,
+            ttfc_seconds=None,
             total_duration_seconds=0.2,
             raw_response={},
         )
 
-        with patch.object(client, "complete", return_value=mock_response):
+        with patch.object(client, "complete", new_callable=AsyncMock, return_value=mock_response):
             result = await client.health_check()
 
         assert result is False

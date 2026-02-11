@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from typing import Any
@@ -74,6 +73,7 @@ class QualityEvaluator:
     async def __aexit__(self, *args) -> None:
         if self._client:
             await self._client.aclose()
+            self._client = None
 
     async def evaluate(
         self,
@@ -200,6 +200,8 @@ class QualityEvaluator:
         - Execution timeout (10s)
         - Resource limits via subprocess
         - Temporary file cleanup
+
+        Uses asyncio.create_subprocess_exec to avoid blocking the event loop.
         """
         # Check for dangerous patterns in model-generated code
         is_safe, safety_msg = self._check_code_safety(code)
@@ -221,37 +223,43 @@ class QualityEvaluator:
             temp_path = f.name
 
         try:
-            # Run with restricted environment
+            # Run with restricted environment using async subprocess
             env = {
                 "PATH": "/usr/bin:/bin",
                 "PYTHONPATH": "",
                 "HOME": "/tmp",
             }
 
-            result = subprocess.run(
-                ["python3", temp_path],
-                capture_output=True,
-                text=True,
-                timeout=10,  # 10 second timeout
+            proc = await asyncio.create_subprocess_exec(
+                "python3", temp_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd="/tmp",  # Run in /tmp to limit file access
             )
 
-            passed = result.returncode == 0
-            output = result.stdout if passed else result.stderr
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    proc.communicate(), timeout=10.0
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+                return {
+                    "passed": False,
+                    "output": "Execution timed out (>10s)",
+                    "return_code": -1,
+                }
+
+            passed = proc.returncode == 0
+            output = stdout.decode() if passed else stderr.decode()
 
             return {
                 "passed": passed,
                 "output": output,
-                "return_code": result.returncode,
+                "return_code": proc.returncode,
             }
 
-        except subprocess.TimeoutExpired:
-            return {
-                "passed": False,
-                "output": "Execution timed out (>10s)",
-                "return_code": -1,
-            }
         except Exception as e:
             return {
                 "passed": False,

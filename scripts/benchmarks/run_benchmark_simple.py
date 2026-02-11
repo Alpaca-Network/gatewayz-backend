@@ -202,8 +202,43 @@ class SoundsgoodBenchmark:
 
         return None
 
+    # Dangerous patterns that should not be executed
+    DANGEROUS_PATTERNS = [
+        r"\bimport\s+os\b",
+        r"\bimport\s+subprocess\b",
+        r"\bimport\s+shutil\b",
+        r"\bimport\s+sys\b",
+        r"\b__import__\b",
+        r"\beval\s*\(",
+        r"\bexec\s*\(",
+        r"\bopen\s*\(",
+        r"\bos\.\w+",
+        r"\bsubprocess\.\w+",
+        r"\bsys\.\w+",
+    ]
+
+    def _check_code_safety(self, code: str) -> tuple[bool, str]:
+        """Check if code contains potentially dangerous patterns."""
+        import re
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, code):
+                return False, f"Dangerous pattern detected: {pattern}"
+        return True, ""
+
     def _run_code_test(self, code: str, test_code: str) -> tuple[bool, str]:
-        """Run code with test cases."""
+        """Run code with test cases.
+
+        Security measures:
+        - Pattern-based filtering of dangerous operations
+        - Execution timeout (10s)
+        - Restricted environment variables
+        - Runs in /tmp directory to limit file access
+        """
+        # Check for dangerous patterns in model-generated code
+        is_safe, safety_msg = self._check_code_safety(code)
+        if not is_safe:
+            return False, f"Code rejected for safety: {safety_msg}"
+
         full_code = f"{code}\n\n{test_code}"
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
@@ -211,11 +246,20 @@ class SoundsgoodBenchmark:
             temp_path = f.name
 
         try:
+            # Run with restricted environment
+            env = {
+                "PATH": "/usr/bin:/bin",
+                "PYTHONPATH": "",
+                "HOME": "/tmp",
+            }
+
             result = subprocess.run(
                 ["python3", temp_path],
                 capture_output=True,
                 text=True,
                 timeout=10,
+                env=env,
+                cwd="/tmp",  # Run in /tmp to limit file access
             )
 
             passed = result.returncode == 0
@@ -227,7 +271,10 @@ class SoundsgoodBenchmark:
         except Exception as e:
             return False, f"Execution error: {str(e)}"
         finally:
-            os.unlink(temp_path)
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass  # File may already be deleted
 
     def run_test(self, test_case: dict, category: str) -> BenchmarkResult:
         """Run a single test case."""
