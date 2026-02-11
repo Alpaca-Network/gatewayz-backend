@@ -63,8 +63,8 @@ openinference-instrumentation-openai>=0.1.41
 
 # OpenLLMetry (Traceloop SDK) - Standardized LLM Observability
 # Auto-instruments OpenAI, Anthropic SDKs with gen_ai.* semantic conventions
-# Pinned to 0.36.2 to avoid pulling incompatible instrumentation sub-dependencies
-traceloop-sdk==0.36.2
+# Pinned to 0.36.1 (latest 0.36.x available on PyPI)
+traceloop-sdk==0.36.1
 
 # Langfuse - LLM Observability & Analytics
 # Provides tracing, scoring, and analytics for LLM applications
