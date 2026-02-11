@@ -427,6 +427,65 @@ jobs:
             requirements*.txt
             pyproject.toml
 
+      # Fresh dependency resolution check (simulates Railway/Docker build)
+      # This catches dependency conflicts that would fail on Railway
+      - name: Verify dependency resolution (Railway build simulation)
+        run: |
+          echo "🔍 Simulating fresh Railway/Docker dependency resolution..."
+          echo "This catches conflicts that would fail deployment builds."
+          echo ""
+
+          # Create a fresh virtual environment (like Railway does)
+          python -m venv .railway-test-venv
+          source .railway-test-venv/bin/activate
+
+          # Upgrade pip to match Railway's build environment
+          pip install --upgrade pip
+
+          # Attempt fresh install - this will fail if there are dependency conflicts
+          # Using --dry-run first to check resolution without downloading
+          echo "📦 Checking dependency resolution..."
+          if ! pip install --dry-run -r requirements.txt 2>&1 | tee dependency-check.log; then
+            echo ""
+            echo "❌ DEPENDENCY CONFLICT DETECTED"
+            echo "This would cause Railway build to fail!"
+            echo ""
+            echo "=== Conflict Details ==="
+            grep -A5 "ERROR\|conflict" dependency-check.log || cat dependency-check.log
+            echo ""
+            echo "Fix: Update requirements.txt to resolve version conflicts"
+            deactivate
+            rm -rf .railway-test-venv
+            exit 1
+          fi
+
+          # Actually install to verify (catches issues --dry-run might miss)
+          echo "📦 Performing full dependency installation..."
+          if ! pip install -r requirements.txt 2>&1 | tee install.log; then
+            echo ""
+            echo "❌ DEPENDENCY INSTALLATION FAILED"
+            echo "This would cause Railway build to fail!"
+            grep -A5 "ERROR\|conflict" install.log || tail -50 install.log
+            deactivate
+            rm -rf .railway-test-venv
+            exit 1
+          fi
+
+          # Verify no broken dependencies
+          echo "🔍 Checking for broken dependencies..."
+          if ! pip check 2>&1 | tee pip-check.log; then
+            echo ""
+            echo "⚠️ BROKEN DEPENDENCIES DETECTED"
+            cat pip-check.log
+            deactivate
+            rm -rf .railway-test-venv
+            exit 1
+          fi
+
+          echo "✅ All dependencies resolve correctly (Railway build will succeed)"
+          deactivate
+          rm -rf .railway-test-venv
+
       # Wheelhouse cache for binary dependencies
       - name: Restore wheelhouse cache
         uses: actions/cache@v4
