@@ -186,8 +186,9 @@ class BenchmarkOrchestrator:
                 )
                 self.results.append(result)
 
-                # Track latency
-                if result.success:
+                # Track latency and cost for all completed API calls
+                # (not just quality-passed ones) to get accurate performance metrics
+                if result.ttfb_seconds > 0:  # API call completed successfully
                     self.category_tracker.record(
                         category.value,
                         ttfb_seconds=result.ttfb_seconds,
