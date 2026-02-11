@@ -430,13 +430,17 @@ jobs:
       # Fresh dependency resolution check (simulates Railway/Docker build)
       # This catches dependency conflicts that would fail on Railway
       - name: Verify dependency resolution (Railway build simulation)
+        shell: bash
         run: |
+          set -euo pipefail  # Exit on error, undefined vars, and pipe failures
+
           echo "🔍 Simulating fresh Railway/Docker dependency resolution..."
           echo "This catches conflicts that would fail deployment builds."
           echo ""
 
-          # Create a fresh virtual environment (like Railway does)
-          python -m venv .railway-test-venv
+          # Create a fresh virtual environment using the Python version from setup-python
+          # Use python3 as fallback for compatibility
+          python${{ env.PYTHON_VERSION }} -m venv .railway-test-venv || python3 -m venv .railway-test-venv
           source .railway-test-venv/bin/activate
 
           # Upgrade pip to match Railway's build environment
