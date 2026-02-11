@@ -98,7 +98,7 @@ def trace_database_query(
 
     with sentry_sdk.start_span(
         op=span_op,
-        name=query,
+        description=query,
         origin="manual",
     ) as span:
         # Set required db.system attribute for Sentry Queries Insights
@@ -219,7 +219,7 @@ def trace_cache_operation(
 
     with sentry_sdk.start_span(
         op=operation,
-        name=key_description,
+        description=key_description,
         origin="manual",
     ) as span:
         # Set cache.key as array (required by Sentry spec)
@@ -392,7 +392,7 @@ def trace_queue_publish(
 
     with sentry_sdk.start_span(
         op="queue.publish",
-        name=destination,
+        description=destination,
         origin="manual",
     ) as span:
         # Set required attributes for queue monitoring
@@ -475,7 +475,7 @@ def trace_queue_process(
         with sentry_sdk.start_transaction(transaction):
             with sentry_sdk.start_span(
                 op="queue.process",
-                name=destination,
+                description=destination,
                 origin="manual",
             ) as span:
                 _set_queue_process_attributes(
@@ -492,7 +492,7 @@ def trace_queue_process(
         # No trace headers, create a standalone span
         with sentry_sdk.start_span(
             op="queue.process",
-            name=destination,
+            description=destination,
             origin="manual",
         ) as span:
             _set_queue_process_attributes(
