@@ -5,26 +5,29 @@ httpx==0.27.0
 pydantic[email]==2.12.2
 supabase==2.12.0
 python-dotenv==1.0.0
-requests==2.31.0
+requests==2.32.3
 openai==1.44.0
 python-multipart==0.0.6
 email-validator==2.1.0
 cryptography>=44.0.1
 PyJWT[crypto]==2.8.0
-resend==0.8.0
+resend>=2.0.0
 redis==5.0.1
 anyio>=4.0.0  # Updated: FastAPI 0.115+ supports anyio 4.x
 stripe==13.0.1
 tenacity==8.2.3
-google-cloud-aiplatform>=1.38.0
-google-auth>=2.0.0
+google-cloud-aiplatform==1.62.0
+google-auth==2.28.0
 
-# Provider SDKs
-cerebras-cloud-sdk>=1.0.0
-xai-sdk>=0.1.0
-clarifai>=10.0.0
-huggingface-hub>=0.23.0
-novita-client>=0.5.0
+# Provider SDKs - Pinned to specific versions to prevent pip backtracking
+# Clarifai requires fsspec==2024.6.1, which conflicts with huggingface-hub's looser constraint
+fsspec==2024.6.1
+cerebras-cloud-sdk==1.0.0
+xai-sdk==1.0.0
+# Clarifai pinned to avoid backtracking through 50+ versions (issue: complex dependency tree with fsspec, rich, schema)
+clarifai==11.1.0
+huggingface-hub==0.23.0
+novita-client==0.5.0
 
 # NotDiamond AI Router (optional - code gracefully falls back when not installed)
 # Excluded from main requirements due to dependency conflicts with cryptography and python-dotenv.
@@ -34,32 +37,33 @@ novita-client>=0.5.0
 # Analytics
 statsig-python-core==0.10.2
 posthog==6.7.8
-braintrust
+# Braintrust pinned to prevent version resolution issues
+braintrust==0.1.0
 prometheus-client==0.21.0
-python-snappy>=0.7.0
-protobuf>=4.24.0
-sentry-sdk[fastapi]>=2.0.0
+python-snappy==0.7.0
+protobuf==5.29.4
+sentry-sdk[fastapi]==2.0.0
 
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
 
-# OpenTelemetry - use >= to allow traceloop-sdk to resolve compatible versions
-opentelemetry-api>=1.28.0
-opentelemetry-sdk>=1.28.0
-opentelemetry-instrumentation>=0.49b0
-opentelemetry-instrumentation-fastapi>=0.49b0
-opentelemetry-instrumentation-httpx>=0.49b0
-opentelemetry-instrumentation-requests>=0.49b0
-opentelemetry-instrumentation-redis>=0.49b0
-opentelemetry-exporter-otlp>=1.28.0
+# OpenTelemetry - Pinned to prevent dependency resolution backtracking
+opentelemetry-api==1.33.1
+opentelemetry-sdk==1.33.1
+opentelemetry-instrumentation==0.54b0
+opentelemetry-instrumentation-fastapi==0.54b0
+opentelemetry-instrumentation-httpx==0.54b0
+opentelemetry-instrumentation-requests==0.54b0
+opentelemetry-instrumentation-redis==0.54b0
+opentelemetry-exporter-otlp==1.33.1
 
 # Loki Logging
 python-json-logger>=2.0.7
 python-logging-loki>=0.3.1
 
-# Arize AI Observability
-arize-otel>=0.11.0
-openinference-instrumentation-openai>=0.1.41
+# Arize AI Observability - Pinned to prevent dependency resolution issues
+arize-otel==0.11.0
+openinference-instrumentation-openai==0.1.41
 
 # OpenLLMetry (Traceloop SDK) - Standardized LLM Observability (optional)
 # Excluded from main requirements due to 30+ transitive instrumentation packages
@@ -68,10 +72,10 @@ openinference-instrumentation-openai>=0.1.41
 # To enable OpenLLMetry, install separately: pip install traceloop-sdk
 # traceloop-sdk>=0.45.0
 
-# Langfuse - LLM Observability & Analytics
+# Langfuse - LLM Observability & Analytics - Pinned to prevent issues
 # Provides tracing, scoring, and analytics for LLM applications
 # See: https://langfuse.com
-langfuse>=2.0.0
+langfuse==3.0.0
 
 # Testing dependencies
 pytest==7.4.3
