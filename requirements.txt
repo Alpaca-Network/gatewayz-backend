@@ -16,7 +16,7 @@ redis==5.0.1
 anyio>=4.0.0  # Updated: FastAPI 0.115+ supports anyio 4.x
 stripe==13.0.1
 tenacity==8.2.3
-google-cloud-aiplatform
+google-cloud-aiplatform==1.62.0
 google-auth==2.28.0
 
 # Provider SDKs - Pinned to specific versions to prevent pip backtracking
