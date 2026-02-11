@@ -6,7 +6,7 @@ Main orchestrator for benchmarking the distilled GLM-4.5-Air model
 for code router integration.
 
 Usage:
-    python glm_code_benchmark.py [--streaming] [--iterations N] [--output-dir DIR]
+    python glm_code_benchmark.py [--no-streaming] [--iterations N] [--output-dir DIR]
 """
 
 import argparse
