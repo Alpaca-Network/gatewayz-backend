@@ -3,6 +3,7 @@ Gateway Analytics Database Layer
 Provides functions to analyze usage across different gateways and providers
 """
 
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -10,6 +11,11 @@ from typing import Any
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+# In-memory cache for trending models (fallback when Redis unavailable)
+_trending_cache: dict[str, tuple[list[dict[str, Any]], datetime]] = {}
+TRENDING_CACHE_TTL_SECONDS = 60  # Cache for 1 minute to prevent DB overload
+MAX_ACTIVITY_LOG_ROWS = 50000  # Hard limit to prevent memory issues
 
 
 def get_provider_stats(
@@ -30,14 +36,21 @@ def get_provider_stats(
     Returns:
         Dictionary with provider statistics
     """
+    # CRITICAL: Never query without a time filter to prevent timeouts
+    if not time_range or time_range == "all":
+        time_range = "24h"
+        logger.debug(f"Defaulting time_range to 24h for provider stats query")
+
     try:
         supabase = get_supabase_client()
 
         # Calculate time filter
         time_filter = _get_time_filter(time_range)
 
-        # Build query
-        query = supabase.table("activity_log").select("*")
+        # Build query with only necessary columns for performance
+        query = supabase.table("activity_log").select(
+            "model,provider,tokens,user_id,cost,speed,metadata,created_at"
+        )
 
         # Apply filters
         if time_filter:
@@ -45,6 +58,9 @@ def get_provider_stats(
 
         if user_id:
             query = query.eq("user_id", user_id)
+
+        # Add hard limit to prevent memory issues
+        query = query.limit(MAX_ACTIVITY_LOG_ROWS)
 
         # Execute query
         response = query.execute()
@@ -99,14 +115,21 @@ def get_gateway_stats(
     Returns:
         Dictionary with gateway statistics
     """
+    # CRITICAL: Never query without a time filter to prevent timeouts
+    if not time_range or time_range == "all":
+        time_range = "24h"
+        logger.debug(f"Defaulting time_range to 24h for gateway stats query")
+
     try:
         supabase = get_supabase_client()
 
         # Calculate time filter
         time_filter = _get_time_filter(time_range)
 
-        # Build query
-        query = supabase.table("activity_log").select("*")
+        # Build query with only necessary columns
+        query = supabase.table("activity_log").select(
+            "model,provider,tokens,user_id,cost,speed,metadata,created_at"
+        )
 
         # Apply filters
         if time_filter:
@@ -114,6 +137,9 @@ def get_gateway_stats(
 
         if user_id:
             query = query.eq("user_id", user_id)
+
+        # Add hard limit to prevent memory issues
+        query = query.limit(MAX_ACTIVITY_LOG_ROWS)
 
         # Execute query
         response = query.execute()
@@ -160,17 +186,39 @@ def get_trending_models(
     Returns:
         List of trending models with statistics
     """
+    # Generate cache key based on parameters
+    cache_key = f"trending:{gateway}:{time_range}:{limit}:{sort_by}"
+
+    # Check in-memory cache first
+    if cache_key in _trending_cache:
+        cached_data, cache_time = _trending_cache[cache_key]
+        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=TRENDING_CACHE_TTL_SECONDS):
+            logger.debug(f"Returning cached trending models for {cache_key}")
+            return cached_data
+
     try:
         supabase = get_supabase_client()
 
-        # Calculate time filter
+        # Calculate time filter - default to 24h if not specified or "all"
+        # CRITICAL: Never query without a time filter to prevent timeouts
+        if not time_range or time_range == "all":
+            time_range = "24h"
+            logger.debug("Defaulting time_range to 24h for trending models query")
+
         time_filter = _get_time_filter(time_range)
 
-        # Build query
-        query = supabase.table("activity_log").select("*")
+        # Build query with only necessary columns for performance
+        # This reduces data transfer significantly compared to select("*")
+        query = supabase.table("activity_log").select(
+            "model,provider,tokens,user_id,cost,speed,metadata"
+        )
 
         if time_filter:
             query = query.gte("created_at", time_filter)
+
+        # Add a hard limit to prevent memory issues
+        # We need enough rows to calculate meaningful trends
+        query = query.limit(MAX_ACTIVITY_LOG_ROWS)
 
         # Execute query
         response = query.execute()
@@ -178,7 +226,7 @@ def get_trending_models(
         if not response.data:
             return []
 
-        # Filter by gateway if specified
+        # Filter by gateway if specified (still needs Python filtering due to metadata structure)
         data = response.data
         if gateway and gateway.lower() != "all":
             gateway_lower = gateway.lower()
@@ -209,9 +257,11 @@ def get_trending_models(
 
             stats = model_stats[model]
             stats["requests"] += 1
-            stats["total_tokens"] += log.get("tokens", 0)
-            stats["unique_users"].add(log.get("user_id"))
-            stats["total_cost"] += log.get("cost", 0.0)
+            stats["total_tokens"] += log.get("tokens", 0) or 0
+            user_id = log.get("user_id")
+            if user_id is not None:
+                stats["unique_users"].add(user_id)
+            stats["total_cost"] += log.get("cost", 0.0) or 0.0
 
             speed = log.get("speed")
             if speed and speed > 0:
@@ -221,9 +271,8 @@ def get_trending_models(
         trending = []
         for _model, stats in model_stats.items():
             stats["unique_users"] = len(stats["unique_users"])
-            stats["avg_speed"] = (
-                sum(stats["avg_speed"]) / len(stats["avg_speed"]) if stats["avg_speed"] else 0
-            )
+            avg_speed_list = stats["avg_speed"]
+            stats["avg_speed"] = sum(avg_speed_list) / len(avg_speed_list) if avg_speed_list else 0
             trending.append(stats)
 
         # Sort by specified criteria
@@ -234,16 +283,20 @@ def get_trending_models(
         else:  # default: requests
             trending.sort(key=lambda x: x["requests"], reverse=True)
 
-        return trending[:limit]
+        result = trending[:limit]
+
+        # Cache the result
+        _trending_cache[cache_key] = (result, datetime.now(timezone.utc))
+
+        return result
 
     except Exception as e:
         logger.error(f"Error getting trending models: {e}")
+        # Return empty list on error - better than hanging
         return []
 
 
-def get_all_gateways_summary(
-    time_range: str = "24h", user_id: int | None = None
-) -> dict[str, Any]:
+def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None) -> dict[str, Any]:
     """
     Get summary statistics for all gateways
 
