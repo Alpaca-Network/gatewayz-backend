@@ -1190,19 +1190,34 @@ def transform_db_models_batch(
     This is a convenience function for batch transformations,
     used by catalog endpoints to convert DB results.
 
+    Includes pricing enrichment: if a model has NULL/zero pricing in the
+    database, it will be enriched from manual_pricing.json or cross-reference
+    sources via enrich_model_with_pricing().
+
     Args:
         db_models: List of model dictionaries from database
 
     Returns:
-        List of models in API format
-
-    Example:
-        >>> db_models = get_all_models_for_catalog()
-        >>> api_models = transform_db_models_batch(db_models)
-        >>> len(api_models) == len(db_models)
-        True
+        List of models in API format with pricing enrichment applied
     """
-    return [transform_db_model_to_api_format(model) for model in db_models]
+    from src.services.pricing_lookup import enrich_model_with_pricing
+
+    result = []
+    enriched_count = 0
+    for model in db_models:
+        api_model = transform_db_model_to_api_format(model)
+        provider_slug = api_model.get("source_gateway") or api_model.get("provider_slug") or "unknown"
+
+        enriched = enrich_model_with_pricing(api_model, provider_slug)
+        if enriched is not None:
+            if enriched.get("pricing_source"):
+                enriched_count += 1
+            result.append(enriched)
+
+    if enriched_count > 0:
+        logger.info(f"Enriched pricing for {enriched_count}/{len(db_models)} models in catalog batch")
+
+    return result
 
 
 def get_catalog_statistics() -> dict[str, Any]:
@@ -1598,10 +1613,76 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
     """
     Batch transform unique models from database format to API format.
 
+    Includes per-provider pricing enrichment: if a provider has NULL/zero
+    pricing in the database, it will be enriched from manual_pricing.json
+    via get_model_pricing().
+
     Args:
         db_models: List of database records from get_all_unique_models_for_catalog()
 
     Returns:
-        List of API-formatted models
+        List of API-formatted models with pricing enrichment applied
     """
-    return [transform_unique_model_to_api_format(model) for model in db_models]
+    from src.services.pricing_lookup import get_model_pricing
+
+    result = []
+    enriched_count = 0
+
+    for model in db_models:
+        api_model = transform_unique_model_to_api_format(model)
+
+        # Enrich per-provider pricing if NULL/zero
+        providers = api_model.get('providers', [])
+        for provider in providers:
+            pricing = provider.get('pricing', {})
+            prompt_val = pricing.get('prompt', '0')
+            completion_val = pricing.get('completion', '0')
+
+            # Check if pricing is missing or zero
+            try:
+                has_real_pricing = float(prompt_val) != 0.0 or float(completion_val) != 0.0
+            except (ValueError, TypeError):
+                has_real_pricing = False
+
+            if not has_real_pricing:
+                # Try to enrich from manual pricing
+                model_id = api_model.get('id', '')
+                provider_slug = provider.get('slug', '')
+                # Also try with provider's original model_name
+                model_name = provider.get('model_name', model_id)
+
+                manual_pricing = get_model_pricing(provider_slug, model_name)
+                if not manual_pricing:
+                    manual_pricing = get_model_pricing(provider_slug, model_id)
+
+                if manual_pricing:
+                    provider['pricing'] = {
+                        'prompt': manual_pricing.get('prompt', '0'),
+                        'completion': manual_pricing.get('completion', '0'),
+                        'image': manual_pricing.get('image', '0'),
+                        'request': manual_pricing.get('request', '0'),
+                    }
+                    enriched_count += 1
+
+        # Recalculate cheapest provider after enrichment
+        cheapest_provider = None
+        cheapest_prompt_price = None
+        for provider in providers:
+            try:
+                price = float(provider.get('pricing', {}).get('prompt', '0'))
+            except (ValueError, TypeError):
+                continue
+            if cheapest_prompt_price is None or price < cheapest_prompt_price:
+                cheapest_prompt_price = price
+                cheapest_provider = provider.get('slug')
+
+        if cheapest_provider:
+            api_model['cheapest_provider'] = cheapest_provider
+            api_model['cheapest_prompt_price'] = cheapest_prompt_price
+
+        result.append(api_model)
+
+    if enriched_count > 0:
+        logger.info(f"Enriched pricing for {enriched_count} providers across {len(db_models)} unique models")
+
+    return result

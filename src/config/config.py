@@ -244,6 +244,9 @@ class Config:
     # Z.AI Configuration (Zhipu AI - GLM models)
     ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
 
+    # Soundsgood Configuration (GLM-4.5-Air distilled model)
+    SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
+
     # NotDiamond AI Router Configuration
     NOTDIAMOND_API_KEY = os.environ.get("NOTDIAMOND_API_KEY", "")
     NOTDIAMOND_TIMEOUT = int(os.environ.get("NOTDIAMOND_TIMEOUT", "10"))

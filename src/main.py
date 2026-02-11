@@ -76,8 +76,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         dsn=Config.SENTRY_DSN,
         # Add data like request headers and IP for users
         send_default_pii=True,
-        # Enable sending logs to Sentry
-        enable_logs=True,
         # Set environment (development, staging, production)
         environment=Config.SENTRY_ENVIRONMENT,
         # Release tracking for Sentry release management
@@ -86,8 +84,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         traces_sampler=sentry_traces_sampler,
         # Reduced profiling: 5% (down from default)
         profiles_sample_rate=0.05,
-        # Set profile_lifecycle to "trace" to run profiler during transactions
-        profile_lifecycle="trace",
     )
     logger.info(
         f"✅ Sentry initialized with adaptive sampling "

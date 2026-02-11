@@ -16,6 +16,7 @@ Note: OpenTelemetry is optional. If not installed, tracing will be gracefully di
 
 import logging
 import socket
+from typing import Optional
 from urllib.parse import urlparse
 
 # Try to import OpenTelemetry - it's optional for deployments like Vercel
@@ -39,6 +40,7 @@ try:
     # Redis instrumentation - optional, gracefully handle if not installed
     try:
         from opentelemetry.instrumentation.redis import RedisInstrumentor
+
         REDIS_INSTRUMENTATION_AVAILABLE = True
     except ImportError:
         REDIS_INSTRUMENTATION_AVAILABLE = False
@@ -130,7 +132,7 @@ class OpenTelemetryConfig:
     """
 
     _initialized = False
-    _tracer_provider: TracerProvider | None = None
+    _tracer_provider: Optional[TracerProvider] = None
 
     @classmethod
     def initialize(cls) -> bool:
@@ -313,7 +315,9 @@ class OpenTelemetryConfig:
             if REDIS_INSTRUMENTATION_AVAILABLE and RedisInstrumentor is not None:
                 try:
                     RedisInstrumentor().instrument()
-                    logger.info("   Redis instrumentation enabled (cache operations will appear in traces)")
+                    logger.info(
+                        "   Redis instrumentation enabled (cache operations will appear in traces)"
+                    )
                 except Exception as redis_e:
                     logger.warning(f"   Redis instrumentation failed (non-fatal): {redis_e}")
             else:
