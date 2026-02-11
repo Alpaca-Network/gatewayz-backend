@@ -1,0 +1,39 @@
+============================================================
+LATENCY REPORT
+============================================================
+
+Sample Size: 60 requests
+
+TIME TO FIRST BYTE (TTFB):
+  Mean:   546.7 ms
+  Median: 571.5 ms
+  P90:    642.3 ms
+  P95:    723.4 ms
+  P99:    850.9 ms
+  Min:    411.0 ms
+  Max:    873.7 ms
+
+TIME TO FIRST CONTENT (TTFC):
+  Mean:   546.9 ms
+  Median: 571.7 ms
+  P90:    642.5 ms
+  P95:    723.6 ms
+
+TOTAL DURATION:
+  Mean:   12.34 s
+  Median: 16.33 s
+  P95:    16.83 s
+
+THROUGHPUT (tokens/second):
+  Mean:   35.5 tps
+  Median: 23.2 tps
+  Min:    0.1 tps
+  Max:    99.0 tps
+
+TOKEN USAGE:
+  Avg Input:     69 tokens
+  Avg Output:    270 tokens
+  Avg Reasoning: 1194 tokens
+  Total:         91,990 tokens
+
+============================================================

@@ -1,0 +1,186 @@
+{
+  "category": "code_generation",
+  "description": "HumanEval-style code generation problems",
+  "test_cases": [
+    {
+      "id": "cg_001",
+      "difficulty": "easy",
+      "prompt": "Write a Python function `is_palindrome(s: str) -> bool` that checks if a string is a palindrome. Ignore case and non-alphanumeric characters.",
+      "expected_behavior": "Should correctly identify palindromes like 'A man, a plan, a canal: Panama'",
+      "evaluation_criteria": ["correct_logic", "handles_edge_cases", "type_hints", "clean_code"],
+      "test_code": "assert is_palindrome('racecar') == True\nassert is_palindrome('hello') == False\nassert is_palindrome('A man, a plan, a canal: Panama') == True\nassert is_palindrome('') == True\nassert is_palindrome('a') == True",
+      "tags": ["string", "easy"]
+    },
+    {
+      "id": "cg_002",
+      "difficulty": "easy",
+      "prompt": "Write a Python function `fizzbuzz(n: int) -> list[str]` that returns a list of strings from 1 to n, where multiples of 3 are 'Fizz', multiples of 5 are 'Buzz', and multiples of both are 'FizzBuzz'.",
+      "expected_behavior": "Classic FizzBuzz implementation",
+      "evaluation_criteria": ["correct_logic", "handles_edge_cases", "type_hints"],
+      "test_code": "assert fizzbuzz(15)[-1] == 'FizzBuzz'\nassert fizzbuzz(3) == ['1', '2', 'Fizz']\nassert fizzbuzz(5) == ['1', '2', 'Fizz', '4', 'Buzz']",
+      "tags": ["logic", "easy"]
+    },
+    {
+      "id": "cg_003",
+      "difficulty": "easy",
+      "prompt": "Write a Python function `factorial(n: int) -> int` that computes the factorial of n. Handle n=0 and raise ValueError for negative numbers.",
+      "expected_behavior": "Correct factorial with edge case handling",
+      "evaluation_criteria": ["correct_logic", "error_handling", "type_hints"],
+      "test_code": "assert factorial(0) == 1\nassert factorial(1) == 1\nassert factorial(5) == 120\nassert factorial(10) == 3628800",
+      "tags": ["math", "recursion", "easy"]
+    },
+    {
+      "id": "cg_004",
+      "difficulty": "easy",
+      "prompt": "Write a Python function `reverse_words(s: str) -> str` that reverses the order of words in a string. Words are separated by single spaces, and the result should have single spaces between words.",
+      "expected_behavior": "Correctly reverses word order with single spaces",
+      "evaluation_criteria": ["correct_logic", "handles_single_word", "type_hints"],
+      "test_code": "assert reverse_words('hello world') == 'world hello'\nassert reverse_words('the quick brown fox') == 'fox brown quick the'\nassert reverse_words('a') == 'a'\nassert reverse_words('') == ''",
+      "tags": ["string", "easy"]
+    },
+    {
+      "id": "cg_005",
+      "difficulty": "easy",
+      "prompt": "Write a Python function `count_vowels(s: str) -> int` that counts the number of vowels (a, e, i, o, u) in a string, case-insensitive.",
+      "expected_behavior": "Correctly counts vowels",
+      "evaluation_criteria": ["correct_logic", "case_insensitive", "type_hints"],
+      "test_code": "assert count_vowels('hello') == 2\nassert count_vowels('AEIOU') == 5\nassert count_vowels('xyz') == 0\nassert count_vowels('') == 0",
+      "tags": ["string", "easy"]
+    },
+    {
+      "id": "cg_006",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `binary_search(arr: list[int], target: int) -> int` that returns the index of target in a sorted array, or -1 if not found. Use O(log n) time complexity.",
+      "expected_behavior": "Correct binary search implementation",
+      "evaluation_criteria": ["correct_algorithm", "O_log_n_complexity", "handles_edge_cases", "type_hints"],
+      "test_code": "assert binary_search([1, 2, 3, 4, 5], 3) == 2\nassert binary_search([1, 2, 3, 4, 5], 6) == -1\nassert binary_search([], 1) == -1\nassert binary_search([1], 1) == 0",
+      "tags": ["algorithm", "search", "medium"]
+    },
+    {
+      "id": "cg_007",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `merge_sorted_lists(list1: list[int], list2: list[int]) -> list[int]` that merges two sorted lists into one sorted list in O(n+m) time.",
+      "expected_behavior": "Efficient merge of sorted lists",
+      "evaluation_criteria": ["correct_algorithm", "O_n_m_complexity", "handles_edge_cases", "type_hints"],
+      "test_code": "assert merge_sorted_lists([1, 3, 5], [2, 4, 6]) == [1, 2, 3, 4, 5, 6]\nassert merge_sorted_lists([], [1, 2]) == [1, 2]\nassert merge_sorted_lists([1], []) == [1]",
+      "tags": ["algorithm", "sorting", "medium"]
+    },
+    {
+      "id": "cg_008",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `find_duplicates(nums: list[int]) -> list[int]` that finds all duplicates in an array where 1 <= nums[i] <= n and n is the length of the array.",
+      "expected_behavior": "Finds duplicates efficiently",
+      "evaluation_criteria": ["correct_logic", "efficiency", "type_hints"],
+      "test_code": "assert sorted(find_duplicates([4, 3, 2, 7, 8, 2, 3, 1])) == [2, 3]\nassert find_duplicates([1, 1, 2]) == [1]\nassert find_duplicates([1, 2, 3]) == []",
+      "tags": ["array", "medium"]
+    },
+    {
+      "id": "cg_009",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `valid_parentheses(s: str) -> bool` that checks if a string of parentheses '()', '[]', '{}' is valid (properly opened and closed).",
+      "expected_behavior": "Correctly validates parentheses using stack",
+      "evaluation_criteria": ["correct_algorithm", "uses_stack", "handles_edge_cases", "type_hints"],
+      "test_code": "assert valid_parentheses('()[]{}') == True\nassert valid_parentheses('([)]') == False\nassert valid_parentheses('{[]}') == True\nassert valid_parentheses('') == True",
+      "tags": ["stack", "string", "medium"]
+    },
+    {
+      "id": "cg_010",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `longest_common_prefix(strs: list[str]) -> str` that finds the longest common prefix among a list of strings.",
+      "expected_behavior": "Correctly finds longest common prefix",
+      "evaluation_criteria": ["correct_logic", "handles_edge_cases", "type_hints"],
+      "test_code": "assert longest_common_prefix(['flower', 'flow', 'flight']) == 'fl'\nassert longest_common_prefix(['dog', 'racecar', 'car']) == ''\nassert longest_common_prefix(['']) == ''\nassert longest_common_prefix([]) == ''",
+      "tags": ["string", "medium"]
+    },
+    {
+      "id": "cg_011",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `group_anagrams(strs: list[str]) -> list[list[str]]` that groups anagrams together from a list of strings.",
+      "expected_behavior": "Correctly groups anagrams",
+      "evaluation_criteria": ["correct_algorithm", "efficient_hashing", "type_hints"],
+      "test_code": "result = group_anagrams(['eat', 'tea', 'tan', 'ate', 'nat', 'bat'])\nassert len(result) == 3\nassert sorted(['eat', 'tea', 'ate']) in [sorted(g) for g in result]",
+      "tags": ["hash", "string", "medium"]
+    },
+    {
+      "id": "cg_012",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `two_sum(nums: list[int], target: int) -> list[int]` that returns indices of two numbers that add up to target. Assume exactly one solution exists.",
+      "expected_behavior": "O(n) solution using hash map",
+      "evaluation_criteria": ["correct_algorithm", "O_n_complexity", "type_hints"],
+      "test_code": "assert sorted(two_sum([2, 7, 11, 15], 9)) == [0, 1]\nassert sorted(two_sum([3, 2, 4], 6)) == [1, 2]\nassert sorted(two_sum([3, 3], 6)) == [0, 1]",
+      "tags": ["hash", "array", "medium"]
+    },
+    {
+      "id": "cg_013",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `flatten_list(nested: list) -> list` that flattens a nested list of arbitrary depth into a single flat list.",
+      "expected_behavior": "Recursively flattens nested lists",
+      "evaluation_criteria": ["correct_recursion", "handles_arbitrary_depth", "type_hints"],
+      "test_code": "assert flatten_list([1, [2, [3, 4], 5], 6]) == [1, 2, 3, 4, 5, 6]\nassert flatten_list([]) == []\nassert flatten_list([[[[1]]]]) == [1]",
+      "tags": ["recursion", "list", "medium"]
+    },
+    {
+      "id": "cg_014",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `max_subarray_sum(nums: list[int]) -> int` that finds the contiguous subarray with the largest sum (Kadane's algorithm).",
+      "expected_behavior": "Implements Kadane's algorithm correctly",
+      "evaluation_criteria": ["correct_algorithm", "O_n_complexity", "handles_negatives", "type_hints"],
+      "test_code": "assert max_subarray_sum([-2, 1, -3, 4, -1, 2, 1, -5, 4]) == 6\nassert max_subarray_sum([1]) == 1\nassert max_subarray_sum([-1, -2, -3]) == -1",
+      "tags": ["algorithm", "dynamic_programming", "medium"]
+    },
+    {
+      "id": "cg_015",
+      "difficulty": "medium",
+      "prompt": "Write a Python function `rotate_matrix(matrix: list[list[int]]) -> list[list[int]]` that rotates an NxN matrix 90 degrees clockwise and returns the rotated matrix.",
+      "expected_behavior": "Rotates matrix correctly and returns it",
+      "evaluation_criteria": ["correct_logic", "returns_rotated", "type_hints"],
+      "test_code": "assert rotate_matrix([[1, 2], [3, 4]]) == [[3, 1], [4, 2]]\nassert rotate_matrix([[1]]) == [[1]]",
+      "tags": ["matrix", "medium"]
+    },
+    {
+      "id": "cg_016",
+      "difficulty": "hard",
+      "prompt": "Write a Python function `lru_cache(capacity: int)` that returns a class implementing an LRU cache with `get(key)` and `put(key, value)` methods, both in O(1) time.",
+      "expected_behavior": "Correct LRU cache with O(1) operations",
+      "evaluation_criteria": ["correct_algorithm", "O_1_operations", "uses_doubly_linked_list_and_hash", "type_hints"],
+      "test_code": "cache = lru_cache(2)\ncache.put(1, 1)\ncache.put(2, 2)\nassert cache.get(1) == 1\ncache.put(3, 3)\nassert cache.get(2) == -1",
+      "tags": ["data_structure", "design", "hard"]
+    },
+    {
+      "id": "cg_017",
+      "difficulty": "hard",
+      "prompt": "Write a Python function `serialize_binary_tree(root) -> str` and `deserialize_binary_tree(data: str)` for a binary tree node with `val`, `left`, `right` attributes.",
+      "expected_behavior": "Correctly serializes and deserializes binary tree",
+      "evaluation_criteria": ["correct_algorithm", "handles_null_nodes", "reversible", "type_hints"],
+      "test_code": "class TreeNode:\n    def __init__(self, val=0, left=None, right=None):\n        self.val = val\n        self.left = left\n        self.right = right\n\nroot = TreeNode(1, TreeNode(2), TreeNode(3, TreeNode(4), TreeNode(5)))\nserialized = serialize_binary_tree(root)\ndeserialized = deserialize_binary_tree(serialized)\nassert deserialized.val == 1\nassert deserialized.left.val == 2\nassert deserialized.right.val == 3",
+      "tags": ["tree", "serialization", "hard"]
+    },
+    {
+      "id": "cg_018",
+      "difficulty": "hard",
+      "prompt": "Write a Python function `find_median_sorted_arrays(nums1: list[int], nums2: list[int]) -> float` that finds the median of two sorted arrays in O(log(min(m,n))) time.",
+      "expected_behavior": "Correct median finding with optimal complexity",
+      "evaluation_criteria": ["correct_algorithm", "O_log_complexity", "handles_edge_cases", "type_hints"],
+      "test_code": "assert find_median_sorted_arrays([1, 3], [2]) == 2.0\nassert find_median_sorted_arrays([1, 2], [3, 4]) == 2.5",
+      "tags": ["binary_search", "algorithm", "hard"]
+    },
+    {
+      "id": "cg_019",
+      "difficulty": "hard",
+      "prompt": "Write a Python function `word_break(s: str, word_dict: list[str]) -> bool` that determines if string s can be segmented into space-separated words from word_dict.",
+      "expected_behavior": "Correct dynamic programming solution",
+      "evaluation_criteria": ["correct_algorithm", "dynamic_programming", "efficiency", "type_hints"],
+      "test_code": "assert word_break('leetcode', ['leet', 'code']) == True\nassert word_break('applepenapple', ['apple', 'pen']) == True\nassert word_break('catsandog', ['cats', 'dog', 'sand', 'and', 'cat']) == False",
+      "tags": ["dynamic_programming", "string", "hard"]
+    },
+    {
+      "id": "cg_020",
+      "difficulty": "hard",
+      "prompt": "Write a Python function `min_window_substring(s: str, t: str) -> str` that finds the minimum window in s which contains all characters from t.",
+      "expected_behavior": "Correct sliding window implementation",
+      "evaluation_criteria": ["correct_algorithm", "sliding_window", "O_n_complexity", "type_hints"],
+      "test_code": "assert min_window_substring('ADOBECODEBANC', 'ABC') == 'BANC'\nassert min_window_substring('a', 'a') == 'a'\nassert min_window_substring('a', 'aa') == ''",
+      "tags": ["sliding_window", "string", "hard"]
+    }
+  ]
+}

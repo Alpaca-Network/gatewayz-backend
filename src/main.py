@@ -84,8 +84,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         traces_sampler=sentry_traces_sampler,
         # Reduced profiling: 5% (down from default)
         profiles_sample_rate=0.05,
-        # Set profile_lifecycle to "trace" to run profiler during transactions
-        profile_lifecycle="trace",
     )
     logger.info(
         f"✅ Sentry initialized with adaptive sampling "
