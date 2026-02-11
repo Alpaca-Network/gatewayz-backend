@@ -12,7 +12,6 @@ import os
 from contextlib import asynccontextmanager
 
 from src.config.arize_config import init_arize_otel, shutdown_arize_otel
-from src.config.langfuse_config import init_langfuse, shutdown_langfuse
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
@@ -192,18 +191,6 @@ async def lifespan(app):
                 logger.warning(f"Arize OTEL initialization warning: {e}")
 
         _create_background_task(init_arize_background(), name="init_arize_otel")
-
-        # Initialize Langfuse for LLM observability in background
-        async def init_langfuse_background():
-            try:
-                if init_langfuse():
-                    logger.info("Langfuse LLM observability initialized")
-                else:
-                    logger.debug("Langfuse not enabled or not configured")
-            except Exception as e:
-                logger.warning(f"Langfuse initialization warning: {e}")
-
-        _create_background_task(init_langfuse_background(), name="init_langfuse")
 
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
@@ -513,13 +500,6 @@ async def lifespan(app):
             logger.info("Arize OTEL shutdown complete")
         except Exception as e:
             logger.warning(f"Arize OTEL shutdown warning: {e}")
-
-        # Shutdown Langfuse
-        try:
-            shutdown_langfuse()
-            logger.info("Langfuse shutdown complete")
-        except Exception as e:
-            logger.warning(f"Langfuse shutdown warning: {e}")
 
         # Clear connection pools
         clear_connection_pools()
