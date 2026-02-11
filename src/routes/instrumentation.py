@@ -44,17 +44,8 @@ async def instrumentation_health():
     Get instrumentation health status.
 
     Returns:
-        dict: Status of Loki, Tempo, and Langfuse integration
+        dict: Status of Loki and Tempo integration
     """
-    # Guard Langfuse import - it's optional
-    langfuse_initialized = False
-    try:
-        from src.config.langfuse_config import LangfuseConfig
-        langfuse_initialized = LangfuseConfig.is_initialized()
-    except ImportError:
-        # Langfuse package not installed, continue without it
-        logger.debug("Langfuse not available for health check - package not installed")
-
     return {
         "status": "healthy",
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -68,12 +59,6 @@ async def instrumentation_health():
             "enabled": Config.TEMPO_ENABLED,
             "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT if Config.TEMPO_ENABLED else None,
             "service_name": Config.OTEL_SERVICE_NAME,
-            "environment": Config.APP_ENV,
-        },
-        "langfuse": {
-            "enabled": Config.LANGFUSE_ENABLED,
-            "initialized": langfuse_initialized,
-            "host": Config.LANGFUSE_HOST if Config.LANGFUSE_ENABLED else None,
             "environment": Config.APP_ENV,
         },
     }
@@ -157,8 +142,6 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
     Returns:
         dict: Full instrumentation setup details
     """
-    from src.config.langfuse_config import LangfuseConfig
-
     return {
         "service": {
             "name": Config.OTEL_SERVICE_NAME,
@@ -180,13 +163,6 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
             "otlp_http_endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT if Config.TEMPO_ENABLED else None,
             "otlp_grpc_endpoint": Config.TEMPO_OTLP_GRPC_ENDPOINT if Config.TEMPO_ENABLED else None,
         },
-        "langfuse": {
-            "enabled": Config.LANGFUSE_ENABLED,
-            "initialized": LangfuseConfig.is_initialized(),
-            "host": Config.LANGFUSE_HOST if Config.LANGFUSE_ENABLED else None,
-            "debug": Config.LANGFUSE_DEBUG if Config.LANGFUSE_ENABLED else None,
-            "flush_interval": Config.LANGFUSE_FLUSH_INTERVAL if Config.LANGFUSE_ENABLED else None,
-        },
         "environment_variables": {
             "LOKI_ENABLED": Config.LOKI_ENABLED,
             "LOKI_PUSH_URL": "***" if Config.LOKI_ENABLED else None,
@@ -194,10 +170,6 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
             "TEMPO_ENABLED": Config.TEMPO_ENABLED,
             "TEMPO_OTLP_HTTP_ENDPOINT": "***" if Config.TEMPO_ENABLED else None,
             "TEMPO_OTLP_GRPC_ENDPOINT": "***" if Config.TEMPO_ENABLED else None,
-            "LANGFUSE_ENABLED": Config.LANGFUSE_ENABLED,
-            "LANGFUSE_HOST": "***" if Config.LANGFUSE_ENABLED else None,
-            "LANGFUSE_PUBLIC_KEY": "***" if Config.LANGFUSE_PUBLIC_KEY else None,
-            "LANGFUSE_SECRET_KEY": "***" if Config.LANGFUSE_SECRET_KEY else None,
             "OTEL_SERVICE_NAME": Config.OTEL_SERVICE_NAME,
             "APP_ENV": Config.APP_ENV,
         },
@@ -357,67 +329,6 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
 
 
 
-
-
-@router.get("/langfuse/status", tags=["instrumentation"])
-async def langfuse_status(admin_key: str = Depends(get_admin_key)):
-    """
-    Get Langfuse LLM observability status and configuration.
-
-    Requires admin API key.
-
-    Returns:
-        dict: Langfuse configuration and status
-    """
-    from src.config.langfuse_config import LangfuseConfig
-
-    return {
-        "enabled": Config.LANGFUSE_ENABLED,
-        "initialized": LangfuseConfig.is_initialized(),
-        "host": Config.LANGFUSE_HOST if Config.LANGFUSE_ENABLED else None,
-        "public_key_configured": bool(Config.LANGFUSE_PUBLIC_KEY),
-        "secret_key_configured": bool(Config.LANGFUSE_SECRET_KEY),
-        "debug": Config.LANGFUSE_DEBUG if Config.LANGFUSE_ENABLED else None,
-        "flush_interval": Config.LANGFUSE_FLUSH_INTERVAL if Config.LANGFUSE_ENABLED else None,
-        "openai_instrumentation": Config.LANGFUSE_OPENAI_INSTRUMENTATION if Config.LANGFUSE_ENABLED else None,
-        "service_name": Config.OTEL_SERVICE_NAME,
-        "environment": Config.APP_ENV,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
-
-
-@router.post("/langfuse/flush", tags=["instrumentation"])
-async def langfuse_flush(admin_key: str = Depends(get_admin_key)):
-    """
-    Flush pending Langfuse traces.
-
-    Requires admin API key.
-
-    Returns:
-        dict: Flush operation result
-    """
-    from src.config.langfuse_config import LangfuseConfig
-
-    if not LangfuseConfig.is_initialized():
-        return {
-            "status": "skipped",
-            "message": "Langfuse not initialized",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    try:
-        LangfuseConfig.flush()
-        return {
-            "status": "success",
-            "message": "Langfuse traces flushed successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
 
 
 @router.get("/otel/status", tags=["instrumentation"])
