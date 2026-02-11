@@ -291,11 +291,19 @@ class CategoryLatencyTracker:
         }
 
     def get_overall_stats(self) -> LatencyStats:
-        """Get combined stats across all categories."""
+        """Get combined stats across all categories.
+
+        Raises:
+            ValueError: If no metrics have been recorded across any category.
+        """
         overall_tracker = LatencyTracker()
         for tracker in self.trackers.values():
             for metric in tracker.metrics:
                 overall_tracker.record(metric)
+
+        if not overall_tracker.metrics:
+            raise ValueError("No metrics recorded across any category")
+
         return overall_tracker.get_stats()
 
 
@@ -320,14 +328,17 @@ def format_latency_report(stats: LatencyStats) -> str:
     ]
 
     if stats.ttfc_mean is not None:
-        lines.extend([
+        ttfc_lines = [
             "TIME TO FIRST CONTENT (TTFC):",
             f"  Mean:   {stats.ttfc_mean * 1000:.1f} ms",
             f"  Median: {stats.ttfc_median * 1000:.1f} ms",
-            f"  P90:    {stats.ttfc_p90 * 1000:.1f} ms" if stats.ttfc_p90 else "",
-            f"  P95:    {stats.ttfc_p95 * 1000:.1f} ms" if stats.ttfc_p95 else "",
-            "",
-        ])
+        ]
+        if stats.ttfc_p90 is not None:
+            ttfc_lines.append(f"  P90:    {stats.ttfc_p90 * 1000:.1f} ms")
+        if stats.ttfc_p95 is not None:
+            ttfc_lines.append(f"  P95:    {stats.ttfc_p95 * 1000:.1f} ms")
+        ttfc_lines.append("")
+        lines.extend(ttfc_lines)
 
     lines.extend([
         "TOTAL DURATION:",

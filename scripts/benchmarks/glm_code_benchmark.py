@@ -15,7 +15,6 @@ import json
 import logging
 import os
 import sys
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -35,11 +34,10 @@ from benchmark_config import (
 )
 from latency_tracker import (
     CategoryLatencyTracker,
-    LatencyTracker,
     format_latency_report,
 )
-from quality_evaluator import QualityEvaluator, QualityScore
-from soundsgood_client import CompletionResponse, SoundsgoodClient
+from quality_evaluator import QualityEvaluator
+from soundsgood_client import SoundsgoodClient
 
 # Configure logging
 logging.basicConfig(
@@ -91,7 +89,7 @@ class BenchmarkOrchestrator:
                 await self._run_warmup(model_client, use_streaming)
 
                 # Run tests by category
-                for category in TestCategory:
+                for category in list(TestCategory):
                     category_cases = [
                         tc for tc in test_cases if tc.category == category
                     ]
@@ -119,7 +117,7 @@ class BenchmarkOrchestrator:
         test_cases = []
         prompts_dir = Path(__file__).parent / "test_prompts"
 
-        for category in TestCategory:
+        for category in list(TestCategory):
             file_path = prompts_dir / f"{category.value}.json"
             if file_path.exists():
                 with open(file_path) as f:
@@ -242,7 +240,7 @@ class BenchmarkOrchestrator:
                 reasoning_content=response.reasoning,
                 raw_response=response.raw_response,
                 ttfb_seconds=response.ttfb_seconds,
-                ttfc_seconds=None,  # TODO: track TTFC in streaming
+                ttfc_seconds=getattr(response, "ttfc_seconds", None),
                 total_duration_seconds=response.total_duration_seconds,
                 input_tokens=response.input_tokens,
                 output_tokens=response.output_tokens,
@@ -284,8 +282,8 @@ class BenchmarkOrchestrator:
         total_duration = (end_time - start_time).total_seconds()
 
         # Calculate category results
-        category_results = {}
-        for category in TestCategory:
+        category_results: dict[TestCategory, CategoryResult] = {}
+        for category in list(TestCategory):
             cat_results = [r for r in self.results if r.test_case.category == category]
             if cat_results:
                 category_results[category] = self._calculate_category_result(
@@ -580,15 +578,10 @@ async def main():
         description="GLM-4.5-Air Code Router Benchmark"
     )
     parser.add_argument(
-        "--streaming",
-        action="store_true",
-        default=True,
-        help="Use streaming mode for requests (default: True)",
-    )
-    parser.add_argument(
         "--no-streaming",
         action="store_true",
-        help="Disable streaming mode",
+        default=False,
+        help="Disable streaming mode (streaming is enabled by default)",
     )
     parser.add_argument(
         "--iterations",

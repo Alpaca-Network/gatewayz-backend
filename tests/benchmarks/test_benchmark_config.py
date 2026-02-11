@@ -1,6 +1,5 @@
 """Tests for benchmark configuration module."""
 
-import os
 import sys
 from pathlib import Path
 

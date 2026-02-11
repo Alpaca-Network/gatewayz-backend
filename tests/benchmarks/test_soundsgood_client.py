@@ -227,7 +227,7 @@ class TestStreamingParsing:
 
     def test_sse_line_parsing(self, model_config):
         """Test that SSE lines are properly identified."""
-        client = SoundsgoodClient(model_config)
+        _ = SoundsgoodClient(model_config)  # Verify client can be instantiated
 
         # Simulated SSE lines
         lines = [

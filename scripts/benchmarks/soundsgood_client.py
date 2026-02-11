@@ -9,9 +9,15 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any
 
 import httpx
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from benchmark_config import ModelConfig
 
@@ -41,6 +47,7 @@ class CompletionResponse:
 
     # Timing
     ttfb_seconds: float
+    ttfc_seconds: float | None  # Time to first content (streaming only)
     total_duration_seconds: float
 
     # Raw response for debugging
@@ -77,6 +84,15 @@ class SoundsgoodClient:
     async def __aexit__(self, *args) -> None:
         if self._client:
             await self._client.aclose()
+            self._client = None
+
+    def _ensure_client(self) -> httpx.AsyncClient:
+        """Ensure client is initialized and return it."""
+        if self._client is None:
+            raise RuntimeError(
+                "Client not initialized. Use 'async with SoundsgoodClient(...) as client:'"
+            )
+        return self._client
 
     @property
     def headers(self) -> dict[str, str]:
@@ -86,6 +102,12 @@ class SoundsgoodClient:
             "Content-Type": "application/json",
         }
 
+    @retry(
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        reraise=True,
+    )
     async def complete(
         self,
         messages: list[dict[str, str]],
@@ -140,7 +162,8 @@ class SoundsgoodClient:
         self, payload: dict[str, Any], start_time: float
     ) -> CompletionResponse:
         """Handle non-streaming completion."""
-        response = await self._client.post(
+        client = self._ensure_client()
+        response = await client.post(
             f"{self.config.api_base_url}/chat/completions",
             headers=self.headers,
             json=payload,
@@ -170,7 +193,8 @@ class SoundsgoodClient:
         model = ""
         finish_reason = ""
 
-        async with self._client.stream(
+        client = self._ensure_client()
+        async with client.stream(
             "POST",
             f"{self.config.api_base_url}/chat/completions",
             headers=self.headers,
@@ -238,6 +262,7 @@ class SoundsgoodClient:
             cost_usd_input=usage_data.get("cost_usd_input", 0.0),
             cost_usd_output=usage_data.get("cost_usd_output", 0.0),
             ttfb_seconds=ttfb_time - start_time if ttfb_time else end_time - start_time,
+            ttfc_seconds=ttfc_time - start_time if ttfc_time else None,
             total_duration_seconds=end_time - start_time,
             raw_response={
                 "id": response_id,
@@ -276,6 +301,7 @@ class SoundsgoodClient:
             cost_usd_input=usage.get("cost_usd_input", 0.0),
             cost_usd_output=usage.get("cost_usd_output", 0.0),
             ttfb_seconds=ttfb_seconds,
+            ttfc_seconds=None,  # Not available for non-streaming
             total_duration_seconds=total_duration_seconds,
             raw_response=data,
         )
@@ -301,7 +327,7 @@ async def test_client():
     config = SOUNDSGOOD_GLM_45_AIR
 
     print(f"Testing {config.model_id} at {config.api_base_url}")
-    print(f"API Key: {config.api_key[:20]}..." if config.api_key else "No API key!")
+    print(f"API Key: {'configured' if config.api_key else 'NOT SET'}")
 
     async with SoundsgoodClient(config) as client:
         # Test non-streaming

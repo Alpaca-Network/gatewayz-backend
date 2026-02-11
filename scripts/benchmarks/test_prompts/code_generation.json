@@ -32,10 +32,10 @@
     {
       "id": "cg_004",
       "difficulty": "easy",
-      "prompt": "Write a Python function `reverse_words(s: str) -> str` that reverses the order of words in a string while preserving whitespace.",
-      "expected_behavior": "Correctly reverses word order",
-      "evaluation_criteria": ["correct_logic", "handles_whitespace", "type_hints"],
-      "test_code": "assert reverse_words('hello world') == 'world hello'\nassert reverse_words('  hello   world  ') == '  world   hello  '\nassert reverse_words('a') == 'a'",
+      "prompt": "Write a Python function `reverse_words(s: str) -> str` that reverses the order of words in a string. Words are separated by single spaces, and the result should have single spaces between words.",
+      "expected_behavior": "Correctly reverses word order with single spaces",
+      "evaluation_criteria": ["correct_logic", "handles_single_word", "type_hints"],
+      "test_code": "assert reverse_words('hello world') == 'world hello'\nassert reverse_words('the quick brown fox') == 'fox brown quick the'\nassert reverse_words('a') == 'a'\nassert reverse_words('') == ''",
       "tags": ["string", "easy"]
     },
     {
@@ -131,9 +131,9 @@
     {
       "id": "cg_015",
       "difficulty": "medium",
-      "prompt": "Write a Python function `rotate_matrix(matrix: list[list[int]]) -> list[list[int]]` that rotates an NxN matrix 90 degrees clockwise in-place.",
-      "expected_behavior": "Rotates matrix correctly",
-      "evaluation_criteria": ["correct_logic", "in_place_preferred", "type_hints"],
+      "prompt": "Write a Python function `rotate_matrix(matrix: list[list[int]]) -> list[list[int]]` that rotates an NxN matrix 90 degrees clockwise and returns the rotated matrix.",
+      "expected_behavior": "Rotates matrix correctly and returns it",
+      "evaluation_criteria": ["correct_logic", "returns_rotated", "type_hints"],
       "test_code": "assert rotate_matrix([[1, 2], [3, 4]]) == [[3, 1], [4, 2]]\nassert rotate_matrix([[1]]) == [[1]]",
       "tags": ["matrix", "medium"]
     },
@@ -152,7 +152,7 @@
       "prompt": "Write a Python function `serialize_binary_tree(root) -> str` and `deserialize_binary_tree(data: str)` for a binary tree node with `val`, `left`, `right` attributes.",
       "expected_behavior": "Correctly serializes and deserializes binary tree",
       "evaluation_criteria": ["correct_algorithm", "handles_null_nodes", "reversible", "type_hints"],
-      "test_code": "# Manual test: serialize then deserialize should return equivalent tree",
+      "test_code": "class TreeNode:\n    def __init__(self, val=0, left=None, right=None):\n        self.val = val\n        self.left = left\n        self.right = right\n\nroot = TreeNode(1, TreeNode(2), TreeNode(3, TreeNode(4), TreeNode(5)))\nserialized = serialize_binary_tree(root)\ndeserialized = deserialize_binary_tree(serialized)\nassert deserialized.val == 1\nassert deserialized.left.val == 2\nassert deserialized.right.val == 3",
       "tags": ["tree", "serialization", "hard"]
     },
     {

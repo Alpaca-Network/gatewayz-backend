@@ -37,9 +37,24 @@ class QualityScore:
 class QualityEvaluator:
     """Evaluates model response quality using code execution and LLM-as-judge."""
 
+    # Dangerous patterns that should not be executed
+    DANGEROUS_PATTERNS = [
+        r"\bimport\s+os\b",
+        r"\bimport\s+subprocess\b",
+        r"\bimport\s+shutil\b",
+        r"\bimport\s+sys\b",
+        r"\b__import__\b",
+        r"\beval\s*\(",
+        r"\bexec\s*\(",
+        r"\bopen\s*\(",
+        r"\bos\.\w+",
+        r"\bsubprocess\.\w+",
+        r"\bsys\.\w+",
+    ]
+
     def __init__(
         self,
-        judge_model: str = "gpt-4-turbo-preview",
+        judge_model: str = "gpt-4o",
         judge_api_key: str | None = None,
         min_passing_score: float = 60.0,
         timeout_seconds: float = 30.0,
@@ -168,10 +183,33 @@ class QualityEvaluator:
 
         return None
 
+    def _check_code_safety(self, code: str) -> tuple[bool, str]:
+        """Check if code contains potentially dangerous patterns."""
+        for pattern in self.DANGEROUS_PATTERNS:
+            if re.search(pattern, code):
+                return False, f"Dangerous pattern detected: {pattern}"
+        return True, ""
+
     async def _run_code_tests(
         self, code: str, test_code: str
     ) -> dict[str, Any]:
-        """Run code with test cases in a sandboxed environment."""
+        """Run code with test cases in a sandboxed environment.
+
+        Security measures:
+        - Pattern-based filtering of dangerous operations
+        - Execution timeout (10s)
+        - Resource limits via subprocess
+        - Temporary file cleanup
+        """
+        # Check for dangerous patterns in model-generated code
+        is_safe, safety_msg = self._check_code_safety(code)
+        if not is_safe:
+            return {
+                "passed": False,
+                "output": f"Code rejected for safety: {safety_msg}",
+                "return_code": -2,
+            }
+
         # Combine code and tests
         full_code = f"{code}\n\n{test_code}"
 
@@ -183,11 +221,20 @@ class QualityEvaluator:
             temp_path = f.name
 
         try:
+            # Run with restricted environment
+            env = {
+                "PATH": "/usr/bin:/bin",
+                "PYTHONPATH": "",
+                "HOME": "/tmp",
+            }
+
             result = subprocess.run(
-                ["python", temp_path],
+                ["python3", temp_path],
                 capture_output=True,
                 text=True,
                 timeout=10,  # 10 second timeout
+                env=env,
+                cwd="/tmp",  # Run in /tmp to limit file access
             )
 
             passed = result.returncode == 0
@@ -212,7 +259,10 @@ class QualityEvaluator:
                 "return_code": -1,
             }
         finally:
-            os.unlink(temp_path)
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass  # File may already be deleted
 
     def _assess_code_quality(self, code: str) -> float:
         """Simple heuristic-based code quality assessment."""

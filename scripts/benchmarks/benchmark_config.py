@@ -97,7 +97,7 @@ class BenchmarkConfig:
     streaming_timeout_seconds: float = 180.0
 
     # Judge model for quality evaluation
-    judge_model: str = "gpt-4-turbo-preview"
+    judge_model: str = "gpt-4o"
     judge_api_key_env: str = "OPENAI_API_KEY"
 
 

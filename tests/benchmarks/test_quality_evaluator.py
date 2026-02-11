@@ -256,9 +256,6 @@ class TestEvaluateCodeGeneration:
     @pytest.mark.asyncio
     async def test_evaluate_code_gen_passed(self):
         """Test evaluating passing code generation."""
-        evaluator = QualityEvaluator()
-        await evaluator.__aenter__()
-
         test_case = TestCase(
             id="cg_001",
             category=TestCategory.CODE_GENERATION,
@@ -277,9 +274,8 @@ def add(a, b):
     return a + b
 ```"""
 
-        score = await evaluator._evaluate_code_generation(test_case, response)
-
-        await evaluator.__aexit__(None, None, None)
+        async with QualityEvaluator() as evaluator:
+            score = await evaluator._evaluate_code_generation(test_case, response)
 
         assert score.overall_score >= 85.0
         assert score.passed is True
@@ -288,9 +284,6 @@ def add(a, b):
     @pytest.mark.asyncio
     async def test_evaluate_code_gen_no_code(self):
         """Test evaluating response with no extractable code."""
-        evaluator = QualityEvaluator()
-        await evaluator.__aenter__()
-
         test_case = TestCase(
             id="cg_002",
             category=TestCategory.CODE_GENERATION,
@@ -303,9 +296,8 @@ def add(a, b):
 
         response = "I cannot provide code for this request."
 
-        score = await evaluator._evaluate_code_generation(test_case, response)
-
-        await evaluator.__aexit__(None, None, None)
+        async with QualityEvaluator() as evaluator:
+            score = await evaluator._evaluate_code_generation(test_case, response)
 
         assert score.overall_score == 0.0
         assert score.passed is False
