@@ -61,10 +61,12 @@ python-logging-loki>=0.3.1
 arize-otel>=0.11.0
 openinference-instrumentation-openai>=0.1.41
 
-# OpenLLMetry (Traceloop SDK) - Standardized LLM Observability
-# Auto-instruments OpenAI, Anthropic SDKs with gen_ai.* semantic conventions
-# Using >=0.45.0 for posthog 6.x compatibility (0.36.x requires posthog<4)
-traceloop-sdk>=0.45.0
+# OpenLLMetry (Traceloop SDK) - Standardized LLM Observability (optional)
+# Excluded from main requirements due to 30+ transitive instrumentation packages
+# (cohere, crewai, llamaindex, marqo, etc.) that cause dependency conflicts.
+# Code gracefully falls back when not installed (see traceloop_config.py).
+# To enable OpenLLMetry, install separately: pip install traceloop-sdk
+# traceloop-sdk>=0.45.0
 
 # Langfuse - LLM Observability & Analytics
 # Provides tracing, scoring, and analytics for LLM applications
