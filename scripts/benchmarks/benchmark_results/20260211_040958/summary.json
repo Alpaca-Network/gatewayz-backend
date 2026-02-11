@@ -1,0 +1,130 @@
+{
+  "run_id": "20260211_040958",
+  "model_id": "zai-org/GLM-4.5-Air",
+  "started_at": "2026-02-11T04:09:58.188356",
+  "completed_at": "2026-02-11T04:22:20.125563",
+  "total_duration_seconds": 741.937207,
+  "weighted_quality_score": 20.702499999999997,
+  "recommended_tier": 5,
+  "tier_reasoning": "Score 20.7 below Tier 4 threshold",
+  "overall_ttfb_p95_ms": 723.4423798625356,
+  "overall_tps_mean": 35.53937589922952,
+  "meets_latency_targets": true,
+  "total_cost_usd": 0.08761799999999999,
+  "estimated_cost_per_1k_requests": 1.4603,
+  "strengths": [],
+  "weaknesses": [
+    "Weak code_generation: 59.1",
+    "High error rate in code_generation: 35.0%",
+    "Weak reasoning: 0.0",
+    "High error rate in reasoning: 100.0%",
+    "Weak debugging: 0.0",
+    "High error rate in debugging: 100.0%",
+    "Weak refactoring: 0.0",
+    "High error rate in refactoring: 100.0%"
+  ],
+  "category_results": {
+    "code_generation": {
+      "test_count": 20,
+      "pass_count": 13,
+      "fail_count": 7,
+      "avg_quality_score": 59.15,
+      "min_quality_score": 0.0,
+      "max_quality_score": 91.0,
+      "ttfb_mean_ms": 521.672591753304,
+      "ttfb_p95_ms": 618.9656928763726,
+      "tps_mean": 53.15506395750313,
+      "total_cost_usd": 0.02549277,
+      "error_rate": 0.35
+    },
+    "reasoning": {
+      "test_count": 15,
+      "pass_count": 0,
+      "fail_count": 15,
+      "avg_quality_score": 0.0,
+      "min_quality_score": 0.0,
+      "max_quality_score": 0.0,
+      "ttfb_mean_ms": 535.7200740526121,
+      "ttfb_p95_ms": 657.5945902150125,
+      "tps_mean": 17.993365798653866,
+      "total_cost_usd": 0.02719194,
+      "error_rate": 1.0
+    },
+    "debugging": {
+      "test_count": 15,
+      "pass_count": 0,
+      "fail_count": 15,
+      "avg_quality_score": 0.0,
+      "min_quality_score": 0.0,
+      "max_quality_score": 0.0,
+      "ttfb_mean_ms": 619.8811568009357,
+      "ttfb_p95_ms": 846.652944595553,
+      "tps_mean": 22.841533146232717,
+      "total_cost_usd": 0.022191060000000002,
+      "error_rate": 1.0
+    },
+    "refactoring": {
+      "test_count": 10,
+      "pass_count": 0,
+      "fail_count": 10,
+      "avg_quality_score": 0.0,
+      "min_quality_score": 0.0,
+      "max_quality_score": 0.0,
+      "ttfb_mean_ms": 503.6369701847434,
+      "ttfb_p95_ms": 587.5627528643236,
+      "tps_mean": 45.67377906304097,
+      "total_cost_usd": 0.01274223,
+      "error_rate": 1.0
+    }
+  },
+  "baseline_comparison": {
+    "tier_1": {
+      "claude-3.5-sonnet": {
+        "their_humaneval": 92.0,
+        "our_score": 20.702499999999997,
+        "relative": 22.502717391304344
+      },
+      "openai/o1": {
+        "their_humaneval": 94.4,
+        "our_score": 20.702499999999997,
+        "relative": 21.930614406779654
+      }
+    },
+    "tier_2": {
+      "claude-3.5-haiku": {
+        "their_humaneval": 88.1,
+        "our_score": 20.702499999999997,
+        "relative": 23.498864926220204
+      },
+      "deepseek-v3": {
+        "their_humaneval": 82.6,
+        "our_score": 20.702499999999997,
+        "relative": 25.063559322033896
+      },
+      "gpt-4o": {
+        "their_humaneval": 90.2,
+        "our_score": 20.702499999999997,
+        "relative": 22.95177383592017
+      }
+    },
+    "tier_3": {
+      "qwen-2.5-coder-32b": {
+        "their_humaneval": 86.2,
+        "our_score": 20.702499999999997,
+        "relative": 24.016821345707655
+      },
+      "llama-3.3-70b": {
+        "their_humaneval": 82.5,
+        "our_score": 20.702499999999997,
+        "relative": 25.09393939393939
+      }
+    },
+    "tier_4": {
+      "zai/glm-4.7": {
+        "their_humaneval": 78.4,
+        "our_score": 20.702499999999997,
+        "relative": 26.406249999999993
+      }
+    }
+  }
+}
