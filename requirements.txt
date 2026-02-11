@@ -48,14 +48,14 @@ APScheduler==3.10.4
 
 # OpenTelemetry - Pinned to prevent dependency resolution backtracking
 # packaging==24.0 (removed)
-opentelemetry-api==1.33.1
-opentelemetry-sdk==1.33.1
-opentelemetry-instrumentation
-opentelemetry-instrumentation-fastapi
-opentelemetry-instrumentation-httpx
-opentelemetry-instrumentation-requests
-opentelemetry-instrumentation-redis
-opentelemetry-exporter-otlp==1.33.1
+opentelemetry-api==1.33.0
+opentelemetry-sdk==1.33.0
+opentelemetry-instrumentation==0.54b0
+opentelemetry-instrumentation-fastapi==0.54b0
+opentelemetry-instrumentation-httpx==0.54b0
+opentelemetry-instrumentation-requests==0.54b0
+opentelemetry-instrumentation-redis==0.54b0
+opentelemetry-exporter-otlp==1.33.0
 
 # Loki Logging
 python-json-logger>=2.0.7
@@ -75,7 +75,7 @@ openinference-instrumentation-openai==0.1.41
 # Langfuse - LLM Observability & Analytics - Pinned to prevent issues
 # Provides tracing, scoring, and analytics for LLM applications
 # See: https://langfuse.com
-langfuse==3.0.0
+langfuse==2.50.0
 
 # Testing dependencies
 pytest==7.4.3
