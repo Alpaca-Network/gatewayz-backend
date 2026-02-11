@@ -3,8 +3,6 @@
 import sys
 from pathlib import Path
 
-import pytest
-
 # Add benchmark scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "scripts" / "benchmarks"))
 
@@ -12,7 +10,6 @@ from benchmark_config import (
     BASELINE_MODELS,
     SOUNDSGOOD_GLM_45_AIR,
     BenchmarkConfig,
-    CategoryResult,
     Difficulty,
     ModelConfig,
     TestCase,

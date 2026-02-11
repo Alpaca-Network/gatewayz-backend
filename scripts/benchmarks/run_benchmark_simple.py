@@ -368,6 +368,10 @@ class SoundsgoodBenchmark:
             p95_idx = int(len(sorted_ttfb) * 0.95)
             print(f"  TTFB P95:    {sorted_ttfb[min(p95_idx, len(sorted_ttfb)-1)]*1000:.0f} ms")
 
+        if duration_values:
+            print(f"\n  Duration Mean:   {statistics.mean(duration_values)*1000:.0f} ms")
+            print(f"  Duration Median: {statistics.median(duration_values)*1000:.0f} ms")
+
         if tps_values:
             print(f"\n  TPS Mean:    {statistics.mean(tps_values):.1f} tokens/sec")
             print(f"  TPS Median:  {statistics.median(tps_values):.1f} tokens/sec")
