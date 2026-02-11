@@ -50,12 +50,14 @@ APScheduler==3.10.4
 # packaging==24.0 (removed)
 opentelemetry-api==1.33.0
 opentelemetry-sdk==1.33.0
-opentelemetry-instrumentation==0.54b0
-opentelemetry-instrumentation-fastapi==0.54b0
-opentelemetry-instrumentation-httpx==0.54b0
-opentelemetry-instrumentation-requests==0.54b0
-opentelemetry-instrumentation-redis==0.54b0
-opentelemetry-exporter-otlp-proto-http==1.33.0
+# OTel instrumentation disabled - httpx instrumentation breaks SSE streaming
+# in chat/completions. Re-enable once streaming-compatible instrumentation is available.
+# opentelemetry-instrumentation==0.54b0
+# opentelemetry-instrumentation-fastapi==0.54b0
+# opentelemetry-instrumentation-httpx==0.54b0
+# opentelemetry-instrumentation-requests==0.54b0
+# opentelemetry-instrumentation-redis==0.54b0
+# opentelemetry-exporter-otlp-proto-http==1.33.0
 
 # Loki Logging
 python-json-logger>=2.0.7
