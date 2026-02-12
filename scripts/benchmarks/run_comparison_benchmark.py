@@ -147,6 +147,7 @@ class ZAIBenchmark(BaseBenchmark):
         messages: list[dict],
         max_tokens: int = 2000,
         temperature: float = 0.7,
+        enable_thinking: bool = False,
     ) -> dict:
         """Make a streaming request to Z.AI API."""
         payload = {
@@ -155,6 +156,7 @@ class ZAIBenchmark(BaseBenchmark):
             "max_tokens": max_tokens,
             "temperature": temperature,
             "stream": True,
+            "thinking": {"type": "enabled" if enable_thinking else "disabled"},
         }
 
         headers = {
