@@ -415,6 +415,21 @@ class Config:
     CONCURRENCY_QUEUE_SIZE = int(os.environ.get("CONCURRENCY_QUEUE_SIZE", "50"))
     CONCURRENCY_QUEUE_TIMEOUT = float(os.environ.get("CONCURRENCY_QUEUE_TIMEOUT", "10.0"))
 
+    # Per-API-Key Concurrency Control (prevents single key from monopolizing server)
+    PER_KEY_CONCURRENCY_LIMIT = int(os.environ.get("PER_KEY_CONCURRENCY_LIMIT", "5"))
+    PER_KEY_MAX_TRACKED_KEYS = int(os.environ.get("PER_KEY_MAX_TRACKED_KEYS", "2000"))
+
+    # Thread Pool Configuration (default asyncio executor for to_thread calls)
+    # Default asyncio executor is min(32, cpu_count+4) which is ~6 on 1-2 vCPU containers
+    THREAD_POOL_MAX_WORKERS = int(os.environ.get("THREAD_POOL_MAX_WORKERS", "40"))
+
+    # Streaming Request Timeout (bounded timeout for streaming endpoints, in seconds)
+    # Chat/completions was previously fully exempt from timeouts, allowing zombie connections
+    STREAMING_REQUEST_TIMEOUT = float(os.environ.get("STREAMING_REQUEST_TIMEOUT", "300.0"))
+
+    # SSE Keepalive Interval (seconds between keepalive pings during TTFC wait)
+    SSE_KEEPALIVE_INTERVAL = float(os.environ.get("SSE_KEEPALIVE_INTERVAL", "15.0"))
+
     # Pricing Sync Scheduler Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
 
