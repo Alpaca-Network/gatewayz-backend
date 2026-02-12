@@ -236,7 +236,9 @@ class TestConvenienceFunctions:
         result = invalidate_gateway_catalog("openrouter")
 
         assert result is True
-        mock_cache.invalidate_gateway_catalog.assert_called_once_with("openrouter")
+        mock_cache.invalidate_gateway_catalog.assert_called_once_with(
+            "openrouter", cascade=False, debounce=False
+        )
 
     @patch("src.services.model_catalog_cache.get_model_catalog_cache")
     def test_cache_unique_models_convenience(self, mock_get_cache):
@@ -263,6 +265,124 @@ class TestConvenienceFunctions:
 
         assert result is True
         mock_cache.set_catalog_stats.assert_called_once_with(test_stats, ttl=900)
+
+
+class TestBatchInvalidation:
+    """Test batch invalidation with Redis pipeline (Issue #1098)"""
+
+    def test_invalidate_providers_batch_success(self, mock_redis, mock_redis_available):
+        """Test successful batch invalidation of multiple providers"""
+        cache = ModelCatalogCache()
+
+        # Mock pipeline
+        mock_pipeline = MagicMock()
+        mock_redis.pipeline.return_value = mock_pipeline
+        mock_pipeline.execute.return_value = [1, 1, 1]  # 3 keys deleted
+
+        providers = ["openrouter", "groq", "anthropic"]
+        result = cache.invalidate_providers_batch(providers, cascade=False)
+
+        # Verify pipeline was created and used
+        assert mock_redis.pipeline.called
+        assert mock_pipeline.delete.call_count == 3
+        assert mock_pipeline.execute.called
+
+        # Verify result
+        assert result["success"] is True
+        assert result["providers_invalidated"] == 3
+        assert result["keys_deleted"] == 3
+        assert "duration_ms" in result
+        assert result["cascade"] is False
+
+    def test_invalidate_providers_batch_with_cascade(self, mock_redis, mock_redis_available):
+        """Test batch invalidation with cascade to full catalog"""
+        cache = ModelCatalogCache()
+
+        # Mock pipeline
+        mock_pipeline = MagicMock()
+        mock_redis.pipeline.return_value = mock_pipeline
+        mock_pipeline.execute.return_value = [1, 1]  # 2 keys deleted
+
+        providers = ["openrouter", "groq"]
+        result = cache.invalidate_providers_batch(providers, cascade=True)
+
+        # Verify cascade invalidation occurred
+        assert result["success"] is True
+        assert result["cascade"] is True
+        # Should delete full catalog after provider deletions
+        assert mock_redis.delete.call_count >= 1  # Full catalog invalidation
+
+    def test_invalidate_providers_batch_empty_list(self, mock_redis, mock_redis_available):
+        """Test batch invalidation with empty provider list"""
+        cache = ModelCatalogCache()
+
+        result = cache.invalidate_providers_batch([], cascade=False)
+
+        # Should succeed but do nothing
+        assert result["success"] is True
+        assert result["providers_invalidated"] == 0
+        assert result["keys_deleted"] == 0
+        assert result["duration_ms"] == 0
+        assert not mock_redis.pipeline.called
+
+    def test_invalidate_providers_batch_redis_unavailable(self):
+        """Test batch invalidation when Redis is unavailable"""
+        with patch("src.services.model_catalog_cache.is_redis_available") as mock_available:
+            mock_available.return_value = False
+
+            cache = ModelCatalogCache()
+            providers = ["openrouter", "groq"]
+            result = cache.invalidate_providers_batch(providers, cascade=False)
+
+            # Should fail gracefully
+            assert result["success"] is False
+            assert result["providers_invalidated"] == 0
+            assert result["keys_deleted"] == 0
+            assert "error" in result
+            assert result["error"] == "Redis unavailable"
+
+    def test_invalidate_providers_batch_pipeline_error(self, mock_redis, mock_redis_available):
+        """Test batch invalidation when pipeline raises exception"""
+        cache = ModelCatalogCache()
+
+        # Mock pipeline to raise exception
+        mock_pipeline = MagicMock()
+        mock_redis.pipeline.return_value = mock_pipeline
+        mock_pipeline.execute.side_effect = Exception("Pipeline error")
+
+        providers = ["openrouter", "groq"]
+        result = cache.invalidate_providers_batch(providers, cascade=False)
+
+        # Should fail with error details
+        assert result["success"] is False
+        assert result["providers_invalidated"] == 0
+        assert result["keys_deleted"] == 0
+        assert "error" in result
+        assert "Pipeline error" in result["error"]
+        assert "duration_ms" in result
+
+    def test_invalidate_providers_batch_performance(self, mock_redis, mock_redis_available):
+        """Test that batch invalidation uses single pipeline operation"""
+        cache = ModelCatalogCache()
+
+        # Mock pipeline
+        mock_pipeline = MagicMock()
+        mock_redis.pipeline.return_value = mock_pipeline
+        mock_pipeline.execute.return_value = [1] * 30  # 30 keys deleted
+
+        # Simulate invalidating 30 providers (all gateways)
+        providers = [f"provider-{i}" for i in range(30)]
+        result = cache.invalidate_providers_batch(providers, cascade=False)
+
+        # Should use only ONE pipeline call regardless of number of providers
+        assert mock_redis.pipeline.call_count == 1
+        assert mock_pipeline.execute.call_count == 1
+        # Should queue all deletions in pipeline
+        assert mock_pipeline.delete.call_count == 30
+
+        assert result["success"] is True
+        assert result["providers_invalidated"] == 30
+        assert result["keys_deleted"] == 30
 
 
 class TestCacheIntegration:

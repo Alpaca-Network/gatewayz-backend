@@ -15,7 +15,7 @@ from html import escape
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from src.services.model_catalog_cache import (
@@ -1140,6 +1140,50 @@ async def trigger_gateway_fix(
 # ============================================================================
 
 
+@router.get("/cache/debouncer/stats", tags=["cache", "monitoring"])
+async def get_cache_debouncer_stats():
+    """
+    Get cache debouncer statistics (Issue #1099).
+
+    Shows effectiveness of debouncing in preventing cache thrashing:
+    - Number of invalidations scheduled
+    - Number executed vs coalesced (deduplicated)
+    - Efficiency percentage
+    - Currently pending invalidations
+
+    Returns detailed metrics about the cache debouncing system.
+    """
+    try:
+        from src.services.model_catalog_cache import _invalidation_debouncer
+
+        debouncer_stats = _invalidation_debouncer.get_stats()
+
+        return {
+            "success": True,
+            "debouncer": {
+                "status": "active",
+                "delay_seconds": _invalidation_debouncer.delay,
+                "scheduled": debouncer_stats["scheduled"],
+                "executed": debouncer_stats["executed"],
+                "coalesced": debouncer_stats["coalesced"],
+                "pending": debouncer_stats["pending_count"],
+                "efficiency_percent": debouncer_stats["efficiency_percent"],
+                "description": "Coalesces rapid invalidation requests to prevent cache thrashing (Issue #1099)",
+            },
+            "impact": {
+                "operations_prevented": debouncer_stats["coalesced"],
+                "operations_saved_percent": debouncer_stats["efficiency_percent"],
+                "status": "healthy" if debouncer_stats["efficiency_percent"] > 0 else "idle"
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache debouncer stats: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get cache debouncer stats: {str(e)}"
+        ) from e
+
+
 @router.get("/cache/warmer/stats", tags=["cache", "monitoring"])
 async def get_cache_warmer_stats():
     """
@@ -1877,8 +1921,76 @@ async def clear_modelz_cache_endpoint():
         ) from e
 
 
+def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> None:
+    """
+    Background task: Perform cache invalidation operations with debouncing.
+
+    This function runs in the background to avoid blocking the API response.
+    Performs all cache invalidation operations including gateway caches,
+    provider caches, and pricing refresh.
+
+    Debouncing is enabled by default to prevent cache thrashing from rapid-fire
+    requests (Issue #1099). Multiple invalidation requests within 1 second are
+    coalesced into a single operation.
+
+    Args:
+        gateway: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
+        cache_type: Optional cache type ('models', 'providers', 'pricing')
+    """
+    try:
+        start_time = datetime.now(timezone.utc)
+        invalidated = []
+
+        if gateway:
+            gateway = gateway.lower()
+            logger.info(f"Background task: Invalidating cache for gateway '{gateway}' (debounced)")
+            # Enable debouncing for frontend-triggered invalidations (Issue #1099)
+            clear_models_cache(gateway, debounce=True)
+            invalidated.append(f"models:{gateway}")
+        elif cache_type == "models":
+            # Clear all gateway model caches using batch operation (Issue #1099)
+            gateways = get_all_gateway_names()
+            logger.info(f"Background task: Batch invalidating model caches for {len(gateways)} gateways")
+            # Use batch invalidation for better performance (1 Redis operation vs 30+)
+            from src.services.model_catalog_cache import get_model_catalog_cache
+            cache = get_model_catalog_cache()
+            result = cache.invalidate_providers_batch(gateways, cascade=False)
+            logger.info(f"Batch invalidation result: {result}")
+            invalidated.extend([f"models:{gw}" for gw in gateways])
+        elif cache_type == "providers":
+            logger.info("Background task: Invalidating provider cache")
+            clear_providers_cache()
+            invalidated.append("providers")
+        elif cache_type == "pricing":
+            logger.info("Background task: Refreshing pricing cache")
+            refresh_pricing_cache()
+            invalidated.append("pricing")
+        else:
+            # Clear all caches using batch operation (Issue #1099)
+            gateways = get_all_gateway_names()
+            logger.info(f"Background task: Batch invalidating all caches ({len(gateways)} gateways + providers + pricing)")
+            # Use batch invalidation for better performance (1 Redis operation vs 30+)
+            from src.services.model_catalog_cache import get_model_catalog_cache
+            cache = get_model_catalog_cache()
+            result = cache.invalidate_providers_batch(gateways, cascade=False)
+            logger.info(f"Batch invalidation result: {result}")
+            clear_providers_cache()
+            refresh_pricing_cache()
+            invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
+
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+        logger.info(
+            f"Background task: Cache invalidation scheduled in {duration:.2f}s. "
+            f"Invalidated (debounced): {', '.join(invalidated[:5])}{' and more...' if len(invalidated) > 5 else ''}"
+        )
+
+    except Exception as e:
+        logger.error(f"Background task: Failed to invalidate cache: {e}", exc_info=True)
+
+
 @router.post("/api/cache/invalidate", tags=["cache"])
 async def invalidate_cache(
+    background_tasks: BackgroundTasks,
     gateway: str | None = Query(
         None, description="Specific gateway cache to invalidate, or all if not specified"
     ),
@@ -1892,6 +2004,9 @@ async def invalidate_cache(
     This endpoint is called by the frontend dashboard to invalidate caches
     after configuration changes.
 
+    **Performance:** Returns immediately and performs invalidation in the background.
+    This prevents long wait times when clearing multiple gateway caches.
+
     **Parameters:**
     - `gateway`: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
     - `cache_type`: Optional cache type ('models', 'providers', 'pricing')
@@ -1900,45 +2015,37 @@ async def invalidate_cache(
     ```bash
     curl -X POST "http://localhost:8000/api/cache/invalidate?gateway=openrouter"
     ```
+
+    **Note:** The actual cache invalidation happens asynchronously in the background.
+    Check logs for completion status.
     """
     try:
-        invalidated = []
-
+        # Determine what will be invalidated for response message
         if gateway:
-            gateway = gateway.lower()
-            clear_models_cache(gateway)
-            invalidated.append(f"models:{gateway}")
-        elif cache_type == "models":
-            # Clear all gateway model caches
-            gateways = get_all_gateway_names()
-            for gw in gateways:
-                clear_models_cache(gw)
-            invalidated.extend([f"models:{gw}" for gw in gateways])
-        elif cache_type == "providers":
-            clear_providers_cache()
-            invalidated.append("providers")
-        elif cache_type == "pricing":
-            refresh_pricing_cache()
-            invalidated.append("pricing")
+            scope = f"gateway '{gateway}'"
+        elif cache_type:
+            scope = f"{cache_type} cache"
         else:
-            # Clear all caches
-            gateways = get_all_gateway_names()
-            for gw in gateways:
-                clear_models_cache(gw)
-            clear_providers_cache()
-            refresh_pricing_cache()
-            invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
+            scope = "all caches"
+
+        # Schedule background task
+        background_tasks.add_task(_perform_cache_invalidation, gateway, cache_type)
+
+        logger.info(f"Cache invalidation task scheduled for: {scope}")
 
         return {
             "success": True,
-            "message": "Cache invalidated successfully",
-            "invalidated": invalidated,
+            "message": f"Cache invalidation started in background for {scope}",
+            "status": "processing",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
-        logger.error(f"Failed to invalidate cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to invalidate cache: {str(e)}") from e
+        logger.error(f"Failed to schedule cache invalidation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to schedule cache invalidation: {str(e)}"
+        ) from e
 
 
 @router.post("/cache/pricing/refresh", tags=["cache", "pricing"])

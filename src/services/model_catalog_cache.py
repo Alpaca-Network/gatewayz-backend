@@ -14,15 +14,131 @@ Cache misses fetch from database (kept fresh by scheduled background sync)
 instead of directly calling provider APIs.
 """
 
+import asyncio
 import json
 import logging
 import threading
+import time
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 from src.config.redis_config import get_redis_client, is_redis_available
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Debouncing Infrastructure (Issue #1099 - Prevent Cache Thrashing)
+# ============================================================================
+
+class InvalidationDebouncer:
+    """
+    Debounces cache invalidation requests to prevent thrashing.
+
+    When multiple invalidation requests arrive rapidly for the same key,
+    only the last one is executed after a delay. This prevents cache thrashing
+    caused by cascading invalidations and rapid-fire requests.
+
+    Example:
+        # Multiple rapid requests for same key:
+        invalidate("openrouter")  # Scheduled for 1s
+        invalidate("openrouter")  # Cancels previous, schedules for 1s
+        invalidate("openrouter")  # Cancels previous, schedules for 1s
+        # Result: Only 1 invalidation executed 1s after last request
+    """
+
+    def __init__(self, delay: float = 1.0):
+        """
+        Initialize debouncer.
+
+        Args:
+            delay: Debounce delay in seconds (default: 1.0)
+        """
+        self.delay = delay
+        self._pending_tasks: dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+        self._stats = {
+            "scheduled": 0,
+            "executed": 0,
+            "coalesced": 0,  # Number of requests that were debounced/skipped
+        }
+
+    def schedule(
+        self,
+        key: str,
+        func: Callable[[], Any],
+        *args,
+        **kwargs
+    ) -> None:
+        """
+        Schedule a debounced invalidation.
+
+        If a request for the same key is already pending, it will be
+        cancelled and replaced with this new request.
+
+        Args:
+            key: Cache key to debounce on
+            func: Function to execute after delay
+            *args: Arguments to pass to func
+            **kwargs: Keyword arguments to pass to func
+        """
+        with self._lock:
+            # Cancel existing pending task for this key
+            if key in self._pending_tasks:
+                self._pending_tasks[key].cancel()
+                self._stats["coalesced"] += 1
+                logger.debug(f"Debounced: Cancelled previous invalidation for '{key}'")
+
+            # Schedule new delayed execution
+            def execute():
+                try:
+                    with self._lock:
+                        if key in self._pending_tasks:
+                            del self._pending_tasks[key]
+
+                    # Execute the actual invalidation
+                    func(*args, **kwargs)
+                    self._stats["executed"] += 1
+                    logger.debug(f"Debounced: Executed invalidation for '{key}'")
+                except Exception as e:
+                    logger.error(f"Debounced invalidation failed for '{key}': {e}")
+
+            timer = threading.Timer(self.delay, execute)
+            timer.start()
+            self._pending_tasks[key] = timer
+            self._stats["scheduled"] += 1
+            logger.debug(f"Debounced: Scheduled invalidation for '{key}' in {self.delay}s")
+
+    def cancel_all(self) -> int:
+        """
+        Cancel all pending debounced invalidations.
+
+        Returns:
+            Number of tasks cancelled
+        """
+        with self._lock:
+            count = len(self._pending_tasks)
+            for timer in self._pending_tasks.values():
+                timer.cancel()
+            self._pending_tasks.clear()
+            logger.debug(f"Debouncer: Cancelled {count} pending invalidations")
+            return count
+
+    def get_stats(self) -> dict[str, Any]:
+        """Get debouncing statistics"""
+        with self._lock:
+            return {
+                **self._stats,
+                "pending_count": len(self._pending_tasks),
+                "efficiency_percent": round(
+                    (self._stats["coalesced"] / max(self._stats["scheduled"], 1)) * 100,
+                    2
+                )
+            }
+
+
+# Global debouncer instance
+_invalidation_debouncer = InvalidationDebouncer(delay=1.0)
 
 
 class CacheErrorType(Enum):
@@ -280,18 +396,39 @@ class ModelCatalogCache:
             logger.warning(f"Cache SET error for provider {provider_name}: {e}")
             return False
 
-    def invalidate_provider_catalog(self, provider_name: str, cascade: bool = True) -> bool:
+    def invalidate_provider_catalog(
+        self,
+        provider_name: str,
+        cascade: bool = False,
+        debounce: bool = False
+    ) -> bool:
         """Invalidate cached catalog for a specific provider.
 
         Args:
             provider_name: Provider name
-            cascade: If True, also invalidate full catalog (default).
-                     Set to False during batch operations where the caller
-                     handles global invalidation once at the end.
+            cascade: If True, also invalidate full catalog. Defaults to False to prevent
+                     cache thrashing from cascading invalidations (Issue #1099).
+                     Only set to True when provider changes truly affect the aggregated
+                     catalog structure (e.g., during single-provider model sync).
+            debounce: If True, debounce this invalidation to coalesce rapid requests
+                     (Issue #1099). Useful for frontend-triggered invalidations.
 
         Returns:
-            True if successful, False otherwise
+            True if successful (or scheduled via debouncing), False otherwise
         """
+        if debounce:
+            # Schedule debounced invalidation
+            debounce_key = f"provider:{provider_name}:cascade={cascade}"
+            _invalidation_debouncer.schedule(
+                debounce_key,
+                self.invalidate_provider_catalog,
+                provider_name=provider_name,
+                cascade=cascade,
+                debounce=False  # Don't re-debounce
+            )
+            logger.debug(f"Cache INVALIDATE (debounced): Provider '{provider_name}'")
+            return True
+
         if not self.redis_client or not is_redis_available():
             return False
 
@@ -469,6 +606,100 @@ class ModelCatalogCache:
 
     # Batch Operations
 
+    def invalidate_providers_batch(
+        self,
+        provider_names: list[str],
+        cascade: bool = False
+    ) -> dict[str, any]:
+        """Batch invalidate multiple provider catalogs using Redis pipeline.
+
+        This method provides significant performance improvements for bulk invalidations:
+        - Single network round-trip for all deletions (vs N round-trips)
+        - Atomic operation (all succeed or all fail)
+        - Reduces latency from ~100ms * N to ~100ms total
+
+        Use this when invalidating multiple providers at once (e.g., full cache refresh).
+
+        Args:
+            provider_names: List of provider names to invalidate
+            cascade: If True, invalidate full catalog once at the end
+
+        Returns:
+            dict with:
+            - success: bool
+            - providers_invalidated: int (count)
+            - keys_deleted: int (total Redis keys deleted)
+            - duration_ms: float (operation duration)
+        """
+        if not self.redis_client or not is_redis_available():
+            return {
+                "success": False,
+                "providers_invalidated": 0,
+                "keys_deleted": 0,
+                "error": "Redis unavailable"
+            }
+
+        if not provider_names:
+            return {
+                "success": True,
+                "providers_invalidated": 0,
+                "keys_deleted": 0,
+                "duration_ms": 0
+            }
+
+        import time
+        start_time = time.time()
+
+        try:
+            # Use Redis pipeline for atomic batch operations
+            pipe = self.redis_client.pipeline()
+
+            # Queue all provider deletions
+            for provider_name in provider_names:
+                key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
+                pipe.delete(key)
+
+            # Execute pipeline (single network round-trip)
+            results = pipe.execute()
+
+            # Count successful deletions
+            keys_deleted = sum(1 for result in results if result > 0)
+
+            # Update stats
+            self._stats["invalidations"] += len(provider_names)
+
+            # Cascade invalidation (once, not per provider)
+            if cascade:
+                self.invalidate_full_catalog()
+
+            duration_ms = (time.time() - start_time) * 1000
+
+            logger.info(
+                f"Batch invalidate: {len(provider_names)} providers, "
+                f"{keys_deleted} keys deleted, {duration_ms:.2f}ms "
+                f"(cascade={cascade})"
+            )
+
+            return {
+                "success": True,
+                "providers_invalidated": len(provider_names),
+                "keys_deleted": keys_deleted,
+                "duration_ms": round(duration_ms, 2),
+                "cascade": cascade
+            }
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            duration_ms = (time.time() - start_time) * 1000
+            logger.error(f"Batch invalidate error: {e}", exc_info=True)
+            return {
+                "success": False,
+                "providers_invalidated": 0,
+                "keys_deleted": 0,
+                "duration_ms": round(duration_ms, 2),
+                "error": str(e)
+            }
+
     def invalidate_all_models(self) -> int:
         """Invalidate all cached model data.
 
@@ -583,19 +814,27 @@ class ModelCatalogCache:
         ttl = ttl or self.TTL_GATEWAY
         return self.set_provider_catalog(gateway_name, catalog, ttl=ttl)
 
-    def invalidate_gateway_catalog(self, gateway_name: str, cascade: bool = True) -> bool:
+    def invalidate_gateway_catalog(
+        self,
+        gateway_name: str,
+        cascade: bool = False,
+        debounce: bool = False
+    ) -> bool:
         """Invalidate cached catalog for a specific gateway.
 
         This is an alias for invalidate_provider_catalog to support consistent naming.
 
         Args:
             gateway_name: Gateway name
-            cascade: If True, also invalidate full catalog (default).
+            cascade: If True, also invalidate full catalog. Defaults to False to prevent
+                     cache thrashing from cascading invalidations (Issue #1099).
+            debounce: If True, debounce this invalidation to coalesce rapid requests
+                     (Issue #1099).
 
         Returns:
-            True if successful, False otherwise
+            True if successful (or scheduled via debouncing), False otherwise
         """
-        return self.invalidate_provider_catalog(gateway_name, cascade=cascade)
+        return self.invalidate_provider_catalog(gateway_name, cascade=cascade, debounce=debounce)
 
     # Catalog Statistics Caching
 
@@ -995,10 +1234,25 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
             return []
 
 
-def invalidate_provider_catalog(provider_name: str, cascade: bool = True) -> bool:
-    """Invalidate cached provider catalog"""
+def invalidate_provider_catalog(
+    provider_name: str,
+    cascade: bool = False,
+    debounce: bool = False
+) -> bool:
+    """Invalidate cached provider catalog.
+
+    Args:
+        provider_name: Provider name to invalidate
+        cascade: If True, also invalidate full catalog. Defaults to False to prevent
+                 cache thrashing (Issue #1099).
+        debounce: If True, debounce this invalidation to coalesce rapid requests
+                 (Issue #1099). Recommended for frontend-triggered invalidations.
+
+    Returns:
+        True if successful (or scheduled via debouncing), False otherwise
+    """
     cache = get_model_catalog_cache()
-    return cache.invalidate_provider_catalog(provider_name, cascade=cascade)
+    return cache.invalidate_provider_catalog(provider_name, cascade=cascade, debounce=debounce)
 
 
 def get_catalog_cache_stats() -> dict[str, Any]:
@@ -1128,10 +1382,25 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
             return []
 
 
-def invalidate_gateway_catalog(gateway_name: str, cascade: bool = True) -> bool:
-    """Invalidate cached gateway catalog"""
+def invalidate_gateway_catalog(
+    gateway_name: str,
+    cascade: bool = False,
+    debounce: bool = False
+) -> bool:
+    """Invalidate cached gateway catalog.
+
+    Args:
+        gateway_name: Gateway name to invalidate
+        cascade: If True, also invalidate full catalog. Defaults to False to prevent
+                 cache thrashing (Issue #1099).
+        debounce: If True, debounce this invalidation to coalesce rapid requests
+                 (Issue #1099). Recommended for frontend-triggered invalidations.
+
+    Returns:
+        True if successful (or scheduled via debouncing), False otherwise
+    """
     cache = get_model_catalog_cache()
-    return cache.invalidate_gateway_catalog(gateway_name, cascade=cascade)
+    return cache.invalidate_gateway_catalog(gateway_name, cascade=cascade, debounce=debounce)
 
 
 # Unique models convenience functions
@@ -1289,15 +1558,18 @@ def get_provider_cache_metadata() -> dict[str, Any]:
     }
 
 
-def clear_models_cache(gateway: str, cascade: bool = True) -> None:
+def clear_models_cache(gateway: str, cascade: bool = False, debounce: bool = False) -> None:
     """
     Clear cache for a specific gateway (backward compatibility wrapper).
 
     Args:
         gateway: Gateway name to clear cache for
-        cascade: If True, also invalidate full catalog (default).
+        cascade: If True, also invalidate full catalog. Defaults to False to prevent
+                 cache thrashing (Issue #1099).
+        debounce: If True, debounce this invalidation to coalesce rapid requests
+                 (Issue #1099).
     """
-    invalidate_gateway_catalog(gateway, cascade=cascade)
+    invalidate_gateway_catalog(gateway, cascade=cascade, debounce=debounce)
 
 
 def clear_providers_cache() -> None:
