@@ -211,12 +211,33 @@ def create_app() -> FastAPI:
         app.add_middleware(SecurityMiddleware)
         logger.warning(f"  🛡️  Security middleware enabled with LOCAL fallback (Redis error: {e})")
 
-    # OPTIMIZED: Add request timeout middleware first to prevent 504 Gateway Timeouts
+    # OPTIMIZED: Add request timeout middleware to prevent 504 Gateway Timeouts
     # Middleware order matters! Last added = first executed
+    # Streaming endpoints get a bounded 300s timeout instead of full exemption
     from src.middleware.request_timeout_middleware import RequestTimeoutMiddleware
 
-    app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
-    logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
+    app.add_middleware(
+        RequestTimeoutMiddleware,
+        timeout_seconds=55.0,
+        streaming_timeout=Config.STREAMING_REQUEST_TIMEOUT,
+    )
+    logger.info(
+        f"  ⏱️  Request timeout middleware enabled "
+        f"(standard=55s, streaming={Config.STREAMING_REQUEST_TIMEOUT}s)"
+    )
+
+    # Add per-API-key concurrency middleware (prevents single key from monopolizing server)
+    from src.middleware.per_key_concurrency_middleware import PerKeyConcurrencyMiddleware
+
+    app.add_middleware(
+        PerKeyConcurrencyMiddleware,
+        max_concurrent_per_key=Config.PER_KEY_CONCURRENCY_LIMIT,
+        max_tracked_keys=Config.PER_KEY_MAX_TRACKED_KEYS,
+    )
+    logger.info(
+        f"  🔑 Per-key concurrency middleware enabled "
+        f"(limit={Config.PER_KEY_CONCURRENCY_LIMIT}/key)"
+    )
 
     # Add concurrency control middleware (global admission gate)
     from src.middleware.concurrency_middleware import ConcurrencyMiddleware

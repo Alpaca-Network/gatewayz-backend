@@ -54,8 +54,20 @@ async def lifespan(app):
     # Startup
     logger.info("Starting health monitoring and observability services...")
 
-    # Validate critical environment variables at runtime startup
+    # PERF: Set larger default thread pool to prevent starvation on low-vCPU containers.
+    # Default asyncio executor is min(32, cpu_count+4) which is ~6 on 1-2 vCPU Railway.
+    # Under 20 concurrent requests each doing 3-5 to_thread() calls, the pool saturates.
+    import concurrent.futures
     from src.config import Config
+
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=Config.THREAD_POOL_MAX_WORKERS,
+        thread_name_prefix="gw-async-worker",
+    )
+    asyncio.get_event_loop().set_default_executor(executor)
+    logger.info(f"  Set default thread pool executor (max_workers={Config.THREAD_POOL_MAX_WORKERS})")
+
+    # Validate critical environment variables at runtime startup
 
     is_valid, missing_vars = Config.validate_critical_env_vars()
     if not is_valid:
@@ -419,6 +431,10 @@ async def lifespan(app):
 
     # Shutdown
     logger.info("Shutting down monitoring and observability services...")
+
+    # Shutdown custom thread pool executor
+    executor.shutdown(wait=False)
+    logger.info("Thread pool executor shutdown initiated")
 
     # Stop scheduled model sync (Phase 3 - Issue #996)
     try:
