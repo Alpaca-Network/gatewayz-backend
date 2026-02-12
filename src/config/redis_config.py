@@ -37,6 +37,14 @@ class RedisConfig:
         self._client: redis.Redis | None = None
         self._pool: ConnectionPool | None = None
 
+        # Cached availability check to avoid pinging Redis on every operation.
+        # Without this, 30 concurrent cache reads each do a PING round-trip,
+        # and a momentary Redis latency spike causes all of them to "miss"
+        # and fall through to expensive DB queries (thundering herd).
+        self._available_cached: bool | None = None
+        self._available_cached_at: float = 0.0
+        self._available_cache_ttl: float = 30.0  # seconds
+
     def get_connection_pool(self) -> ConnectionPool:
         """Get Redis connection pool"""
         if self._pool is None:
@@ -90,14 +98,40 @@ class RedisConfig:
         return self._client
 
     def is_available(self) -> bool:
-        """Check if Redis is available"""
+        """Check if Redis is available (cached for 30s to avoid PING on every operation).
+
+        Previously, every cache read/write called this method which did a live
+        PING to Redis. Under parallel load (e.g., 30 gateway catalog reads),
+        this caused 30 extra round-trips and transient timeouts could cascade
+        into thundering-herd DB queries.
+
+        Now caches the result for 30 seconds. On failure, caches for only 5s
+        so recovery is fast.
+        """
+        import time
+
+        now = time.monotonic()
+        age = now - self._available_cached_at
+
+        # Cache hit: return cached True for 30s, cached False for 5s
+        if self._available_cached is not None:
+            ttl = self._available_cache_ttl if self._available_cached else 5.0
+            if age < ttl:
+                return self._available_cached
+
+        # Perform actual check
         try:
             client = self.get_client()
             if client:
                 client.ping()
+                self._available_cached = True
+                self._available_cached_at = now
                 return True
         except Exception:
             pass
+
+        self._available_cached = False
+        self._available_cached_at = now
         return False
 
     def get_cache_key(self, prefix: str, identifier: str) -> str:

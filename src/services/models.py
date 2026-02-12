@@ -623,7 +623,32 @@ def revalidate_cache_in_background(gateway: str, fetch_function):
 
 
 def get_all_models_parallel():
-    """Fetch models from all gateways in parallel for improved performance"""
+    """Fetch models from all gateways in parallel for improved performance.
+
+    Optimization: First tries the full catalog cache (single Redis read).
+    Only falls back to per-gateway parallel fetching on cache miss.
+    This prevents 30+ concurrent DB queries when the health page is loaded.
+    """
+    # Fast path: try full catalog cache first (1 Redis read vs 30)
+    try:
+        from src.services.model_catalog_cache import get_cached_full_catalog
+
+        full_catalog = get_cached_full_catalog()
+        if full_catalog:
+            logger.info(
+                "get_all_models_parallel: Full catalog cache HIT (%d models), "
+                "skipping per-gateway fetching",
+                len(full_catalog),
+            )
+            return full_catalog
+        logger.info(
+            "get_all_models_parallel: Full catalog cache MISS, "
+            "falling back to per-gateway parallel fetching"
+        )
+    except Exception as e:
+        logger.warning("get_all_models_parallel: Full catalog cache check failed: %s", e)
+
+    # Slow path: per-gateway parallel fetching (original implementation)
     try:
         gateways = [
             "openrouter",

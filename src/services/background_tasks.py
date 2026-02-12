@@ -338,20 +338,22 @@ def _split_and_cache_gateway_catalogs(full_catalog: list[dict]) -> None:
 async def update_full_model_catalog_loop() -> None:
     """
     Background task to refresh the full model catalog every 14 minutes.
-    
+
     Why this is needed:
     - Prevents cache TTL (15m) from expiring during user requests.
     - Eliminates the "thundering herd" of DB queries when cache is cold.
     - Acts as a DB connection keep-alive during idle periods.
     - Resource usage is negligible (one efficient query every 14m).
     """
+    import time
+
     from src.db.models_catalog_db import get_all_models_for_catalog, transform_db_models_batch
     from src.services.model_catalog_cache import cache_full_catalog
-    
+
     logger.info("Starting model catalog background refresh loop (interval: 14m)")
-    
+
     REFRESH_INTERVAL_SECONDS = 14 * 60  # 14 minutes
-    
+
     # Startup delay: let preload_hot_models_cache (5s delay) handle the first
     # cache warm. This task takes over for periodic refreshes after that.
     STARTUP_DELAY = 120  # 2 minutes - well after initial preload completes
@@ -361,20 +363,32 @@ async def update_full_model_catalog_loop() -> None:
     except asyncio.CancelledError:
         logger.info("Model catalog refresh task cancelled during startup delay")
         return
-    
+
+    consecutive_errors = 0
     while True:
         try:
             # Check if we should stop
             if _catalog_refresh_stop_event and _catalog_refresh_stop_event.is_set():
                 logger.info("Model catalog refresh task stopping")
                 break
-                
+
+            refresh_start = time.monotonic()
             logger.info("🔄 Background Refresh: Updating full model catalog...")
-            
+
             # 1. Fetch from DB (optimized query)
             # Use dedicated DB executor to avoid starving the default thread pool
             loop = asyncio.get_running_loop()
             db_models = await loop.run_in_executor(_db_executor, get_all_models_for_catalog, False)
+
+            if not db_models:
+                logger.warning("Background Refresh: DB returned 0 models - skipping cache update")
+                consecutive_errors += 1
+                if consecutive_errors >= 3:
+                    logger.error(
+                        "Background Refresh: %d consecutive empty results from DB - "
+                        "cache may go stale!", consecutive_errors
+                    )
+                continue
 
             # 2. Transform to API format (in executor to avoid blocking event loop)
             # transform_db_models_batch processes 13k+ models with pricing enrichment
@@ -393,10 +407,25 @@ async def update_full_model_catalog_loop() -> None:
                 _db_executor, _split_and_cache_gateway_catalogs, api_models
             )
 
-            logger.info(f"✅ Background Refresh: Updated catalog with {len(api_models)} models")
-            
+            elapsed = time.monotonic() - refresh_start
+            consecutive_errors = 0
+            logger.info(
+                f"✅ Background Refresh: Updated catalog with {len(api_models)} models "
+                f"(took {elapsed:.1f}s)"
+            )
+
         except Exception as e:
-            logger.error(f"Error in model catalog refresh loop: {e}", exc_info=True)
+            consecutive_errors += 1
+            logger.error(
+                f"Error in model catalog refresh loop (attempt #{consecutive_errors}): {e}",
+                exc_info=True,
+            )
+            if consecutive_errors >= 3:
+                logger.error(
+                    "Background Refresh: %d consecutive failures - cache is likely stale! "
+                    "Next request will trigger expensive DB queries.",
+                    consecutive_errors,
+                )
             
         # Wait for next interval
         try:
