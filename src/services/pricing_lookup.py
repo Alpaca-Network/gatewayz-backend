@@ -208,10 +208,10 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
         model_id: Model identifier (e.g., "nosana/meta-llama/Llama-3.3-70B-Instruct")
 
     Returns:
-        Pricing dictionary normalized to per-1M format (for backward compatibility):
+        Pricing dictionary in per-token format (consistent with all other sources):
         {
-            "prompt": "0.90",  # per-1M
-            "completion": "0.90",  # per-1M
+            "prompt": "0.0000009",  # per-token
+            "completion": "0.0000009",  # per-token
             "request": "0",
             "image": "0"
         }
@@ -253,15 +253,12 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
         if prompt_price is None or completion_price is None:
             return None
 
-        # Convert per-token to per-1M for backward compatibility
+        # Return per-token format (consistent with manual and cross-reference sources)
         # Database stores per-token (e.g., 0.0000009)
-        # API returns per-1M (e.g., "0.90")
-        prompt_per_1m = float(prompt_price) * 1_000_000
-        completion_per_1m = float(completion_price) * 1_000_000
-
+        # Frontend handles conversion to per-million for display
         return {
-            "prompt": str(prompt_per_1m),
-            "completion": str(completion_per_1m),
+            "prompt": str(prompt_price),
+            "completion": str(completion_price),
             "request": "0",
             "image": "0"
         }
