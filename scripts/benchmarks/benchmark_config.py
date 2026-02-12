@@ -7,11 +7,11 @@ for benchmarking the GLM-4.5-Air distilled model for code router integration.
 
 import os
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class TestCategory(str, Enum):
+class TestCategory(StrEnum):
     """Benchmark test categories."""
 
     CODE_GENERATION = "code_generation"
@@ -20,7 +20,7 @@ class TestCategory(str, Enum):
     REFACTORING = "refactoring"
 
 
-class Difficulty(str, Enum):
+class Difficulty(StrEnum):
     """Test case difficulty levels."""
 
     EASY = "easy"
