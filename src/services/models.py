@@ -166,6 +166,93 @@ def _convert_db_model_to_raw(db_model: dict, provider_slug: str) -> dict | None:
         return None
 
 
+def apply_database_fallback(
+    provider_slug: str, normalize_function, original_error: Exception | None = None
+) -> list[dict] | None:
+    """
+    Apply database fallback when provider API fails.
+
+    This is a standardized helper that providers can use in their exception handlers
+    to fallback to previously synced models from the database.
+
+    Args:
+        provider_slug: Provider slug (e.g., 'openrouter', 'deepinfra', 'featherless')
+        normalize_function: Provider's normalize function (e.g., normalize_deepinfra_model)
+        original_error: The original exception that triggered the fallback
+
+    Returns:
+        List of normalized model dictionaries ready for caching, or None if fallback fails
+
+    Example:
+        ```python
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"API failed, attempting database fallback")
+            return apply_database_fallback("deepinfra", normalize_deepinfra_model, e)
+        ```
+    """
+    from src.utils.provider_error_logging import log_provider_fetch_warning
+
+    try:
+        # Log that we're attempting fallback
+        error_context = {"trigger": type(original_error).__name__} if original_error else {}
+        log_provider_fetch_warning(
+            provider_slug=provider_slug,
+            message="API fetch failed, attempting database fallback",
+            context=error_context,
+        )
+
+        # Get raw models from database
+        raw_models = get_fallback_models_from_db(provider_slug)
+
+        if not raw_models:
+            log_provider_fetch_warning(
+                provider_slug=provider_slug,
+                message="No fallback models found in database",
+                context={"db_models_count": 0},
+            )
+            return None
+
+        # Normalize the raw models using provider's normalize function
+        normalized_models = []
+        for raw_model in raw_models:
+            try:
+                normalized = normalize_function(raw_model)
+                if normalized:
+                    normalized_models.append(normalized)
+            except Exception as norm_error:
+                logger.warning(
+                    f"[{provider_slug.upper()}] Failed to normalize fallback model: {norm_error}"
+                )
+                continue
+
+        if normalized_models:
+            log_provider_fetch_warning(
+                provider_slug=provider_slug,
+                message=f"Database fallback successful",
+                context={
+                    "raw_count": len(raw_models),
+                    "normalized_count": len(normalized_models),
+                    "source": "database",
+                },
+            )
+            return normalized_models
+
+        log_provider_fetch_warning(
+            provider_slug=provider_slug,
+            message="Database fallback failed - no models could be normalized",
+            context={"raw_count": len(raw_models), "normalized_count": 0},
+        )
+        return None
+
+    except Exception as e:
+        log_provider_fetch_warning(
+            provider_slug=provider_slug,
+            message=f"Database fallback exception: {type(e).__name__}",
+            context={"error": str(e)},
+        )
+        return None
+
+
 # Global lock and flag to prevent circular dependencies during catalog building
 # Using a global lock instead of threading.local() to ensure the flag is visible
 # across all threads spawned by ThreadPoolExecutor during parallel model fetching

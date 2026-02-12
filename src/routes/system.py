@@ -1982,6 +1982,153 @@ async def refresh_pricing_cache_endpoint():
 
 
 # ============================================================================
+# Velocity Mode Status Endpoint
+# ============================================================================
+
+
+@router.get("/velocity-mode-status", tags=["security", "monitoring"])
+async def get_velocity_mode_status():
+    """
+    Get the current velocity mode status from the security middleware.
+
+    Velocity mode is an automatic protection system that activates during high error rates
+    to protect the service from cascading failures by temporarily reducing rate limits.
+
+    **Returns:**
+    ```json
+    {
+        "active": false,
+        "until": null,
+        "remaining_seconds": 0,
+        "trigger_count": 0,
+        "current_error_rate": 0.0,
+        "sample_size": 0,
+        "threshold": 25.0,
+        "limits": {
+            "normal": {
+                "ip_limit": 300,
+                "strict_ip_limit": 60,
+                "fingerprint_limit": 100
+            },
+            "velocity": {
+                "ip_limit": 150,
+                "strict_ip_limit": 30,
+                "fingerprint_limit": 50
+            }
+        }
+    }
+    ```
+
+    **Status Codes:**
+    - 200: Successfully retrieved velocity mode status
+    - 503: Security middleware not available
+    """
+    try:
+        # Import here to avoid circular dependencies
+        from src.middleware.security_middleware import (
+            DEFAULT_IP_LIMIT,
+            STRICT_IP_LIMIT,
+            FINGERPRINT_LIMIT,
+            VELOCITY_ERROR_THRESHOLD,
+            VELOCITY_WINDOW_SECONDS,
+            VELOCITY_LIMIT_MULTIPLIER,
+        )
+
+        # Try to get the security middleware instance from the app
+        from src.main import app
+
+        security_middleware = None
+        for middleware in app.user_middleware:
+            if hasattr(middleware, "cls") and middleware.cls.__name__ == "SecurityMiddleware":
+                # Get the actual middleware instance
+                if hasattr(middleware, "kwargs"):
+                    security_middleware = middleware.kwargs.get("dispatch")
+                break
+
+        # If we can't find it via app.user_middleware, try getting it from the app's middleware stack
+        if not security_middleware and hasattr(app, "middleware_stack"):
+            for mw in app.middleware_stack:
+                if hasattr(mw, "app") and mw.app.__class__.__name__ == "SecurityMiddleware":
+                    security_middleware = mw.app
+                    break
+
+        if not security_middleware:
+            # Return default status if middleware not found
+            logger.warning("Security middleware instance not found - returning default status")
+            return {
+                "active": False,
+                "until": None,
+                "remaining_seconds": 0,
+                "trigger_count": 0,
+                "current_error_rate": 0.0,
+                "sample_size": 0,
+                "threshold": VELOCITY_ERROR_THRESHOLD * 100,
+                "limits": {
+                    "normal": {
+                        "ip_limit": DEFAULT_IP_LIMIT,
+                        "strict_ip_limit": STRICT_IP_LIMIT,
+                        "fingerprint_limit": FINGERPRINT_LIMIT,
+                    },
+                    "velocity": {
+                        "ip_limit": int(DEFAULT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                        "strict_ip_limit": int(STRICT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                        "fingerprint_limit": int(FINGERPRINT_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    },
+                },
+                "warning": "Security middleware instance not found - showing configuration only",
+            }
+
+        # Get current velocity mode status from middleware
+        import time
+
+        now = time.time()
+        is_active = security_middleware._is_velocity_mode_active()
+
+        # Calculate current error rate
+        cutoff = now - VELOCITY_WINDOW_SECONDS
+        recent_requests = [
+            (ts, err, status)
+            for ts, err, status in security_middleware._request_log
+            if ts >= cutoff
+        ]
+
+        error_rate = 0.0
+        if len(recent_requests) > 0:
+            error_count = sum(1 for _, is_error, _ in recent_requests if is_error)
+            error_rate = error_count / len(recent_requests)
+
+        return {
+            "active": is_active,
+            "until": security_middleware._velocity_mode_until if is_active else None,
+            "remaining_seconds": (
+                max(0, int(security_middleware._velocity_mode_until - now)) if is_active else 0
+            ),
+            "trigger_count": security_middleware._velocity_mode_triggered_count,
+            "current_error_rate": round(error_rate * 100, 2),
+            "sample_size": len(recent_requests),
+            "threshold": VELOCITY_ERROR_THRESHOLD * 100,
+            "limits": {
+                "normal": {
+                    "ip_limit": DEFAULT_IP_LIMIT,
+                    "strict_ip_limit": STRICT_IP_LIMIT,
+                    "fingerprint_limit": FINGERPRINT_LIMIT,
+                },
+                "velocity": {
+                    "ip_limit": int(DEFAULT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    "strict_ip_limit": int(STRICT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    "fingerprint_limit": int(FINGERPRINT_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                },
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get velocity mode status: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get velocity mode status: {str(e)}"
+        ) from e
+
+
+# ============================================================================
 # Pricing Health Monitoring Endpoints - DEPRECATED (Phase 2)
 # ============================================================================
 # These endpoints were removed as part of the pricing sync deprecation (Issue #1062).

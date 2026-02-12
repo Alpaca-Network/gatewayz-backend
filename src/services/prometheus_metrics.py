@@ -527,6 +527,45 @@ current_rate_limit = get_or_create_metric(
     ["limit_type"],
 )
 
+# ==================== Velocity Mode Metrics ====================
+# Metrics for tracking velocity mode activations and system protection
+velocity_mode_active = get_or_create_metric(
+    Gauge,
+    "velocity_mode_active",
+    "Velocity mode status (1=active, 0=inactive)",
+)
+
+velocity_mode_activations_total = get_or_create_metric(
+    Counter,
+    "velocity_mode_activations_total",
+    "Total velocity mode activations",
+)
+
+velocity_mode_duration_seconds = get_or_create_metric(
+    Histogram,
+    "velocity_mode_duration_seconds",
+    "Duration of velocity mode activations in seconds",
+    buckets=(10, 30, 60, 120, 180, 300, 600),
+)
+
+velocity_mode_error_rate = get_or_create_metric(
+    Gauge,
+    "velocity_mode_error_rate",
+    "Error rate that triggered velocity mode (0-1)",
+)
+
+velocity_mode_trigger_request_count = get_or_create_metric(
+    Gauge,
+    "velocity_mode_trigger_request_count",
+    "Number of requests in window when velocity mode triggered",
+)
+
+velocity_mode_trigger_error_count = get_or_create_metric(
+    Gauge,
+    "velocity_mode_trigger_error_count",
+    "Number of errors in window when velocity mode triggered",
+)
+
 # ==================== Provider Health Metrics ====================
 provider_availability = get_or_create_metric(
     Gauge,
@@ -1005,6 +1044,47 @@ def record_rate_limited_request(api_key: str, limit_type: str):
     # Note: api_key parameter kept for backwards compatibility but not used in labels
     # (avoid exposing PII in metric labels)
     rate_limited_requests.labels(limit_type=limit_type).inc()
+
+
+# ==================== Velocity Mode Helper Functions ====================
+
+
+def set_velocity_mode_active(active: bool):
+    """Set velocity mode active status.
+
+    Args:
+        active: True if velocity mode is active, False otherwise
+    """
+    velocity_mode_active.set(1 if active else 0)
+
+
+def record_velocity_mode_activation(error_rate: float, total_requests: int, error_count: int):
+    """Record a velocity mode activation event.
+
+    Args:
+        error_rate: Error rate that triggered activation (0-1)
+        total_requests: Total requests in the window
+        error_count: Number of errors in the window
+    """
+    velocity_mode_activations_total.inc()
+    velocity_mode_error_rate.set(error_rate)
+    velocity_mode_trigger_request_count.set(total_requests)
+    velocity_mode_trigger_error_count.set(error_count)
+    set_velocity_mode_active(True)
+
+
+def record_velocity_mode_deactivation(duration_seconds: float):
+    """Record velocity mode deactivation and duration.
+
+    Args:
+        duration_seconds: How long velocity mode was active
+    """
+    velocity_mode_duration_seconds.observe(duration_seconds)
+    set_velocity_mode_active(False)
+    # Reset trigger metrics
+    velocity_mode_error_rate.set(0)
+    velocity_mode_trigger_request_count.set(0)
+    velocity_mode_trigger_error_count.set(0)
 
 
 def set_provider_availability(provider: str, available: bool):

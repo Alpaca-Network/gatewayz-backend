@@ -26,11 +26,12 @@ logger = logging.getLogger(__name__)
 # OpenRouter is our primary provider, so we use conservative thresholds
 OPENROUTER_CIRCUIT_CONFIG = CircuitBreakerConfig(
     failure_threshold=5,  # Open after 5 consecutive failures
-    success_threshold=2,  # Close after 2 consecutive successes in HALF_OPEN
+    success_threshold=1,  # Close after 1 success in HALF_OPEN (easier recovery, was 2)
     timeout_seconds=60,  # Wait 60s before retrying after opening
     failure_window_seconds=60,  # Measure failure rate over 60s window
     failure_rate_threshold=0.5,  # Open if >50% failure rate
     min_requests_for_rate=10,  # Need at least 10 requests to calculate rate
+    half_open_max_failures=2,  # Allow 2 failures in HALF_OPEN before reopening (was instant)
 )
 
 

@@ -467,6 +467,7 @@ def create_app() -> FastAPI:
         ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
         ("rate_limits", "Rate Limiting"),
+        ("ip_whitelist", "IP Whitelist Management"),  # Admin IP whitelist management
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links

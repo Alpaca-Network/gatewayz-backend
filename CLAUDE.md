@@ -42,6 +42,7 @@
 │   │   ├── auto_sentry_middleware.py   # Sentry error tracking middleware
 │   │   ├── observability_middleware.py # Observability/tracing middleware
 │   │   ├── request_timeout_middleware.py # Request timeout handling
+│   │   ├── security_middleware.py      # Security & rate limiting (IP-based + velocity mode)
 │   │   ├── selective_gzip_middleware.py # Conditional compression
 │   │   └── trace_context_middleware.py  # Distributed tracing context
 │   │
@@ -538,10 +539,13 @@ The application follows a **layered, modular architecture** with clear separatio
 - `src/services/pricing_lookup.py` - Model-specific pricing
 - `src/routes/users.py` - User balance endpoints
 
-### Rate Limiting
-- `src/services/rate_limiting.py` - Redis-based rate limiting
+### Rate Limiting (Three-Layer Architecture)
+- `src/middleware/security_middleware.py` - Layer 1: IP-based + Behavioral Fingerprinting + Velocity Mode
+- `src/services/rate_limiting.py` - Layer 2: API key rate limiting (Redis-based)
+- `src/services/anonymous_rate_limiter.py` - Layer 3: Anonymous user rate limiting
 - `src/services/rate_limiting_fallback.py` - Fallback when Redis unavailable
 - `src/db/rate_limits.py` - Rate limit configuration
+- `docs/RATE_LIMITING.md` - Comprehensive rate limiting documentation
 
 ### Database & Configuration
 - `src/config/supabase_config.py` - Database client initialization
@@ -808,6 +812,15 @@ pytest tests/integration/test_chat.py -v
 ## Recent Updates & Current State
 
 ### Latest Changes
+- **Rate Limiting Improvements** (2025-02-11) - Fixed GitHub issue #1091
+  - Implemented three-layer rate limiting architecture
+  - Added security middleware with velocity mode protection
+  - Increased IP rate limits (60→300 RPM, 10→60 RPM)
+  - Adjusted velocity mode thresholds (10%→25%, 10min→3min)
+  - Added authenticated user exemption from IP-based rate limiting
+  - Improved error classification (exclude 4xx errors)
+  - Added comprehensive rate limit headers
+  - Enhanced observability with Prometheus metrics
 - Expanded to 30 provider integrations (up from 17)
 - OpenTelemetry-based distributed tracing
 - Prometheus/Grafana metrics integration
@@ -861,6 +874,7 @@ pytest tests/integration/test_chat.py -v
 - `docs/DEPLOYMENT.md` - Deployment guides
 - `docs/STRIPE.md` - Payment integration details
 - `docs/REFERRAL_SYSTEM.md` - Referral program documentation
+- `docs/RATE_LIMITING.md` - Comprehensive rate limiting architecture and troubleshooting
 - `README.md` - Main project documentation
 
 ---
@@ -932,5 +946,5 @@ This codebase is a sophisticated, production-grade AI gateway system. When worki
 
 ---
 
-**Last Updated**: 2025-12-28
-**Version**: 2.0.3
+**Last Updated**: 2025-02-11
+**Version**: 2.0.4

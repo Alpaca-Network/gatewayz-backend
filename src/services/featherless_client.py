@@ -325,23 +325,42 @@ def normalize_featherless_model(featherless_model: dict) -> dict:
 
 
 def fetch_models_from_featherless():
-    """Fetch models from Featherless API and normalize to the catalog schema
+    """Fetch models from Featherless API with step-by-step logging
 
     Note: Featherless API ignores the 'limit' and 'offset' parameters and returns
     ALL models (~6,452) in a single request. We only need one API call.
     """
+    from src.utils.step_logger import StepLogger
+    from src.utils.provider_error_logging import (
+        ProviderErrorType,
+        ProviderFetchContext,
+        log_provider_fetch_error,
+        log_provider_fetch_success,
+    )
+    import time
+
+    start_time = time.time()
+    step_logger = StepLogger("Featherless Model Fetch", total_steps=4)
+    url = "https://api.featherless.ai/v1/models"
+
+    step_logger.start(provider="featherless", endpoint=url)
+
     try:
+        # Step 1: Validate API configuration
+        step_logger.step(1, "Validating API configuration", provider="featherless")
+
         if not Config.FEATHERLESS_API_KEY:
-            logger.error("Featherless API key not configured")
+            error_msg = "Featherless API key not configured"
+            step_logger.failure(ValueError(error_msg))
+            logger.error(f"[FEATHERLESS] {error_msg}")
             return None
 
+        step_logger.success(status="configured")
+
+        # Step 2: Fetch all models from API (single request)
+        step_logger.step(2, "Fetching all models from API (single request)", endpoint=url, timeout="30s")
+
         headers = {"Authorization": f"Bearer {Config.FEATHERLESS_API_KEY}"}
-
-        # Featherless API returns all models in a single request (ignores pagination params)
-        url = "https://api.featherless.ai/v1/models"
-
-        logger.info("Fetching all models from Featherless API (single request)")
-
         response = httpx.get(url, headers=headers, params={"limit": 10000}, timeout=30.0)
         response.raise_for_status()
 
@@ -349,12 +368,15 @@ def fetch_models_from_featherless():
         all_models = payload.get("data", [])
 
         if not all_models:
-            logger.warning("No models returned from Featherless API")
+            logger.warning("[FEATHERLESS] No models returned from API")
+            step_logger.failure(ValueError("No models returned from API"))
             return None
 
-        logger.info(f"Fetched {len(all_models)} total models from Featherless")
+        step_logger.success(raw_count=len(all_models), status_code=response.status_code)
 
-        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        # Step 3: Normalize, filter, and combine with export catalog if needed
+        step_logger.step(3, "Normalizing and filtering models", raw_count=len(all_models))
+
         normalized_models = [
             norm_model
             for model in all_models
@@ -363,40 +385,129 @@ def fetch_models_from_featherless():
             if norm_model is not None
         ]
 
+        filtered_count = len(all_models) - len(normalized_models)
+
+        # Load export catalog if API returned fewer than expected models
         if len(normalized_models) < 6000:
-            logger.warning(
-                f"Featherless API returned {len(normalized_models)} models; loading extended catalog export for completeness"
+            logger.info(
+                f"[FEATHERLESS] API returned {len(normalized_models)} models; loading extended catalog export for completeness"
             )
             export_models = load_featherless_catalog_export()
             if export_models:
-                # Filter models that have a valid id (normalize functions may return models without id)
+                # Filter models that have a valid id
                 combined = {model["id"]: model for model in normalized_models if model.get("id")}
+                export_added = 0
+
                 for export_model in export_models:
-                    # Run export models through pricing enrichment to filter those without valid pricing.
-                    # Note: During catalog build (_is_building_catalog=True), models are kept even without
-                    # pricing to bootstrap the catalog. During regular operation, only models with valid
-                    # pricing (from manual_pricing.json or cross-reference) are kept. This intentionally
-                    # filters out export models without pricing to prevent them appearing as "free".
+                    # Run export models through pricing enrichment to filter those without valid pricing
                     from src.services.pricing_lookup import enrich_model_with_pricing
 
                     enriched = enrich_model_with_pricing(export_model, "featherless")
-                    if enriched and enriched.get("id"):
+                    if enriched and enriched.get("id") and enriched["id"] not in combined:
                         combined[enriched["id"]] = enriched
+                        export_added += 1
+
                 normalized_models = list(combined.values())
-                logger.info(
-                    f"Combined Featherless catalog now includes {len(normalized_models)} models from API + export"
+                step_logger.success(
+                    normalized_count=len(normalized_models),
+                    filtered_count=filtered_count,
+                    export_added=export_added,
+                    total_sources="API+export",
                 )
+            else:
+                step_logger.success(
+                    normalized_count=len(normalized_models), filtered_count=filtered_count, export_added=0
+                )
+        else:
+            step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count, source="API")
+
+        # Step 4: Cache the models
+        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
 
         cache_gateway_catalog("featherless", normalized_models)
-        logger.info(f"Normalized and cached {len(normalized_models)} Featherless models")
+        step_logger.success(cached_count=len(normalized_models))
+
+        # Complete with summary
+        duration = time.time() - start_time
+        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+
+        # Log success with provider_error_logging utility
+        log_provider_fetch_success(
+            provider_slug="featherless",
+            models_count=len(normalized_models),
+            duration=duration,
+            additional_context={"endpoint": url, "raw_count": len(all_models)},
+        )
+
         return normalized_models
-    except httpx.HTTPStatusError as e:
-        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
-        logger.error("Featherless HTTP error: %s", error_msg)
-        # Error tracking now automatic via Redis cache circuit breaker
+
+    except httpx.TimeoutException as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="featherless",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.API_TIMEOUT,
+        )
+        log_provider_fetch_error("featherless", e, context)
         return None
+
+    except httpx.HTTPStatusError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="featherless",
+            endpoint_url=url,
+            status_code=e.response.status_code,
+            duration=duration,
+        )
+        log_provider_fetch_error("featherless", e, context)
+        return None
+
+    except httpx.NetworkError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="featherless",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.NETWORK_ERROR,
+        )
+        log_provider_fetch_error("featherless", e, context)
+        return None
+
+    except (ValueError, TypeError, KeyError) as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="featherless",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.PARSING_ERROR,
+        )
+        log_provider_fetch_error("featherless", e, context)
+        return None
+
     except Exception as e:
-        error_msg = sanitize_for_logging(str(e))
-        logger.error("Failed to fetch models from Featherless: %s", error_msg)
-        # Error tracking now automatic via Redis cache circuit breaker
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="featherless", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+        )
+        log_provider_fetch_error("featherless", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("featherless", normalize_featherless_model, e)
+        if fallback_models:
+            cache_gateway_catalog("featherless", fallback_models)
+            return fallback_models
+
         return None

@@ -17,11 +17,23 @@ instead of directly calling provider APIs.
 import json
 import logging
 import threading
+from enum import Enum
 from typing import Any
 
 from src.config.redis_config import get_redis_client, is_redis_available
 
 logger = logging.getLogger(__name__)
+
+
+class CacheErrorType(Enum):
+    """Classification of cache errors for better debugging"""
+
+    REDIS_UNAVAILABLE = "redis_unavailable"
+    REDIS_TIMEOUT = "redis_timeout"
+    DATA_CORRUPTION = "data_corruption"
+    SERIALIZATION_ERROR = "serialization_error"
+    PERMISSION_DENIED = "permission_denied"
+    UNKNOWN = "unknown"
 
 
 class ModelCatalogCache:
@@ -55,6 +67,42 @@ class ModelCatalogCache:
             "invalidations": 0,
         }
 
+    def _classify_cache_error(self, error: Exception) -> CacheErrorType:
+        """
+        Classify cache error for better debugging.
+
+        Args:
+            error: The exception to classify
+
+        Returns:
+            CacheErrorType enum value
+        """
+        import redis
+
+        error_name = type(error).__name__
+
+        # Redis connection errors
+        if isinstance(error, redis.ConnectionError):
+            return CacheErrorType.REDIS_UNAVAILABLE
+
+        # Redis timeout errors
+        if isinstance(error, redis.TimeoutError):
+            return CacheErrorType.REDIS_TIMEOUT
+
+        # Data corruption / deserialization errors
+        if isinstance(error, (json.JSONDecodeError, UnicodeDecodeError)):
+            return CacheErrorType.DATA_CORRUPTION
+
+        # Serialization errors
+        if isinstance(error, (TypeError, ValueError)):
+            return CacheErrorType.SERIALIZATION_ERROR
+
+        # Permission errors
+        if "permission" in str(error).lower() or isinstance(error, PermissionError):
+            return CacheErrorType.PERMISSION_DENIED
+
+        return CacheErrorType.UNKNOWN
+
     def _generate_key(self, prefix: str, identifier: str = "") -> str:
         """Generate cache key with prefix and optional identifier"""
         if identifier:
@@ -87,7 +135,14 @@ class ModelCatalogCache:
 
         except Exception as e:
             self._stats["errors"] += 1
-            logger.warning(f"Cache GET error for full catalog: {e}")
+            error_type = self._classify_cache_error(e)
+            logger.warning(
+                f"Cache GET error | "
+                f"Key: full_catalog | "
+                f"Error Type: {error_type.value} | "
+                f"Details: {str(e)} | "
+                f"Redis Available: {is_redis_available()}"
+            )
             return None
 
     def set_full_catalog(
@@ -119,7 +174,14 @@ class ModelCatalogCache:
 
         except Exception as e:
             self._stats["errors"] += 1
-            logger.warning(f"Cache SET error for full catalog: {e}")
+            error_type = self._classify_cache_error(e)
+            logger.warning(
+                f"Cache SET error | "
+                f"Key: full_catalog | "
+                f"Models: {len(catalog)} | "
+                f"Error Type: {error_type.value} | "
+                f"Details: {str(e)}"
+            )
             return False
 
     def invalidate_full_catalog(self) -> bool:

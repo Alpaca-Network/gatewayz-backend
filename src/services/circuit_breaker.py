@@ -75,6 +75,10 @@ class CircuitBreakerConfig:
     # Minimum number of requests before failure rate is calculated
     min_requests_for_rate: int = 10
 
+    # Maximum failures allowed in HALF_OPEN before reopening circuit
+    # Setting this > 1 prevents immediate reopening on first failure during recovery
+    half_open_max_failures: int = 2
+
 
 class CircuitBreakerError(Exception):
     """Raised when circuit breaker is open and rejects a request"""
@@ -105,6 +109,7 @@ class CircuitBreaker:
         self._success_count = 0
         self._last_failure_time = 0.0
         self._opened_at = 0.0
+        self._consecutive_opens = 0  # Track consecutive circuit opens for exponential backoff
 
         # Rolling window for failure rate calculation
         self._recent_requests: list[tuple[float, bool]] = []  # (timestamp, success)
@@ -139,6 +144,10 @@ class CircuitBreaker:
             if opened_at:
                 self._opened_at = float(opened_at)
 
+            consecutive_opens = redis.get(self._get_redis_key("consecutive_opens"))
+            if consecutive_opens:
+                self._consecutive_opens = int(consecutive_opens)
+
             return True
         except Exception as e:
             logger.warning(f"Failed to load circuit breaker state from Redis: {e}")
@@ -159,6 +168,7 @@ class CircuitBreaker:
             pipe.setex(self._get_redis_key("failure_count"), ttl, str(self._failure_count))
             pipe.setex(self._get_redis_key("success_count"), ttl, str(self._success_count))
             pipe.setex(self._get_redis_key("opened_at"), ttl, str(self._opened_at))
+            pipe.setex(self._get_redis_key("consecutive_opens"), ttl, str(self._consecutive_opens))
 
             pipe.execute()
             return True
@@ -198,9 +208,11 @@ class CircuitBreaker:
         if new_state == CircuitState.CLOSED:
             self._failure_count = 0
             self._success_count = 0
+            self._consecutive_opens = 0  # Reset consecutive opens on successful recovery
         elif new_state == CircuitState.OPEN:
             self._opened_at = time.time()
             self._success_count = 0
+            self._consecutive_opens += 1  # Increment consecutive opens
         elif new_state == CircuitState.HALF_OPEN:
             self._failure_count = 0
             self._success_count = 0
@@ -295,11 +307,13 @@ class CircuitBreaker:
             ).inc()
 
             if self._state == CircuitState.HALF_OPEN:
-                # Any failure in HALF_OPEN immediately reopens circuit
-                self._transition_to(
-                    CircuitState.OPEN,
-                    "failure during recovery test"
-                )
+                # Allow multiple failures in HALF_OPEN before reopening
+                # This prevents immediate reopening on transient failures during recovery
+                if self._failure_count >= self.config.half_open_max_failures:
+                    self._transition_to(
+                        CircuitState.OPEN,
+                        f"recovery test failed ({self._failure_count} failures in HALF_OPEN)"
+                    )
             elif self._state == CircuitState.CLOSED:
                 # Check consecutive failures
                 if self._failure_count >= self.config.failure_threshold:
