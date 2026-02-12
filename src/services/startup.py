@@ -252,21 +252,19 @@ async def lifespan(app):
         get_cache()
         logger.info("Response cache initialized")
 
-        # PERF: Preload full catalog cache in background (single DB fetch)
-        # NOTE: Only loads the full catalog once. Individual gateway caches are
-        # populated lazily on first request (stale-while-revalidate pattern).
+        # PERF: Preload full catalog + all gateway catalogs in background.
+        # Fetches the full catalog once, then derives and caches each gateway's
+        # catalog from it (pure in-memory split, zero extra DB queries).
         # The background refresh task (update_full_model_catalog_loop) keeps
-        # the full catalog warm every 14 minutes after the initial 60s delay.
+        # both the full catalog and all gateway caches warm every 14 minutes.
         async def preload_hot_models_cache():
             try:
                 # Wait a few seconds for DB connection pool to stabilize
                 await asyncio.sleep(5)
 
                 logger.info("🔥 Preloading full model catalog cache...")
-                from src.services.model_catalog_cache import (
-                    get_cached_full_catalog,
-                    get_cached_gateway_catalog,
-                )
+                from src.services.model_catalog_cache import get_cached_full_catalog
+                from src.services.background_tasks import _split_and_cache_gateway_catalogs
 
                 # Single fetch: full catalog (Redis → local memory → DB fallback)
                 full_catalog = await asyncio.to_thread(get_cached_full_catalog)
@@ -274,30 +272,12 @@ async def lifespan(app):
                 catalog_count = len(full_catalog) if full_catalog else 0
                 logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
 
-                # Preload ALL individual gateway catalogs so the admin dashboard
-                # doesn't trigger 31 cold DB queries on first visit.
-                # Each gateway is fetched sequentially to avoid overwhelming the DB.
-                try:
-                    from src.services.gateway_health_service import GATEWAY_CONFIG
-                    gateway_names = sorted(GATEWAY_CONFIG.keys())
-                except Exception:
-                    gateway_names = [
-                        "aihubmix", "aimo", "anannas", "cerebras", "chutes",
-                        "deepinfra", "featherless", "fireworks", "groq",
-                        "huggingface", "novita", "openrouter", "together", "xai",
-                    ]
-
-                logger.info(f"🔥 Preloading {len(gateway_names)} gateway catalogs...")
-                total_models = 0
-                for gw in gateway_names:
-                    try:
-                        gw_catalog = await asyncio.to_thread(get_cached_gateway_catalog, gw)
-                        count = len(gw_catalog) if gw_catalog else 0
-                        total_models += count
-                    except Exception as e:
-                        logger.debug(f"Gateway {gw} preload skipped: {e}")
-
-                logger.info(f"✅ All gateway catalogs preloaded: {total_models} models across {len(gateway_names)} gateways")
+                # Derive and cache ALL individual gateway catalogs from the full
+                # catalog. This is a pure in-memory split — zero extra DB queries,
+                # zero extra pricing enrichment. Keeps every gateway cache warm so
+                # the admin dashboard doesn't trigger 31 cold DB fetches on first visit.
+                if full_catalog:
+                    await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
             except Exception as e:
                 logger.warning(f"Model cache preload warning: {e}")
 
