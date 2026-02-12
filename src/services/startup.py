@@ -265,25 +265,39 @@ async def lifespan(app):
                 logger.info("🔥 Preloading full model catalog cache...")
                 from src.services.model_catalog_cache import (
                     get_cached_full_catalog,
-                    get_cached_provider_catalog,
+                    get_cached_gateway_catalog,
                 )
 
                 # Single fetch: full catalog (Redis → local memory → DB fallback)
-                # This is the most important cache to warm since all other lookups
-                # can derive from it. Individual gateway caches warm lazily.
                 full_catalog = await asyncio.to_thread(get_cached_full_catalog)
 
                 catalog_count = len(full_catalog) if full_catalog else 0
                 logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
 
-                # Preload OpenRouter provider catalog - required by pricing
-                # cross-reference lookups. Without this, the first request that
-                # triggers pricing enrichment would hit the slow DB path and
-                # could cause thundering herd under concurrent load.
-                logger.info("🔥 Preloading OpenRouter provider catalog for pricing cross-reference...")
-                or_catalog = await asyncio.to_thread(get_cached_provider_catalog, "openrouter")
-                or_count = len(or_catalog) if or_catalog else 0
-                logger.info(f"✅ OpenRouter catalog preloaded: {or_count} models")
+                # Preload ALL individual gateway catalogs so the admin dashboard
+                # doesn't trigger 31 cold DB queries on first visit.
+                # Each gateway is fetched sequentially to avoid overwhelming the DB.
+                try:
+                    from src.services.gateway_health_service import GATEWAY_CONFIG
+                    gateway_names = sorted(GATEWAY_CONFIG.keys())
+                except Exception:
+                    gateway_names = [
+                        "aihubmix", "aimo", "anannas", "cerebras", "chutes",
+                        "deepinfra", "featherless", "fireworks", "groq",
+                        "huggingface", "novita", "openrouter", "together", "xai",
+                    ]
+
+                logger.info(f"🔥 Preloading {len(gateway_names)} gateway catalogs...")
+                total_models = 0
+                for gw in gateway_names:
+                    try:
+                        gw_catalog = await asyncio.to_thread(get_cached_gateway_catalog, gw)
+                        count = len(gw_catalog) if gw_catalog else 0
+                        total_models += count
+                    except Exception as e:
+                        logger.debug(f"Gateway {gw} preload skipped: {e}")
+
+                logger.info(f"✅ All gateway catalogs preloaded: {total_models} models across {len(gateway_names)} gateways")
             except Exception as e:
                 logger.warning(f"Model cache preload warning: {e}")
 
