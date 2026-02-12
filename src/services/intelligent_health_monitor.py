@@ -119,25 +119,27 @@ class IntelligentHealthMonitor:
         self._monitoring_tasks: list[asyncio.Task] = []
 
         # Configuration for each tier
+        # HEALTH FIX #1094: Increased timeouts to reduce false timeout failures
+        # Some models have cold start delays (serverless) and network latency
         self.tier_config = {
             MonitoringTier.CRITICAL: {
                 "interval_seconds": 300,  # 5 minutes
-                "timeout_seconds": 15,
+                "timeout_seconds": 30,  # CHANGED: 15 → 30 seconds
                 "max_tokens": 10,
             },
             MonitoringTier.POPULAR: {
                 "interval_seconds": 1800,  # 30 minutes
-                "timeout_seconds": 20,
+                "timeout_seconds": 45,  # CHANGED: 20 → 45 seconds
                 "max_tokens": 10,
             },
             MonitoringTier.STANDARD: {
                 "interval_seconds": 7200,  # 2 hours
-                "timeout_seconds": 30,
+                "timeout_seconds": 60,  # CHANGED: 30 → 60 seconds
                 "max_tokens": 5,
             },
             MonitoringTier.ON_DEMAND: {
                 "interval_seconds": 14400,  # 4 hours
-                "timeout_seconds": 30,
+                "timeout_seconds": 60,  # CHANGED: 30 → 60 seconds
                 "max_tokens": 5,
             },
         }
@@ -1005,11 +1007,110 @@ class IntelligentHealthMonitor:
 
             simple_health_cache.cache_system_health(system_data)
             simple_health_cache.cache_gateways_health(gateway_health)
-            logger.info(f"Published health data to Redis cache: {total_models} models ({healthy_models} healthy), {total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy / {len(gateway_health)} cached), tracked: {tracked_models} models")
+            # HEALTH FIX #1094: Improved logging to clarify tracked vs catalog discrepancy
+            logger.info(
+                f"Published health data to Redis cache: "
+                f"{total_models} models in catalog ({healthy_models} healthy, {unhealthy_models} unhealthy), "
+                f"{total_providers} providers, {total_gateways} gateways ({healthy_gateways} healthy / {len(gateway_health)} cached), "
+                f"tracked: {tracked_models} models "
+                f"(Note: tracked count includes models from all {total_gateways} gateways + historical models, not just catalog)"
+            )
+
+            # HEALTH FIX #1094: Check for health degradation and send Sentry alerts
+            await self._check_health_threshold_and_alert(
+                total_models=total_models,
+                healthy_models=healthy_models,
+                unhealthy_models=unhealthy_models,
+                system_uptime=system_uptime,
+            )
 
         except Exception as e:
             logger.warning(f"Failed to publish health data to Redis cache: {e}")
             # Don't fail the monitoring if cache publish fails
+
+    async def _check_health_threshold_and_alert(
+        self,
+        total_models: int,
+        healthy_models: int,
+        unhealthy_models: int,
+        system_uptime: float,
+    ):
+        """
+        Check if health has degraded below threshold and send Sentry alerts.
+
+        Part of fix for issue #1094 - Model Health Degradation.
+
+        Alerts when:
+        - Overall health drops below 90%
+        - Critical degradation below 85%
+
+        Args:
+            total_models: Total number of models in catalog
+            healthy_models: Number of healthy models
+            unhealthy_models: Number of unhealthy models
+            system_uptime: System uptime percentage
+        """
+        try:
+            # Calculate health percentage
+            if total_models == 0:
+                return
+
+            health_pct = (healthy_models / total_models) * 100
+
+            # Check threshold - alert if below 90%
+            HEALTH_THRESHOLD = 90.0
+
+            if health_pct < HEALTH_THRESHOLD:
+                # Determine severity
+                if health_pct < 85.0:
+                    severity = "critical"
+                    emoji = "\ud83d\udea8"
+                elif health_pct < 90.0:
+                    severity = "error"
+                    emoji = "\u26a0\ufe0f"
+                else:
+                    severity = "warning"
+                    emoji = "\u26a0\ufe0f"
+
+                error_message = (
+                    f"{emoji} HEALTH ALERT: Model health degraded to {health_pct:.1f}% "
+                    f"(threshold: {HEALTH_THRESHOLD}%)\n"
+                    f"Healthy: {healthy_models}/{total_models} models\n"
+                    f"Unhealthy: {unhealthy_models} models\n"
+                    f"System Uptime: {system_uptime:.1f}%\n"
+                    f"Issue: GitHub #1094 - Model Health Degradation"
+                )
+
+                logger.error(error_message)
+
+                # Send to Sentry
+                try:
+                    import sentry_sdk
+                    sentry_sdk.capture_message(
+                        error_message,
+                        level=severity,
+                        extras={
+                            "health_percentage": health_pct,
+                            "healthy_models": healthy_models,
+                            "unhealthy_models": unhealthy_models,
+                            "total_models": total_models,
+                            "system_uptime": system_uptime,
+                            "threshold": HEALTH_THRESHOLD,
+                            "github_issue": "#1094",
+                            "fix_docs": "QUICK_START_HEALTH_FIX.md",
+                        },
+                        tags={
+                            "health_alert": "true",
+                            "severity": severity,
+                            "issue": "1094",
+                        },
+                    )
+                    logger.info(f"Sent health degradation alert to Sentry (severity: {severity})")
+                except Exception as sentry_error:
+                    logger.warning(f"Failed to send Sentry alert: {sentry_error}")
+
+        except Exception as e:
+            logger.error(f"Error checking health threshold: {e}")
 
     async def _tier_update_loop(self):
         """Periodically update model tiers based on usage patterns"""

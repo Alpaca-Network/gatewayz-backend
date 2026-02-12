@@ -1741,3 +1741,192 @@ async def get_providers_health_stats(
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+
+@router.get("/health/insights", response_model=dict[str, Any], tags=["health", "insights"])
+async def get_health_insights(api_key: str = Depends(get_api_key)):
+    """
+    Get actionable health insights with detailed breakdown.
+
+    Part of fix for issue #1094 - Model Health Degradation.
+
+    Returns comprehensive health analysis including:
+    - Overall health status and percentage
+    - Unhealthy models grouped by provider
+    - Problematic providers (>30% failure rate)
+    - Unconfigured gateways (missing API keys)
+    - Actionable recommendations
+
+    This endpoint provides intelligence for debugging and improving system health.
+    Use /health/dashboard for frontend display.
+
+    Note: Health data is provided by the dedicated health-service container
+    via Redis cache. If cache is empty, minimal data is returned.
+    """
+    try:
+        # HEALTH FIX #1094: Actionable insights endpoint
+        # Get all health data from cache
+        system_health = simple_health_cache.get_system_health()
+        models_health = simple_health_cache.get_models_health() or []
+        providers_health = simple_health_cache.get_providers_health() or []
+
+        if not system_health:
+            return {
+                "status": "unknown",
+                "message": "Health data not yet available",
+                "recommendation": "Wait for first health check cycle (5 minutes)",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # Group unhealthy models by provider
+        unhealthy_models = [
+            m for m in models_health if m.get("status", "").lower() == "unhealthy"
+        ]
+
+        unhealthy_by_provider = {}
+        for model in unhealthy_models:
+            provider = model.get("provider", "unknown")
+            if provider not in unhealthy_by_provider:
+                unhealthy_by_provider[provider] = []
+            unhealthy_by_provider[provider].append(
+                {
+                    "model_id": model.get("model_id"),
+                    "error_count": model.get("error_count", 0),
+                    "uptime": model.get("uptime_percentage", 0),
+                    "last_checked": model.get("last_checked"),
+                    "last_error": model.get("last_error_message"),
+                }
+            )
+
+        # Find providers with high failure rates (>30%)
+        problematic_providers = []
+        for provider_data in providers_health:
+            total = provider_data.get("total_models", 0)
+            unhealthy = provider_data.get("unhealthy_models", 0)
+
+            if total > 0 and (unhealthy / total) > 0.3:  # >30% failure rate
+                problematic_providers.append(
+                    {
+                        "provider": provider_data.get("provider"),
+                        "gateway": provider_data.get("gateway"),
+                        "total_models": total,
+                        "unhealthy_models": unhealthy,
+                        "failure_rate": f"{(unhealthy/total)*100:.1f}%",
+                        "status": provider_data.get("status"),
+                        "avg_response_time_ms": provider_data.get("avg_response_time_ms"),
+                    }
+                )
+
+        # Find unconfigured gateways (check if gateway_health service tracks this)
+        # For now, we'll identify providers with 0 models or offline status
+        unconfigured_gateways = []
+        for provider_data in providers_health:
+            status = provider_data.get("status", "").lower()
+            total_models = provider_data.get("total_models", 0)
+
+            if status in ["offline", "unconfigured"] or total_models == 0:
+                unconfigured_gateways.append(
+                    {
+                        "gateway": provider_data.get("provider"),
+                        "status": status,
+                        "error": "No models available - API key may be missing or invalid",
+                    }
+                )
+
+        # Generate actionable recommendations
+        recommendations = []
+
+        if unconfigured_gateways:
+            recommendations.append(
+                {
+                    "priority": "HIGH",
+                    "action": "Configure missing API keys",
+                    "details": f"{len(unconfigured_gateways)} gateways need API keys",
+                    "gateways": [g["gateway"] for g in unconfigured_gateways],
+                    "fix": "Run: python3 scripts/audit_gateway_keys.py to identify missing keys",
+                }
+            )
+
+        if problematic_providers:
+            recommendations.append(
+                {
+                    "priority": "MEDIUM",
+                    "action": "Investigate failing providers",
+                    "details": f"{len(problematic_providers)} providers have >30% failure rate",
+                    "providers": [p["provider"] for p in problematic_providers],
+                    "fix": "Check provider status pages and verify API key validity",
+                }
+            )
+
+        overall_health = system_health.get("healthy_models", 0)
+        total_models = system_health.get("total_models", 1)
+        health_pct = (overall_health / total_models) * 100 if total_models > 0 else 0
+
+        if health_pct < 90:
+            recommendations.append(
+                {
+                    "priority": "HIGH",
+                    "action": "Overall health below 90% threshold",
+                    "details": f"Current: {health_pct:.1f}%, Target: >95%",
+                    "next_steps": [
+                        "Review unhealthy models list below",
+                        "Check provider status pages",
+                        "Verify API key validity",
+                        "See docs/HEALTH_RECOVERY_PLAN.md for detailed fix plan",
+                    ],
+                }
+            )
+
+        if health_pct < 85:
+            recommendations.append(
+                {
+                    "priority": "CRITICAL",
+                    "action": "Health critically low - immediate action required",
+                    "details": f"Only {health_pct:.1f}% of models healthy",
+                    "next_steps": [
+                        "Follow QUICK_START_HEALTH_FIX.md for immediate fixes",
+                        "Increase timeouts in intelligent_health_monitor.py",
+                        "Reduce batch check rate in model_health_monitor.py",
+                        "Add missing API keys",
+                    ],
+                }
+            )
+
+        return {
+            "timestamp": system_health.get("last_updated") or datetime.now(timezone.utc).isoformat(),
+            "overall_health": {
+                "status": system_health.get("overall_status"),
+                "health_percentage": f"{health_pct:.1f}%",
+                "healthy_models": system_health.get("healthy_models"),
+                "unhealthy_models": system_health.get("unhealthy_models"),
+                "degraded_models": system_health.get("degraded_models", 0),
+                "total_models": total_models,
+            },
+            "gateways": {
+                "total": system_health.get("total_gateways", 0),
+                "healthy": system_health.get("healthy_gateways", 0),
+                "unconfigured": len(unconfigured_gateways),
+            },
+            "unhealthy_models_by_provider": unhealthy_by_provider,
+            "problematic_providers": problematic_providers,
+            "unconfigured_gateways": unconfigured_gateways,
+            "recommendations": recommendations,
+            "issue": "GitHub #1094 - Model Health Degradation",
+            "docs": {
+                "recovery_plan": "docs/HEALTH_RECOVERY_PLAN.md",
+                "quick_start": "QUICK_START_HEALTH_FIX.md",
+                "audit_script": "scripts/audit_gateway_keys.py",
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Health insights error: {e}", exc_info=True)
+        capture_error(
+            e,
+            context_type="health_endpoint",
+            context_data={"endpoint": "/health/insights", "operation": "get_health_insights"},
+            tags={"endpoint": "health_insights", "error_type": type(e).__name__},
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Failed to retrieve health insights: {str(e)}"
+        ) from e

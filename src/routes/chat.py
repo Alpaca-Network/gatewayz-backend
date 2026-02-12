@@ -448,6 +448,12 @@ from src.services.provider_failover import (
     map_provider_error,
     should_failover,
 )
+# HEALTH FIX #1094: Import health-based routing functions for proactive failover
+from src.services.health_routing import (
+    get_healthy_alternative_provider,
+    is_model_healthy,
+    should_use_health_based_routing,
+)
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
 
@@ -2390,6 +2396,46 @@ async def chat_completions(
             provider_chain = build_provider_failover_chain(provider)
             provider_chain = enforce_model_failover_rules(effective_model, provider_chain)
             provider_chain = filter_by_circuit_breaker(effective_model, provider_chain)
+
+            # HEALTH FIX #1094: Check model health and reorder provider chain to prioritize healthy providers
+            # This proactively routes requests away from unhealthy models BEFORE they fail
+            if should_use_health_based_routing() and provider_chain:
+                primary_provider = provider_chain[0]
+                is_healthy, health_error = is_model_healthy(effective_model, primary_provider)
+
+                if not is_healthy:
+                    logger.warning(
+                        f"Primary provider '{primary_provider}' for model '{effective_model}' is unhealthy: {health_error}. "
+                        f"Checking for healthy alternatives..."
+                    )
+
+                    # Try to find a healthy alternative provider
+                    alt_provider = get_healthy_alternative_provider(effective_model, primary_provider)
+
+                    if alt_provider and alt_provider in provider_chain:
+                        # Move healthy provider to the front of the chain
+                        provider_chain = [alt_provider] + [p for p in provider_chain if p != alt_provider]
+                        logger.info(
+                            f"✓ Health-based routing: Moved '{alt_provider}' to front of chain for model '{effective_model}' "
+                            f"(primary '{primary_provider}' is unhealthy)"
+                        )
+                    elif alt_provider:
+                        # Alternative provider not in chain - add it at the front
+                        provider_chain = [alt_provider] + provider_chain
+                        logger.info(
+                            f"✓ Health-based routing: Added healthy provider '{alt_provider}' to chain for model '{effective_model}'"
+                        )
+                    else:
+                        # No healthy alternative found - log warning but proceed with unhealthy provider
+                        logger.warning(
+                            f"⚠ No healthy alternative found for model '{effective_model}' on '{primary_provider}'. "
+                            f"Proceeding with unhealthy provider (may fail, but circuit breaker will handle it)"
+                        )
+                else:
+                    logger.debug(
+                        f"✓ Health check passed for model '{effective_model}' on '{primary_provider}'"
+                    )
+
             model = effective_model
 
         # Diagnostic logging for tools parameter
