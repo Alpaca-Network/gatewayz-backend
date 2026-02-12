@@ -153,6 +153,28 @@ class AutonomousMonitor:
 
             logger.info(f"Detected {len(patterns)} error patterns")
 
+            # Alert on abnormal pattern growth
+            NORMAL_THRESHOLD = 10
+            WARNING_THRESHOLD = 15
+            CRITICAL_THRESHOLD = 20
+
+            pattern_count = len(patterns)
+            if pattern_count >= CRITICAL_THRESHOLD:
+                logger.error(
+                    f"🚨 CRITICAL: Error pattern count ({pattern_count}) exceeds critical threshold ({CRITICAL_THRESHOLD}). "
+                    f"System health degrading!"
+                )
+            elif pattern_count >= WARNING_THRESHOLD:
+                logger.warning(
+                    f"⚠️  WARNING: Error pattern count ({pattern_count}) exceeds warning threshold ({WARNING_THRESHOLD}). "
+                    f"Investigate underlying errors."
+                )
+            elif pattern_count > NORMAL_THRESHOLD:
+                logger.info(
+                    f"ℹ️  INFO: Error pattern count ({pattern_count}) above normal baseline ({NORMAL_THRESHOLD}). "
+                    f"Monitor for trends."
+                )
+
             # Store patterns
             for pattern in patterns:
                 self.error_monitor.store_error_pattern(pattern)

@@ -71,7 +71,7 @@ CREATE POLICY "Admin users can view velocity mode events"
     USING (
         EXISTS (
             SELECT 1 FROM public.users
-            WHERE users.id = auth.uid()
+            WHERE users.privy_user_id::text = auth.uid()::text
             AND users.role IN ('admin', 'super_admin')
         )
     );

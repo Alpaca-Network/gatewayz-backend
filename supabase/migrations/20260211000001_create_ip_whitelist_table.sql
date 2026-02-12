@@ -64,7 +64,7 @@ CREATE POLICY "Admins can read all IP whitelist entries"
     USING (
         EXISTS (
             SELECT 1 FROM public.users
-            WHERE users.id = auth.uid()
+            WHERE users.privy_user_id::text = auth.uid()::text
             AND users.role IN ('admin', 'superadmin')
         )
     );
@@ -76,7 +76,7 @@ CREATE POLICY "Admins can insert IP whitelist entries"
     WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.users
-            WHERE users.id = auth.uid()
+            WHERE users.privy_user_id::text = auth.uid()::text
             AND users.role IN ('admin', 'superadmin')
         )
     );
@@ -88,7 +88,7 @@ CREATE POLICY "Admins can update IP whitelist entries"
     USING (
         EXISTS (
             SELECT 1 FROM public.users
-            WHERE users.id = auth.uid()
+            WHERE users.privy_user_id::text = auth.uid()::text
             AND users.role IN ('admin', 'superadmin')
         )
     );
@@ -100,7 +100,7 @@ CREATE POLICY "Admins can delete IP whitelist entries"
     USING (
         EXISTS (
             SELECT 1 FROM public.users
-            WHERE users.id = auth.uid()
+            WHERE users.privy_user_id::text = auth.uid()::text
             AND users.role IN ('admin', 'superadmin')
         )
     );
