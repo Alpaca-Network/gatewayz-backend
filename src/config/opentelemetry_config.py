@@ -19,13 +19,10 @@ import socket
 from typing import Optional
 from urllib.parse import urlparse
 
-# Try to import OpenTelemetry - it's optional for deployments like Vercel
+# Try to import OpenTelemetry core - it's optional for deployments like Vercel
 try:
     from opentelemetry import trace
     from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
     from opentelemetry.sdk.resources import (
         DEPLOYMENT_ENVIRONMENT,
         SERVICE_NAME,
@@ -37,21 +34,50 @@ try:
 
     OPENTELEMETRY_AVAILABLE = True
 
-    # Redis instrumentation - optional, gracefully handle if not installed
+except ImportError:
+    OPENTELEMETRY_AVAILABLE = False
+    TracerProvider = None  # type: ignore
+
+# Instrumentation packages are independent of core OTel availability.
+# Each is optional — a missing package should NOT disable all tracing.
+FASTAPI_INSTRUMENTATION_AVAILABLE = False
+HTTPX_INSTRUMENTATION_AVAILABLE = False
+REQUESTS_INSTRUMENTATION_AVAILABLE = False
+REDIS_INSTRUMENTATION_AVAILABLE = False
+
+FastAPIInstrumentor = None  # type: ignore
+HTTPXClientInstrumentor = None  # type: ignore
+RequestsInstrumentor = None  # type: ignore
+RedisInstrumentor = None  # type: ignore
+
+if OPENTELEMETRY_AVAILABLE:
     try:
-        from opentelemetry.instrumentation.redis import RedisInstrumentor
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore[no-redef]
+
+        FASTAPI_INSTRUMENTATION_AVAILABLE = True
+    except ImportError:
+        pass
+
+    try:
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor  # type: ignore[no-redef]
+
+        HTTPX_INSTRUMENTATION_AVAILABLE = True
+    except ImportError:
+        pass
+
+    try:
+        from opentelemetry.instrumentation.requests import RequestsInstrumentor  # type: ignore[no-redef]
+
+        REQUESTS_INSTRUMENTATION_AVAILABLE = True
+    except ImportError:
+        pass
+
+    try:
+        from opentelemetry.instrumentation.redis import RedisInstrumentor  # type: ignore[no-redef]
 
         REDIS_INSTRUMENTATION_AVAILABLE = True
     except ImportError:
-        REDIS_INSTRUMENTATION_AVAILABLE = False
-        RedisInstrumentor = None  # type: ignore
-
-except ImportError:
-    OPENTELEMETRY_AVAILABLE = False
-    REDIS_INSTRUMENTATION_AVAILABLE = False
-    # Define dummy types for type hints
-    TracerProvider = None  # type: ignore
-    RedisInstrumentor = None  # type: ignore
+        pass
 
 from src.config.config import Config
 from src.utils.resilient_span_processor import ResilientSpanProcessor
@@ -306,10 +332,13 @@ class OpenTelemetryConfig:
             # Set global tracer provider
             trace.set_tracer_provider(cls._tracer_provider)
 
-            # Instrument HTTP clients for automatic tracing
-            HTTPXClientInstrumentor().instrument()
-            RequestsInstrumentor().instrument()
-            logger.info("   HTTP client instrumentation enabled")
+            # Instrument HTTP clients for automatic tracing (each is optional)
+            if HTTPX_INSTRUMENTATION_AVAILABLE:
+                HTTPXClientInstrumentor().instrument()
+                logger.info("   HTTPX client instrumentation enabled")
+            if REQUESTS_INSTRUMENTATION_AVAILABLE:
+                RequestsInstrumentor().instrument()
+                logger.info("   Requests library instrumentation enabled")
 
             # Instrument Redis for cache operation tracing
             if REDIS_INSTRUMENTATION_AVAILABLE and RedisInstrumentor is not None:
@@ -410,8 +439,8 @@ def instrument_fastapi_application(app) -> bool:
     Returns:
         bool: True if instrumentation was applied, False if it was skipped.
     """
-    if not OPENTELEMETRY_AVAILABLE:
-        logger.debug("OpenTelemetry not available; skipping FastAPI instrumentation")
+    if not OPENTELEMETRY_AVAILABLE or not FASTAPI_INSTRUMENTATION_AVAILABLE:
+        logger.debug("OpenTelemetry or FastAPI instrumentation not available; skipping")
         return False
 
     if app is None:
