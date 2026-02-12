@@ -22,12 +22,14 @@ CACHE_PREFIX_SUMMARY = "health:summary"
 CACHE_PREFIX_DASHBOARD = "health:dashboard"
 
 # Default TTLs (in seconds)
-DEFAULT_TTL_SYSTEM = 60
-DEFAULT_TTL_PROVIDERS = 60
-DEFAULT_TTL_MODELS = 120
-DEFAULT_TTL_GATEWAYS = 60
-DEFAULT_TTL_SUMMARY = 60
-DEFAULT_TTL_DASHBOARD = 30
+# Aligned with HEALTH_CHECK_INTERVAL (300s) + buffer to prevent cache expiration
+# between health check cycles and avoid fallback to database queries
+DEFAULT_TTL_SYSTEM = 360       # 6 minutes (5min health check + 1min buffer)
+DEFAULT_TTL_PROVIDERS = 360    # 6 minutes
+DEFAULT_TTL_MODELS = 360       # 6 minutes (was 120s - caused 3min gap)
+DEFAULT_TTL_GATEWAYS = 360     # 6 minutes
+DEFAULT_TTL_SUMMARY = 360      # 6 minutes
+DEFAULT_TTL_DASHBOARD = 90     # 1.5 minutes (more frequently accessed)
 
 
 class SimpleHealthCache:
