@@ -3,13 +3,6 @@ Automated bug fix generator using Claude API.
 
 Analyzes error patterns and generates fixes with explanations.
 Integrates with git and GitHub for automated PR creation.
-
-Improvements in this version:
-- Comprehensive request/response logging with correlation IDs
-- Retry logic with exponential backoff for transient failures
-- Prompt sanitization and length validation
-- Better error handling and reporting
-- API key validation on initialization
 """
 
 import asyncio
@@ -76,7 +69,7 @@ class BugFix:
 
 
 class BugFixGenerator:
-    """Generates bug fixes using Claude API with improved reliability."""
+    """Generates bug fixes using Claude API."""
 
     def __init__(self, github_token: str | None = None):
         self.anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
@@ -100,7 +93,6 @@ class BugFixGenerator:
 
         self.github_token = github_token or getattr(Config, "GITHUB_TOKEN", None)
         self.anthropic_url = "https://api.anthropic.com/v1"
-        self.anthropic_model = getattr(Config, "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
         self.session: httpx.AsyncClient | None = None
         self.generated_fixes: dict[str, BugFix] = {}
         self.api_key_validated = False
@@ -132,7 +124,7 @@ class BugFixGenerator:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": self.anthropic_model,
+                    "model": Config.ANTHROPIC_MODEL,
                     "max_tokens": 10,
                     "messages": [{"role": "user", "content": "test"}],
                 },
@@ -204,7 +196,7 @@ class BugFixGenerator:
 
         # Prepare request payload
         request_payload = {
-            "model": self.anthropic_model,
+            "model": Config.ANTHROPIC_MODEL,
             "max_tokens": max_tokens,
             "messages": [{"role": "user", "content": prompt}],
         }
@@ -327,33 +319,18 @@ Provide a concise analysis of:
         if not self.session:
             await self.initialize()
 
-        request_id = str(uuid4())[:8]
+        # First, analyze the error
+        analysis = await self.analyze_error(error)
 
-        try:
-            # First, analyze the error
-            logger.info(f"[{request_id}] Starting fix generation for: {error.message[:100]}...")
-            analysis = await self.analyze_error(error)
+        # Then generate a fix
+        fix_prompt = f"""Based on this error analysis, generate a specific fix.
 
-            if analysis.startswith("Error analysis failed"):
-                logger.warning(
-                    f"[{request_id}] Skipping fix generation due to failed analysis: {analysis}"
-                )
-                return None
-
-            # Sanitize error data
-            sanitized_message = self._sanitize_text(error.message, MAX_ERROR_MESSAGE_LENGTH)
-            sanitized_file = self._sanitize_text(error.file or "unknown", 500)
-            sanitized_analysis = self._sanitize_text(analysis, MAX_ERROR_MESSAGE_LENGTH)
-
-            # Then generate a fix
-            fix_prompt = f"""Based on this error analysis, generate a specific fix.
-
-Error: {sanitized_message}
+Error: {error.message}
 Category: {error.category.value}
-File: {sanitized_file}
+File: {error.file or 'unknown'}
 
 Analysis:
-{sanitized_analysis}
+{analysis}
 
 Generate a fix that includes:
 1. Root cause fix
@@ -376,19 +353,28 @@ Format your response as JSON:
   ]
 }}"""
 
-            fix_prompt = self._prepare_prompt(fix_prompt)
-
-            logger.info(f"[{request_id}] Generating fix with Claude API...")
-            data = await self._make_claude_request(fix_prompt, max_tokens=2048, request_id=request_id)
+        try:
+            response = await self.session.post(
+                f"{self.anthropic_url}/messages",
+                headers={
+                    "x-api-key": self.anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": Config.ANTHROPIC_MODEL,
+                    "max_tokens": 2048,
+                    "messages": [{"role": "user", "content": fix_prompt}],
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
 
             if not data.get("content"):
-                logger.error(f"[{request_id}] No content in Claude response")
+                logger.error("No content in Claude response")
                 return None
 
             response_text = data["content"][0].get("text", "")
-            logger.debug(
-                f"[{request_id}] Received fix response (length: {len(response_text)} chars)"
-            )
 
             # Extract JSON from response
             try:
@@ -397,14 +383,11 @@ Format your response as JSON:
                 json_end = response_text.rfind("}") + 1
                 if json_start >= 0 and json_end > json_start:
                     fix_data = json.loads(response_text[json_start:json_end])
-                    logger.debug(f"[{request_id}] Successfully parsed fix JSON")
                 else:
-                    logger.error(f"[{request_id}] No JSON found in Claude response")
-                    logger.debug(f"[{request_id}] Response text: {response_text[:500]}")
+                    logger.error("No JSON found in Claude response")
                     return None
             except json.JSONDecodeError as e:
-                logger.error(f"[{request_id}] Failed to parse Claude response as JSON: {e}")
-                logger.debug(f"[{request_id}] Response text: {response_text[:500]}")
+                logger.error(f"Failed to parse Claude response as JSON: {e}")
                 return None
 
             # Create code changes mapping
@@ -431,28 +414,10 @@ Format your response as JSON:
             )
 
             self.generated_fixes[fix.id] = fix
-            logger.info(
-                f"[{request_id}] Successfully generated fix (ID: {fix.id}, "
-                f"files affected: {len(files_affected)})"
-            )
             return fix
 
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 400:
-                logger.error(
-                    f"[{request_id}] Bad request to Claude API during fix generation. "
-                    f"This may indicate invalid prompt or API configuration."
-                )
-            elif e.response.status_code == 401:
-                logger.error(
-                    f"[{request_id}] Authentication failed during fix generation. "
-                    f"Check ANTHROPIC_API_KEY configuration."
-                )
-            else:
-                logger.error(f"[{request_id}] HTTP error during fix generation: {e}")
-            return None
         except Exception as e:
-            logger.error(f"[{request_id}] Error generating fix with Claude: {e}", exc_info=True)
+            logger.error(f"Error generating fix with Claude: {e}")
             return None
 
     async def create_branch_and_commit(
