@@ -344,10 +344,12 @@ async def update_full_model_catalog_loop() -> None:
             # Use dedicated DB executor to avoid starving the default thread pool
             loop = asyncio.get_running_loop()
             db_models = await loop.run_in_executor(_db_executor, get_all_models_for_catalog, False)
-            
-            # 2. Transform to API format
-            api_models = transform_db_models_batch(db_models)
-            
+
+            # 2. Transform to API format (in executor to avoid blocking event loop)
+            # transform_db_models_batch processes 13k+ models with pricing enrichment
+            # which is CPU-intensive. Running on the event loop blocks ALL requests.
+            api_models = await loop.run_in_executor(_db_executor, transform_db_models_batch, db_models)
+
             # 3. Update Cache
             # We set TTL to 15m, but we refresh every 14m to ensure overlap
             cache_full_catalog(api_models, ttl=900)

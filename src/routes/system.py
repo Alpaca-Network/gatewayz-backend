@@ -1921,6 +1921,10 @@ async def clear_modelz_cache_endpoint():
         ) from e
 
 
+_last_invalidation_time: float = 0.0
+_INVALIDATION_COOLDOWN_SECONDS = 30.0
+
+
 def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> None:
     """
     Background task: Perform cache invalidation operations with debouncing.
@@ -1929,14 +1933,29 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
     Performs all cache invalidation operations including gateway caches,
     provider caches, and pricing refresh.
 
-    Debouncing is enabled by default to prevent cache thrashing from rapid-fire
-    requests (Issue #1099). Multiple invalidation requests within 1 second are
-    coalesced into a single operation.
+    Includes a 30-second cooldown: if a full invalidation ran recently,
+    duplicate calls are skipped to prevent thundering herd from rapid-fire
+    admin dashboard clicks or retries.
 
     Args:
         gateway: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
         cache_type: Optional cache type ('models', 'providers', 'pricing')
     """
+    global _last_invalidation_time
+    import time
+
+    # Skip duplicate full-invalidation calls within cooldown window
+    if not gateway and not cache_type:
+        now = time.monotonic()
+        elapsed = now - _last_invalidation_time
+        if elapsed < _INVALIDATION_COOLDOWN_SECONDS:
+            logger.info(
+                f"Background task: Skipping duplicate full cache invalidation "
+                f"({elapsed:.1f}s since last, cooldown={_INVALIDATION_COOLDOWN_SECONDS}s)"
+            )
+            return
+        _last_invalidation_time = now
+
     try:
         start_time = datetime.now(timezone.utc)
         invalidated = []
