@@ -176,7 +176,6 @@ class ZAIBenchmark(BaseBenchmark):
         content_chunks = []
         reasoning_chunks = []
         usage_data = {}
-        finish_reason = None
 
         try:
             with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
@@ -207,8 +206,7 @@ class ZAIBenchmark(BaseBenchmark):
                                         content_chunks.append(delta["content"])
                                     if "reasoning_content" in delta and delta["reasoning_content"]:
                                         reasoning_chunks.append(delta["reasoning_content"])
-                                    if choices[0].get("finish_reason"):
-                                        finish_reason = choices[0]["finish_reason"]
+                                    # finish_reason in final chunk not needed for metrics
 
                                 if "usage" in chunk_data:
                                     usage_data = chunk_data["usage"]
@@ -373,7 +371,6 @@ class SoundsgoodBenchmark(BaseBenchmark):
         content_chunks = []
         reasoning_chunks = []
         usage_data = {}
-        finish_reason = None
 
         try:
             with urllib.request.urlopen(request, timeout=120, context=self.ssl_context) as response:
@@ -404,8 +401,7 @@ class SoundsgoodBenchmark(BaseBenchmark):
                                         content_chunks.append(delta["content"])
                                     if "reasoning" in delta and delta["reasoning"]:
                                         reasoning_chunks.append(delta["reasoning"])
-                                    if choices[0].get("finish_reason"):
-                                        finish_reason = choices[0]["finish_reason"]
+                                    # finish_reason in final chunk not needed for metrics
 
                                 if "usage" in chunk_data:
                                     usage_data = chunk_data["usage"]
@@ -582,7 +578,7 @@ def print_summary(benchmark: BaseBenchmark):
     code_gen = [r for r in successful if r.category == "code_generation" and r.test_passed is not None]
     if code_gen:
         passed = sum(1 for r in code_gen if r.test_passed)
-        print(f"\nCODE GENERATION:")
+        print("\nCODE GENERATION:")
         print(f"  Pass Rate: {passed}/{len(code_gen)} ({100*passed/len(code_gen):.1f}%)")
 
 
@@ -675,11 +671,11 @@ def main():
         print(f"\n[{category.upper()}]")
 
         # Run Z.AI benchmark
-        print(f"\n--- Z.AI (Standard) ---")
+        print("\n--- Z.AI (Standard) ---")
         zai_benchmark.run_category(category, max_tests=args.tests_per_category)
 
         # Run Soundsgood benchmark
-        print(f"\n--- Soundsgood (Distilled) ---")
+        print("\n--- Soundsgood (Distilled) ---")
         sg_benchmark.run_category(category, max_tests=args.tests_per_category)
 
     # Print individual summaries

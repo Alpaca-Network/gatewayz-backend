@@ -139,8 +139,7 @@ class SoundsgoodClient:
             payload["stream_options"] = {"include_usage": True}
 
         start_time = time.perf_counter()
-        ttfb_time: float | None = None
-        ttfc_time: float | None = None
+        # Note: ttfb_time and ttfc_time are tracked within helper methods
 
         try:
             if stream:
