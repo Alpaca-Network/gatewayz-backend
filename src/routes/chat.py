@@ -1418,38 +1418,10 @@ async def stream_generator(
                         logger.error(f"Error during sync stream iteration: {e}")
                         raise e
 
-        # KEEPALIVE: Use wait_for pattern to send SSE keepalive pings during TTFC wait.
-        # Proxies (Railway, Cloudflare) close idle connections after 30-60s. During the
-        # TTFC wait for slow providers (reasoning models), no data is sent, causing 499s.
-        # SSE comments (": keepalive\n\n") are ignored by all compliant SSE clients.
-        _KEEPALIVE_INTERVAL = Config.SSE_KEEPALIVE_INTERVAL
-        _KEEPALIVE_COMMENT = ": keepalive\n\n"
-
-        stream_iter = iterate_stream().__aiter__()
-        stream_exhausted = False
-
-        while not stream_exhausted:
+        async for chunk in iterate_stream():
             # CRITICAL: Check for client disconnect to prevent zombie requests (499)
             if request and await request.is_disconnected():
                 logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
-                break
-
-            try:
-                chunk = await asyncio.wait_for(
-                    stream_iter.__anext__(),
-                    timeout=_KEEPALIVE_INTERVAL,
-                )
-            except asyncio.TimeoutError:
-                # No chunk received within interval — send keepalive to keep connection alive
-                yield _KEEPALIVE_COMMENT
-                if not first_chunk_sent:
-                    logger.debug(
-                        f"[StreamGenerator] Sent keepalive ping while waiting for TTFC "
-                        f"(request_id={request_id}, elapsed={time.monotonic() - ttfc_start:.1f}s)"
-                    )
-                continue
-            except StopAsyncIteration:
-                stream_exhausted = True
                 break
 
             chunk_count += 1

@@ -4,11 +4,6 @@ Request Timeout Middleware
 Prevents individual requests from exceeding a maximum duration, helping to avoid 504 Gateway Timeouts.
 This middleware wraps each request with an asyncio timeout to ensure requests complete within acceptable time limits.
 
-Supports tiered timeouts:
-- Standard requests: 55s (below Vercel's 60s limit)
-- Streaming requests: 300s (bounded but generous for reasoning models)
-- Exempt paths: No timeout (health, metrics, admin)
-
 This is a pure ASGI middleware (not BaseHTTPMiddleware) to properly support
 streaming responses without the "No response returned" error.
 """
@@ -25,19 +20,11 @@ logger = logging.getLogger(__name__)
 # Set to 55 seconds to stay within Vercel's 60-second limit
 DEFAULT_REQUEST_TIMEOUT = 55.0
 
-# Default streaming timeout (in seconds)
-# Bounded but generous — prevents zombie connections while allowing reasoning models
-DEFAULT_STREAMING_TIMEOUT = 300.0
-
-# Streaming paths get a longer but bounded timeout (prevents zombie connections)
-STREAMING_TIMEOUT_PATHS = [
+# Paths that are exempt from timeout enforcement (e.g., streaming endpoints, admin operations)
+TIMEOUT_EXEMPT_PATHS = [
     "/v1/chat/completions",  # OpenAI-compatible streaming
     "/v1/messages",  # Anthropic Messages API streaming
     "/ai-sdk/chat/completions",  # AI SDK streaming
-]
-
-# Truly exempt paths (no timeout at all — monitoring and admin operations)
-TIMEOUT_EXEMPT_PATHS = [
     "/admin/",  # Admin operations (model sync, background jobs)
     "/api/catalog",  # Model catalog fetches (can be slow)
     "/health",  # Health checks
@@ -50,8 +37,8 @@ class RequestTimeoutMiddleware:
     Middleware to enforce request timeouts and prevent 504 Gateway Timeouts.
 
     This middleware wraps each request in an asyncio timeout, ensuring that requests
-    complete within the specified time limit. Streaming endpoints get a longer but
-    still bounded timeout to prevent zombie connections from consuming resources.
+    complete within the specified time limit. This helps prevent gateway timeouts
+    when requests take too long to process.
 
     This is a pure ASGI middleware to properly support streaming responses.
     """
@@ -60,9 +47,7 @@ class RequestTimeoutMiddleware:
         self,
         app: ASGIApp,
         timeout_seconds: float = DEFAULT_REQUEST_TIMEOUT,
-        streaming_timeout: float = DEFAULT_STREAMING_TIMEOUT,
         exempt_paths: list[str] | None = None,
-        streaming_paths: list[str] | None = None,
     ):
         """
         Initialize the timeout middleware.
@@ -70,18 +55,13 @@ class RequestTimeoutMiddleware:
         Args:
             app: The ASGI application
             timeout_seconds: Maximum request duration in seconds (default: 55)
-            streaming_timeout: Maximum streaming request duration in seconds (default: 300)
-            exempt_paths: List of paths fully exempt from timeout
-            streaming_paths: List of paths that get the longer streaming timeout
+            exempt_paths: List of paths exempt from timeout (e.g., streaming endpoints)
         """
         self.app = app
         self.timeout_seconds = timeout_seconds
-        self.streaming_timeout = streaming_timeout
         self.exempt_paths = exempt_paths or TIMEOUT_EXEMPT_PATHS
-        self.streaming_paths = streaming_paths or STREAMING_TIMEOUT_PATHS
         logger.info(
-            f"Request timeout middleware initialized "
-            f"(standard={timeout_seconds}s, streaming={streaming_timeout}s)"
+            f"Request timeout middleware initialized with {timeout_seconds}s timeout"
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -90,78 +70,58 @@ class RequestTimeoutMiddleware:
             await self.app(scope, receive, send)
             return
 
+        # Check if path is exempt from timeout
         request_path = scope["path"]
+        is_exempt = any(request_path.startswith(path) for path in self.exempt_paths)
 
-        # Truly exempt paths bypass all timeouts
-        if any(request_path.startswith(path) for path in self.exempt_paths):
+        if is_exempt:
+            # Streaming endpoints and other exempt paths bypass timeout
             await self.app(scope, receive, send)
             return
 
-        # Streaming paths get a longer but bounded timeout
-        is_streaming = any(request_path.startswith(path) for path in self.streaming_paths)
-        timeout = self.streaming_timeout if is_streaming else self.timeout_seconds
-
-        # Track whether response headers have already been sent
-        # If they have, we cannot send a 504 response (stream already started)
-        response_started = False
-        original_send = send
-
-        async def tracked_send(message):
-            nonlocal response_started
-            if message["type"] == "http.response.start":
-                response_started = True
-            await original_send(message)
-
+        # Enforce timeout for non-exempt requests
         try:
             await asyncio.wait_for(
-                self.app(scope, receive, tracked_send),
-                timeout=timeout,
+                self.app(scope, receive, send),
+                timeout=self.timeout_seconds,
             )
         except TimeoutError:
+            # Request exceeded timeout - log and return 504
             method = scope.get("method", "UNKNOWN")
-            timeout_type = "streaming" if is_streaming else "standard"
             logger.error(
-                f"Request timeout ({timeout_type}) after {timeout}s: "
+                f"Request timeout after {self.timeout_seconds}s: "
                 f"{method} {request_path}"
             )
 
-            # Only send 504 if response headers haven't been sent yet
-            # If streaming already started, the connection will just be closed
-            if not response_started:
-                body = json.dumps(
-                    {
-                        "error": {
-                            "message": f"Request exceeded maximum duration of {timeout} seconds",
-                            "type": "gateway_timeout",
-                            "code": 504,
-                        }
+            # Send 504 Gateway Timeout response
+            body = json.dumps(
+                {
+                    "error": {
+                        "message": f"Request exceeded maximum duration of {self.timeout_seconds} seconds",
+                        "type": "gateway_timeout",
+                        "code": 504,
                     }
-                ).encode()
+                }
+            ).encode()
 
-                await original_send(
-                    {
-                        "type": "http.response.start",
-                        "status": 504,
-                        "headers": [
-                            (b"content-type", b"application/json"),
-                            (b"content-length", str(len(body)).encode()),
-                            (b"x-request-timeout", str(timeout).encode()),
-                            (b"retry-after", b"5"),
-                        ],
-                    }
-                )
-                await original_send(
-                    {
-                        "type": "http.response.body",
-                        "body": body,
-                    }
-                )
-            else:
-                # Response already started (streaming) — just log, connection will be closed
-                logger.warning(
-                    f"Streaming timeout after {timeout}s but response already started, "
-                    f"closing connection: {method} {request_path}"
-                )
+            await send(
+                {
+                    "type": "http.response.start",
+                    "status": 504,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (b"x-request-timeout", str(self.timeout_seconds).encode()),
+                        (b"retry-after", b"5"),  # Suggest retry after 5 seconds
+                    ],
+                }
+            )
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": body,
+                }
+            )
         except Exception as e:
             # Re-raise other exceptions to be handled by error handlers
             logger.exception(f"Error in request timeout middleware: {e}")

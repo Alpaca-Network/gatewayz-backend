@@ -146,13 +146,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    async def _get_user_tier_from_request(self, request: Request) -> str:
+    def _get_user_tier_from_request(self, request: Request) -> str:
         """
         Get user tier from request (basic, pro, max, admin).
         Returns 'basic' as default for unauthenticated or unknown users.
-
-        PERF: Uses asyncio.to_thread() to avoid blocking the event loop
-        when the user cache misses and a synchronous database query is needed.
 
         Returns:
             User tier string (basic, pro, max, admin)
@@ -170,11 +167,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             if not api_key.startswith("gw_"):
                 return "basic"
 
-            # Non-blocking database lookup for user tier
+            # Quick database lookup for user tier
             # Import here to avoid circular dependencies
             from src.db.users import get_user
 
-            user = await asyncio.to_thread(get_user, api_key)
+            user = get_user(api_key)
             if user:
                 tier = user.get("tier", "basic")
                 logger.debug(f"User tier for {api_key[:10]}...: {tier}")
@@ -443,12 +440,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         is_authenticated = self._is_authenticated_request(request)
 
         # Get user tier for tiered velocity mode (basic, pro, max, admin)
-        # PERF: Only look up user tier when velocity mode is active, since tier
-        # is only used for tiered velocity multipliers. Skips the DB lookup ~99% of the time.
-        if velocity_active and is_authenticated:
-            user_tier = await self._get_user_tier_from_request(request)
-        else:
-            user_tier = "basic"
+        user_tier = self._get_user_tier_from_request(request)
 
         # Determine applicable limit (Tiering) with velocity mode adjustment
         is_dc = await self._is_datacenter_ip(client_ip, request)
