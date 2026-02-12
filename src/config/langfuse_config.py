@@ -18,7 +18,7 @@ Note: Langfuse is optional. If not installed or configured, tracing will be grac
 import logging
 import threading
 from contextlib import asynccontextmanager, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any, Optional
 
 from src.config.config import Config
@@ -181,10 +181,10 @@ class LangfuseConfig:
     def create_trace(
         cls,
         name: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict] = None,
-        tags: Optional[list[str]] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        metadata: dict | None = None,
+        tags: list[str] | None = None,
         **kwargs,
     ):
         """
@@ -224,8 +224,8 @@ class LangfuseConfig:
         model: str,
         input: Any = None,
         output: Any = None,
-        usage: Optional[dict] = None,
-        metadata: Optional[dict] = None,
+        usage: dict | None = None,
+        metadata: dict | None = None,
         **kwargs,
     ):
         """
@@ -275,9 +275,9 @@ class LangfuseTracer:
         cls,
         provider: str,
         model: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        metadata: dict | None = None,
     ):
         """
         Async context manager for tracing LLM generations with Langfuse.
@@ -303,7 +303,7 @@ class LangfuseTracer:
         if client:
             trace = None
             generation = None
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now(UTC)
 
             try:
                 # Create trace
@@ -370,9 +370,9 @@ class LangfuseTracer:
         cls,
         provider: str,
         model: str,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        metadata: Optional[dict] = None,
+        user_id: str | None = None,
+        session_id: str | None = None,
+        metadata: dict | None = None,
     ):
         """
         Synchronous context manager for tracing LLM generations with Langfuse.
@@ -384,7 +384,7 @@ class LangfuseTracer:
         if client:
             trace = None
             generation = None
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now(UTC)
 
             try:
                 trace = client.trace(
@@ -454,15 +454,15 @@ class LangfuseGenerationContext:
         generation=None,
         provider: str = "",
         model: str = "",
-        start_time: Optional[datetime] = None,
+        start_time: datetime | None = None,
     ):
         self.trace = trace
         self.generation = generation
         self.provider = provider
         self.model = model
-        self.start_time = start_time or datetime.now(timezone.utc)
+        self.start_time = start_time or datetime.now(UTC)
         self._output: Any = None
-        self._usage: Optional[dict] = None
+        self._usage: dict | None = None
         self._metadata: dict = {}
 
     def set_input(self, input_data: Any) -> "LangfuseGenerationContext":
@@ -483,7 +483,7 @@ class LangfuseGenerationContext:
         self,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        total_tokens: Optional[int] = None,
+        total_tokens: int | None = None,
     ) -> "LangfuseGenerationContext":
         """Set token usage for the generation.
 
@@ -504,9 +504,9 @@ class LangfuseGenerationContext:
 
     def set_model_parameters(
         self,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        top_p: Optional[float] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        top_p: float | None = None,
         **kwargs,
     ) -> "LangfuseGenerationContext":
         """Set model generation parameters."""
@@ -554,7 +554,7 @@ class LangfuseGenerationContext:
         self,
         name: str,
         value: float,
-        comment: Optional[str] = None,
+        comment: str | None = None,
     ) -> "LangfuseGenerationContext":
         """
         Add a score to the trace for quality evaluation.
