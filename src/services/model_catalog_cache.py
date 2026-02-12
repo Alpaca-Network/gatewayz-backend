@@ -1008,9 +1008,12 @@ _model_catalog_cache: ModelCatalogCache | None = None
 
 # Stampede protection locks — prevent multiple threads from rebuilding cache simultaneously
 # after invalidation. Only one thread fetches from DB while others wait for the result.
-_rebuild_lock_full_catalog = threading.Lock()
-_rebuild_lock_unique_models = threading.Lock()
-_rebuild_locks_provider: dict[str, threading.Lock] = {}
+# CRITICAL: Must use RLock (reentrant) because pricing enrichment can trigger recursive
+# catalog lookups on the SAME thread (e.g., cross-reference pricing calls get_cached_models
+# for the same provider). A regular Lock() deadlocks in this case.
+_rebuild_lock_full_catalog = threading.RLock()
+_rebuild_lock_unique_models = threading.RLock()
+_rebuild_locks_provider: dict[str, threading.RLock] = {}
 
 
 def get_model_catalog_cache() -> ModelCatalogCache:
@@ -1198,7 +1201,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
     # 3. Cache miss everywhere - fetch from database with stampede protection
     logger.debug(f"Cache MISS (all layers): Fetching {provider_name} catalog from database")
 
-    lock = _rebuild_locks_provider.setdefault(provider_name, threading.Lock())
+    lock = _rebuild_locks_provider.setdefault(provider_name, threading.RLock())
     with lock:
         # Double-check: another thread may have rebuilt while we waited
         cached = cache.get_provider_catalog(provider_name)
@@ -1211,15 +1214,22 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
                 get_models_by_gateway_for_catalog,
                 transform_db_models_batch,
             )
+            from src.services.models import _set_building_catalog
 
-            # Fetch from database
-            db_models = get_models_by_gateway_for_catalog(
-                gateway_slug=provider_name,
-                include_inactive=False
-            )
+            # Set building flag so pricing enrichment skips cross-reference
+            # lookups that would trigger recursive catalog fetches and deadlock.
+            _set_building_catalog(True)
+            try:
+                # Fetch from database
+                db_models = get_models_by_gateway_for_catalog(
+                    gateway_slug=provider_name,
+                    include_inactive=False
+                )
 
-            # Transform to API format
-            api_models = transform_db_models_batch(db_models)
+                # Transform to API format
+                api_models = transform_db_models_batch(db_models)
+            finally:
+                _set_building_catalog(False)
 
             # Cache in both Redis and local memory
             cache.set_provider_catalog(provider_name, api_models, ttl=1800)
@@ -1346,7 +1356,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
     # 3. Cache miss everywhere - fetch from database with stampede protection
     logger.debug(f"Cache MISS (all layers): Fetching {gateway_name} catalog from database")
 
-    lock = _rebuild_locks_provider.setdefault(gateway_name, threading.Lock())
+    lock = _rebuild_locks_provider.setdefault(gateway_name, threading.RLock())
     with lock:
         # Double-check: another thread may have rebuilt while we waited
         cached = cache.get_gateway_catalog(gateway_name)
@@ -1359,15 +1369,22 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
                 get_models_by_gateway_for_catalog,
                 transform_db_models_batch,
             )
+            from src.services.models import _set_building_catalog
 
-            # Fetch from database
-            db_models = get_models_by_gateway_for_catalog(
-                gateway_slug=gateway_name,
-                include_inactive=False
-            )
+            # Set building flag so pricing enrichment skips cross-reference
+            # lookups that would trigger recursive catalog fetches and deadlock.
+            _set_building_catalog(True)
+            try:
+                # Fetch from database
+                db_models = get_models_by_gateway_for_catalog(
+                    gateway_slug=gateway_name,
+                    include_inactive=False
+                )
 
-            # Transform to API format
-            api_models = transform_db_models_batch(db_models)
+                # Transform to API format
+                api_models = transform_db_models_batch(db_models)
+            finally:
+                _set_building_catalog(False)
 
             # Cache in both Redis and local memory
             cache.set_gateway_catalog(gateway_name, api_models, ttl=1800)
