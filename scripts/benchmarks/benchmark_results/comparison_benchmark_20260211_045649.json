@@ -1,0 +1,251 @@
+{
+  "timestamp": "20260211_045649",
+  "tests_per_category": 10,
+  "categories": [
+    "code_generation"
+  ],
+  "zai_results": [
+    {
+      "test_id": "cg_001",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 3.547049436951056,
+      "total_duration_seconds": 11.938686215085909,
+      "input_tokens": 37,
+      "output_tokens": 527,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_002",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 2.4733220499474555,
+      "total_duration_seconds": 20.747822840930894,
+      "input_tokens": 60,
+      "output_tokens": 793,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_003",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 4.290454933885485,
+      "total_duration_seconds": 16.569528192048892,
+      "input_tokens": 37,
+      "output_tokens": 654,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_004",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 2.463993180077523,
+      "total_duration_seconds": 43.10646840999834,
+      "input_tokens": 47,
+      "output_tokens": 2000,
+      "cost_usd": 0.0,
+      "test_passed": null,
+      "error": null
+    },
+    {
+      "test_id": "cg_005",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 4.025095413904637,
+      "total_duration_seconds": 13.379545017844066,
+      "input_tokens": 46,
+      "output_tokens": 427,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_006",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 2.0911123279947788,
+      "total_duration_seconds": 14.869820764986798,
+      "input_tokens": 50,
+      "output_tokens": 817,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_007",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 3.1655289670452476,
+      "total_duration_seconds": 16.985488591948524,
+      "input_tokens": 46,
+      "output_tokens": 773,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_008",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 3.2319086361676455,
+      "total_duration_seconds": 38.44683980406262,
+      "input_tokens": 47,
+      "output_tokens": 2000,
+      "cost_usd": 0.0,
+      "test_passed": null,
+      "error": null
+    },
+    {
+      "test_id": "cg_009",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 3.1104069221764803,
+      "total_duration_seconds": 14.244093682151288,
+      "input_tokens": 43,
+      "output_tokens": 794,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_010",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 2.8527605028357357,
+      "total_duration_seconds": 16.392384689999744,
+      "input_tokens": 35,
+      "output_tokens": 897,
+      "cost_usd": 0.0,
+      "test_passed": true,
+      "error": null
+    }
+  ],
+  "soundsgood_results": [
+    {
+      "test_id": "cg_001",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 0.6676661679521203,
+      "total_duration_seconds": 5.932669766945764,
+      "input_tokens": 37,
+      "output_tokens": 411,
+      "cost_usd": 0.00055071,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_002",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 0.5756515460088849,
+      "total_duration_seconds": 6.99911759304814,
+      "input_tokens": 60,
+      "output_tokens": 572,
+      "cost_usd": 0.0006860400000000001,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_003",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 0.5702548718545586,
+      "total_duration_seconds": 6.496077461866662,
+      "input_tokens": 37,
+      "output_tokens": 434,
+      "cost_usd": 0.00061308,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_004",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 0.5639451600145549,
+      "total_duration_seconds": 6.613616525894031,
+      "input_tokens": 47,
+      "output_tokens": 438,
+      "cost_usd": 0.00065298,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_005",
+      "category": "code_generation",
+      "difficulty": "easy",
+      "ttfb_seconds": 0.6060947629157454,
+      "total_duration_seconds": 5.535477947909385,
+      "input_tokens": 46,
+      "output_tokens": 376,
+      "cost_usd": 0.00051534,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_006",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 0.5665551689453423,
+      "total_duration_seconds": 8.124517834046856,
+      "input_tokens": 50,
+      "output_tokens": 656,
+      "cost_usd": 0.00080553,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_007",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 0.5900905209127814,
+      "total_duration_seconds": 8.798240376869217,
+      "input_tokens": 46,
+      "output_tokens": 530,
+      "cost_usd": 0.00084402,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_008",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 0.4173490949906409,
+      "total_duration_seconds": 19.532274382887408,
+      "input_tokens": 47,
+      "output_tokens": 2,
+      "cost_usd": 0.00198156,
+      "test_passed": null,
+      "error": null
+    },
+    {
+      "test_id": "cg_009",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 0.6146120838820934,
+      "total_duration_seconds": 7.074794296873733,
+      "input_tokens": 43,
+      "output_tokens": 547,
+      "cost_usd": 0.00069642,
+      "test_passed": true,
+      "error": null
+    },
+    {
+      "test_id": "cg_010",
+      "category": "code_generation",
+      "difficulty": "medium",
+      "ttfb_seconds": 0.4185928269289434,
+      "total_duration_seconds": 7.715266211889684,
+      "input_tokens": 35,
+      "output_tokens": 542,
+      "cost_usd": 0.0007536,
+      "test_passed": true,
+      "error": null
+    }
+  ]
+}
