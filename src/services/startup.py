@@ -213,75 +213,62 @@ async def lifespan(app):
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
-        # PERF: Pre-warm database connections in background
-        # This ensures the HTTP/2 connection pool is ready and eliminates cold-start latency
-        async def warmup_database_connections():
+        # ============================================================
+        # STAGGERED STARTUP: DB-heavy tasks run sequentially to avoid
+        # overwhelming Supabase PostgREST with concurrent connections.
+        # Previously all tasks fired simultaneously, causing 502 errors.
+        # ============================================================
+        async def staggered_db_warmup():
             try:
+                # Phase 1: Warm database connection (lightweight query)
                 if db_initialized:
-                    logger.info("🔥 Pre-warming database connections...")
-                    # Execute a simple query to warm up the connection pool
-                    from src.config.supabase_config import get_supabase_client
-                    client = get_supabase_client()
-                    # Ping the database with a lightweight query
-                    await asyncio.to_thread(
-                        lambda: client.table("plans").select("id").limit(1).execute()
-                    )
-                    logger.info("✅ Database connection pool warmed")
+                    try:
+                        logger.info("🔥 [1/3] Pre-warming database connections...")
+                        from src.config.supabase_config import get_supabase_client
+                        client = get_supabase_client()
+                        await asyncio.to_thread(
+                            lambda: client.table("plans").select("id").limit(1).execute()
+                        )
+                        logger.info("✅ [1/3] Database connection pool warmed")
+                    except Exception as e:
+                        logger.warning(f"Database connection warmup warning: {e}")
+
+                # Phase 2: Preload full model catalog (heavy - 13k+ models)
+                # Wait for DB connection to stabilize after Phase 1
+                await asyncio.sleep(3)
+                try:
+                    logger.info("🔥 [2/3] Preloading full model catalog cache...")
+                    from src.services.model_catalog_cache import get_cached_full_catalog
+                    from src.services.background_tasks import _split_and_cache_gateway_catalogs
+
+                    full_catalog = await asyncio.to_thread(get_cached_full_catalog)
+
+                    catalog_count = len(full_catalog) if full_catalog else 0
+                    logger.info(f"✅ [2/3] Catalog cache warming complete: {catalog_count} models loaded")
+
+                    if full_catalog:
+                        await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
+                except Exception as e:
+                    logger.warning(f"Model cache preload warning: {e}")
+
+                # Phase 3: Warm provider connections (HTTP, not DB)
+                await asyncio.sleep(2)
+                try:
+                    logger.info("🔥 [3/3] Pre-warming provider connections...")
+                    warmup_results = await warmup_provider_connections_async()
+                    warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
+                    logger.info(f"✅ [3/3] Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                except Exception as e:
+                    logger.warning(f"Provider connection warmup warning: {e}")
+
             except Exception as e:
-                logger.warning(f"Database connection warmup warning: {e}")
+                logger.error(f"Staggered DB warmup failed: {e}", exc_info=True)
 
-        _create_background_task(warmup_database_connections(), name="warmup_database")
+        _create_background_task(staggered_db_warmup(), name="staggered_db_warmup")
 
-        # PERF: Pre-warm connections to frequently used AI providers in background
-        # This eliminates cold-start penalty (~100-200ms) for first requests
-        # Moved to background to not block healthcheck
-        async def warmup_connections_background():
-            try:
-                logger.info("🔥 Pre-warming provider connections (background)...")
-                warmup_results = await warmup_provider_connections_async()
-                warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-                logger.info(f"✅ Warmed {warmed_count}/{len(warmup_results)} provider connections")
-                pool_stats = get_pool_stats()
-                logger.info(f"Connection pool after warmup: {pool_stats}")
-            except Exception as e:
-                logger.warning(f"Provider connection warmup warning: {e}")
-
-        _create_background_task(warmup_connections_background(), name="warmup_connections")
-
-        # Initialize response cache
+        # Initialize response cache (no DB access - safe to run immediately)
         get_cache()
         logger.info("Response cache initialized")
-
-        # PERF: Preload full catalog + all gateway catalogs in background.
-        # Fetches the full catalog once, then derives and caches each gateway's
-        # catalog from it (pure in-memory split, zero extra DB queries).
-        # The background refresh task (update_full_model_catalog_loop) keeps
-        # both the full catalog and all gateway caches warm every 14 minutes.
-        async def preload_hot_models_cache():
-            try:
-                # Wait a few seconds for DB connection pool to stabilize
-                await asyncio.sleep(5)
-
-                logger.info("🔥 Preloading full model catalog cache...")
-                from src.services.model_catalog_cache import get_cached_full_catalog
-                from src.services.background_tasks import _split_and_cache_gateway_catalogs
-
-                # Single fetch: full catalog (Redis → local memory → DB fallback)
-                full_catalog = await asyncio.to_thread(get_cached_full_catalog)
-
-                catalog_count = len(full_catalog) if full_catalog else 0
-                logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
-
-                # Derive and cache ALL individual gateway catalogs from the full
-                # catalog. This is a pure in-memory split — zero extra DB queries,
-                # zero extra pricing enrichment. Keeps every gateway cache warm so
-                # the admin dashboard doesn't trigger 31 cold DB fetches on first visit.
-                if full_catalog:
-                    await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
-            except Exception as e:
-                logger.warning(f"Model cache preload warning: {e}")
-
-        _create_background_task(preload_hot_models_cache(), name="preload_models")
 
         # Initialize Google Vertex AI models catalog in background
         async def init_google_models_background():
@@ -296,8 +283,10 @@ async def lifespan(app):
         _create_background_task(init_google_models_background(), name="init_google_models")
 
         # Clean up any stuck pricing syncs from previous runs
+        # Delayed to avoid overwhelming Supabase during startup
         async def cleanup_stuck_syncs_startup():
             try:
+                await asyncio.sleep(30)  # Wait for DB warmup to complete
                 logger.info("🧹 Running startup cleanup for stuck pricing syncs...")
                 from src.services.pricing_sync_cleanup import cleanup_stuck_syncs
                 result = await cleanup_stuck_syncs(timeout_minutes=5)
@@ -314,8 +303,10 @@ async def lifespan(app):
         # Pricing sync scheduler removed - pricing updates via model sync (Phase 3, Issue #1063)
 
         # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
+        # Delayed to avoid overwhelming Supabase during startup
         async def sync_providers_background():
             try:
+                await asyncio.sleep(45)  # Wait for catalog preload to finish
                 from src.services.provider_model_sync_service import sync_providers_on_startup
 
                 result = await sync_providers_on_startup()
