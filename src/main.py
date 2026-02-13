@@ -485,7 +485,7 @@ def create_app() -> FastAPI:
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
-        # ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture - DISABLED until migration applied
+        ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
     ]
 
     loaded_count = 0
