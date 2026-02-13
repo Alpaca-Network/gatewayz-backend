@@ -2629,3 +2629,268 @@ def get_cached_providers_index() -> list[int] | None:
         cache._stats["errors"] += 1
         logger.warning(f"Error getting providers index: {e}")
         return None
+
+
+# ============================================================================
+# Smart Unique Models Caching with Filter Support (NEW)
+# ============================================================================
+
+
+def _generate_unique_models_cache_key(
+    include_inactive: bool = False,
+    min_providers: int | None = None,
+    sort_by: str = "provider_count",
+    order: str = "desc"
+) -> str:
+    """
+    Generate cache key for unique models with specific filters.
+
+    Args:
+        include_inactive: Include inactive models
+        min_providers: Minimum provider count filter
+        sort_by: Sort field
+        order: Sort order (asc/desc)
+
+    Returns:
+        Cache key string
+    """
+    key_parts = ["models:unique:filtered"]
+
+    if include_inactive:
+        key_parts.append("inactive")
+
+    if min_providers is not None:
+        key_parts.append(f"minp{min_providers}")
+
+    key_parts.append(f"sort{sort_by}")
+    key_parts.append(order)
+
+    return ":".join(key_parts)
+
+
+async def get_cached_unique_models_smart(
+    include_inactive: bool = False,
+    min_providers: int | None = None,
+    sort_by: str = "provider_count",
+    order: str = "desc"
+) -> list[dict[str, Any]] | None:
+    """
+    Get cached unique models with filter support.
+
+    Supports caching different filter/sort combinations separately.
+    Falls back to asyncio.to_thread for non-blocking Redis access.
+
+    Args:
+        include_inactive: Include inactive models
+        min_providers: Minimum provider count filter
+        sort_by: Sort by field (provider_count, name, cheapest_price)
+        order: Sort order (asc, desc)
+
+    Returns:
+        Cached models list or None if not found
+    """
+    import asyncio
+
+    cache = get_model_catalog_cache()
+
+    if not cache.redis_client or not is_redis_available():
+        return None
+
+    try:
+        key = _generate_unique_models_cache_key(
+            include_inactive=include_inactive,
+            min_providers=min_providers,
+            sort_by=sort_by,
+            order=order
+        )
+
+        # Non-blocking Redis access
+        cached_data = await asyncio.to_thread(cache.redis_client.get, key)
+
+        if cached_data:
+            cache._stats["hits"] += 1
+            logger.debug(f"Cache HIT: Unique models with filters (key: {key})")
+            return json.loads(cached_data)
+        else:
+            cache._stats["misses"] += 1
+            logger.debug(f"Cache MISS: Unique models with filters (key: {key})")
+            return None
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Cache GET error for unique models with filters: {e}")
+        return None
+
+
+async def cache_unique_models_with_filters(
+    models: list[dict[str, Any]],
+    include_inactive: bool = False,
+    min_providers: int | None = None,
+    sort_by: str = "provider_count",
+    order: str = "desc",
+    ttl: int = 1800
+) -> bool:
+    """
+    Cache unique models with specific filter combination.
+
+    Args:
+        models: List of models to cache
+        include_inactive: Include inactive models
+        min_providers: Minimum provider count filter
+        sort_by: Sort by field
+        order: Sort order
+        ttl: Time to live (default: 30 minutes)
+
+    Returns:
+        True if cached successfully
+    """
+    import asyncio
+
+    cache = get_model_catalog_cache()
+
+    if not cache.redis_client or not is_redis_available():
+        return False
+
+    try:
+        key = _generate_unique_models_cache_key(
+            include_inactive=include_inactive,
+            min_providers=min_providers,
+            sort_by=sort_by,
+            order=order
+        )
+
+        serialized_data = json.dumps(models)
+
+        # Non-blocking Redis access
+        await asyncio.to_thread(cache.redis_client.setex, key, ttl, serialized_data)
+
+        cache._stats["sets"] += 1
+        logger.info(
+            f"Cache SET: Unique models with filters ({len(models)} models, "
+            f"key: {key}, TTL: {ttl}s)"
+        )
+        return True
+
+    except Exception as e:
+        cache._stats["errors"] += 1
+        logger.warning(f"Cache SET error for unique models with filters: {e}")
+        return False
+
+
+async def warm_unique_models_cache_all_variants() -> dict[str, Any]:
+    """
+    Warm cache for all common unique models filter combinations.
+
+    Pre-populates cache with the most frequently requested variants:
+    - Default view (active, all providers, sorted by provider_count desc)
+    - Common min_providers filters (2+, 3+, 5+)
+    - Different sort options (name, cheapest_price)
+
+    This dramatically reduces database load for common queries.
+
+    Returns:
+        dict with warming statistics
+    """
+    from src.db.models_catalog_db import (
+        get_all_unique_models_for_catalog,
+        transform_unique_models_batch,
+    )
+    import asyncio
+
+    logger.info("Starting unique models cache warming for common variants...")
+
+    # Define common filter combinations to pre-warm
+    variants = [
+        # Default view
+        {"include_inactive": False, "min_providers": None, "sort_by": "provider_count", "order": "desc"},
+        # Multi-provider models
+        {"include_inactive": False, "min_providers": 2, "sort_by": "provider_count", "order": "desc"},
+        {"include_inactive": False, "min_providers": 3, "sort_by": "provider_count", "order": "desc"},
+        {"include_inactive": False, "min_providers": 5, "sort_by": "provider_count", "order": "desc"},
+        # Alphabetical
+        {"include_inactive": False, "min_providers": None, "sort_by": "name", "order": "asc"},
+        # Cheapest
+        {"include_inactive": False, "min_providers": None, "sort_by": "cheapest_price", "order": "asc"},
+    ]
+
+    stats = {
+        "total_variants": len(variants),
+        "successful": 0,
+        "failed": 0,
+        "variants_cached": []
+    }
+
+    try:
+        # Fetch base data once
+        logger.debug("Fetching base unique models data from database...")
+        db_unique_models = await asyncio.to_thread(
+            get_all_unique_models_for_catalog,
+            include_inactive=False
+        )
+
+        api_models = await asyncio.to_thread(
+            transform_unique_models_batch,
+            db_unique_models
+        )
+
+        logger.info(f"Fetched {len(api_models)} unique models from database")
+
+        # Cache each variant
+        for variant in variants:
+            try:
+                filtered_models = list(api_models)  # Copy
+
+                # Apply filter
+                if variant["min_providers"] is not None:
+                    filtered_models = [
+                        m for m in filtered_models
+                        if m.get("provider_count", 0) >= variant["min_providers"]
+                    ]
+
+                # Apply sort
+                if variant["sort_by"] == "provider_count":
+                    filtered_models.sort(
+                        key=lambda m: m.get("provider_count", 0),
+                        reverse=(variant["order"] == "desc")
+                    )
+                elif variant["sort_by"] == "name":
+                    filtered_models.sort(
+                        key=lambda m: m.get("name", "").lower(),
+                        reverse=(variant["order"] == "desc")
+                    )
+                elif variant["sort_by"] == "cheapest_price":
+                    filtered_models.sort(
+                        key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
+                        reverse=(variant["order"] == "desc")
+                    )
+
+                # Cache this variant
+                success = await cache_unique_models_with_filters(
+                    models=filtered_models,
+                    **variant,
+                    ttl=1800
+                )
+
+                if success:
+                    stats["successful"] += 1
+                    stats["variants_cached"].append({
+                        "variant": variant,
+                        "count": len(filtered_models)
+                    })
+                else:
+                    stats["failed"] += 1
+
+            except Exception as e:
+                logger.error(f"Error warming variant {variant}: {e}")
+                stats["failed"] += 1
+
+        logger.info(
+            f"Unique models cache warming complete: "
+            f"{stats['successful']}/{stats['total_variants']} variants cached"
+        )
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error in unique models cache warming: {e}")
+        return stats

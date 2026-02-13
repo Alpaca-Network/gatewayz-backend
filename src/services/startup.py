@@ -251,13 +251,27 @@ async def lifespan(app):
                 except Exception as e:
                     logger.warning(f"Model cache preload warning: {e}")
 
-                # Phase 3: Warm provider connections (HTTP, not DB)
+                # Phase 3: Warm unique models cache with common filter variants
                 await asyncio.sleep(2)
                 try:
-                    logger.info("🔥 [3/3] Pre-warming provider connections...")
+                    logger.info("🔥 [3/4] Pre-warming unique models cache (all filter variants)...")
+                    from src.services.model_catalog_cache import warm_unique_models_cache_all_variants
+
+                    warmup_stats = await warm_unique_models_cache_all_variants()
+                    logger.info(
+                        f"✅ [3/4] Unique models cache warmed: "
+                        f"{warmup_stats['successful']}/{warmup_stats['total_variants']} variants cached"
+                    )
+                except Exception as e:
+                    logger.warning(f"Unique models cache warmup warning: {e}")
+
+                # Phase 4: Warm provider connections (HTTP, not DB)
+                await asyncio.sleep(2)
+                try:
+                    logger.info("🔥 [4/4] Pre-warming provider connections...")
                     warmup_results = await warmup_provider_connections_async()
                     warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-                    logger.info(f"✅ [3/3] Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                    logger.info(f"✅ [4/4] Warmed {warmed_count}/{len(warmup_results)} provider connections")
                 except Exception as e:
                     logger.warning(f"Provider connection warmup warning: {e}")
 

@@ -2546,7 +2546,7 @@ async def get_unique_models_with_providers(
     ```
     """
     try:
-        from src.services.model_catalog_cache import get_cached_unique_models
+        from src.services.model_catalog_cache import get_cached_unique_models_smart
         from src.db.models_catalog_db import (
             get_all_unique_models_for_catalog,
             transform_unique_models_batch,
@@ -2557,35 +2557,47 @@ async def get_unique_models_with_providers(
             f"min_providers={min_providers}, sort_by={sort_by}, order={order}"
         )
 
-        # Try to get from cache first (only for active models with default sorting)
-        api_models = None
-        if not include_inactive and min_providers is None and sort_by == "provider_count" and order == "desc" and offset == 0:
-            api_models = get_cached_unique_models()
-            if api_models:
-                logger.info(f"Using cached unique models ({len(api_models)} models)")
+        # SMART CACHING: Always try cache first (handles all filter combinations)
+        api_models = await get_cached_unique_models_smart(
+            include_inactive=include_inactive,
+            min_providers=min_providers,
+            sort_by=sort_by,
+            order=order
+        )
 
-        # If not cached or needs custom filtering, fetch from database
-        if api_models is None:
-            # Fetch unique models from database
+        if api_models:
+            logger.info(f"Using cached unique models ({len(api_models)} models)")
+        else:
+            # Cache miss - fetch from database
+            logger.info("Cache miss - fetching unique models from database")
             db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
 
             # Transform to API format
             api_models = transform_unique_models_batch(db_unique_models)
 
-        # Filter by minimum providers if specified
-        if min_providers is not None:
-            api_models = [m for m in api_models if m.get("provider_count", 0) >= min_providers]
+            # Apply filters
+            if min_providers is not None:
+                api_models = [m for m in api_models if m.get("provider_count", 0) >= min_providers]
 
-        # Sort the results
-        if sort_by == "provider_count":
-            api_models.sort(key=lambda m: m.get("provider_count", 0), reverse=(order == "desc"))
-        elif sort_by == "name":
-            api_models.sort(key=lambda m: m.get("name", "").lower(), reverse=(order == "desc"))
-        elif sort_by == "cheapest_price":
-            # Sort by cheapest price, handling None values
-            api_models.sort(
-                key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
-                reverse=(order == "desc")
+            # Sort the results
+            if sort_by == "provider_count":
+                api_models.sort(key=lambda m: m.get("provider_count", 0), reverse=(order == "desc"))
+            elif sort_by == "name":
+                api_models.sort(key=lambda m: m.get("name", "").lower(), reverse=(order == "desc"))
+            elif sort_by == "cheapest_price":
+                api_models.sort(
+                    key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
+                    reverse=(order == "desc")
+                )
+
+            # Cache the result for this specific filter/sort combination
+            from src.services.model_catalog_cache import cache_unique_models_with_filters
+            await cache_unique_models_with_filters(
+                models=api_models,
+                include_inactive=include_inactive,
+                min_providers=min_providers,
+                sort_by=sort_by,
+                order=order
             )
 
         # Calculate total before pagination
