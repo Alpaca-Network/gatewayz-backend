@@ -983,6 +983,23 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         if db_model.get("pricing_completion") is not None:
             pricing["completion"] = str(db_model["pricing_completion"])
 
+        # Fallback: extract pricing from metadata.pricing_raw if DB columns are NULL.
+        # The sync service stores pricing in metadata.pricing_raw but does NOT
+        # populate pricing_prompt/pricing_completion columns or the model_pricing table.
+        # Without this fallback, models show $0 after cache invalidation.
+        if not pricing:
+            metadata = db_model.get("metadata") or {}
+            pricing_raw = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
+            if pricing_raw and isinstance(pricing_raw, dict):
+                if pricing_raw.get("prompt") is not None:
+                    pricing["prompt"] = str(pricing_raw["prompt"])
+                if pricing_raw.get("completion") is not None:
+                    pricing["completion"] = str(pricing_raw["completion"])
+                if pricing_raw.get("image") is not None:
+                    pricing["image"] = str(pricing_raw["image"])
+                if pricing_raw.get("request") is not None:
+                    pricing["request"] = str(pricing_raw["request"])
+
         # Build API format model
         api_model = {
             # Use model_name as the API-facing id (not the DB primary key)

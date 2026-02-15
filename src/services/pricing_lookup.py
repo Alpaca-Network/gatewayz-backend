@@ -204,6 +204,13 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
     """
     Get pricing from database (Phase 2: database-first approach).
 
+    Checks two sources in order:
+    1. model_pricing table (JOIN) - legacy pricing storage
+    2. metadata.pricing_raw - current sync storage location
+
+    The sync service stores pricing in metadata.pricing_raw but does NOT
+    populate the model_pricing table, so source #2 is the primary path.
+
     Args:
         model_id: Model identifier (e.g., "nosana/meta-llama/Llama-3.3-70B-Instruct")
 
@@ -222,11 +229,11 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
 
         client = get_supabase_client()
 
-        # Query models table with JOIN to model_pricing table
+        # Query models table with JOIN to model_pricing table AND metadata
         # Note: model_id column was removed - now use model_name as canonical identifier
         result = (
             client.table("models")
-            .select("id, model_name, model_pricing(price_per_input_token, price_per_output_token)")
+            .select("id, model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)")
             .eq("model_name", model_id)
             .eq("is_active", True)
             .limit(1)
@@ -238,30 +245,41 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
 
         row = result.data[0]
 
-        if not row.get("model_pricing"):
-            return None
+        # Source 1: Try model_pricing table (legacy)
+        if row.get("model_pricing"):
+            pricing_data = row["model_pricing"]
+            if isinstance(pricing_data, list):
+                pricing_data = pricing_data[0] if pricing_data else None
 
-        pricing_data = row["model_pricing"]
-        if isinstance(pricing_data, list):
-            if not pricing_data:
-                return None
-            pricing_data = pricing_data[0]
+            if pricing_data:
+                prompt_price = pricing_data.get("price_per_input_token")
+                completion_price = pricing_data.get("price_per_output_token")
 
-        prompt_price = pricing_data.get("price_per_input_token")
-        completion_price = pricing_data.get("price_per_output_token")
+                if prompt_price is not None and completion_price is not None:
+                    return {
+                        "prompt": str(prompt_price),
+                        "completion": str(completion_price),
+                        "request": "0",
+                        "image": "0"
+                    }
 
-        if prompt_price is None or completion_price is None:
-            return None
+        # Source 2: Try metadata.pricing_raw (current sync storage)
+        metadata = row.get("metadata")
+        if isinstance(metadata, dict):
+            pricing_raw = metadata.get("pricing_raw")
+            if isinstance(pricing_raw, dict):
+                prompt_price = pricing_raw.get("prompt")
+                completion_price = pricing_raw.get("completion")
 
-        # Return per-token format (consistent with manual and cross-reference sources)
-        # Database stores per-token (e.g., 0.0000009)
-        # Frontend handles conversion to per-million for display
-        return {
-            "prompt": str(prompt_price),
-            "completion": str(completion_price),
-            "request": "0",
-            "image": "0"
-        }
+                if prompt_price is not None and completion_price is not None:
+                    return {
+                        "prompt": str(prompt_price),
+                        "completion": str(completion_price),
+                        "request": str(pricing_raw.get("request", "0")),
+                        "image": str(pricing_raw.get("image", "0")),
+                    }
+
+        return None
 
     except Exception as e:
         logger.error(f"Database pricing lookup failed for {model_id}: {e}")
