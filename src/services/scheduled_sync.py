@@ -41,29 +41,33 @@ _last_sync_status: dict[str, Any] = {
 
 async def run_scheduled_model_sync():
     """
-    Run the scheduled model sync job.
+    Run the scheduled model sync job with incremental change detection.
 
     This function is called by APScheduler at the configured interval.
-    It syncs all providers to the database and updates health metrics.
+    It syncs all providers to the database using efficient incremental sync:
+    - Fetches models from ALL providers
+    - Compares with DB using content hashing
+    - Only writes changed/new models
+    - Only invalidates cache for providers with changes
+
+    This minimizes DB writes and cache invalidation overhead.
     """
-    from src.services.model_catalog_sync import sync_all_providers
+    from src.services.incremental_sync import sync_all_providers_incremental
 
     start_time = datetime.now(timezone.utc)
     _last_sync_status["last_run_time"] = start_time
     _last_sync_status["total_runs"] += 1
 
     logger.info("=" * 80)
-    logger.info("Starting scheduled model sync")
+    logger.info("Starting scheduled incremental model sync")
     logger.info("=" * 80)
 
     try:
-        # Sync all providers in a background thread so the event loop stays
-        # free to serve incoming HTTP requests.  sync_all_providers() is fully
-        # synchronous (HTTP calls + DB writes) and would otherwise block every
-        # request for the 10-20 minutes it takes to finish.
+        # Run incremental sync in background thread to avoid blocking event loop
+        # This uses content-based change detection to minimize DB writes
         import asyncio
 
-        result = await asyncio.to_thread(sync_all_providers, dry_run=False)
+        result = await asyncio.to_thread(sync_all_providers_incremental, dry_run=False)
 
         # Calculate duration
         end_time = datetime.now(timezone.utc)
@@ -80,12 +84,17 @@ async def run_scheduled_model_sync():
             )
 
             logger.info("=" * 80)
-            logger.info("✅ Scheduled model sync SUCCESSFUL")
+            logger.info("✅ Scheduled incremental sync SUCCESSFUL")
             logger.info(f"   Duration: {duration:.2f}s")
-            logger.info(f"   Models synced: {result.get('total_models_synced', 0)}")
+            logger.info(f"   Models fetched: {result.get('total_models_fetched', 0):,}")
+            logger.info(f"   Models changed: {result.get('total_models_changed', 0):,}")
+            logger.info(f"   Models synced: {result.get('total_models_synced', 0):,}")
+            logger.info(f"   Change rate: {result.get('change_rate_percent', 0):.1f}%")
+            logger.info(f"   Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%")
             logger.info(
                 f"   Providers synced: {result.get('providers_synced', 0)}/{result.get('total_providers', 0)}"
             )
+            logger.info(f"   Providers with changes: {result.get('providers_with_changes', 0)}")
             logger.info("=" * 80)
 
         else:
