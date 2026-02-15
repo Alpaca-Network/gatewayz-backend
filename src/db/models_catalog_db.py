@@ -598,11 +598,104 @@ def bulk_upsert_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]
 
         if response.data:
             logger.info(f"Upserted {len(response.data)} models")
+            # Sync pricing from metadata.pricing_raw into model_pricing table
+            _sync_pricing_to_model_pricing(supabase, response.data)
             return response.data
         return []
     except Exception as e:
         logger.error(f"Error bulk upserting models: {e}")
         return []
+
+
+def _sync_pricing_to_model_pricing(
+    supabase, upserted_models: list[dict[str, Any]]
+) -> None:
+    """
+    Sync pricing from metadata.pricing_raw into the model_pricing table.
+
+    The sync service stores pricing in models.metadata.pricing_raw but the
+    model_usage_analytics view (and other read paths) JOIN to model_pricing.
+    This function bridges the gap by upserting pricing after models are saved.
+
+    Args:
+        supabase: Supabase client instance
+        upserted_models: List of model dicts returned from the models upsert
+    """
+    pricing_rows = []
+    for model in upserted_models:
+        model_id = model.get("id")
+        if not model_id:
+            continue
+
+        metadata = model.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+
+        pricing_raw = metadata.get("pricing_raw")
+        if not isinstance(pricing_raw, dict):
+            continue
+
+        prompt = pricing_raw.get("prompt")
+        completion = pricing_raw.get("completion")
+        if prompt is None and completion is None:
+            continue
+
+        try:
+            input_price = float(prompt) if prompt is not None else 0
+            output_price = float(completion) if completion is not None else 0
+        except (ValueError, TypeError):
+            continue
+
+        row = {
+            "model_id": model_id,
+            "price_per_input_token": input_price,
+            "price_per_output_token": output_price,
+            "pricing_source": "provider",
+        }
+
+        # Optional fields
+        image = pricing_raw.get("image")
+        if image is not None:
+            try:
+                row["price_per_image_token"] = float(image)
+            except (ValueError, TypeError):
+                pass
+
+        request_price = pricing_raw.get("request")
+        if request_price is not None:
+            try:
+                row["price_per_request"] = float(request_price)
+            except (ValueError, TypeError):
+                pass
+
+        # Classify pricing type
+        if input_price > 0 or output_price > 0:
+            row["pricing_type"] = "paid"
+        else:
+            row["pricing_type"] = "free"
+
+        pricing_rows.append(row)
+
+    if not pricing_rows:
+        return
+
+    try:
+        # Batch upsert in chunks to stay within Supabase limits
+        CHUNK_SIZE = 500
+        total_synced = 0
+        for i in range(0, len(pricing_rows), CHUNK_SIZE):
+            chunk = pricing_rows[i : i + CHUNK_SIZE]
+            supabase.table("model_pricing").upsert(
+                chunk, on_conflict="model_id"
+            ).execute()
+            total_synced += len(chunk)
+
+        logger.info(
+            f"Synced {total_synced} pricing entries to model_pricing table"
+        )
+    except Exception as e:
+        # Non-fatal: pricing sync failure shouldn't block model sync
+        logger.error(f"Failed to sync pricing to model_pricing table: {e}")
 
 
 def flush_models_table() -> dict[str, Any]:
