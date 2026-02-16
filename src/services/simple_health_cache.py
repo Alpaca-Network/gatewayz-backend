@@ -184,11 +184,6 @@ class SimpleHealthCache:
 
         return None
 
-        except Exception as e:
-            logger.error(f"Failed to retrieve cache {key}: {e}", exc_info=True)
-            logger.error(f"Cache retrieval error type: {type(e).__name__}")
-            return None
-
     def delete_cache(self, key: str) -> bool:
         """Delete cache entry"""
         if not self.redis_client:

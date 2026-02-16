@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
-from src.security.deps import require_admin
+from src.security.deps import get_optional_api_key, require_admin
 
 logger = logging.getLogger(__name__)
 
