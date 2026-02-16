@@ -655,9 +655,11 @@ def get_sync_client() -> Client:
         try:
             Config.validate()
 
-            logger.info("Initializing dedicated Supabase sync client...")
+            logger.info("🔄 Initializing dedicated Supabase sync client...")
+            logger.info(f"   Config validation: {'OK' if Config.SUPABASE_URL else 'MISSING URL'}")
 
             postgrest_base_url = f"{Config.SUPABASE_URL}/rest/v1"
+            logger.info(f"   PostgREST URL: {postgrest_base_url[:50]}...")
 
             # SYNC-SPECIFIC CONNECTION POOL: Smaller pool for sync operations
             # This prevents sync from exhausting all available connections

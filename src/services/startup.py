@@ -52,6 +52,12 @@ async def lifespan(app):
     Application lifespan manager for startup and shutdown events
     """
     # Startup
+    logger.info("=" * 80)
+    logger.info("🚀 GATEWAYZ API STARTUP - BEGIN")
+    logger.info("=" * 80)
+    logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'local')}")
+    logger.info(f"Python Version: {os.sys.version.split()[0]}")
+    logger.info(f"Working Directory: {os.getcwd()}")
     logger.info("Starting health monitoring and observability services...")
 
     # Validate critical environment variables at runtime startup
@@ -410,7 +416,11 @@ async def lifespan(app):
 
         _create_background_task(init_model_catalog_refresh_background(), name="init_model_catalog_refresh")
 
+        logger.info("=" * 80)
+        logger.info("✅ GATEWAYZ API STARTUP - COMPLETE")
         logger.info("All monitoring and health services started successfully")
+        logger.info("🎯 Ready to accept requests!")
+        logger.info("=" * 80)
 
     except Exception as e:
         logger.error(f"Failed to start monitoring services: {e}")
