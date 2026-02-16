@@ -373,18 +373,50 @@ class IntelligentHealthMonitor:
                     error_message = f"HTTP {response.status_code}: {response.text[:200]}"
 
         except httpx.TimeoutException:
+            # TRANSIENT FAILURE FIX: Classify timeout errors more granularly
             status = HealthCheckStatus.TIMEOUT
             error_message = f"Request timeout after {timeout}s"
             response_time_ms = timeout * 1000
+            # Note: Timeouts are often transient (cold starts, network congestion)
+            # Don't immediately mark model as unhealthy on first timeout
+        except httpx.ConnectError as e:
+            # TRANSIENT FAILURE FIX: Connection errors are usually transient
+            status = HealthCheckStatus.ERROR
+            error_message = f"Connection error (transient): {str(e)[:100]}"
+            response_time_ms = (time.time() - start_time) * 1000
+            logger.debug(f"Transient connection error for {model_id}: {e}")
         except httpx.RequestError as e:
+            # TRANSIENT FAILURE FIX: Distinguish between transient and persistent errors
+            error_str = str(e).lower()
+            is_transient = any(
+                pattern in error_str
+                for pattern in [
+                    "connection",
+                    "timeout",
+                    "network",
+                    "reset",
+                    "broken pipe",
+                    "503",
+                    "502",
+                    "504",
+                ]
+            )
+
             status = HealthCheckStatus.ERROR
-            error_message = f"Request error: {str(e)}"
+            error_type = "transient" if is_transient else "persistent"
+            error_message = f"Request error ({error_type}): {str(e)[:100]}"
             response_time_ms = (time.time() - start_time) * 1000
+
+            if is_transient:
+                logger.debug(f"Transient request error for {model_id}: {e}")
+            else:
+                logger.warning(f"Persistent request error for {model_id}: {e}")
         except Exception as e:
+            # TRANSIENT FAILURE FIX: Handle unexpected errors gracefully
             status = HealthCheckStatus.ERROR
-            error_message = f"Unexpected error: {str(e)}"
+            error_message = f"Unexpected error: {str(e)[:100]}"
             response_time_ms = (time.time() - start_time) * 1000
-            logger.error(f"Unexpected error checking {model_id}: {e}", exc_info=True)
+            logger.error(f"Unexpected error checking {model_id}: {type(e).__name__}: {e}")
 
         return HealthCheckResult(
             provider=provider,
@@ -454,9 +486,10 @@ class IntelligentHealthMonitor:
 
             is_success = result.status == HealthCheckStatus.SUCCESS
 
-            # Get current health data with retry logic
+            # TRANSIENT FAILURE FIX: Get current health data with improved retry logic
             current = None
-            max_retries = 2
+            max_retries = 3  # Increased from 2 to 3
+            retry_delays = [0.5, 1.0, 2.0]  # Exponential backoff
 
             for attempt in range(max_retries):
                 try:
@@ -470,13 +503,35 @@ class IntelligentHealthMonitor:
                     )
                     break  # Success, exit retry loop
                 except Exception as query_error:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(0.5)  # Brief delay before retry
-                        continue
-                    # Log only on final failure, and at debug level to reduce noise
-                    logger.debug(
-                        f"Health tracking query failed for {result.model} after {max_retries} attempts: {query_error}"
+                    # TRANSIENT FAILURE FIX: Check if error is transient before retrying
+                    error_str = str(query_error).lower()
+                    is_transient = any(
+                        pattern in error_str
+                        for pattern in [
+                            "timeout",
+                            "connection",
+                            "network",
+                            "503",
+                            "502",
+                            "unavailable",
+                        ]
                     )
+
+                    if is_transient and attempt < max_retries - 1:
+                        delay = retry_delays[attempt] if attempt < len(retry_delays) else 2.0
+                        logger.debug(
+                            f"Transient error querying health tracking for {result.model} "
+                            f"(attempt {attempt + 1}/{max_retries}), retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    # Non-transient error or final retry
+                    if attempt == max_retries - 1:
+                        logger.debug(
+                            f"Health tracking query failed for {result.model} after {max_retries} attempts: "
+                            f"{type(query_error).__name__}: {str(query_error)[:100]}"
+                        )
                     return
 
             # Handle case where response is None (e.g., Supabase client not initialized or table doesn't exist)
@@ -600,23 +655,58 @@ class IntelligentHealthMonitor:
         consecutive_failures: int,
         consecutive_successes: int,
     ) -> CircuitBreakerState:
-        """Calculate circuit breaker state based on failure patterns"""
+        """
+        Calculate circuit breaker state based on failure patterns.
+
+        TRANSIENT FAILURE FIX: More lenient thresholds to avoid false positives
+        from transient network issues and cold starts.
+
+        Circuit breaker logic:
+        - CLOSED: Normal operation, failures < 8
+        - OPEN: Too many failures (≥8), block requests temporarily
+        - HALF_OPEN: Testing recovery, allow limited traffic
+
+        Args:
+            current_state: Current circuit breaker state
+            consecutive_failures: Number of consecutive failures
+            consecutive_successes: Number of consecutive successes
+
+        Returns:
+            New circuit breaker state
+        """
         current = CircuitBreakerState(current_state)
 
+        # TRANSIENT FAILURE FIX: Increased threshold from 5 to 8 consecutive failures
+        # Many models have occasional timeouts due to cold starts or network issues
+        # We don't want to trip the circuit breaker on transient failures
+        FAILURE_THRESHOLD = 8  # Increased from 5
+        SUCCESS_THRESHOLD = 3  # Keep at 3 for quick recovery
+
         if current == CircuitBreakerState.CLOSED:
-            if consecutive_failures >= 5:
+            if consecutive_failures >= FAILURE_THRESHOLD:
+                logger.warning(
+                    f"Circuit breaker opening after {consecutive_failures} consecutive failures "
+                    f"(threshold: {FAILURE_THRESHOLD})"
+                )
                 return CircuitBreakerState.OPEN
             return CircuitBreakerState.CLOSED
 
         elif current == CircuitBreakerState.OPEN:
-            # Stay open for a while, then try half-open
-            # This is simplified - should use time-based logic
+            # TRANSIENT FAILURE FIX: Auto-transition to HALF_OPEN after being OPEN
+            # This allows the system to test recovery automatically
+            # In a production system, this would be time-based (e.g., after 60s)
+            logger.info("Circuit breaker transitioning from OPEN to HALF_OPEN for recovery test")
             return CircuitBreakerState.HALF_OPEN
 
         elif current == CircuitBreakerState.HALF_OPEN:
-            if consecutive_successes >= 3:
+            if consecutive_successes >= SUCCESS_THRESHOLD:
+                logger.info(
+                    f"Circuit breaker closing after {consecutive_successes} consecutive successes "
+                    f"(threshold: {SUCCESS_THRESHOLD})"
+                )
                 return CircuitBreakerState.CLOSED
             if consecutive_failures >= 1:
+                logger.warning("Circuit breaker reopening after failure in HALF_OPEN state")
                 return CircuitBreakerState.OPEN
             return CircuitBreakerState.HALF_OPEN
 
@@ -627,9 +717,10 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
 
-            # Check for active incident with retry logic
+            # TRANSIENT FAILURE FIX: Check for active incident with improved retry logic
             active = None
-            max_retries = 2
+            max_retries = 3  # Increased from 2 to 3
+            retry_delays = [0.5, 1.0, 2.0]  # Exponential backoff
 
             for attempt in range(max_retries):
                 try:
@@ -647,13 +738,35 @@ class IntelligentHealthMonitor:
                     )
                     break  # Success, exit retry loop
                 except Exception as query_error:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(0.5)  # Brief delay before retry
-                        continue
-                    # Log only on final failure, and at debug level to reduce noise
-                    logger.debug(
-                        f"Incident query failed for {result.model} after {max_retries} attempts: {query_error}"
+                    # TRANSIENT FAILURE FIX: Check if error is transient before retrying
+                    error_str = str(query_error).lower()
+                    is_transient = any(
+                        pattern in error_str
+                        for pattern in [
+                            "timeout",
+                            "connection",
+                            "network",
+                            "503",
+                            "502",
+                            "unavailable",
+                        ]
                     )
+
+                    if is_transient and attempt < max_retries - 1:
+                        delay = retry_delays[attempt] if attempt < len(retry_delays) else 2.0
+                        logger.debug(
+                            f"Transient error querying incidents for {result.model} "
+                            f"(attempt {attempt + 1}/{max_retries}), retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    # Non-transient error or final retry
+                    if attempt == max_retries - 1:
+                        logger.debug(
+                            f"Incident query failed for {result.model} after {max_retries} attempts: "
+                            f"{type(query_error).__name__}: {str(query_error)[:100]}"
+                        )
                     return
 
             # Handle case where response is None (e.g., Supabase client not initialized or table doesn't exist)
@@ -1025,8 +1138,31 @@ class IntelligentHealthMonitor:
             )
 
         except Exception as e:
-            logger.warning(f"Failed to publish health data to Redis cache: {e}")
-            # Don't fail the monitoring if cache publish fails
+            # TRANSIENT FAILURE FIX: Better error handling for Redis cache failures
+            error_str = str(e).lower()
+            is_redis_transient = any(
+                pattern in error_str
+                for pattern in [
+                    "timeout",
+                    "connection",
+                    "redis",
+                    "upstash",
+                    "network",
+                    "unavailable",
+                ]
+            )
+
+            if is_redis_transient:
+                logger.warning(
+                    f"Transient Redis cache publish failure (will retry next cycle): "
+                    f"{type(e).__name__}: {str(e)[:100]}"
+                )
+            else:
+                logger.error(
+                    f"Failed to publish health data to Redis cache: "
+                    f"{type(e).__name__}: {str(e)[:200]}"
+                )
+            # Don't fail the monitoring if cache publish fails - graceful degradation
 
     async def _check_health_threshold_and_alert(
         self,

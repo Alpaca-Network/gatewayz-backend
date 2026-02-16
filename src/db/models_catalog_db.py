@@ -521,18 +521,26 @@ def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def bulk_upsert_models(models_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = True) -> list[dict[str, Any]]:
     """
     Upsert multiple models at once
 
     Args:
         models_data: List of model data dictionaries
+        use_sync_pool: If True, use dedicated sync connection pool (default).
+                       Set to False only for non-sync bulk operations.
 
     Returns:
         List of upserted model dictionaries
+
+    Note:
+        By default, uses dedicated sync connection pool to prevent API downtime
+        during bulk model sync operations (8-minute sync window).
     """
     try:
-        supabase = get_supabase_client()
+        # Use dedicated sync pool to prevent exhausting API connections
+        # This solves the "API down for 8 minutes during sync" problem
+        supabase = get_client_for_query(for_sync=use_sync_pool)
 
         # Serialize Decimal objects to floats
         serialized_models = [_serialize_model_data(model) for model in models_data]
