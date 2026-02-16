@@ -227,6 +227,78 @@ class ModelCatalogCache:
 
     # Full Catalog Caching
 
+    def get_unique_models_catalog(self) -> list[dict[str, Any]] | None:
+        """Get cached unique models catalog.
+
+        Returns:
+            Cached catalog list or None if not found/expired
+        """
+        if not self.redis_client or not is_redis_available():
+            return None
+
+        key = self.PREFIX_UNIQUE
+
+        try:
+            cached_data = self.redis_client.get(key)
+            if cached_data:
+                self._stats["hits"] += 1
+                logger.debug("Cache HIT: Unique models catalog")
+                return json.loads(cached_data)
+            else:
+                self._stats["misses"] += 1
+                logger.debug("Cache MISS: Unique models catalog")
+                return None
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            error_type = self._classify_cache_error(e)
+            logger.warning(
+                f"Cache GET error | "
+                f"Key: unique_catalog | "
+                f"Error Type: {error_type.value} | "
+                f"Details: {str(e)}"
+            )
+            return None
+
+    def set_unique_models_catalog(
+        self,
+        catalog: list[dict[str, Any]],
+        ttl: int | None = None,
+    ) -> bool:
+        """Cache the unique models catalog.
+
+        Args:
+            catalog: Unique model catalog with provider arrays
+            ttl: Time to live in seconds (default: TTL_UNIQUE)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.redis_client or not is_redis_available():
+            return False
+
+        key = self.PREFIX_UNIQUE
+        ttl = ttl or self.TTL_UNIQUE
+
+        try:
+            serialized_data = json.dumps(catalog)
+            self.redis_client.setex(key, ttl, serialized_data)
+            self._stats["sets"] += 1
+            logger.info(f"Cache SET: Unique model catalog ({len(catalog)} models, TTL: {ttl}s)")
+            return True
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            error_type = self._classify_cache_error(e)
+            logger.warning(
+                f"Cache SET error | "
+                f"Key: unique_catalog | "
+                f"Models: {len(catalog)} | "
+                f"Error Type: {error_type.value} | "
+                f"Details: {str(e)}"
+            )
+            return False
+
     def get_full_catalog(self) -> list[dict[str, Any]] | None:
         """Get cached full model catalog.
 
@@ -258,6 +330,39 @@ class ModelCatalogCache:
                 f"Error Type: {error_type.value} | "
                 f"Details: {str(e)} | "
                 f"Redis Available: {is_redis_available()}"
+            )
+            return None
+            
+    def get_unique_models_catalog(self) -> list[dict[str, Any]] | None:
+        """Get cached unique models catalog.
+        
+        Returns:
+            Cached catalog list or None if not found/expired
+        """
+        if not self.redis_client or not is_redis_available():
+            return None
+
+        key = self.PREFIX_UNIQUE
+
+        try:
+            cached_data = self.redis_client.get(key)
+            if cached_data:
+                self._stats["hits"] += 1
+                logger.debug("Cache HIT: Unique models catalog")
+                return json.loads(cached_data)
+            else:
+                self._stats["misses"] += 1
+                logger.debug("Cache MISS: Unique models catalog")
+                return None
+
+        except Exception as e:
+            self._stats["errors"] += 1
+            error_type = self._classify_cache_error(e)
+            logger.warning(
+                f"Cache GET error | "
+                f"Key: unique_catalog | "
+                f"Error Type: {error_type.value} | "
+                f"Details: {str(e)}"
             )
             return None
 
