@@ -2072,51 +2072,6 @@ async def invalidate_cache(
         ) from e
 
 
-@router.post("/api/cache/invalidate", tags=["cache"])
-async def invalidate_cache_legacy(
-    background_tasks: BackgroundTasks,
-    gateway: str | None = Query(
-        None, description="Specific gateway cache to invalidate, or all if not specified"
-    ),
-    cache_type: str | None = Query(
-        None, description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified"
-    ),
-):
-    """
-    Legacy cache invalidation endpoint (backward compatibility).
-
-    NOTE: This endpoint is deprecated. Use /admin/api/cache/invalidate instead.
-    Maintained for backward compatibility with external systems.
-    """
-    try:
-        # Determine what will be invalidated for response message
-        if gateway:
-            scope = f"gateway '{gateway}'"
-        elif cache_type:
-            scope = f"{cache_type} cache"
-        else:
-            scope = "all caches"
-
-        # Schedule background task
-        background_tasks.add_task(_perform_cache_invalidation, gateway, cache_type)
-
-        logger.info(f"Cache invalidation task scheduled for: {scope}")
-
-        return {
-            "success": True,
-            "message": f"Cache invalidation started in background for {scope}",
-            "status": "processing",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to schedule cache invalidation: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to schedule cache invalidation: {str(e)}"
-        ) from e
-
-
 @router.post("/admin/cache/pricing/refresh", tags=["admin", "cache", "pricing"])
 async def refresh_pricing_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
