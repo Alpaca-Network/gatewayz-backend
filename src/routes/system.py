@@ -15,8 +15,10 @@ from html import escape
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
+
+from src.security.deps import require_admin
 
 from src.services.model_catalog_cache import (
     clear_models_cache,
@@ -1140,8 +1142,8 @@ async def trigger_gateway_fix(
 # ============================================================================
 
 
-@router.get("/cache/debouncer/stats", tags=["cache", "monitoring"])
-async def get_cache_debouncer_stats():
+@router.get("/admin/cache/debouncer/stats", tags=["admin", "cache", "monitoring"])
+async def get_cache_debouncer_stats(admin_user: dict = Depends(require_admin)):
     """
     Get cache debouncer statistics (Issue #1099).
 
@@ -1184,8 +1186,8 @@ async def get_cache_debouncer_stats():
         ) from e
 
 
-@router.get("/cache/warmer/stats", tags=["cache", "monitoring"])
-async def get_cache_warmer_stats():
+@router.get("/admin/cache/warmer/stats", tags=["admin", "cache", "monitoring"])
+async def get_cache_warmer_stats(admin_user: dict = Depends(require_admin)):
     """
     Get cache warmer statistics including:
     - Background refresh counts
@@ -1251,8 +1253,8 @@ async def get_cache_warmer_stats():
         ) from e
 
 
-@router.get("/cache/status", tags=["cache"])
-async def get_cache_status():
+@router.get("/admin/cache/status", tags=["admin", "cache"])
+async def get_cache_status(admin_user: dict = Depends(require_admin)):
     """
     Get cache status for all gateways.
 
@@ -1372,10 +1374,11 @@ async def get_cache_status():
         raise HTTPException(status_code=500, detail=f"Failed to get cache status: {str(e)}") from e
 
 
-@router.post("/cache/refresh/{gateway}", tags=["cache"])
+@router.post("/admin/cache/refresh/{gateway}", tags=["admin", "cache"])
 async def refresh_gateway_cache(
     gateway: str,
     force: bool = Query(False, description="Force refresh even if cache is still valid"),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Force refresh cache for a specific gateway.
@@ -1483,11 +1486,12 @@ async def refresh_gateway_cache(
         raise HTTPException(status_code=500, detail=f"Failed to refresh cache: {str(e)}") from e
 
 
-@router.post("/cache/clear", tags=["cache"])
+@router.post("/admin/cache/clear", tags=["admin", "cache"])
 async def clear_all_caches(
     gateway: str | None = Query(
         None, description="Specific gateway to clear, or all if not specified"
-    )
+    ),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Clear cache for all gateways or a specific gateway.
@@ -1807,8 +1811,8 @@ async def check_single_gateway(gateway: str):
 # ============================================================================
 
 
-@router.get("/cache/modelz/status", tags=["cache", "modelz"])
-async def get_modelz_cache_status():
+@router.get("/admin/cache/modelz/status", tags=["admin", "cache", "modelz"])
+async def get_modelz_cache_status(admin_user: dict = Depends(require_admin)):
     """
     Get the current status of the Modelz cache.
 
@@ -1845,8 +1849,8 @@ async def get_modelz_cache_status():
         ) from e
 
 
-@router.post("/cache/modelz/refresh", tags=["cache", "modelz"])
-async def refresh_modelz_cache_endpoint():
+@router.post("/admin/cache/modelz/refresh", tags=["admin", "cache", "modelz"])
+async def refresh_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Force refresh the Modelz cache by fetching fresh data from the API.
 
@@ -1886,8 +1890,8 @@ async def refresh_modelz_cache_endpoint():
         ) from e
 
 
-@router.delete("/cache/modelz/clear", tags=["cache", "modelz"])
-async def clear_modelz_cache_endpoint():
+@router.delete("/admin/cache/modelz/clear", tags=["admin", "cache", "modelz"])
+async def clear_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Clear the Modelz cache.
 
@@ -2007,7 +2011,7 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
         logger.error(f"Background task: Failed to invalidate cache: {e}", exc_info=True)
 
 
-@router.post("/api/cache/invalidate", tags=["cache"])
+@router.post("/admin/api/cache/invalidate", tags=["admin", "cache"])
 async def invalidate_cache(
     background_tasks: BackgroundTasks,
     gateway: str | None = Query(
@@ -2016,6 +2020,7 @@ async def invalidate_cache(
     cache_type: str | None = Query(
         None, description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified"
     ),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Invalidate cache for specified gateway or cache type.
@@ -2067,8 +2072,8 @@ async def invalidate_cache(
         ) from e
 
 
-@router.post("/cache/pricing/refresh", tags=["cache", "pricing"])
-async def refresh_pricing_cache_endpoint():
+@router.post("/admin/cache/pricing/refresh", tags=["admin", "cache", "pricing"])
+async def refresh_pricing_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Force refresh the pricing cache by reloading from the manual pricing file.
 
