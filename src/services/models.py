@@ -968,8 +968,8 @@ def get_cached_unique_models_catalog():
     cache = get_model_catalog_cache()
 
     try:
-        # Try cache first
-        cached = cache.get_full_catalog()
+        # Try cache first (using distinctive unique models key)
+        cached = cache.get_unique_models_catalog()
         if cached is not None:
             # Check if cached data has the unique models structure
             if cached and isinstance(cached, list) and len(cached) > 0:
@@ -991,8 +991,8 @@ def get_cached_unique_models_catalog():
         if query_time > 1.0:
             logger.warning(f"Slow unique models fetch: {query_time:.2f}s (threshold: 1.0s)")
 
-        # Cache result (TTL: 900 seconds = 15 minutes)
-        cache.set_full_catalog(api_models, ttl=900)
+        # Cache result (TTL: 900 seconds = 15 minutes) using distinctive unique models key
+        cache.set_unique_models_catalog(api_models, ttl=900)
 
         return api_models
 
