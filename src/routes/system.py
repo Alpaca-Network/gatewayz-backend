@@ -1967,17 +1967,17 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
         if gateway:
             gateway = gateway.lower()
             logger.info(f"Background task: Invalidating cache for gateway '{gateway}' (debounced)")
-            # Enable debouncing for frontend-triggered invalidations (Issue #1099)
-            clear_models_cache(gateway, debounce=True)
+            # Enable debouncing and cascade for frontend-triggered invalidations (Issue #1099, #1100)
+            clear_models_cache(gateway, debounce=True, cascade=True)
             invalidated.append(f"models:{gateway}")
         elif cache_type == "models":
             # Clear all gateway model caches using batch operation (Issue #1099)
             gateways = get_all_gateway_names()
             logger.info(f"Background task: Batch invalidating model caches for {len(gateways)} gateways")
-            # Use batch invalidation for better performance (1 Redis operation vs 30+)
+            # Use batch invalidation with cascade to refresh catalog (Issue #1099, #1100)
             from src.services.model_catalog_cache import get_model_catalog_cache
             cache = get_model_catalog_cache()
-            result = cache.invalidate_providers_batch(gateways, cascade=False)
+            result = cache.invalidate_providers_batch(gateways, cascade=True)
             logger.info(f"Batch invalidation result: {result}")
             invalidated.extend([f"models:{gw}" for gw in gateways])
         elif cache_type == "providers":

@@ -746,6 +746,10 @@ queue_size = get_or_create_metric(
 # Scraped from Redis INFO on every Prometheus /metrics request.
 # Metric names match the standard redis_exporter convention so
 # the Grafana Redis-Cache dashboard queries work out of the box.
+#
+# These are all Gauges (not Counters) because we read absolute values
+# from Redis INFO. PromQL rate() works on monotonically-increasing
+# Gauges the same way it works on Counters.
 
 redis_up = get_or_create_metric(
     Gauge,
@@ -759,22 +763,65 @@ redis_memory_used_bytes = get_or_create_metric(
     "Total bytes allocated by Redis",
 )
 
+redis_memory_max_bytes = get_or_create_metric(
+    Gauge,
+    "redis_memory_max_bytes",
+    "Maximum memory configured for Redis (maxmemory)",
+)
+
 redis_connected_clients = get_or_create_metric(
     Gauge,
     "redis_connected_clients",
     "Number of connected client connections",
 )
 
-redis_expired_keys = get_or_create_metric(
+redis_uptime_in_seconds = get_or_create_metric(
     Gauge,
-    "redis_expired_keys",
+    "redis_uptime_in_seconds",
+    "Redis server uptime in seconds",
+)
+
+redis_commands_processed_total = get_or_create_metric(
+    Gauge,
+    "redis_commands_processed_total",
+    "Total number of commands processed by Redis",
+)
+
+redis_keyspace_hits_total = get_or_create_metric(
+    Gauge,
+    "redis_keyspace_hits_total",
+    "Total number of successful key lookups",
+)
+
+redis_keyspace_misses_total = get_or_create_metric(
+    Gauge,
+    "redis_keyspace_misses_total",
+    "Total number of failed key lookups",
+)
+
+redis_expired_keys_total = get_or_create_metric(
+    Gauge,
+    "redis_expired_keys_total",
     "Total number of keys expired by TTL",
 )
 
-redis_evicted_keys = get_or_create_metric(
+redis_evicted_keys_total = get_or_create_metric(
     Gauge,
-    "redis_evicted_keys",
+    "redis_evicted_keys_total",
     "Total number of keys evicted due to maxmemory policy",
+)
+
+redis_total_connections_received_total = get_or_create_metric(
+    Gauge,
+    "redis_total_connections_received_total",
+    "Total number of connections accepted by Redis",
+)
+
+redis_db_keys = get_or_create_metric(
+    Gauge,
+    "redis_db_keys",
+    "Number of keys in a Redis database",
+    ["db"],
 )
 
 # ==================== Performance Stage Metrics ====================
@@ -1925,6 +1972,16 @@ def collect_redis_info():
     Called automatically before each /metrics response via the
     metrics endpoint in main.py. Uses the existing Redis client
     from redis_config — no extra connections needed.
+
+    Exports all metrics needed by the Grafana Redis-Cache dashboard:
+    - Health: redis_up
+    - Memory: redis_memory_used_bytes, redis_memory_max_bytes
+    - Clients: redis_connected_clients
+    - Server: redis_uptime_in_seconds
+    - Stats: redis_commands_processed_total, redis_keyspace_hits_total,
+             redis_keyspace_misses_total, redis_expired_keys_total,
+             redis_evicted_keys_total, redis_total_connections_received_total
+    - Keyspace: redis_db_keys (per-database key count)
     """
     try:
         from src.config.redis_config import get_redis_client
@@ -1937,12 +1994,39 @@ def collect_redis_info():
         client.ping()
         redis_up.set(1)
 
+        # Fetch all INFO sections at once
         info = client.info()
 
+        # Memory
         redis_memory_used_bytes.set(info.get("used_memory", 0))
+        maxmemory = info.get("maxmemory", 0)
+        # Upstash and some configs report maxmemory=0 (unlimited) — use used_memory
+        # as a floor so Memory Usage % gauge doesn't divide by zero
+        if maxmemory and maxmemory > 0:
+            redis_memory_max_bytes.set(maxmemory)
+        else:
+            # For unlimited configs, report a sentinel so the gauge renders
+            # (dashboard handles 0 gracefully)
+            redis_memory_max_bytes.set(0)
+
+        # Clients
         redis_connected_clients.set(info.get("connected_clients", 0))
-        redis_expired_keys.set(info.get("expired_keys", 0))
-        redis_evicted_keys.set(info.get("evicted_keys", 0))
+
+        # Server
+        redis_uptime_in_seconds.set(info.get("uptime_in_seconds", 0))
+
+        # Stats (monotonically increasing — PromQL rate() works on these)
+        redis_commands_processed_total.set(info.get("total_commands_processed", 0))
+        redis_keyspace_hits_total.set(info.get("keyspace_hits", 0))
+        redis_keyspace_misses_total.set(info.get("keyspace_misses", 0))
+        redis_expired_keys_total.set(info.get("expired_keys", 0))
+        redis_evicted_keys_total.set(info.get("evicted_keys", 0))
+        redis_total_connections_received_total.set(info.get("total_connections_received", 0))
+
+        # Keyspace — per-database key counts (db0, db1, ...)
+        for key, value in info.items():
+            if key.startswith("db") and isinstance(value, dict):
+                redis_db_keys.labels(db=key).set(value.get("keys", 0))
 
     except Exception as e:
         redis_up.set(0)
