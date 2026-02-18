@@ -143,52 +143,46 @@ jobs:
             --base main \
             --head "$BRANCH"
 
-      - name: Repair already-applied migrations
-        if: steps.drift.outputs.drift == 'false'
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          # Parse migration list to find migrations that exist locally but failed
-          # to track in schema_migrations (e.g. applied manually or via a partial run).
-          # These show up as pending in "db push" but already have their version key
-          # in the DB, causing a duplicate key error.
-          supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
-
-          # Look for lines with a timestamp and no "applied" or "remote only" marker —
-          # but we can't reliably distinguish from the list alone. Instead, attempt a
-          # dry push and repair any version that hits a duplicate key conflict.
-          supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" --include-all 2>&1 | tee push-dry.txt || true
-
-          # Extract versions that failed with duplicate key
-          DUPES=$(grep -oP 'Key \(version\)=\(\K[0-9]+' push-dry.txt || true)
-
-          if [ -n "$DUPES" ]; then
-            echo "Found already-applied migrations that need repair: $DUPES"
-            for ver in $DUPES; do
-              echo "Repairing migration $ver → marking as applied"
-              supabase migration repair --status applied "$ver" --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
-            done
-            echo "Repair complete — will retry push"
-          else
-            echo "No duplicate migrations to repair"
-            # Check if the first push actually succeeded
-            if grep -q "Migrations applied successfully\|No migrations to push" push-dry.txt 2>/dev/null; then
-              echo "push_succeeded=true" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
       - name: Push local migrations to remote
         id: push
         if: steps.drift.outputs.drift == 'false' && github.event.inputs.dry_run != 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" --include-all 2>&1 | tee migration-output.txt
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::Migration failed — see logs above"
-            exit 1
-          fi
-          echo "Migrations applied successfully"
+          MAX_RETRIES=3
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Push attempt $ATTEMPT/$MAX_RETRIES..."
+
+            yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
+            EXIT_CODE=${PIPESTATUS[1]}
+
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "Migrations applied successfully"
+              exit 0
+            fi
+
+            # Check if failure is due to duplicate key (already-applied migration)
+            DUPES=$(grep -oP 'Key \(version\)=\(\K[0-9]+' migration-output.txt || true)
+
+            if [ -z "$DUPES" ]; then
+              echo "::error::Migration failed with non-duplicate error — see logs above"
+              exit 1
+            fi
+
+            # Repair each duplicate version and retry
+            for ver in $DUPES; do
+              echo "Migration $ver already exists in schema_migrations — repairing"
+              supabase migration repair --status applied "$ver" --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
+            done
+
+            echo "Repaired — retrying push..."
+          done
+
+          echo "::error::Migration failed after $MAX_RETRIES attempts"
+          exit 1
 
       - name: Verify migration status
         if: steps.drift.outputs.drift == 'false'
