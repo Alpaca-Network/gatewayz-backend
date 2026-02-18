@@ -143,46 +143,67 @@ jobs:
             --base main \
             --head "$BRANCH"
 
+      - name: Reconcile already-applied migrations
+        if: steps.drift.outputs.drift == 'false'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          # Get versions the remote DB already has in schema_migrations
+          supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
+
+          # Extract applied version timestamps from the list output
+          APPLIED=$(grep -oP '^\s*\K\d{14}(?=.*applied)' migration-status.txt || true)
+
+          if [ -z "$APPLIED" ]; then
+            echo "No previously applied migrations found"
+            exit 0
+          fi
+
+          # Temporarily move already-applied migration files out so db push
+          # only processes truly new migrations
+          mkdir -p /tmp/applied-migrations
+          for ver in $APPLIED; do
+            FILE=$(ls supabase/migrations/${ver}_*.sql 2>/dev/null || true)
+            if [ -n "$FILE" ]; then
+              echo "Skipping already-applied migration: $(basename $FILE)"
+              mv "$FILE" /tmp/applied-migrations/
+            fi
+          done
+
       - name: Push local migrations to remote
         id: push
         if: steps.drift.outputs.drift == 'false' && github.event.inputs.dry_run != 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          MAX_RETRIES=3
-          ATTEMPT=0
+          # Check if there are any pending migrations left to push
+          PENDING=$(ls supabase/migrations/*.sql 2>/dev/null | wc -l)
+          if [ "$PENDING" -eq 0 ]; then
+            echo "No new migrations to push"
+            exit 0
+          fi
 
-          while [ $ATTEMPT -lt $MAX_RETRIES ]; do
-            ATTEMPT=$((ATTEMPT + 1))
-            echo "Push attempt $ATTEMPT/$MAX_RETRIES..."
+          yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
+          EXIT_CODE=${PIPESTATUS[1]}
 
-            yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
-            EXIT_CODE=${PIPESTATUS[1]}
+          # Restore moved files regardless of outcome
+          if [ -d /tmp/applied-migrations ] && ls /tmp/applied-migrations/*.sql &>/dev/null; then
+            mv /tmp/applied-migrations/*.sql supabase/migrations/
+          fi
 
-            if [ $EXIT_CODE -eq 0 ]; then
-              echo "Migrations applied successfully"
-              exit 0
-            fi
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Migration failed — see logs above"
+            exit 1
+          fi
+          echo "Migrations applied successfully"
 
-            # Check if failure is due to duplicate key (already-applied migration)
-            DUPES=$(grep -oP 'Key \(version\)=\(\K[0-9]+' migration-output.txt || true)
-
-            if [ -z "$DUPES" ]; then
-              echo "::error::Migration failed with non-duplicate error — see logs above"
-              exit 1
-            fi
-
-            # Repair each duplicate version and retry
-            for ver in $DUPES; do
-              echo "Migration $ver already exists in schema_migrations — repairing"
-              supabase migration repair --status applied "$ver" --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
-            done
-
-            echo "Repaired — retrying push..."
-          done
-
-          echo "::error::Migration failed after $MAX_RETRIES attempts"
-          exit 1
+      - name: Restore migration files
+        if: always()
+        run: |
+          # Ensure applied migration files are restored even if push failed
+          if [ -d /tmp/applied-migrations ] && ls /tmp/applied-migrations/*.sql &>/dev/null; then
+            mv /tmp/applied-migrations/*.sql supabase/migrations/
+          fi
 
       - name: Verify migration status
         if: steps.drift.outputs.drift == 'false'
