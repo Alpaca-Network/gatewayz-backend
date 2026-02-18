@@ -729,7 +729,7 @@ def merge_models_by_slug(*model_lists: list[dict]) -> list[dict]:
 @router.get("/provider", tags=["providers"])
 async def get_providers(
     moderated_only: bool = Query(False, description="Filter for moderated providers only"),
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    limit: int = Query(100, ge=1, le=500, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     gateway: str | None = Query(
         "all",
@@ -895,6 +895,7 @@ async def get_models(
         # This provides 5-10ms response times for cached requests (vs 500ms-2s uncached)
         from src.services.catalog_response_cache import (
             get_cached_catalog_response,
+            cache_catalog_response,
         )
 
         # Build cache params from all request parameters
@@ -1684,7 +1685,7 @@ async def get_specific_model(
 
 async def get_developer_models(
     developer_name: str,
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    limit: int = Query(100, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
     gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
@@ -1781,12 +1782,10 @@ async def get_developer_models(
         }
 
         # Cache the response for future requests (fire and forget - don't block response)
-        # TODO: Re-enable caching after fixing cache_catalog_response import
-        # try:
-        #     await cache_catalog_response(gateway_value, cache_params, response)
-        # except Exception as cache_error:
-        #     # Log but don't fail the request if caching fails
-        #     logger.warning(f"Failed to cache response: {cache_error}")
+        try:
+            await cache_catalog_response(gateway_value, cache_params, response)
+        except Exception as cache_error:
+            logger.warning(f"Failed to cache response: {cache_error}")
 
         return response
 
@@ -2350,8 +2349,8 @@ async def get_all_models(
         None,
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
-    limit: int | None = Query(
-        100, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 100, max recommended: 1000)"
+    limit: int = Query(
+        100, ge=1, le=1000, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 100, max: 1000)"
     ),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
