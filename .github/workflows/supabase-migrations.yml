@@ -83,12 +83,16 @@ jobs:
           version: latest
 
       - name: Link Supabase project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
                         --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
 
       - name: Check for drift
         id: drift
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           # Capture migration list output
           supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
@@ -104,6 +108,8 @@ jobs:
 
       - name: Pull remote migrations
         if: steps.drift.outputs.drift == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           supabase db pull --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
           echo "Pulled remote-only migrations into supabase/migrations/"
@@ -139,6 +145,8 @@ jobs:
 
       - name: Push local migrations to remote
         if: steps.drift.outputs.drift == 'false' && github.event.inputs.dry_run != 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
           supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -149,6 +157,8 @@ jobs:
 
       - name: Verify migration status
         if: steps.drift.outputs.drift == 'false'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
 
       - name: Upload logs
