@@ -49,6 +49,7 @@ def compute_model_hash(model_data: dict[str, Any]) -> str:
     Excludes volatile fields:
     - created_at, updated_at
     - id, provider_id
+    - metadata.synced_at (changes every sync cycle)
 
     Args:
         model_data: Model dictionary
@@ -73,7 +74,10 @@ def compute_model_hash(model_data: dict[str, Any]) -> str:
             "function_calling": model_data.get("supports_function_calling", False),
             "vision": model_data.get("supports_vision", False),
         },
-        "metadata": model_data.get("metadata", {}),
+        "metadata": {
+            k: v for k, v in model_data.get("metadata", {}).items()
+            if k not in ("synced_at",)
+        },
         "description": model_data.get("description"),
         "top_provider": model_data.get("top_provider"),
         "per_request_limits": model_data.get("per_request_limits"),
