@@ -23,13 +23,15 @@ INSERT INTO model_pricing (
 )
 SELECT
     m.id AS model_id,
-    COALESCE(CAST(m.metadata->'pricing_raw'->>'prompt' AS NUMERIC), 0)
+    -- Clamp to NUMERIC(20,15) range: max absolute value is 99999.999...
+    -- Some providers store per-million-token prices; cap to avoid overflow.
+    LEAST(COALESCE(CAST(m.metadata->'pricing_raw'->>'prompt' AS NUMERIC), 0), 99999)
         AS price_per_input_token,
-    COALESCE(CAST(m.metadata->'pricing_raw'->>'completion' AS NUMERIC), 0)
+    LEAST(COALESCE(CAST(m.metadata->'pricing_raw'->>'completion' AS NUMERIC), 0), 99999)
         AS price_per_output_token,
-    CAST(m.metadata->'pricing_raw'->>'image' AS NUMERIC)
+    LEAST(COALESCE(CAST(m.metadata->'pricing_raw'->>'image' AS NUMERIC), 0), 99999)
         AS price_per_image_token,
-    CAST(m.metadata->'pricing_raw'->>'request' AS NUMERIC)
+    LEAST(COALESCE(CAST(m.metadata->'pricing_raw'->>'request' AS NUMERIC), 0), 9999)
         AS price_per_request,
     'provider' AS pricing_source,
     CASE
