@@ -440,8 +440,10 @@ def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
         # Use read replica for read-only catalog queries
         supabase = get_client_for_query(read_only=True)
 
-        # Get all models (with optional provider filter)
-        query = supabase.table("models").select("*")
+        # Only fetch fields needed for stats — NOT select("*")
+        query = supabase.table("models").select(
+            "id, is_active, health_status, modality"
+        )
         if provider_id:
             query = query.eq("provider_id", provider_id)
 
