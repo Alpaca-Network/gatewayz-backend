@@ -712,13 +712,17 @@ class ModelCatalogCache:
         try:
             total_deleted = 0
 
-            # Invalidate all model caches
+            # Invalidate all model caches using SCAN (non-blocking)
             for prefix in [self.PREFIX_MODEL, self.PREFIX_PRICING, self.PREFIX_PROVIDER]:
                 pattern = f"{prefix}:*"
-                keys = self.redis_client.keys(pattern)
-                if keys:
-                    deleted = self.redis_client.delete(*keys)
-                    total_deleted += deleted
+                cursor = 0
+                while True:
+                    cursor, keys = self.redis_client.scan(cursor, match=pattern, count=100)
+                    if keys:
+                        deleted = self.redis_client.delete(*keys)
+                        total_deleted += deleted
+                    if cursor == 0:
+                        break
 
             # Invalidate full catalog
             self.redis_client.delete(self.PREFIX_FULL_CATALOG)
@@ -732,6 +736,17 @@ class ModelCatalogCache:
             self._stats["errors"] += 1
             logger.warning(f"Cache INVALIDATE ALL error: {e}")
             return 0
+
+    def _count_keys(self, pattern: str) -> int:
+        """Count keys matching pattern using non-blocking SCAN."""
+        count = 0
+        cursor = 0
+        while True:
+            cursor, keys = self.redis_client.scan(cursor, match=pattern, count=100)
+            count += len(keys)
+            if cursor == 0:
+                break
+        return count
 
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics"""
@@ -755,13 +770,9 @@ class ModelCatalogCache:
         if self.redis_client and is_redis_available():
             try:
                 stats["full_catalog_cached"] = self.redis_client.exists(self.PREFIX_FULL_CATALOG)
-                stats["provider_catalogs_count"] = len(
-                    self.redis_client.keys(f"{self.PREFIX_PROVIDER}:*")
-                )
-                stats["models_cached_count"] = len(self.redis_client.keys(f"{self.PREFIX_MODEL}:*"))
-                stats["pricing_cached_count"] = len(
-                    self.redis_client.keys(f"{self.PREFIX_PRICING}:*")
-                )
+                stats["provider_catalogs_count"] = self._count_keys(f"{self.PREFIX_PROVIDER}:*")
+                stats["models_cached_count"] = self._count_keys(f"{self.PREFIX_MODEL}:*")
+                stats["pricing_cached_count"] = self._count_keys(f"{self.PREFIX_PRICING}:*")
             except Exception as e:
                 logger.warning(f"Failed to get cache size stats: {e}")
 
