@@ -89,25 +89,46 @@ jobs:
           supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
                         --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
 
-      - name: Check for drift
-        id: drift
+      - name: Check migration status
+        id: status
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          # Capture migration list output
           supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
 
-          # Check for remote-only migrations (applied on DB but missing locally)
-          if grep -q "remote only" migration-status.txt; then
+          # Detect drift: lines where REMOTE has a version but LOCAL is empty
+          # Format: "   LOCAL          | REMOTE         | TIME"
+          DRIFT=$(awk -F'|' '{
+            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            if ($2 ~ /^[0-9]{14}$/ && $1 !~ /^[0-9]{14}$/) print $2
+          }' migration-status.txt || true)
+
+          if [ -n "$DRIFT" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Schema drift detected — remote DB has migrations not in the repo"
+            echo "::warning::Schema drift detected — remote has migrations not in local repo:"
+            echo "$DRIFT"
           else
             echo "drift=false" >> "$GITHUB_OUTPUT"
             echo "No drift detected"
           fi
 
+          # Check for pending local-only migrations
+          PENDING=$(awk -F'|' '{
+            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            if ($1 ~ /^[0-9]{14}$/ && $2 !~ /^[0-9]{14}$/) print $1
+          }' migration-status.txt || true)
+
+          if [ -n "$PENDING" ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "Pending migrations to push:"
+            echo "$PENDING"
+          else
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            echo "No pending migrations"
+          fi
+
       - name: Pull remote migrations
-        if: steps.drift.outputs.drift == 'true'
+        if: steps.status.outputs.drift == 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
@@ -115,7 +136,7 @@ jobs:
           echo "Pulled remote-only migrations into supabase/migrations/"
 
       - name: Open PR for pulled migrations
-        if: steps.drift.outputs.drift == 'true'
+        if: steps.status.outputs.drift == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -143,93 +164,27 @@ jobs:
             --base main \
             --head "$BRANCH"
 
-      - name: Reconcile already-applied migrations
-        if: steps.drift.outputs.drift == 'false'
+      - name: Push migrations to remote
+        if: |
+          steps.status.outputs.drift == 'false' &&
+          steps.status.outputs.pending == 'true' &&
+          github.event.inputs.dry_run != 'true'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          # migration list output format:
-          #   LOCAL          │ REMOTE         │ TIME (UTC)
-          #   ───────────────┼────────────────┼──────────────
-          #   20260212000000 │ 20260212000000 │ 2024-...       ← applied (both columns)
-          #   20260217000000 │                │                 ← local only (pending)
-          supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
-
-          echo "=== Migration list output ==="
-          cat migration-status.txt
-          echo "=== End migration list ==="
-
-          # Extract REMOTE column versions (versions that have been applied to the DB).
-          # Format: "   LOCAL          | REMOTE         | TIME"
-          # A line where REMOTE has a 14-digit number means that version is applied.
-          # We extract the second column (after the first |, before the second |).
-          REMOTE_VERSIONS=$(awk -F'|' '{gsub(/[^0-9]/, "", $2); if ($2 ~ /^[0-9]{14}$/) print $2}' migration-status.txt || true)
-
-          if [ -z "$REMOTE_VERSIONS" ]; then
-            echo "No previously applied migrations found — all will be pushed"
-            exit 0
-          fi
-
-          echo "Remote has $(echo "$REMOTE_VERSIONS" | wc -l | tr -d ' ') applied migrations"
-
-          # Temporarily move local migration files whose version is already on remote.
-          # Match by exact filename prefix to handle duplicate timestamps correctly.
-          mkdir -p /tmp/applied-migrations
-          for ver in $REMOTE_VERSIONS; do
-            for FILE in supabase/migrations/${ver}_*.sql; do
-              [ -f "$FILE" ] || continue
-              BASENAME=$(basename "$FILE")
-              # Only move if this exact file's version matches a remote version.
-              # For duplicate timestamps (e.g. two files with 20260212000000),
-              # we need to check which one is actually tracked on remote.
-              # The remote tracks by version number, so ALL local files with
-              # that version would conflict. Move them all — the new one with
-              # the duplicate timestamp needs to be renamed anyway.
-              echo "Skipping already-applied migration: $BASENAME"
-              mv "$FILE" /tmp/applied-migrations/
-            done
-          done
-
-          echo "Remaining migrations to push:"
-          ls supabase/migrations/*.sql 2>/dev/null || echo "  (none)"
-
-      - name: Push local migrations to remote
-        id: push
-        if: steps.drift.outputs.drift == 'false' && github.event.inputs.dry_run != 'true'
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-        run: |
-          # Check if there are any pending migrations left to push
-          PENDING=$(ls supabase/migrations/*.sql 2>/dev/null | wc -l)
-          if [ "$PENDING" -eq 0 ]; then
-            echo "No new migrations to push"
-            exit 0
-          fi
-
+          # Pipe 'yes' to skip the interactive confirmation prompt in CI.
+          # db push automatically skips already-applied migrations and only
+          # applies new ones — all local files must be present for this to work.
           yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
-          EXIT_CODE=${PIPESTATUS[1]}
-
-          # Restore moved files regardless of outcome
-          if [ -d /tmp/applied-migrations ] && ls /tmp/applied-migrations/*.sql &>/dev/null; then
-            mv /tmp/applied-migrations/*.sql supabase/migrations/
-          fi
-
-          if [ $EXIT_CODE -ne 0 ]; then
-            echo "::error::Migration failed — see logs above"
+          # PIPESTATUS[1] is the exit code of supabase (PIPESTATUS[0] is yes)
+          if [ ${PIPESTATUS[1]} -ne 0 ]; then
+            echo "::error::Migration push failed — see logs above"
             exit 1
           fi
           echo "Migrations applied successfully"
 
-      - name: Restore migration files
-        if: always()
-        run: |
-          # Ensure applied migration files are restored even if push failed
-          if [ -d /tmp/applied-migrations ] && ls /tmp/applied-migrations/*.sql &>/dev/null; then
-            mv /tmp/applied-migrations/*.sql supabase/migrations/
-          fi
-
       - name: Verify migration status
-        if: steps.drift.outputs.drift == 'false'
+        if: steps.status.outputs.drift == 'false'
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
