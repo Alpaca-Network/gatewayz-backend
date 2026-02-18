@@ -16,6 +16,8 @@ Key Features:
 - Memory-efficient batch processing
 """
 
+import concurrent.futures
+import gc
 import hashlib
 import json
 import logging
@@ -349,7 +351,7 @@ def sync_provider_incremental(
 def sync_all_providers_incremental(
     provider_slugs: list[str] | None = None,
     dry_run: bool = False,
-    max_concurrent: int = 1,
+    max_concurrent: int = 3,
 ) -> dict[str, Any]:
     """
     Sync all providers incrementally with change detection.
@@ -357,23 +359,25 @@ def sync_all_providers_incremental(
     This is the main entry point for efficient scheduled sync.
 
     Process:
-    1. For each provider:
-       - Fetch models from API
-       - Detect changes via hash comparison
-       - Only write changed models to DB
-       - Only invalidate provider cache if changed
-    2. After ALL providers:
+    1. Phase 1: Sync small/medium providers in parallel using ThreadPoolExecutor
+    2. Phase 2: Sync large providers (e.g. featherless, 17k+ models) serially
+       with gc.collect() between each to manage memory
+    3. After ALL providers:
        - If ANY provider changed, invalidate global caches once
 
     Args:
         provider_slugs: Optional list of providers to sync (defaults to all)
         dry_run: If True, detect changes but don't write
-        max_concurrent: Future: support parallel provider sync (currently serial)
+        max_concurrent: Max parallel provider syncs (default 3, set 1 for serial)
 
     Returns:
         Overall sync results with aggregated metrics
     """
     sync_start = time.time()
+
+    # Providers with very large model counts that should be synced serially
+    # to avoid excessive memory usage when run concurrently
+    LARGE_PROVIDERS = {"featherless"}
 
     try:
         from src.config.config import Config
@@ -391,9 +395,17 @@ def sync_all_providers_incremental(
                     f"Skipping {len(skip_set)} providers: {', '.join(sorted(skip_set))}"
                 )
 
+        # Separate large providers (sync serially) from small/medium (sync in parallel)
+        small_providers = [p for p in providers_to_sync if p not in LARGE_PROVIDERS]
+        large_to_sync = [p for p in providers_to_sync if p in LARGE_PROVIDERS]
+
         logger.info("=" * 80)
         logger.info(f"INCREMENTAL SYNC: {len(providers_to_sync)} providers")
         logger.info(f"Dry run: {dry_run}")
+        logger.info(
+            f"Concurrency: max_concurrent={max_concurrent} "
+            f"({len(small_providers)} parallel, {len(large_to_sync)} serial)"
+        )
         logger.info("=" * 80)
 
         results = []
@@ -404,11 +416,9 @@ def sync_all_providers_incremental(
         providers_with_changes = []
         errors = []
 
-        # Sync each provider
-        for i, provider_slug in enumerate(providers_to_sync, 1):
-            logger.info(f"\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}")
-
-            result = sync_provider_incremental(provider_slug, dry_run=dry_run)
+        def _collect_result(provider_slug: str, result: dict[str, Any]) -> None:
+            """Aggregate a single provider's sync result into totals."""
+            nonlocal total_fetched, total_changed, total_synced, total_unchanged
             results.append(result)
 
             if result["success"]:
@@ -424,6 +434,55 @@ def sync_all_providers_incremental(
                     "provider": provider_slug,
                     "error": result.get("error")
                 })
+
+        # Phase 1: Small/medium providers in parallel
+        if small_providers and max_concurrent > 1:
+            logger.info(
+                f"\n--- Phase 1: Syncing {len(small_providers)} providers "
+                f"(max {max_concurrent} concurrent) ---"
+            )
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_concurrent
+            ) as executor:
+                future_to_slug = {
+                    executor.submit(
+                        sync_provider_incremental, slug, dry_run
+                    ): slug
+                    for slug in small_providers
+                }
+                for future in concurrent.futures.as_completed(future_to_slug):
+                    slug = future_to_slug[future]
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        logger.error(f"[{slug.upper()}] Sync failed with exception: {e}")
+                        result = {
+                            "success": False,
+                            "provider": slug,
+                            "error": str(e),
+                            "models_fetched": 0,
+                            "models_changed": 0,
+                            "models_synced": 0,
+                        }
+                    _collect_result(slug, result)
+        elif small_providers:
+            # max_concurrent=1: fall back to serial
+            for i, slug in enumerate(small_providers, 1):
+                logger.info(f"\n[{i}/{len(small_providers)}] Syncing: {slug.upper()}")
+                result = sync_provider_incremental(slug, dry_run=dry_run)
+                _collect_result(slug, result)
+
+        # Phase 2: Large providers serially with memory management
+        if large_to_sync:
+            logger.info(
+                f"\n--- Phase 2: Syncing {len(large_to_sync)} large providers (serial) ---"
+            )
+            for slug in large_to_sync:
+                gc.collect()
+                logger.info(f"\nSyncing large provider: {slug.upper()}")
+                result = sync_provider_incremental(slug, dry_run=dry_run)
+                _collect_result(slug, result)
+                gc.collect()
 
         # Invalidate global caches ONCE if any provider had changes
         if providers_with_changes and not dry_run:
