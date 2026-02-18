@@ -108,15 +108,11 @@ def get_existing_model_hashes(provider_id: int) -> dict[str, str]:
 
         supabase = get_supabase_client()
 
-        # Fetch only the fields needed for hashing
+        # Lightweight query: only fetch 2 fields instead of 14
+        # content_hash is pre-computed and stored on upsert
         result = (
             supabase.table("models")
-            .select(
-                "provider_model_id, model_name, context_length, modality, "
-                "pricing_prompt, pricing_completion, pricing_image, pricing_request, "
-                "supports_streaming, supports_function_calling, supports_vision, "
-                "metadata, description, top_provider, per_request_limits"
-            )
+            .select("provider_model_id, content_hash")
             .eq("provider_id", provider_id)
             .execute()
         )
@@ -124,13 +120,13 @@ def get_existing_model_hashes(provider_id: int) -> dict[str, str]:
         if not result.data:
             return {}
 
-        # Compute hash for each existing model
+        # No need to recompute hashes — just read stored values
         model_hashes = {}
         for model in result.data:
             provider_model_id = model.get("provider_model_id")
-            if provider_model_id:
-                model_hash = compute_model_hash(model)
-                model_hashes[provider_model_id] = model_hash
+            content_hash = model.get("content_hash")
+            if provider_model_id and content_hash:
+                model_hashes[provider_model_id] = content_hash
 
         return model_hashes
 
@@ -245,6 +241,9 @@ def sync_provider_incremental(
 
             # Compute hash of fetched model
             new_hash = compute_model_hash(db_model)
+
+            # Store hash in model data so it gets persisted on upsert
+            db_model["content_hash"] = new_hash
 
             # Compare with existing
             existing_hash = existing_hashes.get(provider_model_id)
