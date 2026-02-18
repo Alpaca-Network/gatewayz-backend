@@ -148,14 +148,23 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          # Get versions the remote DB already has in schema_migrations
+          # migration list output format:
+          #   LOCAL          │ REMOTE         │ TIME (UTC)
+          #   ───────────────┼────────────────┼──────────────
+          #   20260212000000 │ 20260212000000 │ 2024-...       ← applied (both columns)
+          #   20260217000000 │                │                 ← local only (pending)
           supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
 
-          # Extract applied version timestamps from the list output
-          APPLIED=$(grep -oP '^\s*\K\d{14}(?=.*applied)' migration-status.txt || true)
+          echo "=== Migration list output ==="
+          cat migration-status.txt
+          echo "=== End migration list ==="
+
+          # Extract versions that appear in BOTH local and remote columns
+          # (a line with two 14-digit numbers means it's applied on both sides)
+          APPLIED=$(grep -oP '\d{14}' migration-status.txt | sort | uniq -d || true)
 
           if [ -z "$APPLIED" ]; then
-            echo "No previously applied migrations found"
+            echo "No previously applied migrations found — all will be pushed"
             exit 0
           fi
 
@@ -169,6 +178,9 @@ jobs:
               mv "$FILE" /tmp/applied-migrations/
             fi
           done
+
+          echo "Remaining migrations to push:"
+          ls supabase/migrations/*.sql 2>/dev/null || echo "  (none)"
 
       - name: Push local migrations to remote
         id: push
