@@ -1807,7 +1807,7 @@ async def get_developer_models(
             "gateway": gateway_value,
         }
 
-        # Cache the response for future requests (fire and forget - don't block response)
+        # Cache the response for future requests
         try:
             await cache_catalog_response(gateway_value, cache_params, response)
         except Exception as cache_error:
