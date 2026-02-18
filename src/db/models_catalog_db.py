@@ -595,21 +595,33 @@ def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = 
             logger.warning("No models to upsert after deduplication and validation")
             return []
 
-        response = (
-            supabase.table("models")
-            .upsert(
-                deduplicated_models,
-                on_conflict="provider_id,provider_model_id"
-            )
-            .execute()
-        )
+        BATCH_SIZE = 500
+        all_upserted = []
 
-        if response.data:
-            logger.info(f"Upserted {len(response.data)} models")
+        for i in range(0, len(deduplicated_models), BATCH_SIZE):
+            batch = deduplicated_models[i : i + BATCH_SIZE]
+            response = (
+                supabase.table("models")
+                .upsert(
+                    batch,
+                    on_conflict="provider_id,provider_model_id"
+                )
+                .execute()
+            )
+            if response.data:
+                all_upserted.extend(response.data)
+
+            logger.info(
+                f"Upserted models batch {i // BATCH_SIZE + 1}: "
+                f"{len(batch)} models (total so far: {len(all_upserted)})"
+            )
+
+        if all_upserted:
+            logger.info(f"Upserted {len(all_upserted)} models total")
             # Sync pricing from metadata.pricing_raw into model_pricing table
-            _sync_pricing_to_model_pricing(supabase, response.data)
-            return response.data
-        return []
+            _sync_pricing_to_model_pricing(supabase, all_upserted)
+
+        return all_upserted
     except Exception as e:
         logger.error(f"Error bulk upserting models: {e}")
         return []
