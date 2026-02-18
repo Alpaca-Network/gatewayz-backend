@@ -77,7 +77,7 @@ def compute_model_hash(model_data: dict[str, Any]) -> str:
             "vision": model_data.get("supports_vision", False),
         },
         "metadata": {
-            k: v for k, v in model_data.get("metadata", {}).items()
+            k: v for k, v in (model_data.get("metadata") or {}).items()
             if k not in ("synced_at",)
         },
         "description": model_data.get("description"),
