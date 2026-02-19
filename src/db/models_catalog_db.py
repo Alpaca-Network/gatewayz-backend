@@ -36,12 +36,11 @@ from decimal import Decimal
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client, get_client_for_query
-from src.services.pricing_lookup import (
-    _build_openrouter_pricing_index,
-    enrich_model_with_pricing,
-    get_all_pricing_batch,
-    get_model_pricing,
-)
+
+# NOTE: pricing_lookup imports are deferred to function scope to avoid
+# a layer violation (db → services) at module load time.  The functions
+# that need them (transform_db_models_batch, transform_unique_models_batch)
+# import lazily inside their bodies.
 from src.utils.retry import with_retry
 from src.utils.step_logger import StepLogger
 
@@ -1561,6 +1560,12 @@ def transform_db_models_batch(
         List of models in API format with pricing enrichment applied
     """
     try:
+        from src.services.pricing_lookup import (
+            _build_openrouter_pricing_index,
+            enrich_model_with_pricing,
+            get_all_pricing_batch,
+        )
+
         # Pre-fetch ALL pricing in ONE query (eliminates N per-model DB round-trips)
         pricing_batch = get_all_pricing_batch()
         # Build O(1) OpenRouter cross-reference index once for the whole batch
@@ -2113,6 +2118,8 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
         List of API-formatted models with pricing enrichment applied
     """
     try:
+        from src.services.pricing_lookup import get_all_pricing_batch, get_model_pricing
+
         # Pre-fetch ALL pricing in ONE query (eliminates N per-model DB round-trips)
         pricing_batch = get_all_pricing_batch()
 

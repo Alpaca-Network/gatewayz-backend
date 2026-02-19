@@ -50,9 +50,10 @@ def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
         )
         return "0"
 
-    if numeric < 0:
+    import math
+    if not math.isfinite(numeric) or numeric < 0:
         logger.warning(
-            f"Pricing field '{field}' for model '{model_id}' is negative "
+            f"Pricing field '{field}' for model '{model_id}' is invalid "
             f"({numeric}); defaulting to 0"
         )
         return "0"
@@ -559,13 +560,14 @@ def enrich_model_with_pricing(
 
         # PHASE 2: Try database pricing — prefer the pre-fetched batch map (Fix 1/3)
         db_pricing: dict[str, str] | None = None
-        if pricing_batch:
-            # O(1) lookup in the pre-fetched map — no extra HTTP round-trip
+        if pricing_batch is not None:
+            # Batch was provided (even if empty) — use O(1) lookup, never fall
+            # back to per-model DB queries (the batch already represents the full DB).
             batch_entry = pricing_batch.get(model_id)
             if batch_entry:
                 db_pricing = {k: v for k, v in batch_entry.items() if k != "source"}
         else:
-            # Fallback: per-model DB query (legacy path for single-model callers)
+            # No batch provided — per-model DB query (legacy path for single-model callers)
             db_pricing = _get_pricing_from_database(model_id)
 
         if db_pricing:

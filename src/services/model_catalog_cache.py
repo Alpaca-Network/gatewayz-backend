@@ -37,7 +37,7 @@ import redis
 logger = logging.getLogger(__name__)
 
 try:
-    from prometheus_client import Counter, REGISTRY
+    from prometheus_client import Counter
     try:
         cache_operations = Counter(
             'catalog_cache_operations_total',
@@ -45,8 +45,9 @@ try:
             ['operation', 'cache_layer', 'result']
         )
     except ValueError:
-        # Already registered by catalog_response_cache — retrieve existing counter
-        cache_operations = REGISTRY._names_to_collectors.get('catalog_cache_operations_total')
+        # Already registered by catalog_response_cache — the existing instance
+        # is being used there; set None here to avoid relying on private API.
+        cache_operations = None
 except Exception:
     cache_operations = None
 
