@@ -1,0 +1,262 @@
+[
+  {
+    "test_name": "Simple Hello",
+    "prompt": "Hello, tell me about yourself in 2-3 sentences.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\nI'm GLM, a large language model developed by Zhipu AI, designed to assist with information, tasks, and creative projects through natural conversation. I'm trained on diverse data to provide helpful, accurate responses while maintaining a friendly and approachable interaction style. How can I help you today?",
+      "reasoning": "The user is asking me to introduce myself in 2-3 sentences. I should provide a concise and professional introduction based on my role and capabilities.\n\nAs an AI assistant, I should highlight my purpose and key functions. I can explain that I am designed to help with various tasks such as answering questions, providing information, and assisting with problem-solving. It would be good to mention my ability to handle different types of inquiries while maintaining accuracy and relevance.\n\nI should also emphasize my commitment to being helpful and informative in a friendly manner. This introduction should be straightforward and focus on what I can do for the user without going into excessive detail. Keep it to about 2-3 sentences as requested.",
+      "ttfb_seconds": 0.7081120770890266,
+      "ttfc_seconds": 0.7084429189562798,
+      "total_duration_seconds": 2.1741213649511337,
+      "input_tokens": 18,
+      "output_tokens": 62,
+      "reasoning_tokens": 140,
+      "total_tokens": 220,
+      "cost_usd": 0.00020067,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 18,
+          "total_tokens": 220,
+          "reasoning_tokens": 140,
+          "completion_tokens": 62,
+          "prompt_tokens_details": {
+            "cached_tokens": 17
+          },
+          "cost_usd_total": 0.00020067,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00019998,
+          "cost_usd_cached_input": 5.1e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 1.6793131241574883,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 1.6793131241574883,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429 | Response: ",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Python Function",
+    "prompt": "Write a Python function to check if a string is a palindrome. Include docstring and type hints.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nTo solve this problem, we need to determine if a given string",
+      "reasoning": "We are going to write a function that checks if a string is a palindrome.\n A palindrome is a string that reads the same forwards and backwards, ignoring non-alphanumeric characters and case.\n However, note: the problem does not specify whether to ignore non-alphanumeric and case. \n But typically, palindrome checks for phrases ignore non-alphanumeric and case. \n Since the problem says \"a string\", we should clarify the requirements.\n\n But the problem statement does not specify, so we have two options:\n 1. Strict: check the string exactly as given (including spaces and case).\n 2. Typical: ignore non-alphanumeric and convert to same case.\n\n However, the problem does not specify, so let's assume the typical approach: \n   - Convert the string to the same case (lower or upper) to ignore case.\n   - Remove non-alphanumeric characters.\n\n But note: sometimes palindromes are defined without any filtering. \n Since the problem is ambiguous, I will write a function that does the typical approach.\n\n Alternatively, we can make it flexible by adding parameters, but the problem does not ask for that.\n\n Let's define the function with type hints and docstring.\n\n Steps:\n 1. Convert the string to lower case (to ignore case).\n 2. Remove non-alphanumeric characters (only keep letters and numbers).\n 3. Compare the cleaned string with its reverse.\n\n However, note: the problem says \"a string\", so we might want to consider if the string is empty.\n An empty string is a palindrome.\n\n Implementation for removing non-alphanumeric: we can use a list comprehension and the `isalnum` method.\n\n Example: \n   s = \"A man, a plan, a canal: Panama\" should return True.\n\n But if we are to do without filtering, then we would have to consider the exact string.\n\n Since the problem is ambiguous, I will write the function in the typical way, but note that sometimes \n the requirement might be for exact matching. \n\n However, the problem says \"Write a Python function to check if a string is a palindrome\", without further details.\n\n Let me look at common practice: Leetcode problem 125. Valid Palindrome does the typical approach.\n\n So I'll do:\n\n   cleaned = [char.lower() for char in s if char.isalnum()]\n   cleaned = ''.join(cleaned)\n   return cleaned == cleaned[::-1]\n\n But note: this approach may be inefficient for very long strings because we create a new string and then reverse it.\n\n Alternatively, we can use two pointers to avoid building a new string and without building the reversed string.\n\n However, the problem doesn't specify performance, so we can go with clarity.\n\n But note: the problem says \"step by step\", so we can also consider an efficient method.\n\n Let me write two versions and then choose one.\n\n Version 1: Simple and clear (using cleaning and then reversal)\n\n Version 2: Two pointers (without building a new string, but we do need to skip non-alphanumeric)\n\n Since the problem does not specify, I'll go with Version 1 for simplicity and readability.\n\n However, if we are to consider the exact string without cleaning, then we can do:\n\n   return s == s[::-1]\n\n But that would not ignore non-alphanumeric and case.\n\n So, to be safe, I'll write the function that does the typical cleaning.\n\n Alternatively, we can write a function that does the typical cleaning and then checks.\n\n But note: the problem says \"check if a string is a palindrome\", and the typical definition ignores non-alphanumeric and case.\n\n Let's write the function accordingly.\n\n Steps for the typical approach:\n\n  1. Convert the string to lower case.\n  2. Remove all non-alphanumeric characters.\n  3. Check if the cleaned string is equal to its reverse.\n\n However, we can combine step 1 and 2.\n\n Code:\n\n   s_clean = ''.join(ch.lower() for ch in s if ch.isalnum())\n   return s_clean == s_clean[::-1]\n\n But note: what about non-ASCII alphanumeric? The `isalnum` works for Unicode, but the problem doesn't specify.\n\n We'll assume the string is in ASCII for simplicity? But the problem doesn't say.\n\n Actually, the `isalnum` method in Python works for any Unicode character that is a letter or number.\n\n So we are safe.\n\n Let's write the function accordingly.\n\n However, note: the problem says \"type hints\", so we should include.\n\n The function will take a string and return a boolean.\n\n Let's write the docstring.\n\n Example:\n\n   is_palindrome(\"racecar\") -> True\n   is_palindrome(\"hello\") -> False\n   is_palindrome(\"A man, a plan, a canal: Panama\") -> True\n   is_palindrome(\"\") -> True\n\n We'll write accordingly.",
+      "ttfb_seconds": 0.6565198709722608,
+      "ttfc_seconds": 0.6567423699889332,
+      "total_duration_seconds": 8.613975405925885,
+      "input_tokens": 25,
+      "output_tokens": 16,
+      "reasoning_tokens": 984,
+      "total_tokens": 1025,
+      "cost_usd": 0.0009909,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 25,
+          "total_tokens": 1025,
+          "reasoning_tokens": 984,
+          "completion_tokens": 16,
+          "prompt_tokens_details": {
+            "cached_tokens": 24
+          },
+          "cost_usd_total": 0.0009909,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00099,
+          "cost_usd_cached_input": 7.2e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 0.6156699631828815,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 0.6156699631828815,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429 | Response: ",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Debugging",
+    "prompt": "Debug this Python code:\n```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n)\n```\nExplain the bug and provide the fix.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nThe bug in the provided code is that the recursive call incorrectly passes `n` instead of `n-1`. This causes infinite recursion because the function keeps calling itself with the same value of `n` without progressing toward the base case (`n == 0`). For any input `n > 0`, the recursion depth will be exceeded, leading to a `RecursionError`.\n\n**Explanation:**\n- The base case `if n == 0: return 1` is correct.\n- However, the recursive step `return n * factorial(n)` should reduce `n` by 1 in each call to eventually reach the base case. By passing `n` unchanged, the function never progresses toward `n == 0`.\n\n**Fix:**\nChange the recursive call to `factorial(n-1)` to decrement `n` in each step. This ensures the recursion terminates when `n` reaches 0.\n\n**Corrected Code:**\n```python\ndef factorial(n):\n    if n == 0:\n        return 1\n    return n * factorial(n-1)\n```\n\n**Example Walkthrough (for `n = 3`):**\n1. `factorial(3)` returns `3 * factorial(2)`\n2. `factorial(2)` returns `2 * factorial(1)`\n3. `factorial(1)` returns `1 * factorial(0)`\n4. `factorial(0)` returns `1`\n5. Unwinding the stack: `1 * 1 = 1` \u2192 `2 * 1 = 2` \u2192 `3 * 2 = 6`\n\nThis correctly computes `3! = 6`. The fix ensures the recursion progresses toward the base case and terminates.",
+      "reasoning": "We are given a recursive function to compute the factorial of a number n.\n The factorial of n (denoted as n!) is the product of all positive integers less than or equal to n.\n The base case is when n is 0, factorial(0) is 1.\n\n The current code:\n   def factorial(n):\n       if n == 0:\n           return 1\n       return n * factorial(n)\n\n The bug: In the recursive call, we are passing `n` again instead of `n-1`.\n This leads to infinite recursion because the function will keep calling itself with the same value of n (if n>0) and never reach the base case (unless n==0).\n\n For example, if we call factorial(5):\n   It will compute: 5 * factorial(5)\n   Then inside factorial(5): 5 * factorial(5) again, and so on.\n\n This will eventually cause a RecursionError because the recursion depth is exceeded.\n\n The fix: We should pass `n-1` in the recursive call so that each time we are reducing the problem by one until we reach 0.\n\n Corrected code:\n   def factorial(n):\n       if n == 0:\n           return 1\n       return n * factorial(n-1)\n\n Let's test with n=5:\n   factorial(5) = 5 * factorial(4)\n   factorial(4) = 4 * factorial(3)\n   factorial(3) = 3 * factorial(2)\n   factorial(2) = 2 * factorial(1)\n   factorial(1) = 1 * factorial(0)\n   factorial(0) = 1\n\n Then substituting back:\n   factorial(1) = 1 * 1 = 1\n   factorial(2) = 2 * 1 = 2\n   factorial(3) = 3 * 2 = 6\n   factorial(4) = 4 * 6 = 24\n   factorial(5) = 5 * 24 = 120\n\n This matches the expected factorial of 5.",
+      "ttfb_seconds": 0.6139244150836021,
+      "ttfc_seconds": 0.6141110830940306,
+      "total_duration_seconds": 6.917981524951756,
+      "input_tokens": 47,
+      "output_tokens": 359,
+      "reasoning_tokens": 434,
+      "total_tokens": 840,
+      "cost_usd": 0.00078663,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 47,
+          "total_tokens": 840,
+          "reasoning_tokens": 434,
+          "completion_tokens": 359,
+          "prompt_tokens_details": {
+            "cached_tokens": 46
+          },
+          "cost_usd_total": 0.00078663,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.0007850699999999999,
+          "cost_usd_cached_input": 1.38e-06
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 0.6524374631699175,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 0.6524374631699175,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429 | Response: ",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Algorithm Explanation",
+    "prompt": "Explain how quicksort works with a simple example. Be concise.",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n**Quicksort** is a divide-and-conquer algorithm that sorts an array by partitioning it around a pivot element. Here's how it works with a simple example:\n\n### Steps:\n1. **Choose a pivot**: Select an element from the array (commonly the last element).\n2. **Partition**: Rearrange the array so elements **less than** the pivot come before it, and elements **greater than** the pivot come after it. The pivot is now in its final sorted position.\n3. **Recursively sort**: Apply the same process to the sub-arrays formed by the partition (left of pivot and right of pivot).\n\n---\n\n### Example: Sort `[5, 1, 8, 3, 2]`\n1. **Choose pivot**: Last element, `2`.\n2. **Partition**:\n   - Compare elements with `2`:\n     - `5 > 2` \u2192 move to the right.\n     - `1 < 2` \u2192 swap with the first element (or move left).  \n       Array becomes: `[1, 5, 8, 3, 2]`.\n   - After all comparisons, swap `2` (pivot) into its correct position (after `1`):  \n     **Result**: `[1, 2, 8, 3, 5]`.  \n     Pivot `2` is now in place. Elements left: `[",
+      "reasoning": "We are going to explain quicksort with a simple example.\n Quicksort is a divide-and-conquer algorithm. It works by selecting a 'pivot' element from the array and partitioning the other elements into two sub-arrays:\n   - One sub-array of elements less than the pivot.\n   - Another sub-array of elements greater than the pivot.\n Then, it recursively sorts the sub-arrays.\n\n Steps:\n 1. Choose a pivot (we'll use the last element for simplicity in the example).\n 2. Partition the array so that all elements less than the pivot come before, and all elements greater come after.\n 3. Recursively apply the above steps to the two sub-arrays.\n\n Example: Sort [5, 1, 8, 3, 2] using quicksort.\n\n Step 1: Choose pivot (last element: 2)\n   Array: [5, 1, 8, 3, 2]\n   We want to partition so that elements < 2 are on the left and elements > 2 are on the right.\n\n   Partitioning:\n     We traverse the array and swap elements to put them in the correct places.\n     Let's set a pointer (i) for the position where the next element less than the pivot should go (initially at the start).\n\n     We traverse from the start to the element before the pivot:\n        j=0: 5 > 2 -> skip.\n        j=1: 1 < 2 -> swap with the element at i (which is 5). Now array: [1, 5, 8, 3, 2]. Increment i to 1.\n        j=2: 8 > 2 -> skip.\n        j=3: 3 > 2 -> skip.\n\n     Now, we swap the pivot (at index 4) with the element at i (index 1): swap 5 and 2.\n        Array becomes: [1, 2, 8, 3, 5]\n        Now the pivot (2) is at index 1.\n\n   After partition: [1, 2, 8, 3, 5] with pivot 2 at index 1.\n\n Step 2: Recursively sort the left part (elements before pivot: [1]) and the right part (elements after pivot: [8,3,5]).\n\n   Left part: [1] -> already sorted.\n   Right part: [8,3,5] -> apply quicksort.\n\n   For [8,3,5]:\n     Choose pivot = last element: 5.\n     Partitioning:\n        Start with i=0.\n        j=0: 8>5 -> skip.\n        j=1: 3<5 -> swap with element at i (8). Array: [3,8,5]. Then i=1.\n        Now swap pivot (5) with element at i (8): [3,5,8].\n\n     Now recursively sort:\n        Left of pivot: [3] -> sorted.\n        Right of pivot: [8] -> sorted.\n\n   So the right part becomes [3,5,8].\n\n Step 3: Combine: [1] + [2] (pivot) + [3,5,8] = [1,2,3,5,8]\n\n Final sorted array: [1,2,3,5,8]",
+      "ttfb_seconds": 0.6259168351534754,
+      "ttfc_seconds": 0.6260897549800575,
+      "total_duration_seconds": 8.587937538977712,
+      "input_tokens": 19,
+      "output_tokens": 293,
+      "reasoning_tokens": 707,
+      "total_tokens": 1019,
+      "cost_usd": 0.00099072,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 19,
+          "total_tokens": 1019,
+          "reasoning_tokens": 707,
+          "completion_tokens": 293,
+          "prompt_tokens_details": {
+            "cached_tokens": 18
+          },
+          "cost_usd_total": 0.00099072,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00099,
+          "cost_usd_cached_input": 5.4e-07
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 1.7272213101387024,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 1.7272213101387024,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429 | Response: ",
+      "raw_response": null
+    }
+  },
+  {
+    "test_name": "Code Refactoring",
+    "prompt": "Refactor this code to be more Pythonic:\n```python\nresult = []\nfor i in range(len(items)):\n    if items[i] > 0:\n        result.append(items[i] * 2)\n```",
+    "soundsgood": {
+      "provider": "soundsgood",
+      "model": "zai-org/GLM-4.5-Air",
+      "content": "\n\nTo make the code more Pythonic, we can use a list comprehension. This approach is concise, readable, and leverages Python's built-in capabilities for creating lists efficiently. Here's the refactored code:\n\n```python\nresult = [x * 2 for x in items if x > 0]\n```\n\n**Explanation:**\n- **List Comprehension:** The expression `[x * 2 for x in items if x > 0]` iterates over each element `x` in `items`, applies the condition `if x > 0`, and includes `x * 2` in the resulting list only when the condition is met.\n- **Readability:** This approach clearly expresses the intent: transform and filter elements in a single line.\n- **Efficiency:** List comprehensions are optimized for performance and are generally faster than manual loops for such operations.\n- **Pythonic Style:** It avoids explicit index manipulation and appending, adhering to Python's philosophy of simplicity and clarity.\n\nThis refactoring maintains the same functionality as the original code but is more idiomatic and efficient.",
+      "reasoning": "We are given a list `items` and we want to create a new list `result` that contains each element of `items` that is greater than 0, multiplied by 2.\n The original code uses a for loop with an index and then appends to the result list.\n\n However, in Python, we can use a list comprehension for a more concise and readable solution.\n\n Steps:\n 1. We iterate over each element `x` in `items` (without using index).\n 2. We check if `x > 0`.\n 3. If the condition is true, we include `x * 2` in the new list.\n\n Let's rewrite the code accordingly.",
+      "ttfb_seconds": 0.6095957639627159,
+      "ttfc_seconds": 0.6098179609980434,
+      "total_duration_seconds": 3.421277242945507,
+      "input_tokens": 48,
+      "output_tokens": 226,
+      "reasoning_tokens": 141,
+      "total_tokens": 415,
+      "cost_usd": 0.00036491999999999997,
+      "success": true,
+      "error": null,
+      "raw_response": {
+        "usage": {
+          "prompt_tokens": 48,
+          "total_tokens": 415,
+          "reasoning_tokens": 141,
+          "completion_tokens": 226,
+          "prompt_tokens_details": {
+            "cached_tokens": 47
+          },
+          "cost_usd_total": 0.00036491999999999997,
+          "cost_usd_input": 1.8e-07,
+          "cost_usd_output": 0.00036333,
+          "cost_usd_cached_input": 1.4099999999999998e-06
+        }
+      }
+    },
+    "zai": {
+      "provider": "z.ai",
+      "model": "glm-4.5-air",
+      "content": "",
+      "reasoning": null,
+      "ttfb_seconds": 1.652336304076016,
+      "ttfc_seconds": null,
+      "total_duration_seconds": 1.652336304076016,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "total_tokens": 0,
+      "cost_usd": 0.0,
+      "success": false,
+      "error": "Client error '429 Too Many Requests' for url 'https://api.z.ai/api/paas/v4/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429 | Response: ",
+      "raw_response": null
+    }
+  }
+]
