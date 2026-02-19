@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 # Get app name from environment or use default
 APP_NAME = os.environ.get("APP_NAME", "gatewayz")
 
+
+def get_trace_exemplar() -> dict[str, str] | None:
+    """
+    Get the current OpenTelemetry trace ID as a Prometheus exemplar.
+
+    Returns {"trace_id": "<hex>"} when a valid trace context exists,
+    or None when tracing is unavailable. Prometheus exemplars let you
+    click from a metric datapoint directly to the corresponding trace
+    in Tempo via Grafana.
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx and ctx.is_valid:
+            return {"trace_id": format(ctx.trace_id, "032x")}
+    except Exception:
+        pass
+    return None
+
 # Clear any existing metrics from the registry to avoid duplication issues
 # This is necessary because Prometheus uses a global registry that persists across imports
 try:
@@ -916,14 +937,24 @@ def track_model_inference(provider: str, model: str):
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
-        model_inference_duration.labels(provider=provider, model=model).observe(duration)
-        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
+        exemplar = get_trace_exemplar()
+        model_inference_duration.labels(provider=provider, model=model).observe(
+            duration, exemplar=exemplar
+        )
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc(
+            1, exemplar=exemplar
+        )
 
 
 def record_tokens_used(provider: str, model: str, input_tokens: int, output_tokens: int):
     """Record token consumption metrics."""
-    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
-    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
+    exemplar = get_trace_exemplar()
+    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+        input_tokens, exemplar=exemplar
+    )
+    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+        output_tokens, exemplar=exemplar
+    )
 
 
 def record_credits_used(provider: str, model: str, user_id: str, credits: float):
