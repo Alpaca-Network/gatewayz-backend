@@ -300,24 +300,32 @@ def create_app() -> FastAPI:
     from src.services import prometheus_metrics  # noqa: F401
 
     @app.get("/metrics", tags=["monitoring"], include_in_schema=False)
-    async def metrics():
+    async def metrics(request: Request):
         """
         Prometheus metrics endpoint for monitoring.
 
-        Exposes metrics in Prometheus text format including:
-        - HTTP request counts and durations
-        - Model inference metrics (requests, latency, tokens)
-        - Database query metrics
-        - Cache hit/miss rates
-        - Rate limiting metrics
-        - Provider health metrics
-        - Business metrics (credits, tokens, subscriptions)
-        - Redis INFO metrics (memory, keyspace, clients, commands)
+        Supports both Prometheus text format and OpenMetrics format.
+        OpenMetrics format is required for serving exemplars (trace_id links
+        that let you click from a metric datapoint to the trace in Tempo).
+        Prometheus requests OpenMetrics when --enable-feature=exemplar-storage is set.
         """
         # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking)
         import asyncio
 
         await asyncio.to_thread(prometheus_metrics.collect_redis_info)
+
+        # Content negotiation: serve OpenMetrics when requested (carries exemplars),
+        # fall back to Prometheus text format for backward compatibility
+        accept = request.headers.get("accept", "")
+        if "application/openmetrics-text" in accept:
+            from prometheus_client.openmetrics.exposition import (
+                CONTENT_TYPE_LATEST as OPENMETRICS_CT,
+            )
+            from prometheus_client.openmetrics.exposition import (
+                generate_latest as generate_openmetrics,
+            )
+            return Response(generate_openmetrics(REGISTRY), media_type=OPENMETRICS_CT)
+
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")

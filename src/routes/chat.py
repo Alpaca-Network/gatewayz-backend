@@ -25,6 +25,7 @@ from src.security.deps import get_api_key, get_optional_api_key
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import (
     credits_used,
+    get_trace_exemplar,
     model_inference_duration,
     model_inference_requests,
     record_free_model_usage,
@@ -973,29 +974,34 @@ async def _record_inference_metrics_and_health(
     This centralizes metrics recording for both streaming and non-streaming requests.
     """
     try:
-        # Record Prometheus metrics
+        # Record Prometheus metrics with trace exemplars for metrics→traces correlation
         status = "success" if success else "error"
+        exemplar = get_trace_exemplar()
 
         # Request count
-        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc(
+            1, exemplar=exemplar
+        )
 
         # Duration
-        model_inference_duration.labels(provider=provider, model=model).observe(elapsed_seconds)
+        model_inference_duration.labels(provider=provider, model=model).observe(
+            elapsed_seconds, exemplar=exemplar
+        )
 
         # Token usage
         if prompt_tokens > 0:
             tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-                prompt_tokens
+                prompt_tokens, exemplar=exemplar
             )
 
         if completion_tokens > 0:
             tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-                completion_tokens
+                completion_tokens, exemplar=exemplar
             )
 
         # Credits consumed
         if cost > 0:
-            credits_used.labels(provider=provider, model=model).inc(cost)
+            credits_used.labels(provider=provider, model=model).inc(cost, exemplar=exemplar)
 
         # Record Redis metrics (real-time dashboards)
         redis_metrics = get_redis_metrics()
@@ -2852,19 +2858,20 @@ async def chat_completions(
 
                 # Record Prometheus metrics for model popularity tracking
                 inference_duration = time.time() - inference_start
+                exemplar = get_trace_exemplar()
                 model_inference_requests.labels(
                     provider=provider, model=model, status="success"
-                ).inc()
+                ).inc(1, exemplar=exemplar)
                 model_inference_duration.labels(provider=provider, model=model).observe(
-                    inference_duration
+                    inference_duration, exemplar=exemplar
                 )
                 if input_tokens > 0:
                     tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-                        input_tokens
+                        input_tokens, exemplar=exemplar
                     )
                 if output_tokens > 0:
                     tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-                        output_tokens
+                        output_tokens, exemplar=exemplar
                     )
 
                 logger.info(
@@ -2877,7 +2884,7 @@ async def chat_completions(
                 error_model = model if "model" in locals() else original_model
                 model_inference_requests.labels(
                     provider=error_provider, model=error_model, status="error"
-                ).inc()
+                ).inc(1, exemplar=get_trace_exemplar())
 
                 # Map any errors to HTTPException
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)

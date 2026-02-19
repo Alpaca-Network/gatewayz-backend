@@ -27,6 +27,7 @@ from src.services.prometheus_metrics import (
     fastapi_requests_duration_seconds,
     fastapi_requests_in_progress,
     fastapi_response_size_bytes,
+    get_trace_exemplar,
     http_request_duration,
     record_http_response,
 )
@@ -159,13 +160,15 @@ class ObservabilityMiddleware:
         finally:
             # Always record duration and decrement in-progress gauge
             duration = time.time() - start_time
+            exemplar = get_trace_exemplar()
 
-            # Record HTTP metrics (both new and legacy)
+            # Record HTTP metrics (both new and legacy) with exemplars for
+            # metrics→traces correlation (click a datapoint in Grafana → Tempo trace)
             fastapi_requests_duration_seconds.labels(
                 app_name=APP_NAME, method=method, path=endpoint
-            ).observe(duration)
+            ).observe(duration, exemplar=exemplar)
             http_request_duration.labels(method=method, endpoint=endpoint).observe(
-                duration
+                duration, exemplar=exemplar
             )
             record_http_response(
                 method=method, endpoint=endpoint, status_code=status_code, app_name=APP_NAME
