@@ -2030,4 +2030,4 @@ def collect_redis_info():
 
     except Exception as e:
         redis_up.set(0)
-        logger.debug(f"Redis INFO collection failed: {e}")
+        logger.warning(f"Redis INFO collection failed: {type(e).__name__}: {e}")
