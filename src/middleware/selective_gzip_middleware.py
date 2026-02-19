@@ -41,7 +41,10 @@ class SelectiveGZipMiddleware:
     def __init__(
         self,
         app: ASGIApp,
-        minimum_size: int = 500,
+        # 1 KB minimum: responses smaller than this gain little from compression
+        # (gzip header overhead ~20 bytes makes compression counterproductive under ~1 KB).
+        # Configurable via GZIP_MINIMUM_SIZE env var in Config.
+        minimum_size: int = 1024,
         compresslevel: int = 9,
     ) -> None:
         self.app = app

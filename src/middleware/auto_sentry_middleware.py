@@ -149,8 +149,18 @@ class AutoSentryMiddleware:
                 # Add specific tags based on exception type
                 self._add_exception_tags(sentry_scope, exc, request_context)
 
-                # Capture exception
-                sentry_sdk.capture_exception(exc)
+                # Deduplication: route-level error handlers (e.g. global exception
+                # handlers in routes/) may have already reported this exception to
+                # Sentry by setting `exc._sentry_reported = True` before re-raising.
+                # Checking that flag here prevents double-reporting the same event.
+                if not getattr(exc, "_sentry_reported", False):
+                    sentry_sdk.capture_exception(exc)
+                    # Mark as reported so any outer middleware layers also skip it.
+                    try:
+                        exc._sentry_reported = True
+                    except AttributeError:
+                        # Some built-in exception types are read-only; safe to ignore.
+                        pass
 
                 # Log the error
                 logger.error(

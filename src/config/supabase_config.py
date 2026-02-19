@@ -1,3 +1,27 @@
+"""
+Supabase client configuration with module-level singleton pool.
+
+Connection pooling strategy
+---------------------------
+The Supabase Python SDK uses ``httpx.Client`` (sync) internally for all
+PostgREST queries.  By default the SDK creates a new ``httpx.Client`` per
+``create_client()`` call, which means each call would open fresh TCP
+connections on every request — no connection reuse.
+
+To fix this we:
+1. Create each ``httpx.Client`` once, configured with ``httpx.Limits``
+   (max_connections, max_keepalive_connections) and inject it into the
+   PostgREST session (``client.postgrest.session = httpx_client``).
+2. Cache the resulting Supabase ``Client`` objects in module-level globals
+   (``_supabase_client``, ``_read_replica_client``, ``_sync_client``).
+3. Guard each initialisation path with a ``threading.Lock`` + double-checked
+   locking so only one thread ever builds the client.
+
+The three singleton clients and their connection budgets:
+  - Primary API client  : 80 connections  (general reads + writes)
+  - Read-replica client : 30-100 connections  (catalog SELECT queries, if configured)
+  - Sync client         : 20 connections  (bulk model sync, isolated to prevent API downtime)
+"""
 import logging
 import os
 import threading
@@ -156,7 +180,9 @@ def get_supabase_client() -> Client:
         if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
             _supabase_client.postgrest.session = httpx_client
             logger.info(
-                "Configured Supabase client with optimized HTTP/2 connection pooling (base_url: %s)",
+                "Configured Supabase client with optimized connection pool "
+                "(HTTP/1.1, %d max connections, base_url: %s)",
+                max_conn,
                 postgrest_base_url,
             )
 

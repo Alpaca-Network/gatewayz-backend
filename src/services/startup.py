@@ -229,13 +229,13 @@ async def lifespan(app):
                 # Phase 1: Warm database connection (lightweight query)
                 if db_initialized:
                     try:
-                        logger.info("🔥 [1/3] Pre-warming database connections...")
+                        logger.info("🔥 [1/5] Pre-warming database connections...")
                         from src.config.supabase_config import get_supabase_client
                         client = get_supabase_client()
                         await asyncio.to_thread(
                             lambda: client.table("plans").select("id").limit(1).execute()
                         )
-                        logger.info("✅ [1/3] Database connection pool warmed")
+                        logger.info("✅ [1/5] Database connection pool warmed")
                     except Exception as e:
                         logger.warning(f"Database connection warmup warning: {e}")
 
@@ -243,14 +243,14 @@ async def lifespan(app):
                 # Wait for DB connection to stabilize after Phase 1
                 await asyncio.sleep(3)
                 try:
-                    logger.info("🔥 [2/3] Preloading full model catalog cache...")
+                    logger.info("🔥 [2/5] Preloading full model catalog cache...")
                     from src.services.model_catalog_cache import get_cached_full_catalog
                     from src.services.background_tasks import _split_and_cache_gateway_catalogs
 
                     full_catalog = await asyncio.to_thread(get_cached_full_catalog)
 
                     catalog_count = len(full_catalog) if full_catalog else 0
-                    logger.info(f"✅ [2/3] Catalog cache warming complete: {catalog_count} models loaded")
+                    logger.info(f"✅ [2/5] Catalog cache warming complete: {catalog_count} models loaded")
 
                     if full_catalog:
                         await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
@@ -274,12 +274,61 @@ async def lifespan(app):
                 # Phase 4: Warm provider connections (HTTP, not DB)
                 await asyncio.sleep(2)
                 try:
-                    logger.info("🔥 [4/4] Pre-warming provider connections...")
+                    logger.info("🔥 [4/5] Pre-warming provider connections...")
                     warmup_results = await warmup_provider_connections_async()
                     warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-                    logger.info(f"✅ [4/4] Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                    logger.info(f"✅ [4/5] Warmed {warmed_count}/{len(warmup_results)} provider connections")
                 except Exception as e:
                     logger.warning(f"Provider connection warmup warning: {e}")
+
+                # Phase 5: Warm catalog response cache (Redis catalog:v2:* keys)
+                # This pre-populates the exact cache hit by GET /v1/models?gateway=all
+                # so the first request after deployment does not incur a cold-cache penalty.
+                # Runs after Phase 2 has already loaded the model catalog into Redis, so no
+                # additional DB queries are needed — we simply read from the in-memory/Redis
+                # model catalog cache and write the serialised response into catalog_response_cache.
+                try:
+                    logger.info("🔥 [5/5] Warming catalog response cache (gateway=all, default params)...")
+                    from datetime import datetime, timezone
+                    from src.services.models import get_cached_models
+                    from src.services.catalog_response_cache import cache_catalog_response
+
+                    default_cache_params = {
+                        "limit": 100,
+                        "offset": 0,
+                        "provider": None,
+                        "is_private": None,
+                        "include_huggingface": False,
+                        "unique_models": False,
+                    }
+
+                    models = await asyncio.to_thread(get_cached_models, "all")
+                    if models:
+                        paginated = models[:100]
+                        response_payload = {
+                            "data": paginated,
+                            "total": len(models),
+                            "returned": len(paginated),
+                            "offset": 0,
+                            "limit": 100,
+                            "has_more": len(models) > 100,
+                            "next_offset": 100 if len(models) > 100 else None,
+                            "include_huggingface": False,
+                            "gateway": "all",
+                            "note": (
+                                "Combined catalog (all gateways)"
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await cache_catalog_response("all", default_cache_params, response_payload)
+                        logger.info(
+                            f"✅ [5/5] Catalog response cache warmed: "
+                            f"{len(paginated)} models cached for gateway=all"
+                        )
+                    else:
+                        logger.warning("[5/5] Skipping catalog response cache warm: no models available")
+                except Exception as e:
+                    logger.warning(f"Catalog response cache warmup warning: {e}")
 
             except Exception as e:
                 logger.error(f"Staggered DB warmup failed: {e}", exc_info=True)

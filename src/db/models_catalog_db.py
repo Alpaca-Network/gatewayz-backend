@@ -1,16 +1,68 @@
 """
 Database layer for models catalog management
 Handles CRUD operations for AI models with provider relationships
+
+Error contract:
+- Functions returning list[...] return [] on error (never None)
+- Functions returning dict | None return None on error
+- Functions returning bool return False on error
+- Functions returning int return 0 on error
+- Functions returning a stats dict return a zeroed-out dict on error
+- All errors are logged via logger.error() or logger.warning()
+- "Not found" outcomes (not DB errors) are logged at logger.debug()
+
+Timeout posture (DB-M2)
+-----------------------
+Every Supabase client created by ``src.config.supabase_config`` injects a custom
+``httpx.Client`` with ``timeout=httpx.Timeout(30.0, connect=10.0)`` and sets
+``postgrest_client_timeout=30`` on the ClientOptions.  This means each individual
+``.execute()`` call is bounded to 30 s at the HTTP transport level.
+
+The remaining risk is *paginated loops* that issue many sequential ``.execute()``
+calls (e.g. ``get_all_models_for_catalog`` for 11 k+ models makes 12+ page fetches).
+Each page is bounded at 30 s, but the total wall-clock time across all pages is not.
+``DB_QUERY_TIMEOUT_SECONDS`` is enforced via a wall-clock deadline guard in every
+paginated loop: if the deadline is exceeded the loop breaks early and logs a warning
+so callers receive a partial result rather than hanging indefinitely.
 """
 
+from __future__ import annotations
+
 import logging
+import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client, get_client_for_query
+from src.services.pricing_lookup import (
+    _build_openrouter_pricing_index,
+    enrich_model_with_pricing,
+    get_all_pricing_batch,
+    get_model_pricing,
+)
+from src.utils.retry import with_retry
+from src.utils.step_logger import StepLogger
 
 logger = logging.getLogger(__name__)
+
+SUPABASE_PAGE_SIZE = 1000  # Supabase PostgREST default max rows per request
+
+# Maximum total wall-clock seconds allowed for any single paginated DB operation.
+# Individual HTTP requests are already bounded to 30 s by the httpx client in
+# supabase_config; this constant caps the *aggregate* time across all page fetches.
+DB_QUERY_TIMEOUT_SECONDS: float = 120.0
+
+# Retry config for catalog DB reads: up to 2 retries (3 total attempts),
+# 0.5s -> 1.0s exponential backoff on transient connection/timeout errors.
+_CATALOG_DB_RETRY = dict(
+    max_attempts=3,
+    initial_delay=0.5,
+    max_delay=2.0,
+    exponential_base=2.0,
+    exceptions=(ConnectionError, TimeoutError, OSError, Exception),
+)
 
 
 def _serialize_model_data(data: dict[str, Any]) -> dict[str, Any]:
@@ -115,19 +167,46 @@ def get_models_by_provider_slug(
         # Use read replica for read-only catalog queries
         supabase = get_client_for_query(read_only=True)
 
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .eq("providers.slug", provider_slug)
-        )
+        # Use pagination to avoid Supabase's 1000-row default truncation
+        # (e.g. OpenRouter has 2800+ models)
+        all_models = []
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
 
-        if is_active_only:
-            query = query.eq("is_active", True)
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_models_by_provider_slug: wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(all_models)} models "
+                    f"(provider={provider_slug}); returning partial results"
+                )
+                break
 
-        query = query.order("model_name")
-        response = query.execute()
+            query = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+                .eq("providers.slug", provider_slug)
+            )
 
-        return response.data or []
+            if is_active_only:
+                query = query.eq("is_active", True)
+
+            query = query.order("model_name").range(offset, offset + page_size - 1)
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                break
+
+            all_models.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            offset += page_size
+
+        return all_models
     except Exception as e:
         logger.error(f"Error fetching models for provider {provider_slug}: {e}")
         return []
@@ -381,15 +460,43 @@ def get_models_by_health_status(health_status: str) -> list[dict[str, Any]]:
     try:
         # Use read replica for read-only catalog queries
         supabase = get_client_for_query(read_only=True)
-        response = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .eq("health_status", health_status)
-            .eq("is_active", True)
-            .execute()
-        )
 
-        return response.data or []
+        # Use pagination to avoid Supabase's 1000-row default truncation
+        all_models = []
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
+
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_models_by_health_status: wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(all_models)} models "
+                    f"(health_status={health_status}); returning partial results"
+                )
+                break
+
+            response = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+                .eq("health_status", health_status)
+                .eq("is_active", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = response.data or []
+
+            if not batch:
+                break
+
+            all_models.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            offset += page_size
+
+        return all_models
     except Exception as e:
         logger.error(f"Error fetching models by health status {health_status}: {e}")
         return []
@@ -409,18 +516,46 @@ def search_models(query: str, provider_id: int | None = None) -> list[dict[str, 
     try:
         supabase = get_supabase_client()
 
-        # Search in model_name and description
-        search_query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .or_(f"model_name.ilike.%{query}%,description.ilike.%{query}%")
-        )
+        # Use pagination to avoid Supabase's 1000-row default truncation
+        all_models = []
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
 
-        if provider_id:
-            search_query = search_query.eq("provider_id", provider_id)
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"search_models: wall-clock deadline of {DB_QUERY_TIMEOUT_SECONDS}s "
+                    f"exceeded after {len(all_models)} models (query='{query}'); "
+                    f"returning partial results"
+                )
+                break
 
-        response = search_query.execute()
-        return response.data or []
+            # Search in model_name and description
+            search_q = (
+                supabase.table("models")
+                .select("*, providers!inner(*)")
+                .or_(f"model_name.ilike.%{query}%,description.ilike.%{query}%")
+            )
+
+            if provider_id:
+                search_q = search_q.eq("provider_id", provider_id)
+
+            search_q = search_q.range(offset, offset + page_size - 1)
+            response = search_q.execute()
+            batch = response.data or []
+
+            if not batch:
+                break
+
+            all_models.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            offset += page_size
+
+        return all_models
     except Exception as e:
         logger.error(f"Error searching models with query '{query}': {e}")
         return []
@@ -441,14 +576,39 @@ def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
         supabase = get_client_for_query(read_only=True)
 
         # Only fetch fields needed for stats — NOT select("*")
-        query = supabase.table("models").select(
-            "id, is_active, health_status, modality"
-        )
-        if provider_id:
-            query = query.eq("provider_id", provider_id)
+        # Use pagination to avoid Supabase's 1000-row default truncation
+        all_models = []
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
 
-        all_response = query.execute()
-        all_models = all_response.data or []
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_models_stats: wall-clock deadline of {DB_QUERY_TIMEOUT_SECONDS}s "
+                    f"exceeded after {len(all_models)} models; returning partial stats"
+                )
+                break
+
+            query = supabase.table("models").select(
+                "id, is_active, health_status, modality"
+            )
+            if provider_id:
+                query = query.eq("provider_id", provider_id)
+
+            query = query.range(offset, offset + page_size - 1)
+            response = query.execute()
+            batch = response.data or []
+
+            if not batch:
+                break
+
+            all_models.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            offset += page_size
 
         # Count by status
         stats = {
@@ -817,6 +977,7 @@ def flush_providers_table() -> dict[str, Any]:
 # ============================================================================
 
 
+@with_retry(**_CATALOG_DB_RETRY)
 def get_all_models_for_catalog(
     include_inactive: bool = False
 ) -> list[dict[str, Any]]:
@@ -848,8 +1009,6 @@ def get_all_models_for_catalog(
         >>> len(models)
         11432  # All active models from all providers (not limited to 1000)
     """
-    from src.utils.step_logger import StepLogger
-
     step_logger = StepLogger("Database: Fetch All Models", total_steps=2)
     step_logger.start(table="models", include_inactive=include_inactive)
 
@@ -858,15 +1017,25 @@ def get_all_models_for_catalog(
         step_logger.step(1, "Connecting to database", table="models", replica="read")
         supabase = get_client_for_query(read_only=True)
         all_models = []
-        page_size = 1000  # Supabase default limit
+        page_size = SUPABASE_PAGE_SIZE
         offset = 0
         step_logger.success(connection="ready", page_size=page_size)
 
         # Step 2: Fetch models with pagination
         step_logger.step(2, "Fetching models (paginated)", table="models")
         batch_count = 0
+        start = time.monotonic()
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
         while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_all_models_for_catalog: wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(all_models)} models "
+                    f"({batch_count} batches); returning partial results"
+                )
+                break
+
             # Build query with pagination - join with providers table
             query = (
                 supabase.table("models")
@@ -902,6 +1071,9 @@ def get_all_models_for_catalog(
             # Move to next page
             offset += page_size
 
+        elapsed = time.monotonic() - start
+        logger.info(f"Query get_all_models_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows")
+
         step_logger.success(
             total_models=len(all_models),
             batches=batch_count,
@@ -922,6 +1094,7 @@ def get_all_models_for_catalog(
         return []
 
 
+@with_retry(**_CATALOG_DB_RETRY)
 def get_models_by_gateway_for_catalog(
     gateway_slug: str,
     include_inactive: bool = False
@@ -949,12 +1122,22 @@ def get_models_by_gateway_for_catalog(
         # Use read replica for read-only catalog queries
         supabase = get_client_for_query(read_only=True)
         all_models = []
-        page_size = 1000  # Supabase default limit
+        page_size = SUPABASE_PAGE_SIZE
         offset = 0
 
         logger.debug(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
+        start = time.monotonic()
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
         while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_models_by_gateway_for_catalog: wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(all_models)} models "
+                    f"(gateway={gateway_slug}); returning partial results"
+                )
+                break
+
             # Build query with provider filter
             query = (
                 supabase.table("models")
@@ -990,10 +1173,8 @@ def get_models_by_gateway_for_catalog(
             # Move to next page
             offset += page_size
 
-        logger.info(
-            f"Fetched {len(all_models)} models from database for gateway: {gateway_slug} "
-            f"({(offset // page_size) + 1} batches)"
-        )
+        elapsed = time.monotonic() - start
+        logger.info(f"Query get_models_by_gateway_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows")
 
         return all_models
 
@@ -1040,7 +1221,14 @@ def get_model_by_model_name_string(
         response = query.single().execute()
         return response.data
     except Exception as e:
-        logger.debug(f"Model {model_name} not found in database: {e}")
+        # .single() raises when no row is found; treat that as a normal
+        # "not found" result and log at debug. Genuine DB errors also land
+        # here — the error text from Supabase will distinguish them in logs.
+        err_str = str(e).lower()
+        if "no rows" in err_str or "pgrst116" in err_str or "multiple" in err_str:
+            logger.debug(f"Model '{model_name}' not found in database: {e}")
+        else:
+            logger.warning(f"Error fetching model '{model_name}' from database: {e}")
         return None
 
 
@@ -1056,11 +1244,9 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
     - model_name (str) - the API-facing identifier and display name
     - provider_id (int) - foreign key
     - providers (dict) - joined provider data
-    - pricing_prompt (decimal) - per-token input cost
-    - pricing_completion (decimal) - per-token output cost
     - context_length (int)
     - is_active (bool)
-    - metadata (jsonb)
+    - metadata (jsonb) - includes pricing_raw with prompt/completion pricing
     - etc.
 
     API format:
@@ -1091,29 +1277,23 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         provider = db_model.get("providers", {})
         provider_slug = provider.get("slug", "unknown")
 
-        # Build pricing dict from database pricing fields
+        # Build pricing dict from metadata.pricing_raw.
+        # NOTE: The pricing_prompt/pricing_completion/pricing_image/pricing_request
+        # columns were dropped from the models table (migration 20260121000003).
+        # Pricing is now stored in metadata.pricing_raw (JSONB) and the
+        # model_pricing table.
         pricing = {}
-        if db_model.get("pricing_prompt") is not None:
-            pricing["prompt"] = str(db_model["pricing_prompt"])
-        if db_model.get("pricing_completion") is not None:
-            pricing["completion"] = str(db_model["pricing_completion"])
-
-        # Fallback: extract pricing from metadata.pricing_raw if DB columns are NULL.
-        # The sync service stores pricing in metadata.pricing_raw but does NOT
-        # populate pricing_prompt/pricing_completion columns or the model_pricing table.
-        # Without this fallback, models show $0 after cache invalidation.
-        if not pricing:
-            metadata = db_model.get("metadata") or {}
-            pricing_raw = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
-            if pricing_raw and isinstance(pricing_raw, dict):
-                if pricing_raw.get("prompt") is not None:
-                    pricing["prompt"] = str(pricing_raw["prompt"])
-                if pricing_raw.get("completion") is not None:
-                    pricing["completion"] = str(pricing_raw["completion"])
-                if pricing_raw.get("image") is not None:
-                    pricing["image"] = str(pricing_raw["image"])
-                if pricing_raw.get("request") is not None:
-                    pricing["request"] = str(pricing_raw["request"])
+        metadata = db_model.get("metadata") or {}
+        pricing_raw = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
+        if pricing_raw and isinstance(pricing_raw, dict):
+            if pricing_raw.get("prompt") is not None:
+                pricing["prompt"] = str(pricing_raw["prompt"])
+            if pricing_raw.get("completion") is not None:
+                pricing["completion"] = str(pricing_raw["completion"])
+            if pricing_raw.get("image") is not None:
+                pricing["image"] = str(pricing_raw["image"])
+            if pricing_raw.get("request") is not None:
+                pricing["request"] = str(pricing_raw["request"])
 
         # Build API format model
         api_model = {
@@ -1162,6 +1342,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 # ============================================================================
 
 
+@with_retry(**_CATALOG_DB_RETRY)
 def get_models_for_catalog_with_filters(
     gateway_slug: str | None = None,
     modality: str | None = None,
@@ -1206,6 +1387,8 @@ def get_models_for_catalog_with_filters(
         # Use read replica for read-only catalog queries
         supabase = get_client_for_query(read_only=True)
 
+        start = time.monotonic()
+
         # Build base query with provider join
         query = (
             supabase.table("models")
@@ -1230,21 +1413,66 @@ def get_models_for_catalog_with_filters(
                 f"description.ilike.{search_pattern}"
             )
 
-        # Order by model name for consistent results
-        query = query.order("model_name")
-
         # Apply pagination
         if limit is not None:
-            query = query.range(offset, offset + limit - 1)
+            # Explicit limit: single ranged query
+            query = query.order("model_name").range(offset, offset + limit - 1)
+            response = query.execute()
+            models = response.data or []
+        else:
+            # No limit requested: fetch ALL rows using paginated batches of
+            # SUPABASE_PAGE_SIZE to avoid Supabase's silent 1000-row default truncation.
+            models = []
+            page_size = SUPABASE_PAGE_SIZE
+            page_offset = offset
+            filter_deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
 
-        response = query.execute()
-        models = response.data or []
+            while True:
+                if time.monotonic() > filter_deadline:
+                    logger.warning(
+                        f"get_models_for_catalog_with_filters: wall-clock deadline of "
+                        f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(models)} models; "
+                        f"returning partial results"
+                    )
+                    break
 
-        logger.info(
-            f"Fetched {len(models)} models from database "
-            f"(gateway={gateway_slug}, modality={modality}, "
-            f"search={search_query}, limit={limit}, offset={offset})"
-        )
+                page_query = (
+                    supabase.table("models")
+                    .select("*, providers!inner(*)")
+                )
+
+                # Re-apply the same filters on each page query
+                if not include_inactive:
+                    page_query = page_query.eq("is_active", True)
+                if gateway_slug:
+                    page_query = page_query.eq("providers.slug", gateway_slug)
+                if modality:
+                    page_query = page_query.eq("modality", modality)
+                if search_query:
+                    search_pattern = f"%{search_query}%"
+                    page_query = page_query.or_(
+                        f"model_name.ilike.{search_pattern},"
+                        f"description.ilike.{search_pattern}"
+                    )
+
+                page_query = page_query.order("model_name").range(
+                    page_offset, page_offset + page_size - 1
+                )
+                response = page_query.execute()
+                batch = response.data or []
+
+                if not batch:
+                    break
+
+                models.extend(batch)
+
+                if len(batch) < page_size:
+                    break
+
+                page_offset += page_size
+
+        elapsed = time.monotonic() - start
+        logger.info(f"Query get_models_for_catalog_with_filters completed in {elapsed:.3f}s, returned {len(models)} rows")
 
         return models
 
@@ -1332,24 +1560,36 @@ def transform_db_models_batch(
     Returns:
         List of models in API format with pricing enrichment applied
     """
-    from src.services.pricing_lookup import enrich_model_with_pricing
+    try:
+        # Pre-fetch ALL pricing in ONE query (eliminates N per-model DB round-trips)
+        pricing_batch = get_all_pricing_batch()
+        # Build O(1) OpenRouter cross-reference index once for the whole batch
+        openrouter_index = _build_openrouter_pricing_index()
 
-    result = []
-    enriched_count = 0
-    for model in db_models:
-        api_model = transform_db_model_to_api_format(model)
-        provider_slug = api_model.get("source_gateway") or api_model.get("provider_slug") or "unknown"
+        result = []
+        enriched_count = 0
+        for model in db_models:
+            api_model = transform_db_model_to_api_format(model)
+            provider_slug = api_model.get("source_gateway") or api_model.get("provider_slug") or "unknown"
 
-        enriched = enrich_model_with_pricing(api_model, provider_slug)
-        if enriched is not None:
-            if enriched.get("pricing_source"):
-                enriched_count += 1
-            result.append(enriched)
+            enriched = enrich_model_with_pricing(
+                api_model,
+                provider_slug,
+                pricing_batch=pricing_batch,
+                openrouter_index=openrouter_index,
+            )
+            if enriched is not None:
+                if enriched.get("pricing_source"):
+                    enriched_count += 1
+                result.append(enriched)
 
-    if enriched_count > 0:
-        logger.info(f"Enriched pricing for {enriched_count}/{len(db_models)} models in catalog batch")
+        if enriched_count > 0:
+            logger.info(f"Enriched pricing for {enriched_count}/{len(db_models)} models in catalog batch")
 
-    return result
+        return result
+    except Exception as e:
+        logger.error(f"Error transforming DB models batch: {e}")
+        return []
 
 
 def get_catalog_statistics() -> dict[str, Any]:
@@ -1387,32 +1627,65 @@ def get_catalog_statistics() -> dict[str, Any]:
         )
         total_providers = providers_response.count or 0
 
-        # Get count by modality
-        modalities_response = (
-            supabase.table("models")
-            .select("modality")
-            .eq("is_active", True)
-            .execute()
-        )
-
+        # Get count by modality (paginated to avoid 1000-row truncation)
         modality_counts = {}
-        for model in modalities_response.data or []:
-            modality = model.get("modality", "unknown")
-            modality_counts[modality] = modality_counts.get(modality, 0) + 1
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        stats_deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
+        while True:
+            if time.monotonic() > stats_deadline:
+                logger.warning(
+                    f"get_catalog_statistics (modality loop): wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded; returning partial modality counts"
+                )
+                break
 
-        # Get models per provider
-        provider_models_response = (
-            supabase.table("models")
-            .select("provider_id, providers!inner(slug)")
-            .eq("is_active", True)
-            .execute()
-        )
+            modalities_response = (
+                supabase.table("models")
+                .select("modality")
+                .eq("is_active", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = modalities_response.data or []
+            if not batch:
+                break
+            for model in batch:
+                modality = model.get("modality", "unknown")
+                modality_counts[modality] = modality_counts.get(modality, 0) + 1
+            if len(batch) < page_size:
+                break
+            offset += page_size
 
+        # Get models per provider (paginated to avoid 1000-row truncation)
         provider_counts = {}
-        for model in provider_models_response.data or []:
-            provider = model.get("providers", {})
-            slug = provider.get("slug", "unknown")
-            provider_counts[slug] = provider_counts.get(slug, 0) + 1
+        offset = 0
+        stats_deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
+        while True:
+            if time.monotonic() > stats_deadline:
+                logger.warning(
+                    f"get_catalog_statistics (provider loop): wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded; returning partial provider counts"
+                )
+                break
+
+            provider_models_response = (
+                supabase.table("models")
+                .select("provider_id, providers!inner(slug)")
+                .eq("is_active", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = provider_models_response.data or []
+            if not batch:
+                break
+            for model in batch:
+                provider = model.get("providers", {})
+                slug = provider.get("slug", "unknown")
+                provider_counts[slug] = provider_counts.get(slug, 0) + 1
+            if len(batch) < page_size:
+                break
+            offset += page_size
 
         return {
             "total_models": total_models,
@@ -1437,6 +1710,7 @@ def get_catalog_statistics() -> dict[str, Any]:
         }
 
 
+@with_retry(**_CATALOG_DB_RETRY)
 def get_all_unique_models_for_catalog(
     include_inactive: bool = False
 ) -> list[dict[str, Any]]:
@@ -1476,10 +1750,10 @@ def get_all_unique_models_for_catalog(
                         'model_id': 456,
                         'model_api_id': 'openai/gpt-4',
                         'provider_model_id': 'openai/gpt-4',
-                        'pricing_prompt': 0.03,
-                        'pricing_completion': 0.06,
-                        'pricing_image': 0,
-                        'pricing_request': 0,
+                        'pricing_prompt': '0.03',
+                        'pricing_completion': '0.06',
+                        'pricing_image': '0',
+                        'pricing_request': '0',
                         'context_length': 8192,
                         'health_status': 'healthy',
                         'average_response_time_ms': 1200,
@@ -1493,37 +1767,111 @@ def get_all_unique_models_for_catalog(
             }
         ]
     """
-    from src.config.supabase_config import get_supabase_client
-    import time
-    from collections import defaultdict
-
-    supabase = get_supabase_client()
-
     try:
-        start_time = time.time()
+        # Use read replica for read-only catalog queries (offloads primary DB)
+        supabase = get_client_for_query(read_only=True)
+        start = time.monotonic()
         logger.debug(f"Fetching unique models (include_inactive={include_inactive})")
 
-        # OPTIMIZATION: Fetch all unique models in one query
-        um_query = supabase.table("unique_models").select("*")
-        um_response = um_query.execute()
-        unique_models_data = um_response.data or []
+        # OPTIMIZATION: Fetch all unique models with pagination
+        # to avoid Supabase's 1000-row default truncation
+        unique_models_data = []
+        page_size = SUPABASE_PAGE_SIZE
+        um_offset = 0
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
+
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_all_unique_models_for_catalog (unique_models loop): wall-clock "
+                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
+                    f"{len(unique_models_data)} unique models; returning partial results"
+                )
+                break
+
+            um_query = (
+                supabase.table("unique_models")
+                .select("id, model_name, model_count, sample_model_id")
+                .range(um_offset, um_offset + page_size - 1)
+            )
+            um_response = um_query.execute()
+            batch = um_response.data or []
+
+            if not batch:
+                break
+
+            unique_models_data.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            um_offset += page_size
 
         if not unique_models_data:
             logger.info("No unique models found in database")
             return []
 
-        # OPTIMIZATION: Fetch ALL provider mappings in a SINGLE query
+        # Note: These two queries are not atomic. Brief inconsistency is possible during model updates.
+        # Supabase (PostgREST) does not support multi-statement transactions via the REST API,
+        # so unique_models and unique_models_provider are fetched in separate round-trips.
+        # In practice this window is milliseconds and only affects catalog reads, not writes.
+
+        # Record the set of unique_model_ids from the first query for staleness detection below.
+        unique_model_ids_from_first_query = {row["id"] for row in unique_models_data}
+
+        # OPTIMIZATION: Fetch ALL provider mappings with pagination
         # This replaces N individual queries (one per unique model)
-        ump_query = (
-            supabase.table("unique_models_provider")
-            .select("*, models!inner(*), providers!inner(*)")
-        )
+        all_provider_mappings = []
+        ump_offset = 0
+        # Reuse remaining time budget from the same operation deadline
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
-        if not include_inactive:
-            ump_query = ump_query.eq("models.is_active", True)
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_all_unique_models_for_catalog (provider mappings loop): wall-clock "
+                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
+                    f"{len(all_provider_mappings)} mappings; returning partial results"
+                )
+                break
 
-        ump_response = ump_query.execute()
-        all_provider_mappings = ump_response.data or []
+            ump_query = (
+                supabase.table("unique_models_provider")
+                .select("unique_model_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active), providers!inner(id, slug, name)")
+            )
+
+            if not include_inactive:
+                ump_query = ump_query.eq("models.is_active", True)
+
+            ump_query = ump_query.range(ump_offset, ump_offset + page_size - 1)
+            ump_response = ump_query.execute()
+            batch = ump_response.data or []
+
+            if not batch:
+                break
+
+            all_provider_mappings.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            ump_offset += page_size
+
+        # Staleness check: warn if the second query references unique_model_ids that were not
+        # present in the first query. This can happen when a model is inserted between the two
+        # queries (non-atomic reads). The data is still usable but may be slightly inconsistent.
+        orphaned_ids = {
+            ump.get("unique_model_id")
+            for ump in all_provider_mappings
+            if ump.get("unique_model_id") not in unique_model_ids_from_first_query
+        }
+        if orphaned_ids:
+            logger.warning(
+                f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) returned "
+                f"by unique_models_provider were not present in the unique_models snapshot "
+                f"(ids: {sorted(orphaned_ids)}). This indicates a model was added between the "
+                f"two non-atomic queries. The affected provider mappings will be skipped."
+            )
 
         # OPTIMIZATION: Group provider mappings by unique_model_id in memory
         # This is MUCH faster than N database queries
@@ -1537,6 +1885,14 @@ def get_all_unique_models_for_catalog(
             model = ump.get("models", {})
             provider = ump.get("providers", {})
 
+            # NOTE: pricing_prompt/pricing_completion/pricing_image/pricing_request
+            # and architecture columns were dropped from the models table
+            # (migrations 20260121000003, 20260131000005). Pricing is now
+            # extracted from metadata.pricing_raw (JSONB).
+            model_metadata = model.get('metadata') or {}
+            pricing_raw = model_metadata.get('pricing_raw') if isinstance(model_metadata, dict) else None
+            pricing_raw = pricing_raw if isinstance(pricing_raw, dict) else {}
+
             provider_data = {
                 'provider_id': provider.get('id'),
                 'provider_slug': provider.get('slug'),
@@ -1544,10 +1900,10 @@ def get_all_unique_models_for_catalog(
                 'model_id': model.get('id'),
                 'model_api_name': model.get('model_name'),
                 'provider_model_id': model.get('provider_model_id'),
-                'pricing_prompt': model.get('pricing_prompt'),
-                'pricing_completion': model.get('pricing_completion'),
-                'pricing_image': model.get('pricing_image'),
-                'pricing_request': model.get('pricing_request'),
+                'pricing_prompt': pricing_raw.get('prompt'),
+                'pricing_completion': pricing_raw.get('completion'),
+                'pricing_image': pricing_raw.get('image'),
+                'pricing_request': pricing_raw.get('request'),
                 'context_length': model.get('context_length'),
                 'health_status': model.get('health_status'),
                 'average_response_time_ms': model.get('average_response_time_ms'),
@@ -1556,7 +1912,6 @@ def get_all_unique_models_for_catalog(
                 'supports_function_calling': model.get('supports_function_calling'),
                 'supports_vision': model.get('supports_vision'),
                 'description': model.get('description'),
-                'architecture': model.get('architecture')
             }
 
             providers_by_unique_model[unique_model_id].append(provider_data)
@@ -1570,9 +1925,17 @@ def get_all_unique_models_for_catalog(
             # Only include models that have at least one provider
             if providers:
                 # Sort providers by price (cheapest first)
-                providers.sort(
-                    key=lambda p: p['pricing_prompt'] if p['pricing_prompt'] is not None else float('inf')
-                )
+                # pricing_prompt is now a string from metadata.pricing_raw
+                def _price_sort_key(p):
+                    val = p.get('pricing_prompt')
+                    if val is None:
+                        return float('inf')
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError):
+                        return float('inf')
+
+                providers.sort(key=_price_sort_key)
 
                 result.append({
                     'unique_model_id': unique_model_id,
@@ -1582,15 +1945,12 @@ def get_all_unique_models_for_catalog(
                     'providers': providers
                 })
 
-        query_time = time.time() - start_time
-        logger.info(
-            f"Fetched {len(result)} unique models with {len(all_provider_mappings)} "
-            f"provider mappings in {query_time:.2f}s (OPTIMIZED: 2 queries instead of N+1)"
-        )
+        elapsed = time.monotonic() - start
+        logger.info(f"Query get_all_unique_models_for_catalog completed in {elapsed:.3f}s, returned {len(result)} rows")
 
-        if query_time > 1.0:
+        if elapsed > 1.0:
             logger.warning(
-                f"Slow unique models query: {query_time:.2f}s "
+                f"Slow unique models query: {elapsed:.3f}s "
                 f"(threshold: 1.0s, include_inactive={include_inactive})"
             )
 
@@ -1640,8 +2000,6 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
             'fastest_response_time': 950
         }
     """
-    from decimal import Decimal
-
     try:
         providers_data = db_model.get('providers', [])
 
@@ -1679,7 +2037,6 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
                 'supports_function_calling': provider.get('supports_function_calling', False),
                 'supports_vision': provider.get('supports_vision', False),
                 'description': provider.get('description'),
-                'architecture': provider.get('architecture'),
                 'model_name': provider.get('model_api_name')  # Include original model_name
             }
 
@@ -1755,66 +2112,87 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
     Returns:
         List of API-formatted models with pricing enrichment applied
     """
-    from src.services.pricing_lookup import get_model_pricing
+    try:
+        # Pre-fetch ALL pricing in ONE query (eliminates N per-model DB round-trips)
+        pricing_batch = get_all_pricing_batch()
 
-    result = []
-    enriched_count = 0
+        result = []
+        enriched_count = 0
 
-    for model in db_models:
-        api_model = transform_unique_model_to_api_format(model)
+        for model in db_models:
+            api_model = transform_unique_model_to_api_format(model)
 
-        # Enrich per-provider pricing if NULL/zero
-        providers = api_model.get('providers', [])
-        for provider in providers:
-            pricing = provider.get('pricing', {})
-            prompt_val = pricing.get('prompt', '0')
-            completion_val = pricing.get('completion', '0')
+            # Enrich per-provider pricing if NULL/zero
+            providers = api_model.get('providers', [])
+            for provider in providers:
+                pricing = provider.get('pricing', {})
+                prompt_val = pricing.get('prompt', '0')
+                completion_val = pricing.get('completion', '0')
 
-            # Check if pricing is missing or zero
-            try:
-                has_real_pricing = float(prompt_val) != 0.0 or float(completion_val) != 0.0
-            except (ValueError, TypeError):
-                has_real_pricing = False
+                # Check if pricing is missing or zero
+                try:
+                    has_real_pricing = float(prompt_val) != 0.0 or float(completion_val) != 0.0
+                except (ValueError, TypeError):
+                    has_real_pricing = False
 
-            if not has_real_pricing:
-                # Try to enrich from manual pricing
-                model_id = api_model.get('id', '')
-                provider_slug = provider.get('slug', '')
-                # Also try with provider's original model_name
-                model_name = provider.get('model_name', model_id)
+                if not has_real_pricing:
+                    model_id = api_model.get('id', '')
+                    provider_slug = provider.get('slug', '')
+                    # Also try with provider's original model_name
+                    model_name = provider.get('model_name', model_id)
 
-                manual_pricing = get_model_pricing(provider_slug, model_name)
-                if not manual_pricing:
-                    manual_pricing = get_model_pricing(provider_slug, model_id)
+                    # Try batch pricing map first (O(1), no DB round-trip)
+                    enriched_from_batch = False
+                    for lookup_key in (model_name, model_id):
+                        if lookup_key and lookup_key in pricing_batch:
+                            bp = pricing_batch[lookup_key]
+                            provider['pricing'] = {
+                                'prompt': bp.get('prompt', '0'),
+                                'completion': bp.get('completion', '0'),
+                                'image': bp.get('image', '0'),
+                                'request': bp.get('request', '0'),
+                            }
+                            enriched_count += 1
+                            enriched_from_batch = True
+                            break
 
-                if manual_pricing:
-                    provider['pricing'] = {
-                        'prompt': manual_pricing.get('prompt', '0'),
-                        'completion': manual_pricing.get('completion', '0'),
-                        'image': manual_pricing.get('image', '0'),
-                        'request': manual_pricing.get('request', '0'),
-                    }
-                    enriched_count += 1
+                    if not enriched_from_batch:
+                        # Fallback to manual pricing JSON
+                        manual_pricing = get_model_pricing(provider_slug, model_name)
+                        if not manual_pricing:
+                            manual_pricing = get_model_pricing(provider_slug, model_id)
 
-        # Recalculate cheapest provider after enrichment
-        cheapest_provider = None
-        cheapest_prompt_price = None
-        for provider in providers:
-            try:
-                price = float(provider.get('pricing', {}).get('prompt', '0'))
-            except (ValueError, TypeError):
-                continue
-            if cheapest_prompt_price is None or price < cheapest_prompt_price:
-                cheapest_prompt_price = price
-                cheapest_provider = provider.get('slug')
+                        if manual_pricing:
+                            provider['pricing'] = {
+                                'prompt': manual_pricing.get('prompt', '0'),
+                                'completion': manual_pricing.get('completion', '0'),
+                                'image': manual_pricing.get('image', '0'),
+                                'request': manual_pricing.get('request', '0'),
+                            }
+                            enriched_count += 1
 
-        if cheapest_provider:
-            api_model['cheapest_provider'] = cheapest_provider
-            api_model['cheapest_prompt_price'] = cheapest_prompt_price
+            # Recalculate cheapest provider after enrichment
+            cheapest_provider = None
+            cheapest_prompt_price = None
+            for provider in providers:
+                try:
+                    price = float(provider.get('pricing', {}).get('prompt', '0'))
+                except (ValueError, TypeError):
+                    continue
+                if cheapest_prompt_price is None or price < cheapest_prompt_price:
+                    cheapest_prompt_price = price
+                    cheapest_provider = provider.get('slug')
 
-        result.append(api_model)
+            if cheapest_provider:
+                api_model['cheapest_provider'] = cheapest_provider
+                api_model['cheapest_prompt_price'] = cheapest_prompt_price
 
-    if enriched_count > 0:
-        logger.info(f"Enriched pricing for {enriched_count} providers across {len(db_models)} unique models")
+            result.append(api_model)
 
-    return result
+        if enriched_count > 0:
+            logger.info(f"Enriched pricing for {enriched_count} providers across {len(db_models)} unique models")
+
+        return result
+    except Exception as e:
+        logger.error(f"Error transforming unique models batch: {e}")
+        return []

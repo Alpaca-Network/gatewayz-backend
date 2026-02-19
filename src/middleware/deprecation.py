@@ -13,6 +13,41 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
+# Map of deprecated endpoint paths to their deprecation info.
+# Add or remove entries here to manage deprecated paths without modifying middleware logic.
+DEPRECATED_PATHS: dict[str, dict[str, str]] = {
+    "/v1/chat/completions": {
+        "replacement": "/v1/chat",
+        "sunset_date": "2025-06-01",  # 4 months from Feb 2025
+        "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
+        "reason": "Use /v1/chat for unified API with auto-format detection",
+    },
+    "/v1/messages": {
+        "replacement": "/v1/chat",
+        "sunset_date": "2025-06-01",
+        "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
+        "reason": "Use /v1/chat for unified API with auto-format detection",
+    },
+    "/v1/responses": {
+        "replacement": "/v1/chat",
+        "sunset_date": "2025-06-01",
+        "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
+        "reason": "Use /v1/chat for unified API with auto-format detection",
+    },
+    "/api/chat/ai-sdk": {
+        "replacement": "/v1/chat",
+        "sunset_date": "2025-06-01",
+        "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
+        "reason": "Use /v1/chat for unified API",
+    },
+    "/api/chat/ai-sdk-completions": {
+        "replacement": "/v1/chat",
+        "sunset_date": "2025-06-01",
+        "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
+        "reason": "Use /v1/chat for unified API",
+    },
+}
+
 
 class DeprecationMiddleware:
     """
@@ -24,41 +59,8 @@ class DeprecationMiddleware:
     - Link: Alternate endpoint URL
 
     This is a pure ASGI middleware to properly support streaming responses.
+    Deprecated paths are configured via the module-level DEPRECATED_PATHS constant.
     """
-
-    # Map of deprecated endpoints to their replacements
-    DEPRECATED_ENDPOINTS = {
-        "/v1/chat/completions": {
-            "replacement": "/v1/chat",
-            "sunset_date": "2025-06-01",  # 4 months from Feb 2025
-            "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
-            "reason": "Use /v1/chat for unified API with auto-format detection"
-        },
-        "/v1/messages": {
-            "replacement": "/v1/chat",
-            "sunset_date": "2025-06-01",
-            "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
-            "reason": "Use /v1/chat for unified API with auto-format detection"
-        },
-        "/v1/responses": {
-            "replacement": "/v1/chat",
-            "sunset_date": "2025-06-01",
-            "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
-            "reason": "Use /v1/chat for unified API with auto-format detection"
-        },
-        "/api/chat/ai-sdk": {
-            "replacement": "/v1/chat",
-            "sunset_date": "2025-06-01",
-            "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
-            "reason": "Use /v1/chat for unified API"
-        },
-        "/api/chat/ai-sdk-completions": {
-            "replacement": "/v1/chat",
-            "sunset_date": "2025-06-01",
-            "migration_url": "https://docs.gatewayz.com/migration/unified-chat",
-            "reason": "Use /v1/chat for unified API"
-        },
-    }
 
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -70,7 +72,7 @@ class DeprecationMiddleware:
             return
 
         path = scope["path"]
-        deprecation_info = self.DEPRECATED_ENDPOINTS.get(path)
+        deprecation_info = DEPRECATED_PATHS.get(path)
 
         # If not a deprecated endpoint, pass through without modification
         if not deprecation_info:

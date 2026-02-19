@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from fastapi import APIRouter
@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 
 # Constants
 FAL_CACHE_INIT_DEFERRED = "FAL cache initialization deferred"
+MAX_MODEL_DESCRIPTION_LENGTH = 500
 
 
 def get_fallback_models_from_db(provider_slug: str) -> list[dict] | None:
@@ -253,32 +254,23 @@ def apply_database_fallback(
         return None
 
 
-# Global lock and flag to prevent circular dependencies during catalog building
-# Using a global lock instead of threading.local() to ensure the flag is visible
-# across all threads spawned by ThreadPoolExecutor during parallel model fetching
-_building_catalog_lock = threading.Lock()
-_building_catalog_flag = False
+# Thread-local storage for the catalog building flag.
+# Using threading.local() prevents the global boolean from being shared
+# (and corrupted) across concurrent provider builds running in different
+# threads spawned by ThreadPoolExecutor.  Each thread sees its own
+# independent copy of the flag, so one provider's build lifecycle cannot
+# accidentally suppress cache lookups in another provider's thread.
+_building_catalog_local = threading.local()
 
 
 def _is_building_catalog() -> bool:
-    """Check if we're currently building the model catalog
-
-    Uses a global lock to ensure thread-safety and visibility across
-    all threads spawned by ThreadPoolExecutor.
-    """
-    with _building_catalog_lock:
-        return _building_catalog_flag
+    """Check if the current thread is building the model catalog."""
+    return getattr(_building_catalog_local, 'building', False)
 
 
-def _set_building_catalog(active: bool):
-    """Set the building catalog flag
-
-    Uses a global lock to ensure thread-safety and visibility across
-    all threads spawned by ThreadPoolExecutor.
-    """
-    global _building_catalog_flag
-    with _building_catalog_lock:
-        _building_catalog_flag = active
+def _set_building_catalog(value: bool):
+    """Set the building catalog flag for the current thread."""
+    _building_catalog_local.building = value
 
 
 # Modality constants to reduce duplication
@@ -296,15 +288,6 @@ class AggregatedCatalog(list):
 
     def as_dict(self) -> dict[str, Any]:
         return {"models": list(self), "canonical_models": self.canonical_models}
-
-
-def _normalize_provider_slug(provider_slug: str) -> str:
-    mapping = {
-        "hug": "huggingface",
-        "huggingface": "huggingface",
-        "google-vertex": "google-vertex",
-    }
-    return mapping.get(provider_slug.lower(), provider_slug.lower())
 
 
 def _extract_modalities(record: dict) -> list[str]:
@@ -858,6 +841,24 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
     return catalog
 
 
+def filter_valid_enhanced_models(models: list) -> list:
+    """Filter out models missing required fields before returning to callers.
+
+    Required fields:
+    - "id": must be a non-empty string
+
+    Logs a warning if any models are filtered out.
+    """
+    valid = [
+        m for m in models
+        if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"].strip()
+    ]
+    count = len(models) - len(valid)
+    if count:
+        logger.warning(f"Filtered {count} models missing required fields")
+    return valid
+
+
 def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = False):
     """
     Get cached models from database-first architecture.
@@ -894,7 +895,7 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             models = get_cached_unique_models_catalog()
             if models is not None:
                 logger.debug(f"Returning {len(models)} unique models")
-                return models
+                return filter_valid_enhanced_models(models)
             logger.warning("Failed to get unique models catalog")
             return []
         elif gateway == "all":
@@ -902,7 +903,7 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             models = get_cached_full_catalog()
             if models is not None:
                 logger.debug(f"Returning {len(models)} models for 'all'")
-                return models
+                return filter_valid_enhanced_models(models)
             # get_cached_full_catalog already fetched from DB on miss
             logger.warning("Failed to get catalog from cache or database")
             return []
@@ -916,7 +917,7 @@ def get_cached_models(gateway: str = "openrouter", use_unique_models: bool = Fal
             models = get_cached_provider_catalog(gateway)
             if models is not None:
                 logger.debug(f"Returning {len(models)} models for '{gateway}'")
-                return models
+                return filter_valid_enhanced_models(models)
             # get_cached_provider_catalog already fetched from DB on miss
             logger.warning(f"Failed to get {gateway} catalog from cache or database")
             return []
@@ -969,7 +970,7 @@ def get_cached_unique_models_catalog():
 
     try:
         # Try cache first (using distinctive unique models key)
-        cached = cache.get_unique_models_catalog()
+        cached = cache.get_unique_models()
         if cached is not None:
             # Check if cached data has the unique models structure
             if cached and isinstance(cached, list) and len(cached) > 0:
@@ -992,7 +993,7 @@ def get_cached_unique_models_catalog():
             logger.warning(f"Slow unique models fetch: {query_time:.2f}s (threshold: 1.0s)")
 
         # Cache result (TTL: 900 seconds = 15 minutes) using distinctive unique models key
-        cache.set_unique_models_catalog(api_models, ttl=900)
+        cache.set_unique_models(api_models, ttl=900)
 
         return api_models
 
@@ -1423,7 +1424,7 @@ def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
     """Fetch specific model data from OpenRouter by searching cached models"""
     try:
         # Construct the model ID
-        provider_provider_model_id = f"{provider_name}/{model_name}"
+        provider_model_id = f"{provider_name}/{model_name}"
         provider_model_id_lower = provider_model_id.lower()
 
         # First check cache
@@ -1995,13 +1996,13 @@ def fetch_specific_model_from_together(provider_name: str, model_name: str):
         together_models = get_cached_models("together")
         if together_models:
             for model in together_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         fresh_models = fetch_models_from_together()
         if fresh_models:
             for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         logger.warning(
@@ -2028,14 +2029,14 @@ def fetch_specific_model_from_featherless(provider_name: str, model_name: str):
         featherless_models = get_cached_models("featherless")
         if featherless_models:
             for model in featherless_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         # If not in cache, try to fetch fresh data
         fresh_models = fetch_models_from_featherless()
         if fresh_models:
             for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         logger.warning(
@@ -2078,7 +2079,7 @@ def fetch_specific_model_from_deepinfra(provider_name: str, model_name: str):
 
         # Search for the specific model
         for model in models:
-            if model.get("id", "").lower() == model_id.lower():
+            if model.get("id", "").lower() == provider_model_id.lower():
                 # Normalize to our schema
                 return normalize_deepinfra_model(model)
 
@@ -2224,14 +2225,14 @@ def fetch_specific_model_from_chutes(provider_name: str, model_name: str):
         chutes_models = get_cached_models("chutes")
         if chutes_models:
             for model in chutes_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         # If not in cache, try to fetch fresh data
         fresh_models = fetch_models_from_chutes()
         if fresh_models:
             for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         logger.warning(
@@ -2256,13 +2257,13 @@ def fetch_specific_model_from_groq(provider_name: str, model_name: str):
         groq_models = get_cached_models("groq")
         if groq_models:
             for model in groq_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         fresh_models = fetch_models_from_groq()
         if fresh_models:
             for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         logger.warning(
@@ -2287,13 +2288,13 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
         fireworks_models = get_cached_models("fireworks")
         if fireworks_models:
             for model in fireworks_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         fresh_models = fetch_models_from_fireworks()
         if fresh_models:
             for model in fresh_models:
-                if model.get("id", "").lower() == model_id.lower():
+                if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
         logger.warning(
@@ -2317,7 +2318,7 @@ def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
         provider_model_id_lower = provider_model_id.lower()
 
         # Try lightweight direct lookup first
-        model_data = get_huggingface_model_info(model_id)
+        model_data = get_huggingface_model_info(provider_model_id)
         if model_data:
             model_data.setdefault("source_gateway", "hug")
             return model_data
@@ -2444,7 +2445,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             models = get_cached_models(gateway)
             if models:
                 for model in models:
-                    if model.get("id", "").lower() == model_id:
+                    if model.get("id", "").lower() == provider_model_id:
                         return "huggingface" if gateway in ("hug", "huggingface") else gateway
 
         # Default to onerouter if not found
@@ -2474,7 +2475,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         )
         detected_gateway = detected_gateway.lower()
 
-        override_gateway = detect_provider_from_model_id(model_id)
+        override_gateway = detect_provider_from_model_id(provider_model_id)
         override_gateway = override_gateway.lower() if override_gateway else None
 
         def normalize_gateway(value: str) -> str:
@@ -2681,7 +2682,21 @@ def _extract_model_provider_slug(model: dict) -> str | None:
 
 
 def _normalize_provider_slug(provider: Any) -> str | None:
-    """Extract provider slug from a provider record."""
+    """Extract and normalize a provider slug from a string or provider record dict.
+
+    This is the canonical slug normalization function for the codebase.
+    All other normalization logic (inline or in client modules) should
+    reference this function.  It:
+      - Accepts a plain string slug or a dict with "slug"/"id"/"provider_slug"/"name" keys
+      - Lower-cases the result
+      - Strips leading "@" characters
+      - Resolves known aliases (e.g. "hug" -> "huggingface")
+
+    Importers: use the public alias ``normalize_provider_slug`` exported from
+    this module.  Client modules that cannot import at module level (to avoid
+    circular imports with models.py) should perform inline normalization with
+    the same logic: ``str(slug).lower().lstrip("@")`` and note this location.
+    """
     if provider is None:
         return None
 
@@ -2698,7 +2713,17 @@ def _normalize_provider_slug(provider: Any) -> str | None:
     if not slug:
         return None
 
-    return str(slug).lower().lstrip("@")
+    normalized = str(slug).lower().lstrip("@")
+
+    # Normalize known aliases
+    _SLUG_ALIASES = {
+        "hug": "huggingface",
+    }
+    return _SLUG_ALIASES.get(normalized, normalized)
+
+
+# Public alias — preferred import for callers outside this module.
+normalize_provider_slug = _normalize_provider_slug
 
 
 def get_model_count_by_provider(
@@ -2762,10 +2787,21 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
         # Preserve existing provider_site_url if already set (e.g., from HuggingFace normalization)
         provider_site_url = openrouter_model.get("provider_site_url")
         if not provider_site_url and providers_data and provider_slug:
-            for provider in providers_data:
-                if provider.get("slug") == provider_slug:
-                    provider_site_url = provider.get("site_url")
-                    break
+            # Build a lookup dict for O(1) access instead of O(N) linear scan
+            if not hasattr(enhance_model_with_provider_info, "_provider_cache"):
+                enhance_model_with_provider_info._provider_cache = {}
+                enhance_model_with_provider_info._provider_cache_id = None
+
+            # Rebuild cache if providers_data changed (use id() as cheap identity check)
+            if enhance_model_with_provider_info._provider_cache_id != id(providers_data):
+                enhance_model_with_provider_info._provider_cache = {
+                    p.get("slug"): p for p in providers_data if isinstance(p, dict) and p.get("slug")
+                }
+                enhance_model_with_provider_info._provider_cache_id = id(providers_data)
+
+            matched_provider = enhance_model_with_provider_info._provider_cache.get(provider_slug)
+            if matched_provider:
+                provider_site_url = matched_provider.get("site_url")
 
         # Generate model logo URL using Google favicon service
         model_logo_url = None
@@ -2791,9 +2827,17 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
                 model_logo_url = f"https://www.google.com/s2/favicons?domain={clean_url}&sz=128"
                 logger.debug(f"Generated model_logo_url (fallback): {model_logo_url}")
 
+        # Truncate description to a consistent length to keep response sizes predictable
+        description = openrouter_model.get("description")
+        if isinstance(description, str) and len(description) > MAX_MODEL_DESCRIPTION_LENGTH:
+            description = description[:MAX_MODEL_DESCRIPTION_LENGTH] + "..."
+        else:
+            description = description
+
         # Add provider information to model
         enhanced_model = {
             **openrouter_model,
+            "description": description,
             "provider_slug": (
                 provider_slug if provider_slug else openrouter_model.get("provider_slug")
             ),
@@ -2803,7 +2847,7 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
 
         return enhanced_model
     except Exception as e:
-        logger.error(f"Error enhancing model with provider info: {e}")
+        logger.warning(f"Failed to enhance model {openrouter_model.get('id', 'unknown')}: {e}")
         return openrouter_model
 
 
@@ -3032,7 +3076,7 @@ def normalize_helicone_model(model) -> dict | None:
         "default_parameters": {},
         "provider_slug": provider_slug,
         "provider_site_url": "https://www.helicone.ai",
-        "model_logo_url": "https://www.helicone.ai/favicon.ico",
+        "model_logo_url": urljoin("https://www.helicone.ai", "/favicon.ico"),
         "source_gateway": "helicone",
     }
 
@@ -3259,16 +3303,29 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
             context_length = 128000
 
         # Determine modality
+        # Strategy: check metadata capabilities first, fall back to name-based detection.
+        # Name-based detection is a last resort that may miss newly released vision models.
         modality = MODALITY_TEXT_TO_TEXT
         input_modalities = ["text"]
         output_modalities = ["text"]
-        if (
-            "vision" in provider_model_id
-            or "gpt-4o" in provider_model_id
-            or "gpt-4-turbo" in provider_model_id
-        ):
-            modality = "text+image->text"
-            input_modalities = ["text", "image"]
+
+        raw_arch = openai_model.get("architecture") or {}
+        raw_input_modalities = raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+
+        if isinstance(raw_input_modalities, list) and raw_input_modalities:
+            # Metadata from API response is authoritative
+            if "image" in raw_input_modalities:
+                modality = "text+image->text"
+                input_modalities = raw_input_modalities
+        else:
+            # Fall back to name-based heuristics only if metadata is absent
+            if (
+                "vision" in provider_model_id
+                or "gpt-4o" in provider_model_id
+                or "gpt-4-turbo" in provider_model_id
+            ):
+                modality = "text+image->text"
+                input_modalities = ["text", "image"]
 
         # Pricing will be enriched from manual pricing data
         pricing = {
@@ -3368,8 +3425,20 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
         else:
             max_output = 4096
 
-        # All Claude 3+ models support vision
-        has_vision = provider_model_id.startswith("claude-3")
+        # Determine vision support.
+        # Strategy: check metadata capabilities first, fall back to name-based detection.
+        # The Anthropic models API does not yet return input_modalities, so we fall back
+        # to name-based heuristics. When the API adds that field this branch will be skipped.
+        raw_arch = anthropic_model.get("architecture") or {}
+        raw_input_modalities = raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+
+        if isinstance(raw_input_modalities, list) and raw_input_modalities:
+            # Metadata from API response is authoritative
+            has_vision = "image" in raw_input_modalities
+        else:
+            # Fall back to name-based heuristics only if metadata is absent.
+            # All Claude 3+ models released to date support vision.
+            has_vision = provider_model_id.startswith("claude-3")
 
         # Determine modality
         modality = "text+image->text" if has_vision else MODALITY_TEXT_TO_TEXT

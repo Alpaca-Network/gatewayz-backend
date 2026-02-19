@@ -349,6 +349,9 @@ def _normalize_nebius_model(model: Any) -> dict[str, Any] | None:
         or payload.get("owned_by")
         or (provider_model_id.split("/")[0] if "/" in provider_model_id else "nebius")
     )
+    # Inline normalization mirrors normalize_provider_slug() in src/services/models.py.
+    # A module-level import is avoided here to prevent a circular import (models.py
+    # imports nebius_client at module level).
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "nebius"
 
     # Generate display name from model ID

@@ -1,14 +1,64 @@
 """
 Pricing Lookup Service
 Provides manual pricing lookup for providers that don't expose pricing via API
+
+CANONICAL PRICING FORMAT
+------------------------
+All pricing values throughout this service and the billing pipeline are stored and
+returned in **per-token** format — i.e., cost per single token (e.g., 0.000000055 USD).
+
+Source-specific raw formats are converted to per-token by pricing_normalization.py:
+  - OpenRouter API  -> already per-token   (PricingFormat.PER_TOKEN)
+  - manual_pricing.json (non-OpenRouter) -> per-1M tokens (PricingFormat.PER_1M_TOKENS)
+  - AiHubMix        -> per-1K tokens      (PricingFormat.PER_1K_TOKENS)
+
+If you add a new pricing source, use normalize_pricing_dict() with the correct
+PricingFormat constant before returning values from this module.
 """
 
 import json
 import logging
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
+    """
+    Validate a single pricing value.
+
+    Ensures the value is numeric and non-negative. If invalid, logs a warning
+    and returns "0" as a safe fallback.
+
+    Args:
+        value: The raw pricing value (str, int, float, or other).
+        field: Field name used in the warning message (e.g. "prompt").
+        model_id: Optional model identifier for more useful log messages.
+
+    Returns:
+        A string representation of the validated value, or "0" if invalid.
+    """
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Pricing field '{field}' for model '{model_id}' is not numeric "
+            f"(got {value!r}); defaulting to 0"
+        )
+        return "0"
+
+    if numeric < 0:
+        logger.warning(
+            f"Pricing field '{field}' for model '{model_id}' is negative "
+            f"({numeric}); defaulting to 0"
+        )
+        return "0"
+
+    return str(value)
+
 
 # Gateway providers that route to underlying providers (OpenAI, Anthropic, etc.)
 # These need cross-reference pricing from OpenRouter if no manual pricing exists
@@ -31,33 +81,77 @@ GATEWAY_PROVIDERS = {
     "vercel-ai-gateway",
 }
 
+# Pricing lookup tier order (checked in sequence, first match wins)
+PRICING_TIERS = ["database", "manual_json", "cross_reference"]
+
 # Cache for pricing data
 _pricing_cache: dict[str, Any] | None = None
+_pricing_cache_lock = threading.Lock()
+# Timestamp (monotonic seconds) of when _pricing_cache was last populated.
+# None means the cache has never been loaded or was explicitly invalidated.
+_pricing_cache_timestamp: float | None = None
+# How long (in seconds) the in-memory pricing cache is considered fresh.
+# After this interval the next access will clear the cache so it reloads from disk.
+PRICING_CACHE_TTL: float = 15 * 60  # 15 minutes
+
+# Cache for OpenRouter pricing index (O(1) lookups)
+_openrouter_pricing_index: dict[str, dict] | None = None
 
 
 def load_manual_pricing() -> dict[str, Any]:
-    """Load manual pricing data from JSON file"""
-    global _pricing_cache
+    """Load manual pricing data from JSON file.
 
+    The result is cached in-memory for up to PRICING_CACHE_TTL seconds.  On the
+    first access after the TTL has elapsed the cache is cleared so the next call
+    reloads fresh data from disk.
+    """
+    global _pricing_cache, _pricing_cache_timestamp
+
+    # Fast path: cache hit and still fresh (no lock needed for the read).
     if _pricing_cache is not None:
-        return _pricing_cache
+        age = time.monotonic() - (_pricing_cache_timestamp or 0.0)
+        if age < PRICING_CACHE_TTL:
+            return _pricing_cache
+        # TTL expired — clear outside the lock so the locked section re-populates.
+        logger.debug(
+            f"Pricing cache TTL expired after {age:.0f}s (TTL={PRICING_CACHE_TTL}s); reloading"
+        )
+        _pricing_cache = None
+        _pricing_cache_timestamp = None
 
-    try:
-        pricing_file = Path(__file__).parent.parent / "data" / "manual_pricing.json"
+    with _pricing_cache_lock:
+        # Double-checked locking: re-check after acquiring the lock
+        if _pricing_cache is not None:
+            return _pricing_cache
 
-        if not pricing_file.exists():
-            logger.warning(f"Manual pricing file not found: {pricing_file}")
+        try:
+            pricing_file = Path(__file__).parent.parent / "data" / "manual_pricing.json"
+
+            if not pricing_file.exists():
+                logger.warning(f"Manual pricing file not found: {pricing_file}")
+                return {}
+
+            with open(pricing_file) as f:
+                raw_data = json.load(f)
+
+            # Pre-lowercase all model keys within each gateway section to avoid
+            # the O(N) case-insensitive fallback scan in get_model_pricing()
+            lowercased: dict[str, Any] = {}
+            for gateway_key, gateway_val in raw_data.items():
+                if isinstance(gateway_val, dict):
+                    lowercased[gateway_key] = {k.lower(): v for k, v in gateway_val.items()}
+                else:
+                    lowercased[gateway_key] = gateway_val
+
+            _pricing_cache = lowercased
+            _pricing_cache_timestamp = time.monotonic()
+
+            logger.info(f"Loaded manual pricing data for {len(_pricing_cache) - 1} providers")
+            return _pricing_cache
+
+        except Exception as e:
+            logger.error(f"Failed to load manual pricing: {e}")
             return {}
-
-        with open(pricing_file) as f:
-            _pricing_cache = json.load(f)
-
-        logger.info(f"Loaded manual pricing data for {len(_pricing_cache) - 1} providers")
-        return _pricing_cache
-
-    except Exception as e:
-        logger.error(f"Failed to load manual pricing: {e}")
-        return {}
 
 
 def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
@@ -87,14 +181,13 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         gateway_pricing = pricing_data[gateway_lower]
 
         raw_pricing = None
-        if model_id in gateway_pricing:
+        # Keys are pre-lowercased at load time, so a single O(1) lookup suffices
+        model_id_lower = model_id.lower()
+        if model_id_lower in gateway_pricing:
+            raw_pricing = gateway_pricing[model_id_lower]
+        elif model_id in gateway_pricing:
+            # Fallback for any non-lowercased entry (e.g. metadata key)
             raw_pricing = gateway_pricing[model_id]
-        else:
-            # Try case-insensitive match
-            for key, value in gateway_pricing.items():
-                if key.lower() == model_id.lower():
-                    raw_pricing = value
-                    break
 
         if raw_pricing is None:
             return None
@@ -120,16 +213,67 @@ def _is_building_catalog() -> bool:
         return False
 
 
-def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
+def _build_openrouter_pricing_index() -> dict[str, dict]:
+    """Build an O(1) lookup index from OpenRouter models.
+
+    Called once per catalog build cycle. Returns a dict keyed by multiple
+    aliases for each model (full id, base id, lowercase variants) so that
+    cross-reference lookups are O(1) instead of O(N).
+    """
+    global _openrouter_pricing_index
+    if _openrouter_pricing_index is not None:
+        return _openrouter_pricing_index
+
+    index: dict[str, dict] = {}
+    try:
+        from src.services.models import get_cached_models
+
+        openrouter_models = get_cached_models("openrouter") or []
+        for model in openrouter_models:
+            if not isinstance(model, dict):
+                continue
+            pricing = model.get("pricing")
+            if not pricing:
+                continue
+            model_id = model.get("id", "")
+            base_id = model_id.split("/")[-1] if "/" in model_id else model_id
+
+            for key in (model_id, model_id.lower(), base_id, base_id.lower()):
+                if key:
+                    index[key] = pricing
+
+        _openrouter_pricing_index = index
+    except Exception as e:
+        logger.warning(f"Failed to build OpenRouter pricing index: {e}")
+        _openrouter_pricing_index = {}
+
+    return _openrouter_pricing_index
+
+
+def invalidate_openrouter_pricing_index() -> None:
+    """Invalidate the OpenRouter pricing index. Call when the OpenRouter cache is refreshed."""
+    global _openrouter_pricing_index
+    _openrouter_pricing_index = None
+
+
+def _get_cross_reference_pricing(
+    model_id: str,
+    openrouter_index: dict[str, dict] | None = None,
+) -> dict[str, str] | None:
     """
     Get pricing for a gateway provider model by cross-referencing OpenRouter's catalog.
 
     Gateway providers (AiHubMix, Helicone, Anannas, Vercel) route to underlying providers
     like OpenAI, Anthropic, Google etc. This function extracts the underlying model ID
-    and looks up its pricing from OpenRouter's cached models.
+    and looks up its pricing from the OpenRouter pricing index.
+
+    Uses an O(1) index lookup when `openrouter_index` is provided (batch path).
+    Falls back to building the index on demand for single-model lookups.
 
     Args:
         model_id: Model ID from gateway provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
+        openrouter_index: Pre-built pricing index from _build_openrouter_pricing_index().
+                          Pass None to have the function build/fetch the index itself.
 
     Returns:
         Pricing dictionary (normalized to per-token format) or None if not found
@@ -139,59 +283,35 @@ def _get_cross_reference_pricing(model_id: str) -> dict[str, str] | None:
         return None
 
     try:
-        from src.services.models import get_cached_models
         from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
 
-        # Get OpenRouter models from cache
-        openrouter_models = get_cached_models("openrouter")
-        if not openrouter_models:
+        # Use the provided index or build it on demand (single-model fallback path)
+        index = openrouter_index if openrouter_index is not None else _build_openrouter_pricing_index()
+        if not index:
             return None
 
         # Extract the base model name from the gateway model ID
         # e.g., "openai/gpt-4o" -> "gpt-4o", "anthropic/claude-3-opus" -> "claude-3-opus"
-        base_model_id = model_id
-        if "/" in model_id:
-            parts = model_id.split("/")
-            # Could be "provider/model" or "org/model-name"
-            base_model_id = parts[-1]
+        base_model_id = model_id.split("/")[-1] if "/" in model_id else model_id
 
-        # Search for matching model in OpenRouter catalog
-        for or_model in openrouter_models:
-            if not isinstance(or_model, dict):
+        # --- O(1) exact-match attempts ---
+        # OpenRouter's API returns prices already in per-token format (e.g. 0.000000055),
+        # so we must normalize using PER_TOKEN — not PER_1M_TOKENS.
+        # This is the canonical format used everywhere in the billing pipeline.
+        # See PROVIDER_PRICING_FORMATS["openrouter"] in pricing_normalization.py.
+        for candidate in (model_id, model_id.lower(), base_model_id, base_model_id.lower()):
+            if candidate and candidate in index:
+                return normalize_pricing_dict(index[candidate], PricingFormat.PER_TOKEN)
+
+        # --- Versioned-suffix fallback: scan only the (small) set of index keys ---
+        # e.g., "claude-3-opus" should match "claude-3-opus-20240229" but NOT "claude-3-opus-mini"
+        base_lower = base_model_id.lower()
+        for key, pricing in index.items():
+            if not key.startswith(base_lower):
                 continue
-
-            or_id = or_model.get("id", "")
-            or_pricing = or_model.get("pricing")
-
-            if not or_pricing:
-                continue
-
-            # Check for exact match or suffix match
-            # OpenRouter IDs are like "openai/gpt-4o", "anthropic/claude-3-opus-20240229"
-            if or_id.endswith(f"/{base_model_id}") or or_id.endswith(f"/{model_id}"):
-                # Normalize OpenRouter pricing (which is per-1M tokens) to per-token
-                return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
-
-            # Also check if the base model ID matches the end of OpenRouter ID
-            or_base = or_id.split("/")[-1] if "/" in or_id else or_id
-            if or_base == base_model_id:
-                # Normalize OpenRouter pricing (which is per-1M tokens) to per-token
-                return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
-
-            # Handle versioned model IDs (e.g., "claude-3-opus" matching "claude-3-opus-20240229")
-            # OpenRouter often uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
-            # Note: We need to check that the suffix is a date version, not a different model variant
-            # e.g., "gpt-4o" should NOT match "gpt-4o-mini" but SHOULD match "gpt-4o-20240513"
-            if or_base.startswith(base_model_id):
-                suffix = or_base[len(base_model_id):]
-                # Only match if suffix is empty or looks like a date version (starts with '-' followed by digits)
-                if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
-                    return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
-            # Also check reverse: base_model_id starts with or_base (for versioned queries)
-            if base_model_id.startswith(or_base):
-                suffix = base_model_id[len(or_base):]
-                if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
-                    return normalize_pricing_dict(or_pricing, PricingFormat.PER_1M_TOKENS)
+            suffix = key[len(base_lower):]
+            if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
+                return normalize_pricing_dict(pricing, PricingFormat.PER_TOKEN)
 
         return None
 
@@ -257,8 +377,8 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
 
                 if prompt_price is not None and completion_price is not None:
                     return {
-                        "prompt": str(prompt_price),
-                        "completion": str(completion_price),
+                        "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
+                        "completion": validate_pricing_value(completion_price, "completion", model_id),
                         "request": "0",
                         "image": "0"
                     }
@@ -273,10 +393,10 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
 
                 if prompt_price is not None and completion_price is not None:
                     return {
-                        "prompt": str(prompt_price),
-                        "completion": str(completion_price),
-                        "request": str(pricing_raw.get("request", "0")),
-                        "image": str(pricing_raw.get("image", "0")),
+                        "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
+                        "completion": validate_pricing_value(completion_price, "completion", model_id),
+                        "request": validate_pricing_value(pricing_raw.get("request", "0"), "request", model_id),
+                        "image": validate_pricing_value(pricing_raw.get("image", "0"), "image", model_id),
                     }
 
         return None
@@ -286,20 +406,109 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
         return None
 
 
-def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[str, Any] | None:
+def get_all_pricing_batch() -> dict[str, dict]:
+    """Fetch all model pricing in a single database query.
+
+    Returns a dict keyed by model_name with pricing sub-dicts so callers can
+    do O(1) lookups instead of issuing one Supabase HTTP call per model.
+
+    Returns:
+        {model_name: {"prompt": "...", "completion": "...", "request": "...", "image": "...", "source": "..."}}
+    """
+    try:
+        from src.config.supabase_config import get_supabase_client
+
+        client = get_supabase_client()
+
+        # Paginate to avoid Supabase's default 1000-row limit truncating results
+        all_rows: list[dict] = []
+        page_size = 1000
+        offset = 0
+        while True:
+            result = (
+                client.table("models")
+                .select("model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)")
+                .eq("is_active", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            batch = result.data or []
+            all_rows.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+
+        pricing_map: dict[str, dict] = {}
+        for row in all_rows:
+            model_name = row.get("model_name")
+            if not model_name:
+                continue
+
+            # Source 1: model_pricing JOIN (legacy table)
+            mp = row.get("model_pricing")
+            if mp and isinstance(mp, list) and len(mp) > 0:
+                mp = mp[0]
+            if mp and isinstance(mp, dict) and (
+                mp.get("price_per_input_token") or mp.get("price_per_output_token")
+            ):
+                pricing_map[model_name] = {
+                    "prompt": validate_pricing_value(mp.get("price_per_input_token", 0), "prompt", model_name),
+                    "completion": validate_pricing_value(mp.get("price_per_output_token", 0), "completion", model_name),
+                    "request": "0",
+                    "image": "0",
+                    "source": "database_batch",
+                }
+                continue
+
+            # Source 2: metadata.pricing_raw (primary sync path)
+            metadata = row.get("metadata") or {}
+            if isinstance(metadata, dict):
+                pricing_raw = metadata.get("pricing_raw") or metadata.get("pricing") or {}
+                if isinstance(pricing_raw, dict) and (
+                    pricing_raw.get("prompt") is not None or pricing_raw.get("completion") is not None
+                ):
+                    pricing_map[model_name] = {
+                        "prompt": validate_pricing_value(pricing_raw.get("prompt", 0), "prompt", model_name),
+                        "completion": validate_pricing_value(pricing_raw.get("completion", 0), "completion", model_name),
+                        "request": validate_pricing_value(pricing_raw.get("request", 0), "request", model_name),
+                        "image": validate_pricing_value(pricing_raw.get("image", 0), "image", model_name),
+                        "source": "metadata_batch",
+                    }
+
+        logger.info(f"Batch pricing fetch: loaded {len(pricing_map)} models in one query")
+        return pricing_map
+
+    except Exception as e:
+        logger.error(f"Failed to batch fetch pricing: {e}")
+        return {}
+
+
+def enrich_model_with_pricing(
+    model_data: dict[str, Any],
+    gateway: str,
+    pricing_batch: dict[str, dict] | None = None,
+    openrouter_index: dict[str, dict] | None = None,
+) -> dict[str, Any] | None:
     """
     Enrich model data with pricing information.
 
     Phase 2 Update: Database-first approach with JSON fallback.
 
     Lookup priority:
-    1. Database (model_pricing table) ← NEW
-    2. Manual pricing JSON (fallback)
-    3. Cross-reference (for gateway providers)
+    1. Pre-fetched batch pricing map (when `pricing_batch` is supplied — avoids per-model DB round-trips)
+    2. Database per-model query (fallback when no batch map provided)
+    3. Manual pricing JSON
+    4. Cross-reference from OpenRouter (for gateway providers, uses O(1) index when available)
 
     Args:
         model_data: Model dictionary
         gateway: Gateway name
+        pricing_batch: Optional pre-fetched {model_name: pricing_dict} map from
+                       get_all_pricing_batch(). When provided the per-model database
+                       call is skipped entirely, eliminating the N+1 query problem.
+        openrouter_index: Optional pre-built OpenRouter pricing index from
+                          _build_openrouter_pricing_index(). When provided the
+                          cross-reference lookup is O(1) instead of O(N).
 
     Returns:
         Enhanced model dictionary with pricing, or None if no pricing found for gateway providers
@@ -336,8 +545,23 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
             if has_real_pricing:
                 return model_data
 
-        # PHASE 2: Try database first (NEW)
-        db_pricing = _get_pricing_from_database(model_id)
+        # 3-tier pricing fallback — checked in order defined by PRICING_TIERS:
+        #   Tier 1 "database"        — DB models table (batch map or per-model query)
+        #   Tier 2 "manual_json"     — static manual_pricing.json bundled with the service
+        #   Tier 3 "cross_reference" — OpenRouter catalog lookup (gateway providers only)
+        # First tier that returns non-None pricing wins; subsequent tiers are skipped.
+
+        # PHASE 2: Try database pricing — prefer the pre-fetched batch map (Fix 1/3)
+        db_pricing: dict[str, str] | None = None
+        if pricing_batch is not None:
+            # O(1) lookup in the pre-fetched map — no extra HTTP round-trip
+            batch_entry = pricing_batch.get(model_id)
+            if batch_entry:
+                db_pricing = {k: v for k, v in batch_entry.items() if k != "source"}
+        else:
+            # Fallback: per-model DB query (legacy path for single-model callers)
+            db_pricing = _get_pricing_from_database(model_id)
+
         if db_pricing:
             model_data["pricing"] = db_pricing
             model_data["pricing_source"] = "database"
@@ -354,7 +578,7 @@ def enrich_model_with_pricing(model_data: dict[str, Any], gateway: str) -> dict[
 
         # For gateway providers, try cross-reference with OpenRouter
         if is_gateway_provider:
-            cross_ref_pricing = _get_cross_reference_pricing(model_id)
+            cross_ref_pricing = _get_cross_reference_pricing(model_id, openrouter_index)
             if cross_ref_pricing:
                 # Verify cross-reference pricing has non-zero values
                 # Models with zero pricing from OpenRouter should still be filtered out
@@ -432,7 +656,9 @@ def get_pricing_metadata() -> dict[str, Any]:
 
 
 def refresh_pricing_cache():
-    """Refresh the pricing cache by reloading from file"""
-    global _pricing_cache
+    """Refresh the pricing cache by reloading from file and invalidating all derived caches."""
+    global _pricing_cache, _pricing_cache_timestamp
     _pricing_cache = None
+    _pricing_cache_timestamp = None
+    invalidate_openrouter_pricing_index()
     return load_manual_pricing()
