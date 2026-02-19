@@ -1588,7 +1588,7 @@ def transform_db_models_batch(
 
         return result
     except Exception as e:
-        logger.error(f"Error transforming DB models batch: {e}")
+        logger.error(f"Error transforming DB models batch: {e}", exc_info=True)
         return []
 
 

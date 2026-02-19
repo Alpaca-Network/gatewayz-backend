@@ -424,6 +424,8 @@ def get_all_pricing_batch() -> dict[str, dict]:
         all_rows: list[dict] = []
         page_size = 1000
         offset = 0
+        max_pages = 100  # Safety cap: 100k models max
+        deadline = time.monotonic() + 30  # 30-second wall-clock deadline
         while True:
             result = (
                 client.table("models")
@@ -437,6 +439,10 @@ def get_all_pricing_batch() -> dict[str, dict]:
             if len(batch) < page_size:
                 break
             offset += page_size
+            max_pages -= 1
+            if max_pages <= 0 or time.monotonic() > deadline:
+                logger.warning(f"Pricing batch fetch hit safety limit at {len(all_rows)} rows")
+                break
 
         pricing_map: dict[str, dict] = {}
         for row in all_rows:
@@ -553,7 +559,7 @@ def enrich_model_with_pricing(
 
         # PHASE 2: Try database pricing — prefer the pre-fetched batch map (Fix 1/3)
         db_pricing: dict[str, str] | None = None
-        if pricing_batch is not None:
+        if pricing_batch:
             # O(1) lookup in the pre-fetched map — no extra HTTP round-trip
             batch_entry = pricing_batch.get(model_id)
             if batch_entry:

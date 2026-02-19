@@ -2831,8 +2831,6 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
         description = openrouter_model.get("description")
         if isinstance(description, str) and len(description) > MAX_MODEL_DESCRIPTION_LENGTH:
             description = description[:MAX_MODEL_DESCRIPTION_LENGTH] + "..."
-        else:
-            description = description
 
         # Add provider information to model
         enhanced_model = {

@@ -52,9 +52,7 @@ except Exception:
 
 # Cache TTL constants (in seconds)
 CATALOG_RESPONSE_CACHE_TTL = 300   # 5 minutes
-UNIQUE_MODELS_CACHE_TTL = 900      # 15 minutes
 PROVIDER_MODELS_CACHE_TTL = 1800   # 30 minutes
-METADATA_CACHE_TTL = 86400         # 24 hours
 
 
 # ============================================================================
@@ -1806,8 +1804,8 @@ def get_provider_catalog_smart(provider_name: str) -> list[dict[str, Any]] | Non
                     if raw:
                         try:
                             models.append(_deserialize(raw))
-                        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-                            pass
+                        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
+                            logger.debug(f"Skipping corrupted cache entry for model {model_id}: {e}")
 
             if models:
                 logger.debug(f"Smart cache HIT: {provider_name} - {len(models)} models retrieved individually")
