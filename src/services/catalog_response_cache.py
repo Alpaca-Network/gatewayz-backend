@@ -33,14 +33,38 @@ import logging
 from typing import Any
 from datetime import datetime, timezone
 
+import redis as redis_module
+
 from src.config.redis_config import get_redis_client
+
+try:
+    from prometheus_client import Counter
+    cache_operations = Counter(
+        'catalog_cache_operations_total',
+        'Cache operations',
+        ['operation', 'cache_layer', 'result']
+    )
+except Exception:
+    cache_operations = None
 
 logger = logging.getLogger(__name__)
 
+# Cache TTL constants (in seconds)
+CATALOG_RESPONSE_CACHE_TTL = 300  # 5 minutes
+METADATA_CACHE_TTL = 86400  # 24 hours
+
+# Cache key namespace — prepended to every Redis key to avoid collisions with
+# other services or provider slugs that could otherwise match a bare prefix.
+# Key schema:
+#   gw:catalog:v2:{gateway}:{hash}        - cached catalog API response
+#   gw:catalog:metadata:{gateway}         - cache metadata (stats, timestamps)
+#   gw:catalog:rebuild_lock:{cache_key}   - stampede-protection lock
+CACHE_NAMESPACE = "gw:"
+
 # Cache configuration
-CATALOG_CACHE_TTL = 300  # 5 minutes - balance freshness vs performance
-CATALOG_CACHE_PREFIX = "catalog:v2:"  # Version prefix for easy invalidation
-CATALOG_METADATA_KEY = "catalog:metadata"
+CATALOG_CACHE_TTL = CATALOG_RESPONSE_CACHE_TTL  # backward-compatible alias
+CATALOG_CACHE_PREFIX = f"{CACHE_NAMESPACE}catalog:v2:"  # Version prefix for easy invalidation
+CATALOG_METADATA_KEY = f"{CACHE_NAMESPACE}catalog:metadata"
 
 
 def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
@@ -71,9 +95,10 @@ def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
         "gateway": gateway_key,
         "limit": params.get("limit", 100),
         "offset": params.get("offset", 0),
+        "provider": params.get("provider"),
+        "is_private": params.get("is_private"),
         "include_huggingface": params.get("include_huggingface", False),
         "unique_models": params.get("unique_models", False),
-        # Add other parameters as needed
     }
 
     # Hash parameters to keep keys short while maintaining uniqueness
@@ -123,19 +148,39 @@ async def get_cached_catalog_response(
         if cached_data:
             logger.info(f"✅ Cache HIT: {cache_key}")
             _track_cache_hit(gateway)
+            # Refresh TTL so frequently accessed keys stay warm
+            redis.expire(cache_key, CATALOG_CACHE_TTL)
 
             # Deserialize and return
             return json.loads(cached_data)
 
         logger.debug(f"Cache MISS: {cache_key}")
+
+        # Thundering herd / stampede protection:
+        # If another coroutine is already rebuilding the cache, wait briefly
+        # and retry once before returning None so the caller hits DB.
+        lock_key = f"{CACHE_NAMESPACE}catalog:rebuild_lock:{cache_key}"
+        try:
+            acquired = redis.set(lock_key, "1", nx=True, ex=60)
+            if not acquired:
+                # Another request is rebuilding - wait briefly and retry cache
+                import asyncio
+                await asyncio.sleep(0.5)
+                cached_data = redis.get(cache_key)
+                if cached_data:
+                    _track_cache_hit(gateway)
+                    return json.loads(cached_data)
+        except Exception:
+            pass  # If lock fails, proceed normally
+
         _track_cache_miss(gateway)
         return None
 
     except json.JSONDecodeError as e:
-        logger.error(f"Cache data corrupted for key {cache_key}: {e}")
+        logger.warning(f"Cache data corrupted for key {cache_key}: {e}")
         _track_cache_miss(gateway)
         return None
-    except Exception as e:
+    except redis_module.RedisError as e:
         logger.warning(f"Cache read failed: {e}")
         _track_cache_miss(gateway)
         return None
@@ -193,12 +238,20 @@ async def cache_catalog_response(
 
         logger.info(f"💾 Cached response: {cache_key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
 
-        # Update cache metadata for monitoring
+        # Update cache metadata and Prometheus gauge for monitoring
         _update_cache_metadata(redis, gateway, len(serialized))
+        _track_cache_size(gateway, len(serialized))
+
+        # Release stampede lock now that cache is populated so other waiters can read immediately
+        lock_key = f"{CACHE_NAMESPACE}catalog:rebuild_lock:{cache_key}"
+        try:
+            redis.delete(lock_key)
+        except Exception:
+            pass  # Lock will auto-expire via its 60s TTL
 
         return True
 
-    except Exception as e:
+    except redis_module.RedisError as e:
         logger.warning(f"Cache write failed: {e}")
         return False
 
@@ -266,8 +319,8 @@ def invalidate_catalog_cache(gateway: str | None = None) -> int:
 
         return deleted_count
 
-    except Exception as e:
-        logger.error(f"Cache invalidation failed: {e}")
+    except redis_module.RedisError as e:
+        logger.warning(f"Cache invalidation failed: {e}")
         return 0
 
 
@@ -308,8 +361,8 @@ def get_cache_stats(gateway: str | None = None) -> dict[str, Any]:
             "total_size_bytes": int(metadata.get("total_size_bytes", 0)),
         }
 
-    except Exception as e:
-        logger.error(f"Failed to get cache stats: {e}")
+    except redis_module.RedisError as e:
+        logger.warning(f"Failed to get cache stats: {e}")
         return {"error": str(e)}
 
 
@@ -326,6 +379,11 @@ def _track_cache_hit(gateway: str | None):
         pass
     except Exception as e:
         logger.debug(f"Failed to track cache hit: {e}")
+    try:
+        if cache_operations is not None:
+            cache_operations.labels(operation='get', cache_layer='l1', result='hit').inc()
+    except Exception as e:
+        logger.debug(f"Failed to track cache_operations hit: {e}")
 
 
 def _track_cache_miss(gateway: str | None):
@@ -338,6 +396,23 @@ def _track_cache_miss(gateway: str | None):
         pass
     except Exception as e:
         logger.debug(f"Failed to track cache miss: {e}")
+    try:
+        if cache_operations is not None:
+            cache_operations.labels(operation='get', cache_layer='l1', result='miss').inc()
+    except Exception as e:
+        logger.debug(f"Failed to track cache_operations miss: {e}")
+
+
+def _track_cache_size(gateway: str | None, size_bytes: int):
+    """Update catalog_cache_size_bytes Prometheus gauge for this gateway"""
+    try:
+        from src.services.prometheus_metrics import catalog_cache_size_bytes
+        catalog_cache_size_bytes.labels(gateway=gateway or "all").set(size_bytes)
+    except ImportError:
+        # Metrics not available - not critical
+        pass
+    except Exception as e:
+        logger.debug(f"Failed to track cache size: {e}")
 
 
 def _update_cache_metadata(redis, gateway: str | None, size_bytes: int):
@@ -358,9 +433,9 @@ def _update_cache_metadata(redis, gateway: str | None, size_bytes: int):
         pipe.hincrby(metadata_key, "total_cached", 1)
         pipe.hincrby(metadata_key, "total_size_bytes", size_bytes)
         pipe.hset(metadata_key, "last_cached_at", datetime.now(timezone.utc).isoformat())
-        pipe.expire(metadata_key, 86400)  # Metadata expires after 24 hours
+        pipe.expire(metadata_key, METADATA_CACHE_TTL)  # Metadata expires after 24 hours
         pipe.execute()
 
-    except Exception as e:
+    except redis_module.RedisError as e:
         # Non-critical - don't fail cache operation
         logger.debug(f"Failed to update cache metadata: {e}")

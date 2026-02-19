@@ -50,7 +50,7 @@ class StagingSecurityMiddleware:
         self.app = app
 
         # Log security configuration on startup
-        if Config.APP_ENV == "staging":
+        if Config.IS_STAGING:
             logger.info(
                 "🔒 Staging security enabled: Admin-only access "
                 "(all routes require admin user API key except /health)"
@@ -63,7 +63,7 @@ class StagingSecurityMiddleware:
             return
 
         # Only apply in staging environment
-        if Config.APP_ENV != "staging":
+        if not Config.IS_STAGING:
             await self.app(scope, receive, send)
             return
 

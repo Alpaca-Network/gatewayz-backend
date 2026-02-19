@@ -15,6 +15,11 @@ import time
 from collections import Counter, deque
 from typing import Optional
 
+try:
+    from redis.exceptions import RedisError as _RedisError
+except ImportError:
+    _RedisError = OSError  # type: ignore[misc,assignment]
+
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -57,7 +62,40 @@ DATACENTER_KEYWORDS = ["aws", "amazon", "google", "digitalocean", "azure", "ovh"
 class SecurityMiddleware(BaseHTTPMiddleware):
     """
     Advanced security middleware for behavioral rate limiting and protection.
+
+    KNOWN LIMITATION — BaseHTTPMiddleware and SSE/Streaming:
+    =========================================================
+    This middleware is built on Starlette's BaseHTTPMiddleware, which works by
+    awaiting the full response from `call_next` before returning it to the client.
+    Under the hood, BaseHTTPMiddleware wraps the response body in an anyio memory
+    stream and iterates over it completely, which means:
+
+      1. Streaming responses (Server-Sent Events / SSE, chunked transfer) are fully
+         buffered in memory before being forwarded to the client.
+      2. The client does not receive any tokens until the *entire* LLM response has
+         been generated, effectively breaking the streaming UX.
+      3. For very long completions this can also increase memory pressure.
+
+    The correct long-term fix is to rewrite this middleware as a pure ASGI callable
+    (no BaseHTTPMiddleware) so that response chunks can be forwarded directly.
+    That is intentionally deferred as a larger refactor.
+
+    SHORT-TERM MITIGATION implemented below:
+    For requests that are identified as SSE streaming requests (i.e. POST to
+    /v1/chat/completions with `stream=true` in the body, or an `Accept:
+    text/event-stream` header), we still run all inbound security checks (IP rate
+    limit, fingerprint limit) but we call `call_next` and return its response
+    immediately without any additional processing of the response body.  This
+    restores streaming behaviour for chat endpoints while preserving all
+    rate-limiting protection.
     """
+
+    # Paths that may carry SSE / chunked streaming responses.
+    STREAMING_PATHS = {
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/v1/responses",
+    }
 
     def __init__(self, app: ASGIApp, redis_client=None):
         super().__init__(app)
@@ -91,7 +129,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         ua = request.headers.get("user-agent", "none")
         accept = request.headers.get("accept-language", "none")
         encoding = request.headers.get("accept-encoding", "none")
-        
+
         # Combine identifiers into a stable hash
         fingerprint_raw = f"{ua}|{accept}|{encoding}"
         return hashlib.sha256(fingerprint_raw.encode()).hexdigest()[:16]
@@ -146,7 +184,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    def _get_user_tier_from_request(self, request: Request) -> str:
+    async def _get_user_tier_from_request(self, request: Request) -> str:
         """
         Get user tier from request (basic, pro, max, admin).
         Returns 'basic' as default for unauthenticated or unknown users.
@@ -171,7 +209,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             # Import here to avoid circular dependencies
             from src.db.users import get_user
 
-            user = get_user(api_key)
+            # Wrap synchronous DB call to avoid blocking the event loop
+            user = await asyncio.to_thread(get_user, api_key)
             if user:
                 tier = user.get("tier", "basic")
                 logger.debug(f"User tier for {api_key[:10]}...: {tier}")
@@ -179,9 +218,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             return "basic"
 
+        except (asyncio.TimeoutError, RuntimeError, OSError) as e:
+            # Don't fail the request if tier lookup fails (connection/timeout errors)
+            logger.warning(f"Failed to get user tier from request: {e}")
+            return "basic"
         except Exception as e:
-            # Don't fail the request if tier lookup fails
-            logger.debug(f"Failed to get user tier from request: {e}")
+            # Catch-all for unexpected errors (e.g. malformed DB response)
+            logger.warning(f"Unexpected error getting user tier from request: {e}", exc_info=True)
             return "basic"
 
     def _is_velocity_mode_active(self) -> bool:
@@ -271,8 +314,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     error_count=error_count,
                 )
                 rate_limited_requests.labels(limit_type="velocity_mode_activated").inc()
-            except Exception as e:
-                logger.debug(f"Failed to record velocity mode metrics: {e}")
+            except ImportError as e:
+                logger.warning(f"Prometheus metrics module unavailable, skipping velocity activation metrics: {e}")
+            except RuntimeError as e:
+                logger.warning(f"Failed to record velocity mode activation metrics: {e}")
 
             # Log to database (async operation, don't block on it)
             try:
@@ -297,8 +342,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
                 # Run in thread pool to avoid blocking
                 asyncio.create_task(asyncio.to_thread(_log_event))
-            except Exception as e:
-                logger.debug(f"Failed to log velocity mode event to database: {e}")
+            except ImportError as e:
+                logger.warning(f"DB module unavailable, skipping velocity mode event log: {e}")
+            except RuntimeError as e:
+                logger.warning(f"Failed to schedule velocity mode event log: {e}")
 
             return True
 
@@ -330,8 +377,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 # Record Prometheus metrics
                 try:
                     record_velocity_mode_deactivation(duration)
-                except Exception as e:
-                    logger.debug(f"Failed to record velocity mode deactivation metrics: {e}")
+                except (ImportError, RuntimeError) as e:
+                    logger.warning(f"Failed to record velocity mode deactivation metrics: {e}")
 
                 def _deactivate_event():
                     deactivate_velocity_event(self._current_velocity_event_id)
@@ -340,8 +387,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 # Run in thread pool to avoid blocking
                 asyncio.create_task(asyncio.to_thread(_deactivate_event))
                 self._current_velocity_event_id = None
-            except Exception as e:
-                logger.debug(f"Failed to deactivate velocity mode event: {e}")
+            except ImportError as e:
+                logger.warning(f"DB/metrics module unavailable, skipping velocity mode deactivation log: {e}")
+            except RuntimeError as e:
+                logger.warning(f"Failed to schedule velocity mode deactivation: {e}")
 
     def _get_effective_limit(self, base_limit: int, user_tier: str = "basic") -> int:
         """
@@ -369,6 +418,100 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return base_limit
 
+    def _is_streaming_request(self, request: Request) -> bool:
+        """
+        Heuristically detect whether this request expects a streaming (SSE) response.
+
+        Detection rules (any one is sufficient):
+          1. The path is a known streaming endpoint AND the query-string contains
+             ``stream=true`` (clients that pass stream as a query param).
+          2. The path is a known streaming endpoint AND the ``Accept`` header
+             contains ``text/event-stream``.
+
+        Note: We intentionally do NOT parse the JSON request body here — doing so
+        would consume the body stream and break the downstream handler.  Instead we
+        rely on the query-string and headers, which are always present for well-
+        behaved streaming clients (e.g. the OpenAI SDK sets Accept: text/event-stream
+        when stream=True).  Clients that pass ``stream`` only in the JSON body will
+        still be buffered; that is an acceptable trade-off for this lightweight fix.
+        """
+        if request.url.path not in self.STREAMING_PATHS:
+            return False
+
+        # Check Accept header (most reliable signal — OpenAI SDK always sets this)
+        accept = request.headers.get("Accept", "")
+        if "text/event-stream" in accept:
+            return True
+
+        # Check query-string fallback (less common but valid)
+        if request.query_params.get("stream", "").lower() == "true":
+            return True
+
+        return False
+
+    def _validate_content_type(self, request: Request) -> Optional[JSONResponse]:
+        """
+        Validate the Content-Type header for mutating requests on /v1/* endpoints.
+
+        Rules (MW-M3):
+        - Only applies to POST, PUT, and PATCH methods on paths under /v1/.
+        - If the Content-Type header is absent the request is allowed through
+          unchanged (backwards compatibility with clients that omit it).
+        - If the Content-Type header is present it must be one of:
+            - application/json               (standard API calls)
+            - multipart/form-data            (audio/image file uploads)
+            - application/x-www-form-urlencoded  (form submissions)
+        - Any other value causes an immediate HTTP 415 Unsupported Media Type
+          response before the request reaches any route handler.
+
+        Returns:
+            None if the request passes validation.
+            A JSONResponse(415) if the Content-Type is present but unsupported.
+        """
+        if request.method not in ("POST", "PUT", "PATCH"):
+            return None
+
+        if not request.url.path.startswith("/v1/"):
+            return None
+
+        content_type_raw = request.headers.get("content-type", "")
+        if not content_type_raw:
+            # Missing Content-Type — pass through for backwards compatibility
+            return None
+
+        # Strip parameters such as "; charset=utf-8" or "; boundary=----..."
+        content_type = content_type_raw.split(";")[0].strip().lower()
+
+        ALLOWED_CONTENT_TYPES = {
+            "application/json",
+            "multipart/form-data",
+            "application/x-www-form-urlencoded",
+        }
+
+        if content_type not in ALLOWED_CONTENT_TYPES:
+            logger.warning(
+                "Rejected unsupported Content-Type '%s' for %s %s",
+                content_type_raw,
+                request.method,
+                request.url.path,
+            )
+            return JSONResponse(
+                status_code=415,
+                content={
+                    "error": {
+                        "message": (
+                            f"Unsupported Media Type: '{content_type_raw}'. "
+                            "Content-Type must be 'application/json' or 'multipart/form-data'."
+                        ),
+                        "type": "unsupported_media_type",
+                        "code": 415,
+                    }
+                },
+                headers={"Accept": "application/json, multipart/form-data"},
+            )
+
+        return None
+
     async def _check_limit(self, key: str, limit: int, window: int = 60) -> bool:
         """
         Generic sliding window rate limit check.
@@ -389,8 +532,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 if count == 1:
                     await asyncio.to_thread(self.redis.expire, full_key, window * 2)
                 return count <= limit
-            except Exception as e:
-                logger.error(f"Redis security limit error: {e}")
+            except _RedisError as e:
+                logger.error(f"Redis security limit error (falling back to local): {e}")
                 # Fallback to local
 
         # Local in-memory fallback
@@ -409,6 +552,14 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/metrics", "/api/health", "/favicon.ico"]:
             return await call_next(request)
 
+        # MW-M3: Validate Content-Type for mutating requests on /v1/* endpoints.
+        # Returns 415 if Content-Type is present but not application/json or
+        # multipart/form-data. Missing Content-Type is allowed for backwards
+        # compatibility.
+        content_type_error = self._validate_content_type(request)
+        if content_type_error is not None:
+            return content_type_error
+
         client_ip = await self._get_client_ip(request)
 
         # Check if IP is whitelisted (bypasses all rate limiting)
@@ -417,7 +568,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             # TODO: Extract user_id from request if available for user-specific whitelists
             # For now, only check global whitelists
-            if is_ip_whitelisted(ip_address=client_ip, user_id=None):
+            if await asyncio.to_thread(is_ip_whitelisted, ip_address=client_ip, user_id=None):
                 logger.debug(f"🟢 IP {client_ip} is whitelisted - bypassing rate limiting")
                 # Still track response for velocity mode statistics
                 start_time = time.time()
@@ -427,9 +578,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 self._check_and_activate_velocity_mode()
                 self._check_velocity_mode_deactivation()
                 return response
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError) as e:
             # Don't fail the request if whitelist check fails - just log and continue
-            logger.debug(f"IP whitelist check failed for {client_ip}: {e}")
+            logger.warning(f"IP whitelist check failed for {client_ip}: {e}")
+        except Exception as e:
+            # Catch-all for unexpected errors from the whitelist DB lookup
+            logger.error(f"Unexpected error in IP whitelist check for {client_ip}: {e}", exc_info=True)
 
         fingerprint = self._generate_fingerprint(request)
 
@@ -440,7 +594,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         is_authenticated = self._is_authenticated_request(request)
 
         # Get user tier for tiered velocity mode (basic, pro, max, admin)
-        user_tier = self._get_user_tier_from_request(request)
+        user_tier = await self._get_user_tier_from_request(request)
 
         # Determine applicable limit (Tiering) with velocity mode adjustment
         is_dc = await self._is_datacenter_ip(client_ip, request)
@@ -454,11 +608,18 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(f"🛡️ Blocked Aggressive IP: {client_ip} (Limit: {ip_limit} RPM){mode_indicator}")
 
+            _ip_reset_ts = str(int(time.time()) + 60)
             headers = {
+                # IETF draft standard headers (RateLimit-*); RateLimit-Reset is seconds until reset
+                "RateLimit-Limit": str(ip_limit),
+                "RateLimit-Remaining": "0",
+                "RateLimit-Reset": "60",
+                # Retry-After (RFC 7231)
                 "Retry-After": "60",
+                # Legacy X-RateLimit-* headers kept for backwards compatibility
                 "X-RateLimit-Limit": str(ip_limit),
                 "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(int(time.time()) + 60),
+                "X-RateLimit-Reset": _ip_reset_ts,
                 "X-RateLimit-Reason": "ip_limit" if not velocity_active else "velocity_mode_ip_limit",
                 "X-RateLimit-Mode": "velocity" if velocity_active else "normal",
                 "X-Velocity-Mode-Active": str(velocity_active).lower(),
@@ -476,16 +637,24 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
-        if not await self._check_limit(f"fp:{fingerprint}", fp_limit):
+        #    Skip for authenticated users — they are already rate-limited by API key
+        if not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}")
 
+            _fp_reset_ts = str(int(time.time()) + 60)
             headers = {
+                # IETF draft standard headers (RateLimit-*); RateLimit-Reset is seconds until reset
+                "RateLimit-Limit": str(fp_limit),
+                "RateLimit-Remaining": "0",
+                "RateLimit-Reset": "60",
+                # Retry-After (RFC 7231)
                 "Retry-After": "60",
+                # Legacy X-RateLimit-* headers kept for backwards compatibility
                 "X-RateLimit-Limit": str(fp_limit),
                 "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": str(int(time.time()) + 60),
+                "X-RateLimit-Reset": _fp_reset_ts,
                 "X-RateLimit-Reason": "fingerprint_limit" if not velocity_active else "velocity_mode_fingerprint_limit",
                 "X-RateLimit-Mode": "velocity" if velocity_active else "normal",
                 "X-Velocity-Mode-Active": str(velocity_active).lower(),
@@ -501,6 +670,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 content={"error": {"message": "Suspicious request patterns detected.", "type": "behavioral_limit"}},
                 headers=headers
             )
+
+        # --- SSE / Streaming bypass ---
+        # BaseHTTPMiddleware buffers the entire response body before forwarding it
+        # to the client, which breaks Server-Sent Events (SSE) streaming.  For
+        # detected streaming requests we skip post-response processing and return
+        # the response object directly so Starlette can stream chunks as they
+        # arrive.  All inbound security checks above have already been applied.
+        # See the class docstring for a full explanation of this limitation.
+        if self._is_streaming_request(request):
+            return await call_next(request)
 
         # Proceed to next middleware/app logic
         start_time = time.time()

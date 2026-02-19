@@ -6,6 +6,7 @@ Handles Redis connection and configuration for rate limiting and caching.
 
 import logging
 import os
+import threading
 
 import redis
 from redis.connection import ConnectionPool
@@ -286,27 +287,47 @@ class RedisConfig:
         return 0
 
     def cleanup_expired_keys(self, pattern: str = "*") -> int:
-        """Clean up expired keys matching pattern"""
+        """Clean up expired keys matching pattern.
+
+        Uses SCAN instead of KEYS to avoid blocking Redis under large keyspaces.
+        SCAN is cursor-based and processes keys in batches, keeping Redis
+        responsive while iterating over the full keyspace.
+        """
+        client = self.get_client()
+        if not client:
+            return 0
         try:
-            client = self.get_client()
-            if client:
-                keys = client.keys(pattern)
+            total_deleted = 0
+            cursor = 0
+            while True:
+                cursor, keys = client.scan(cursor=cursor, match=pattern, count=100)
                 if keys:
-                    return client.delete(*keys)
+                    total_deleted += client.delete(*keys)
+                if cursor == 0:
+                    break
+            return total_deleted
         except Exception as e:
-            logger.warning(f"Failed to cleanup expired keys {pattern}: {e}")
-        return 0
+            logger.error(f"Error cleaning up keys: {e}")
+            return 0
 
 
 # Global Redis configuration instance
 _redis_config = None
+_redis_config_lock = threading.Lock()
 
 
 def get_redis_config() -> RedisConfig:
-    """Get global Redis configuration instance"""
+    """Get global Redis configuration instance (thread-safe singleton).
+
+    Uses double-checked locking so that the common case (instance already
+    created) never acquires the lock, while still preventing two threads from
+    racing to create the first instance simultaneously.
+    """
     global _redis_config
     if _redis_config is None:
-        _redis_config = RedisConfig()
+        with _redis_config_lock:
+            if _redis_config is None:
+                _redis_config = RedisConfig()
     return _redis_config
 
 

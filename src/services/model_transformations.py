@@ -231,7 +231,7 @@ MODEL_ID_ALIASES = {
     # XAI Grok specialized models
     "grok-code-fast-1": "x-ai/grok-code-fast-1",
     # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
-    # Note: Map directly to canonical x-ai/ prefix since apply_model_alias doesn't chain
+    # Note: Map directly to canonical x-ai/ prefix (apply_model_alias now resolves one chain level)
     "grok-beta": "x-ai/grok-3",
     "xai/grok-beta": "x-ai/grok-3",
     "grok-vision-beta": "x-ai/grok-3",
@@ -270,6 +270,7 @@ OPENROUTER_AUTO_FALLBACKS = {
 }
 
 # Shared helper for resolving aliases before any downstream routing logic runs.
+# Normalization is idempotent: applying twice yields same result as once.
 def apply_model_alias(model_id: str | None) -> str | None:
     if not model_id:
         return model_id
@@ -277,6 +278,20 @@ def apply_model_alias(model_id: str | None) -> str | None:
     alias_key = model_id.lower()
     canonical = MODEL_ID_ALIASES.get(alias_key)
     if canonical:
+        # Guard against chaining: if the resolved value is itself an alias key that
+        # maps to something different, resolve one more level so that calling this
+        # function on the output always returns the same result as calling it once.
+        second_key = canonical.lower()
+        if second_key != alias_key:
+            second_canonical = MODEL_ID_ALIASES.get(second_key)
+            if second_canonical and second_canonical != canonical:
+                logger.debug(
+                    "Resolved chained model alias '%s' -> '%s' -> '%s'",
+                    model_id,
+                    canonical,
+                    second_canonical,
+                )
+                return second_canonical
         logger.debug("Resolved model alias '%s' -> '%s'", model_id, canonical)
         return canonical
     return model_id
@@ -497,367 +512,361 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     return model_id
 
 
-def get_model_id_mapping(provider: str) -> dict[str, str]:
-    """
-    Get simplified -> native format mapping for a specific provider.
-    This maps user-friendly input to what the provider API expects.
-    """
-
-    mappings = {
-        "fireworks": {
-            # Full format with org
-            "deepseek-ai/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
-            # Alternative "deepseek/" org prefix (common user input format)
-            "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
-            # Llama models
-            "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
-            "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
-            "meta-llama/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-            "meta-llama/llama-3.1-70b-instruct": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-            "meta-llama/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
-            "meta-llama/llama-3.1-8b-instruct": "accounts/fireworks/models/llama-v3p1-8b-instruct",
-            "meta-llama/llama-4-scout": "accounts/fireworks/models/llama4-scout-instruct-basic",
-            "meta-llama/llama-4-maverick": "accounts/fireworks/models/llama4-maverick-instruct-basic",
-            # Without org prefix (common shortcuts)
-            "deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
-            "deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
-            "llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
-            "llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
-            "llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
-            # Qwen models
-            "qwen/qwen-2.5-32b": "accounts/fireworks/models/qwen2p5-vl-32b-instruct",
-            "qwen/qwen-3-235b": "accounts/fireworks/models/qwen3-235b-a22b",
-            "qwen/qwen-3-235b-instruct": "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
-            "qwen/qwen-3-235b-thinking": "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507",
-            "qwen/qwen-3-30b-thinking": "accounts/fireworks/models/qwen3-30b-a3b-thinking-2507",
-            "qwen/qwen-3-coder-480b": "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
-            # Other models
-            "moonshot-ai/kimi-k2": "accounts/fireworks/models/kimi-k2-instruct",
-            "moonshot-ai/kimi-k2-instruct": "accounts/fireworks/models/kimi-k2-instruct",
-            "zhipu-ai/glm-4.5": "accounts/fireworks/models/glm-4p5",
-            "gpt-oss/gpt-120b": "accounts/fireworks/models/gpt-oss-120b",
-            "gpt-oss/gpt-20b": "accounts/fireworks/models/gpt-oss-20b",
-        },
-        "openrouter": {
-            # OpenRouter already uses org/model format, so mostly pass-through
-            # But support common variations
-            "openai/gpt-4": "openai/gpt-4",
-            "openai/gpt-4-turbo": "openai/gpt-4-turbo",
-            "openai/gpt-3.5-turbo": "openai/gpt-3.5-turbo",
-            # Claude 3 models - OpenRouter expects base model IDs without date suffixes
-            "anthropic/claude-3-opus": "anthropic/claude-3-opus",
-            "anthropic/claude-3-sonnet": "anthropic/claude-3-sonnet",
-            "anthropic/claude-3-haiku": "anthropic/claude-3-haiku",
-            # Claude 3.5 models
-            "anthropic/claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
-            "anthropic/claude-3.5-haiku": "anthropic/claude-3.5-haiku",
-            "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
-            "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
-            # Claude 3.7 Sonnet
-            "anthropic/claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
-            "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
-            # Claude 4 series
-            "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4",
-            "anthropic/claude-opus-4": "anthropic/claude-opus-4",
-            "anthropic/claude-opus-4.1": "anthropic/claude-opus-4.1",
-            "claude-sonnet-4": "anthropic/claude-sonnet-4",
-            "claude-opus-4": "anthropic/claude-opus-4",
-            "claude-opus-4.1": "anthropic/claude-opus-4.1",
-            # Claude 4.5 series
-            "anthropic/claude-sonnet-4.5": CLAUDE_SONNET_4_5,
-            "anthropic/claude-opus-4.5": "anthropic/claude-opus-4.5",
-            "anthropic/claude-haiku-4.5": "anthropic/claude-haiku-4.5",
-            "anthropic/claude-4.5-sonnet": CLAUDE_SONNET_4_5,
-            "anthropic/claude-4.5-sonnet-20250929": CLAUDE_SONNET_4_5,
-            "claude-sonnet-4.5": CLAUDE_SONNET_4_5,
-            "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
-            "claude-opus-4.5": "anthropic/claude-opus-4.5",
-            "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
-            # Claude Code native format (Anthropic API dated model IDs)
-            "claude-sonnet-4-20250514": CLAUDE_SONNET_4_5,
-            "claude-sonnet-4.5-20250514": CLAUDE_SONNET_4_5,
-            "claude-4-5-sonnet-20250514": CLAUDE_SONNET_4_5,
-            "claude-4.5-sonnet-20250514": CLAUDE_SONNET_4_5,
-            "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
-            "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
-            "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
-            "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
-            # Claude 3.5 series (Anthropic native dated formats)
-            "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
-            "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
-            # Google Gemini models on OpenRouter
-            "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
-            "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
-            "gemini-3-flash-preview": "google/gemini-3-flash-preview",
-            "gemini-3-pro-preview": "google/gemini-3-pro-preview",
-            "gemini-3-flash": "google/gemini-3-flash-preview",
-            "gemini-3-pro": "google/gemini-3-pro-preview",
-            "google/gemini-2.5-flash": "google/gemini-2.5-flash",
-            "google/gemini-2.5-pro": "google/gemini-2.5-pro",
-            "gemini-2.5-flash": "google/gemini-2.5-flash",
-            "gemini-2.5-pro": "google/gemini-2.5-pro",
-            "google/gemini-2.0-flash-001": "google/gemini-2.0-flash-001",
-            "gemini-2.0-flash": "google/gemini-2.0-flash-001",
-            "google/gemini-flash-1.5": "google/gemini-flash-1.5",
-            "google/gemini-pro-1.5": "google/gemini-pro-1.5",
-            "gemini-1.5-flash": "google/gemini-flash-1.5",
-            "gemini-1.5-pro": "google/gemini-pro-1.5",
-            # Other models
-            "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
-            "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
-            # DeepSeek models routed to OpenRouter (not available on Fireworks)
-            # V3.2 - not on Fireworks
-            "deepseek/deepseek-v3.2": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-v3.2": "deepseek/deepseek-chat",
-            "deepseek-v3.2": "deepseek/deepseek-chat",
-            # V2/V2.5 - older versions
-            "deepseek/deepseek-v2": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-v2": "deepseek/deepseek-chat",
-            "deepseek-v2": "deepseek/deepseek-chat",
-            "deepseek/deepseek-v2.5": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-v2.5": "deepseek/deepseek-chat",
-            "deepseek-v2.5": "deepseek/deepseek-chat",
-            # DeepSeek Coder
-            "deepseek/deepseek-coder": "deepseek/deepseek-coder",
-            "deepseek-ai/deepseek-coder": "deepseek/deepseek-coder",
-            "deepseek-coder": "deepseek/deepseek-coder",
-            # DeepSeek Chat (default chat model)
-            "deepseek/deepseek-chat": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
-            "deepseek-chat": "deepseek/deepseek-chat",
-            # DeepSeek Chat V3 variants - map to the canonical deepseek/deepseek-chat on OpenRouter
-            "deepseek/deepseek-chat-v3": "deepseek/deepseek-chat",
-            "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
-            "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-chat-v3": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat",
-            "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
-            "deepseek-chat-v3": "deepseek/deepseek-chat",
-            "deepseek-chat-v3.1": "deepseek/deepseek-chat",
-            "deepseek-chat-v3-0324": "deepseek/deepseek-chat",
-            # Cerebras models explicitly routed through OpenRouter
-            # (for users who request provider="openrouter" explicitly or failover scenarios)
-            "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
-            "cerebras/llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
-            "cerebras/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
-            "cerebras/llama-3.1-70b-instruct": "meta-llama/llama-3.1-70b-instruct",
-        },
-        "featherless": {
-            # Featherless uses direct provider/model format
-            # Most pass through directly
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-            "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-        },
-        "together": {
-            # Together AI uses specific naming
-            "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-        },
-        "huggingface": {
-            # HuggingFace uses org/model format directly
-            # Most models pass through as-is, but we map common variations
-            "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.3-70b-instruct": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            # DeepSeek models
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-            "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-            # Qwen models
-            "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
-            "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
-            "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
-            "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
-            # Mistral models
-            "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
-            "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
-            "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-            "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-            # Microsoft models
-            "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
-            "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
-            # Google Gemma models removed - they should use Google Vertex AI provider
-        },
-        "hug": {
-            # Alias for huggingface - use same mappings
-            # HuggingFace uses org/model format directly
-            # Most models pass through as-is, but we map common variations
-            "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.3-70b-instruct": "meta-llama/Llama-3.3-70B-Instruct",
-            "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            # DeepSeek models
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-            "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-            # Qwen models
-            "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
-            "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
-            "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
-            "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
-            # Mistral models
-            "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
-            "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
-            "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-            "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-            # Microsoft models
-            "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
-            "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
-            # Google Gemma models removed - they should use Google Vertex AI provider
-        },
-        "chutes": {
-            # Chutes uses org/model format directly
-            # Most models pass through as-is from their catalog
-            # Keep the exact format from the catalog for proper routing
-        },
-        "groq": {
-            # Groq models use simple names without org prefix
-            # The groq/ prefix is stripped in transform_model_id
-            # Popular Groq models:
-            "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
-            "llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
-            "llama-3.1-8b-instant": "llama-3.1-8b-instant",
-            "llama3-70b-8192": "llama3-70b-8192",
-            "llama3-8b-8192": "llama3-8b-8192",
-            "mixtral-8x7b-32768": "mixtral-8x7b-32768",
-            "gemma2-9b-it": "gemma2-9b-it",
-            "gemma-7b-it": "gemma-7b-it",
-            # With groq/ prefix (stripped automatically)
-            "groq/llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
-            "groq/llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
-            "groq/llama-3.1-8b-instant": "llama-3.1-8b-instant",
-            "groq/mixtral-8x7b-32768": "mixtral-8x7b-32768",
-            "groq/gemma2-9b-it": "gemma2-9b-it",
-        },
-        "google-vertex": {
-            # Google Vertex AI models - simple names
-            # Full resource names are constructed by the client
-            # Gemini 3 models (latest - released Dec 17, 2025)
-            "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
-            "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
-            "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
-            "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
-            "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
-            "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
-            # Gemini 2.5 models (newest)
-            # Flash Lite (stable GA version - use stable by default)
-            "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
-            "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-            "@google/models/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
-            "google/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
-            "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
-            "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
-            # Gemini 2.5 flash models (use stable GA version by default)
-            "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
-            "google/gemini-2.5-flash": "gemini-2.5-flash",
-            "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
-            "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
-            # Image-specific models (GA version only - no preview version exists)
-            "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
-            # Pro (use stable GA version by default)
-            "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
-            "google/gemini-2.5-pro": "gemini-2.5-pro",
-            "@google/models/gemini-2.5-pro": "gemini-2.5-pro",
-            # Preview version (only if explicitly requested)
-            "gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
-            "google/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
-            "@google/models/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
-            "gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
-            "google/gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
-            "gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
-            "google/gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
-            # Gemini 2.0 models (stable versions)
-            "gemini-2.0-flash": GEMINI_2_0_FLASH,
-            "gemini-2.0-flash-thinking": "gemini-2.0-flash-thinking",
-            "gemini-2.0-flash-001": "gemini-2.0-flash-001",
-            "gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
-            "gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
-            "google/gemini-2.0-flash": GEMINI_2_0_FLASH,
-            "google/gemini-2.0-flash-001": "gemini-2.0-flash-001",
-            "google/gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
-            "google/gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
-            "@google/models/gemini-2.0-flash": GEMINI_2_0_FLASH,
-            "gemini-2.0-pro": GEMINI_2_0_PRO,
-            "gemini-2.0-pro-001": "gemini-2.0-pro-001",
-            "google/gemini-2.0-pro": GEMINI_2_0_PRO,
-            "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-            # Gemini 1.5 models - RETIRED (April-September 2025)
-            # These models are NO LONGER AVAILABLE on Google Vertex AI
-            # Removed all google-vertex mappings to prevent 404 errors
-            # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
-            # Gemini 1.0 models
-            "gemini-1.0-pro": GEMINI_1_0_PRO,
-            "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
-            "google/gemini-1.0-pro": GEMINI_1_0_PRO,
-            "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
-            # Aliases for convenience
-            "gemini-2.0": GEMINI_2_0_FLASH,
-            # Note: gemini-1.5 alias removed - model is retired on Vertex AI
-            # Gemma models (open source models from Google)
-            "google/gemma-2-9b": "gemma-2-9b-it",
-            "google/gemma-2-9b-it": "gemma-2-9b-it",
-            "google/gemma-2-27b-it": "gemma-2-27b-it",
-            "google/gemma-3-4b-it": "gemma-3-4b-it",
-            "google/gemma-3-12b-it": "gemma-3-12b-it",
-            "google/gemma-3-27b-it": "gemma-3-27b-it",
-            "google/gemma-3n-e2b-it": "gemma-3n-e2b-it",
-            "google/gemma-3n-e4b-it": "gemma-3n-e4b-it",
-            "gemma-2-9b-it": "gemma-2-9b-it",
-            "gemma-2-27b-it": "gemma-2-27b-it",
-            "gemma-3-4b-it": "gemma-3-4b-it",
-            "gemma-3-12b-it": "gemma-3-12b-it",
-            "gemma-3-27b-it": "gemma-3-27b-it",
-            "gemma-3n-e2b-it": "gemma-3n-e2b-it",
-            "gemma-3n-e4b-it": "gemma-3n-e4b-it",
-        },
-        "vercel-ai-gateway": {
-            # Vercel AI Gateway uses standard model identifiers
-            # The gateway automatically routes requests to the appropriate provider
-            # Using pass-through format - any model ID is supported
-            # Minimal mappings to avoid conflicts with other providers during auto-detection
-        },
-        "helicone": {
-            # Helicone AI Gateway uses standard model identifiers
-            # The gateway provides observability on top of standard provider APIs
-            # Using pass-through format - any model ID is supported
-            # Minimal mappings to avoid conflicts with other providers during auto-detection
-        },
-        "aihubmix": {
-            # AiHubMix uses OpenAI-compatible model identifiers
-            # Pass-through format - any model ID is supported
-            # Minimal mappings to avoid conflicts with other providers during auto-detection
-        },
-        "anannas": {
-            # Anannas uses OpenAI-compatible model identifiers
-            # Pass-through format - any model ID is supported
-            # Minimal mappings to avoid conflicts with other providers during auto-detection
-        },
-        "near": {
-            # Near AI uses HuggingFace-style model naming with proper case
-            # Maps lowercase input variants to actual NEAR model IDs
-            # Reference: https://cloud.near.ai/models for current available models
+_MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
+    "fireworks": {
+        # Full format with org
+        "deepseek-ai/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-ai/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-ai/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-ai/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+        # Alternative "deepseek/" org prefix (common user input format)
+        "deepseek/deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek/deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek/deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek/deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+        # Llama models
+        "meta-llama/llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "meta-llama/llama-3.3-70b-instruct": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "meta-llama/llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        "meta-llama/llama-3.1-70b-instruct": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        "meta-llama/llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+        "meta-llama/llama-3.1-8b-instruct": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+        "meta-llama/llama-4-scout": "accounts/fireworks/models/llama4-scout-instruct-basic",
+        "meta-llama/llama-4-maverick": "accounts/fireworks/models/llama4-maverick-instruct-basic",
+        # Without org prefix (common shortcuts)
+        "deepseek-v3": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-v3.1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-v3p1": "accounts/fireworks/models/deepseek-v3p1",
+        "deepseek-r1": "accounts/fireworks/models/deepseek-r1-0528",
+        "llama-3.3-70b": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+        "llama-3.1-70b": "accounts/fireworks/models/llama-v3p1-70b-instruct",
+        "llama-3.1-8b": "accounts/fireworks/models/llama-v3p1-8b-instruct",
+        # Qwen models
+        "qwen/qwen-2.5-32b": "accounts/fireworks/models/qwen2p5-vl-32b-instruct",
+        "qwen/qwen-3-235b": "accounts/fireworks/models/qwen3-235b-a22b",
+        "qwen/qwen-3-235b-instruct": "accounts/fireworks/models/qwen3-235b-a22b-instruct-2507",
+        "qwen/qwen-3-235b-thinking": "accounts/fireworks/models/qwen3-235b-a22b-thinking-2507",
+        "qwen/qwen-3-30b-thinking": "accounts/fireworks/models/qwen3-30b-a3b-thinking-2507",
+        "qwen/qwen-3-coder-480b": "accounts/fireworks/models/qwen3-coder-480b-a35b-instruct",
+        # Other models
+        "moonshot-ai/kimi-k2": "accounts/fireworks/models/kimi-k2-instruct",
+        "moonshot-ai/kimi-k2-instruct": "accounts/fireworks/models/kimi-k2-instruct",
+        "zhipu-ai/glm-4.5": "accounts/fireworks/models/glm-4p5",
+        "gpt-oss/gpt-120b": "accounts/fireworks/models/gpt-oss-120b",
+        "gpt-oss/gpt-20b": "accounts/fireworks/models/gpt-oss-20b",
+    },
+    "openrouter": {
+        # OpenRouter already uses org/model format, so mostly pass-through
+        # But support common variations
+        "openai/gpt-4": "openai/gpt-4",
+        "openai/gpt-4-turbo": "openai/gpt-4-turbo",
+        "openai/gpt-3.5-turbo": "openai/gpt-3.5-turbo",
+        # Claude 3 models - OpenRouter expects base model IDs without date suffixes
+        "anthropic/claude-3-opus": "anthropic/claude-3-opus",
+        "anthropic/claude-3-sonnet": "anthropic/claude-3-sonnet",
+        "anthropic/claude-3-haiku": "anthropic/claude-3-haiku",
+        # Claude 3.5 models
+        "anthropic/claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
+        "anthropic/claude-3.5-haiku": "anthropic/claude-3.5-haiku",
+        "claude-3.5-sonnet": "anthropic/claude-3.5-sonnet",
+        "claude-3.5-haiku": "anthropic/claude-3.5-haiku",
+        # Claude 3.7 Sonnet
+        "anthropic/claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
+        "claude-3.7-sonnet": "anthropic/claude-3.7-sonnet",
+        # Claude 4 series
+        "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4",
+        "anthropic/claude-opus-4": "anthropic/claude-opus-4",
+        "anthropic/claude-opus-4.1": "anthropic/claude-opus-4.1",
+        "claude-sonnet-4": "anthropic/claude-sonnet-4",
+        "claude-opus-4": "anthropic/claude-opus-4",
+        "claude-opus-4.1": "anthropic/claude-opus-4.1",
+        # Claude 4.5 series
+        "anthropic/claude-sonnet-4.5": CLAUDE_SONNET_4_5,
+        "anthropic/claude-opus-4.5": "anthropic/claude-opus-4.5",
+        "anthropic/claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+        "anthropic/claude-4.5-sonnet": CLAUDE_SONNET_4_5,
+        "anthropic/claude-4.5-sonnet-20250929": CLAUDE_SONNET_4_5,
+        "claude-sonnet-4.5": CLAUDE_SONNET_4_5,
+        "claude-sonnet-4-5-20250929": CLAUDE_SONNET_4_5,
+        "claude-opus-4.5": "anthropic/claude-opus-4.5",
+        "claude-haiku-4.5": "anthropic/claude-haiku-4.5",
+        # Claude Code native format (Anthropic API dated model IDs)
+        "claude-sonnet-4-20250514": CLAUDE_SONNET_4_5,
+        "claude-sonnet-4.5-20250514": CLAUDE_SONNET_4_5,
+        "claude-4-5-sonnet-20250514": CLAUDE_SONNET_4_5,
+        "claude-4.5-sonnet-20250514": CLAUDE_SONNET_4_5,
+        "claude-opus-4-20250514": "anthropic/claude-opus-4.5",
+        "claude-opus-4.5-20250514": "anthropic/claude-opus-4.5",
+        "claude-4-5-opus-20250514": "anthropic/claude-opus-4.5",
+        "claude-4.5-opus-20250514": "anthropic/claude-opus-4.5",
+        # Claude 3.5 series (Anthropic native dated formats)
+        "claude-3-5-sonnet-20241022": "anthropic/claude-3.5-sonnet",
+        "claude-3-5-haiku-20241022": "anthropic/claude-3.5-haiku",
+        # Google Gemini models on OpenRouter
+        "google/gemini-3-flash-preview": "google/gemini-3-flash-preview",
+        "google/gemini-3-pro-preview": "google/gemini-3-pro-preview",
+        "gemini-3-flash-preview": "google/gemini-3-flash-preview",
+        "gemini-3-pro-preview": "google/gemini-3-pro-preview",
+        "gemini-3-flash": "google/gemini-3-flash-preview",
+        "gemini-3-pro": "google/gemini-3-pro-preview",
+        "google/gemini-2.5-flash": "google/gemini-2.5-flash",
+        "google/gemini-2.5-pro": "google/gemini-2.5-pro",
+        "gemini-2.5-flash": "google/gemini-2.5-flash",
+        "gemini-2.5-pro": "google/gemini-2.5-pro",
+        "google/gemini-2.0-flash-001": "google/gemini-2.0-flash-001",
+        "gemini-2.0-flash": "google/gemini-2.0-flash-001",
+        "google/gemini-flash-1.5": "google/gemini-flash-1.5",
+        "google/gemini-pro-1.5": "google/gemini-pro-1.5",
+        "gemini-1.5-flash": "google/gemini-flash-1.5",
+        "gemini-1.5-pro": "google/gemini-pro-1.5",
+        # Other models
+        "meta-llama/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+        "deepseek-ai/deepseek-v3": "deepseek/deepseek-chat",
+        # DeepSeek models routed to OpenRouter (not available on Fireworks)
+        # V3.2 - not on Fireworks
+        "deepseek/deepseek-v3.2": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-v3.2": "deepseek/deepseek-chat",
+        "deepseek-v3.2": "deepseek/deepseek-chat",
+        # V2/V2.5 - older versions
+        "deepseek/deepseek-v2": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-v2": "deepseek/deepseek-chat",
+        "deepseek-v2": "deepseek/deepseek-chat",
+        "deepseek/deepseek-v2.5": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-v2.5": "deepseek/deepseek-chat",
+        "deepseek-v2.5": "deepseek/deepseek-chat",
+        # DeepSeek Coder
+        "deepseek/deepseek-coder": "deepseek/deepseek-coder",
+        "deepseek-ai/deepseek-coder": "deepseek/deepseek-coder",
+        "deepseek-coder": "deepseek/deepseek-coder",
+        # DeepSeek Chat (default chat model)
+        "deepseek/deepseek-chat": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
+        "deepseek-chat": "deepseek/deepseek-chat",
+        # DeepSeek Chat V3 variants - map to the canonical deepseek/deepseek-chat on OpenRouter
+        "deepseek/deepseek-chat-v3": "deepseek/deepseek-chat",
+        "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+        "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-chat-v3": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+        "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+        "deepseek-chat-v3": "deepseek/deepseek-chat",
+        "deepseek-chat-v3.1": "deepseek/deepseek-chat",
+        "deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+        # Cerebras models explicitly routed through OpenRouter
+        # (for users who request provider="openrouter" explicitly or failover scenarios)
+        "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+        "cerebras/llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
+        "cerebras/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+        "cerebras/llama-3.1-70b-instruct": "meta-llama/llama-3.1-70b-instruct",
+    },
+    "featherless": {
+        # Featherless uses direct provider/model format
+        # Most pass through directly
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    },
+    "together": {
+        # Together AI uses specific naming
+        "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+    },
+    "huggingface": {
+        # HuggingFace uses org/model format directly
+        # Most models pass through as-is, but we map common variations
+        "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.3-70b-instruct": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        # DeepSeek models
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+        # Qwen models
+        "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
+        "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
+        # Mistral models
+        "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
+        "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
+        "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        # Microsoft models
+        "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
+        "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
+        # Google Gemma models removed - they should use Google Vertex AI provider
+    },
+    "hug": {
+        # Alias for huggingface - use same mappings
+        # HuggingFace uses org/model format directly
+        # Most models pass through as-is, but we map common variations
+        "meta-llama/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.3-70b-instruct": "meta-llama/Llama-3.3-70B-Instruct",
+        "meta-llama/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "meta-llama/llama-3.1-70b-instruct": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "meta-llama/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "meta-llama/llama-3.1-8b-instruct": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        # DeepSeek models
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        "deepseek-ai/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+        # Qwen models
+        "qwen/qwen-2.5-72b": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen/qwen-2.5-72b-instruct": "Qwen/Qwen2.5-72B-Instruct",
+        "qwen/qwen-2.5-7b": "Qwen/Qwen2.5-7B-Instruct",
+        "qwen/qwen-2.5-7b-instruct": "Qwen/Qwen2.5-7B-Instruct",
+        # Mistral models
+        "mistralai/mistral-7b": "mistralai/Mistral-7B-Instruct-v0.3",
+        "mistralai/mistral-7b-instruct": "mistralai/Mistral-7B-Instruct-v0.3",
+        "mistralai/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "mistralai/mixtral-8x7b-instruct": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        # Microsoft models
+        "microsoft/phi-3": "microsoft/Phi-3-medium-4k-instruct",
+        "microsoft/phi-3-medium": "microsoft/Phi-3-medium-4k-instruct",
+        # Google Gemma models removed - they should use Google Vertex AI provider
+    },
+    "chutes": {
+        # Chutes uses org/model format directly
+        # Most models pass through as-is from their catalog
+        # Keep the exact format from the catalog for proper routing
+    },
+    "groq": {
+        # Groq models use simple names without org prefix
+        # The groq/ prefix is stripped in transform_model_id
+        # Popular Groq models:
+        "llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+        "llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+        "llama-3.1-8b-instant": "llama-3.1-8b-instant",
+        "llama3-70b-8192": "llama3-70b-8192",
+        "llama3-8b-8192": "llama3-8b-8192",
+        "mixtral-8x7b-32768": "mixtral-8x7b-32768",
+        "gemma2-9b-it": "gemma2-9b-it",
+        "gemma-7b-it": "gemma-7b-it",
+        # With groq/ prefix (stripped automatically)
+        "groq/llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
+        "groq/llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
+        "groq/llama-3.1-8b-instant": "llama-3.1-8b-instant",
+        "groq/mixtral-8x7b-32768": "mixtral-8x7b-32768",
+        "groq/gemma2-9b-it": "gemma2-9b-it",
+    },
+    "google-vertex": {
+        # Google Vertex AI models - simple names
+        # Full resource names are constructed by the client
+        # Gemini 3 models (latest - released Dec 17, 2025)
+        "gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+        "gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+        "google/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+        "google/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+        "@google/models/gemini-3-flash": GEMINI_3_FLASH_PREVIEW,
+        "@google/models/gemini-3-flash-preview": GEMINI_3_FLASH_PREVIEW,
+        # Gemini 2.5 models (newest)
+        # Flash Lite (stable GA version - use stable by default)
+        "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",  # Use stable GA version
+        "google/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+        "@google/models/gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+        # Preview version (only if explicitly requested)
+        "gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+        "google/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+        "@google/models/gemini-2.5-flash-lite-preview-09-2025": GEMINI_2_5_FLASH_LITE_PREVIEW,
+        "gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
+        "google/gemini-2.5-flash-lite-preview-06-17": "gemini-2.5-flash-lite-preview-06-17",
+        # Gemini 2.5 flash models (use stable GA version by default)
+        "gemini-2.5-flash": "gemini-2.5-flash",  # Stable GA version for production
+        "google/gemini-2.5-flash": "gemini-2.5-flash",
+        "@google/models/gemini-2.5-flash": "gemini-2.5-flash",
+        # Preview version (only if explicitly requested)
+        "gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+        "gemini-2.5-flash-preview": GEMINI_2_5_FLASH_PREVIEW,
+        "google/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+        "@google/models/gemini-2.5-flash-preview-09-2025": GEMINI_2_5_FLASH_PREVIEW,
+        # Image-specific models (GA version only - no preview version exists)
+        "google/gemini-2.5-flash-image": "gemini-2.5-flash-image",
+        "gemini-2.5-flash-image": "gemini-2.5-flash-image",
+        "@google/models/gemini-2.5-flash-image": "gemini-2.5-flash-image",
+        # Pro (use stable GA version by default)
+        "gemini-2.5-pro": "gemini-2.5-pro",  # Use stable GA version
+        "google/gemini-2.5-pro": "gemini-2.5-pro",
+        "@google/models/gemini-2.5-pro": "gemini-2.5-pro",
+        # Preview version (only if explicitly requested)
+        "gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+        "google/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+        "@google/models/gemini-2.5-pro-preview-09-2025": GEMINI_2_5_PRO_PREVIEW,
+        "gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
+        "google/gemini-2.5-pro-preview": GEMINI_2_5_PRO_PREVIEW,
+        "gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
+        "google/gemini-2.5-pro-preview-05-06": "gemini-2.5-pro-preview-05-06",
+        # Gemini 2.0 models (stable versions)
+        "gemini-2.0-flash": GEMINI_2_0_FLASH,
+        "gemini-2.0-flash-thinking": "gemini-2.0-flash-thinking",
+        "gemini-2.0-flash-001": "gemini-2.0-flash-001",
+        "gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
+        "gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
+        "google/gemini-2.0-flash": GEMINI_2_0_FLASH,
+        "google/gemini-2.0-flash-001": "gemini-2.0-flash-001",
+        "google/gemini-2.0-flash-lite-001": "gemini-2.0-flash-lite-001",
+        "google/gemini-2.0-flash-exp": "gemini-2.0-flash-exp",
+        "@google/models/gemini-2.0-flash": GEMINI_2_0_FLASH,
+        "gemini-2.0-pro": GEMINI_2_0_PRO,
+        "gemini-2.0-pro-001": "gemini-2.0-pro-001",
+        "google/gemini-2.0-pro": GEMINI_2_0_PRO,
+        "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
+        # Gemini 1.5 models - RETIRED (April-September 2025)
+        # These models are NO LONGER AVAILABLE on Google Vertex AI
+        # Removed all google-vertex mappings to prevent 404 errors
+        # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
+        # Gemini 1.0 models
+        "gemini-1.0-pro": GEMINI_1_0_PRO,
+        "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
+        "google/gemini-1.0-pro": GEMINI_1_0_PRO,
+        "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
+        # Aliases for convenience
+        "gemini-2.0": GEMINI_2_0_FLASH,
+        # Note: gemini-1.5 alias removed - model is retired on Vertex AI
+        # Gemma models (open source models from Google)
+        "google/gemma-2-9b": "gemma-2-9b-it",
+        "google/gemma-2-9b-it": "gemma-2-9b-it",
+        "google/gemma-2-27b-it": "gemma-2-27b-it",
+        "google/gemma-3-4b-it": "gemma-3-4b-it",
+        "google/gemma-3-12b-it": "gemma-3-12b-it",
+        "google/gemma-3-27b-it": "gemma-3-27b-it",
+        "google/gemma-3n-e2b-it": "gemma-3n-e2b-it",
+        "google/gemma-3n-e4b-it": "gemma-3n-e4b-it",
+        "gemma-2-9b-it": "gemma-2-9b-it",
+        "gemma-2-27b-it": "gemma-2-27b-it",
+        "gemma-3-4b-it": "gemma-3-4b-it",
+        "gemma-3-12b-it": "gemma-3-12b-it",
+        "gemma-3-27b-it": "gemma-3-27b-it",
+        "gemma-3n-e2b-it": "gemma-3n-e2b-it",
+        "gemma-3n-e4b-it": "gemma-3n-e4b-it",
+    },
+    "vercel-ai-gateway": {
+        # Vercel AI Gateway uses standard model identifiers
+        # The gateway automatically routes requests to the appropriate provider
+        # Using pass-through format - any model ID is supported
+        # Minimal mappings to avoid conflicts with other providers during auto-detection
+    },
+    "helicone": {
+        # Helicone AI Gateway uses standard model identifiers
+        # The gateway provides observability on top of standard provider APIs
+        # Using pass-through format - any model ID is supported
+        # Minimal mappings to avoid conflicts with other providers during auto-detection
+    },
+    "aihubmix": {
+        # AiHubMix uses OpenAI-compatible model identifiers
+        # Pass-through format - any model ID is supported
+        # Minimal mappings to avoid conflicts with other providers during auto-detection
+    },
+    "anannas": {
+        # Anannas uses OpenAI-compatible model identifiers
+        # Pass-through format - any model ID is supported
+        # Minimal mappings to avoid conflicts with other providers during auto-detection
+    },
+    "near": {
+        # Near AI uses HuggingFace-style model naming with proper case
+        # Maps lowercase input variants to actual NEAR model IDs
+        # Reference: https://cloud.near.ai/models for current available models
 
             # DeepSeek models - only DeepSeek-V3.1 is currently available on Near AI
             "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1 (only available)
@@ -1289,7 +1298,20 @@ def get_model_id_mapping(provider: str) -> dict[str, str]:
         },
     }
 
-    return mappings.get(provider, {})
+
+
+# Pre-built reverse lookup: for each provider, the set of native model IDs (values)
+_MODEL_ID_VALUES_BY_PROVIDER: dict[str, set[str]] = {
+    provider: set(mapping.values()) for provider, mapping in _MODEL_ID_MAPPINGS.items()
+}
+
+
+def get_model_id_mapping(provider: str) -> dict[str, str]:
+    """
+    Get simplified -> native format mapping for a specific provider.
+    This maps user-friendly input to what the provider API expects.
+    """
+    return _MODEL_ID_MAPPINGS.get(provider, {})
 
 
 def normalize_model_name(model_id: str) -> str:
@@ -1374,9 +1396,25 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
 
     Now supports multi-provider models with automatic provider selection.
 
+    IMPORTANT - First-match behavior:
+        Returns the first matching provider found. For models that exist on multiple
+        providers, the result is determined by the detection priority order below:
+          1. Multi-provider registry (uses selector with preferred_provider hint)
+          2. Explicit MODEL_PROVIDER_OVERRIDES entries
+          3. Hard-coded prefix/suffix rules (Fireworks accounts/ path, @cf/, Vertex, etc.)
+          4. org-prefix rules (openai/, anthropic/, cerebras/, deepseek/, etc.)
+          5. Ordered mapping-table scan (see provider list below — list order is priority)
+          6. Pattern-based org-prefix fallbacks
+
+        If a model is available on multiple providers and the wrong one is returned,
+        either (a) pass `preferred_provider` to honour a caller-specified preference via
+        the multi-provider registry, (b) add an entry to MODEL_PROVIDER_OVERRIDES, or
+        (c) adjust the order of providers in the mapping scan list.
+
     Args:
         model_id: The model ID to analyze
-        preferred_provider: Optional preferred provider (for multi-provider models)
+        preferred_provider: Optional preferred provider hint (for multi-provider models).
+            Only honoured when the model is present in the multi-provider registry.
 
     Returns:
         The detected provider name, or None if unable to detect
@@ -1508,7 +1546,12 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
             logger.info(f"Routing '{model_id}' to native Anthropic provider")
             return "anthropic"
 
-    # Check all mappings to see if this model exists
+    # Check all mappings to see if this model exists.
+    # Returns first matching provider. For models on multiple providers, priority order matters.
+    # The list below is the authoritative priority order: providers listed earlier take
+    # precedence over providers listed later when a model ID appears in multiple mappings.
+    # To change routing priority for a specific model, use MODEL_PROVIDER_OVERRIDES instead
+    # of reordering this list, which affects all models.
     # IMPORTANT: cerebras is checked FIRST to prioritize cerebras/ prefix models
     for provider in [
         "cerebras",  # Check Cerebras first for cerebras/ prefix models
@@ -1535,13 +1578,14 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         "onerouter",
         "simplismart",
     ]:
-        mapping = get_model_id_mapping(provider)
+        mapping = _MODEL_ID_MAPPINGS.get(provider, {})
         if model_id in mapping:
             logger.info(f"Detected provider '{provider}' for model '{model_id}'")
             return provider
 
-        # Also check the values (native formats)
-        if model_id in mapping.values():
+        # Also check the values (native formats) using pre-built set for O(1) lookup
+        values_set = _MODEL_ID_VALUES_BY_PROVIDER.get(provider, set())
+        if model_id in values_set:
             logger.info(f"Detected provider '{provider}' for native model '{model_id}'")
             return provider
 

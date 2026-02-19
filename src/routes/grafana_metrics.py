@@ -197,7 +197,8 @@ def _generate_test_metrics(requests_total, requests_duration, inference_requests
             app_name=APP_NAME,
             method="POST",
             path="/api/metrics/test",
-            status_code=200
+            status_code=200,
+            status_class="2xx"
         ).inc()
 
         requests_duration.labels(
