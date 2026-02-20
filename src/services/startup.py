@@ -12,7 +12,6 @@ import os
 from contextlib import asynccontextmanager
 
 from src.config.arize_config import init_arize_otel, shutdown_arize_otel
-from src.config.langfuse_config import init_langfuse, shutdown_langfuse
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
@@ -53,6 +52,12 @@ async def lifespan(app):
     Application lifespan manager for startup and shutdown events
     """
     # Startup
+    logger.info("=" * 80)
+    logger.info("🚀 GATEWAYZ API STARTUP - BEGIN")
+    logger.info("=" * 80)
+    logger.info(f"Environment: {os.getenv('RAILWAY_ENVIRONMENT', 'local')}")
+    logger.info(f"Python Version: {os.sys.version.split()[0]}")
+    logger.info(f"Working Directory: {os.getcwd()}")
     logger.info("Starting health monitoring and observability services...")
 
     # Validate critical environment variables at runtime startup
@@ -193,18 +198,6 @@ async def lifespan(app):
 
         _create_background_task(init_arize_background(), name="init_arize_otel")
 
-        # Initialize Langfuse for LLM observability in background
-        async def init_langfuse_background():
-            try:
-                if init_langfuse():
-                    logger.info("Langfuse LLM observability initialized")
-                else:
-                    logger.debug("Langfuse not enabled or not configured")
-            except Exception as e:
-                logger.warning(f"Langfuse initialization warning: {e}")
-
-        _create_background_task(init_langfuse_background(), name="init_langfuse")
-
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
             try:
@@ -226,69 +219,125 @@ async def lifespan(app):
         pool_stats = get_pool_stats()
         logger.info(f"Connection pool manager ready: {pool_stats}")
 
-        # PERF: Pre-warm database connections in background
-        # This ensures the HTTP/2 connection pool is ready and eliminates cold-start latency
-        async def warmup_database_connections():
+        # ============================================================
+        # STAGGERED STARTUP: DB-heavy tasks run sequentially to avoid
+        # overwhelming Supabase PostgREST with concurrent connections.
+        # Previously all tasks fired simultaneously, causing 502 errors.
+        # ============================================================
+        async def staggered_db_warmup():
             try:
+                # Phase 1: Warm database connection (lightweight query)
                 if db_initialized:
-                    logger.info("🔥 Pre-warming database connections...")
-                    # Execute a simple query to warm up the connection pool
-                    from src.config.supabase_config import get_supabase_client
-                    client = get_supabase_client()
-                    # Ping the database with a lightweight query
-                    await asyncio.to_thread(
-                        lambda: client.table("plans").select("id").limit(1).execute()
+                    try:
+                        logger.info("🔥 [1/5] Pre-warming database connections...")
+                        from src.config.supabase_config import get_supabase_client
+                        client = get_supabase_client()
+                        await asyncio.to_thread(
+                            lambda: client.table("plans").select("id").limit(1).execute()
+                        )
+                        logger.info("✅ [1/5] Database connection pool warmed")
+                    except Exception as e:
+                        logger.warning(f"Database connection warmup warning: {e}")
+
+                # Phase 2: Preload full model catalog (heavy - 13k+ models)
+                # Wait for DB connection to stabilize after Phase 1
+                await asyncio.sleep(3)
+                try:
+                    logger.info("🔥 [2/5] Preloading full model catalog cache...")
+                    from src.services.model_catalog_cache import get_cached_full_catalog
+                    from src.services.background_tasks import _split_and_cache_gateway_catalogs
+
+                    full_catalog = await asyncio.to_thread(get_cached_full_catalog)
+
+                    catalog_count = len(full_catalog) if full_catalog else 0
+                    logger.info(f"✅ [2/5] Catalog cache warming complete: {catalog_count} models loaded")
+
+                    if full_catalog:
+                        await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
+                except Exception as e:
+                    logger.warning(f"Model cache preload warning: {e}")
+
+                # Phase 3: Warm unique models cache with common filter variants
+                await asyncio.sleep(2)
+                try:
+                    logger.info("🔥 [3/4] Pre-warming unique models cache (all filter variants)...")
+                    from src.services.model_catalog_cache import warm_unique_models_cache_all_variants
+
+                    warmup_stats = await warm_unique_models_cache_all_variants()
+                    logger.info(
+                        f"✅ [3/4] Unique models cache warmed: "
+                        f"{warmup_stats['successful']}/{warmup_stats['total_variants']} variants cached"
                     )
-                    logger.info("✅ Database connection pool warmed")
+                except Exception as e:
+                    logger.warning(f"Unique models cache warmup warning: {e}")
+
+                # Phase 4: Warm provider connections (HTTP, not DB)
+                await asyncio.sleep(2)
+                try:
+                    logger.info("🔥 [4/5] Pre-warming provider connections...")
+                    warmup_results = await warmup_provider_connections_async()
+                    warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
+                    logger.info(f"✅ [4/5] Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                except Exception as e:
+                    logger.warning(f"Provider connection warmup warning: {e}")
+
+                # Phase 5: Warm catalog response cache (Redis catalog:v2:* keys)
+                # This pre-populates the exact cache hit by GET /v1/models?gateway=all
+                # so the first request after deployment does not incur a cold-cache penalty.
+                # Runs after Phase 2 has already loaded the model catalog into Redis, so no
+                # additional DB queries are needed — we simply read from the in-memory/Redis
+                # model catalog cache and write the serialised response into catalog_response_cache.
+                try:
+                    logger.info("🔥 [5/5] Warming catalog response cache (gateway=all, default params)...")
+                    from datetime import datetime, timezone
+                    from src.services.models import get_cached_models
+                    from src.services.catalog_response_cache import cache_catalog_response
+
+                    default_cache_params = {
+                        "limit": 100,
+                        "offset": 0,
+                        "provider": None,
+                        "is_private": None,
+                        "include_huggingface": False,
+                        "unique_models": False,
+                    }
+
+                    models = await asyncio.to_thread(get_cached_models, "all")
+                    if models:
+                        paginated = models[:100]
+                        response_payload = {
+                            "data": paginated,
+                            "total": len(models),
+                            "returned": len(paginated),
+                            "offset": 0,
+                            "limit": 100,
+                            "has_more": len(models) > 100,
+                            "next_offset": 100 if len(models) > 100 else None,
+                            "include_huggingface": False,
+                            "gateway": "all",
+                            "note": (
+                                "Combined catalog (all gateways)"
+                            ),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        await cache_catalog_response("all", default_cache_params, response_payload)
+                        logger.info(
+                            f"✅ [5/5] Catalog response cache warmed: "
+                            f"{len(paginated)} models cached for gateway=all"
+                        )
+                    else:
+                        logger.warning("[5/5] Skipping catalog response cache warm: no models available")
+                except Exception as e:
+                    logger.warning(f"Catalog response cache warmup warning: {e}")
+
             except Exception as e:
-                logger.warning(f"Database connection warmup warning: {e}")
+                logger.error(f"Staggered DB warmup failed: {e}", exc_info=True)
 
-        _create_background_task(warmup_database_connections(), name="warmup_database")
+        _create_background_task(staggered_db_warmup(), name="staggered_db_warmup")
 
-        # PERF: Pre-warm connections to frequently used AI providers in background
-        # This eliminates cold-start penalty (~100-200ms) for first requests
-        # Moved to background to not block healthcheck
-        async def warmup_connections_background():
-            try:
-                logger.info("🔥 Pre-warming provider connections (background)...")
-                warmup_results = await warmup_provider_connections_async()
-                warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-                logger.info(f"✅ Warmed {warmed_count}/{len(warmup_results)} provider connections")
-                pool_stats = get_pool_stats()
-                logger.info(f"Connection pool after warmup: {pool_stats}")
-            except Exception as e:
-                logger.warning(f"Provider connection warmup warning: {e}")
-
-        _create_background_task(warmup_connections_background(), name="warmup_connections")
-
-        # Initialize response cache
+        # Initialize response cache (no DB access - safe to run immediately)
         get_cache()
         logger.info("Response cache initialized")
-
-        # PERF: Preload full catalog cache in background (single DB fetch)
-        # NOTE: Only loads the full catalog once. Individual gateway caches are
-        # populated lazily on first request (stale-while-revalidate pattern).
-        # The background refresh task (update_full_model_catalog_loop) keeps
-        # the full catalog warm every 14 minutes after the initial 60s delay.
-        async def preload_hot_models_cache():
-            try:
-                # Wait a few seconds for DB connection pool to stabilize
-                await asyncio.sleep(5)
-
-                logger.info("🔥 Preloading full model catalog cache...")
-                from src.services.model_catalog_cache import get_cached_full_catalog
-
-                # Single fetch: full catalog (Redis → local memory → DB fallback)
-                # This is the most important cache to warm since all other lookups
-                # can derive from it. Individual gateway caches warm lazily.
-                full_catalog = await asyncio.to_thread(get_cached_full_catalog)
-
-                catalog_count = len(full_catalog) if full_catalog else 0
-                logger.info(f"✅ Catalog cache warming complete: {catalog_count} models loaded")
-            except Exception as e:
-                logger.warning(f"Model cache preload warning: {e}")
-
-        _create_background_task(preload_hot_models_cache(), name="preload_models")
 
         # Initialize Google Vertex AI models catalog in background
         async def init_google_models_background():
@@ -303,8 +352,10 @@ async def lifespan(app):
         _create_background_task(init_google_models_background(), name="init_google_models")
 
         # Clean up any stuck pricing syncs from previous runs
+        # Delayed to avoid overwhelming Supabase during startup
         async def cleanup_stuck_syncs_startup():
             try:
+                await asyncio.sleep(30)  # Wait for DB warmup to complete
                 logger.info("🧹 Running startup cleanup for stuck pricing syncs...")
                 from src.services.pricing_sync_cleanup import cleanup_stuck_syncs
                 result = await cleanup_stuck_syncs(timeout_minutes=5)
@@ -321,8 +372,10 @@ async def lifespan(app):
         # Pricing sync scheduler removed - pricing updates via model sync (Phase 3, Issue #1063)
 
         # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
+        # Delayed to avoid overwhelming Supabase during startup
         async def sync_providers_background():
             try:
+                await asyncio.sleep(45)  # Wait for catalog preload to finish
                 from src.services.provider_model_sync_service import sync_providers_on_startup
 
                 result = await sync_providers_on_startup()
@@ -412,7 +465,11 @@ async def lifespan(app):
 
         _create_background_task(init_model_catalog_refresh_background(), name="init_model_catalog_refresh")
 
+        logger.info("=" * 80)
+        logger.info("✅ GATEWAYZ API STARTUP - COMPLETE")
         logger.info("All monitoring and health services started successfully")
+        logger.info("🎯 Ready to accept requests!")
+        logger.info("=" * 80)
 
     except Exception as e:
         logger.error(f"Failed to start monitoring services: {e}")
@@ -513,13 +570,6 @@ async def lifespan(app):
             logger.info("Arize OTEL shutdown complete")
         except Exception as e:
             logger.warning(f"Arize OTEL shutdown warning: {e}")
-
-        # Shutdown Langfuse
-        try:
-            shutdown_langfuse()
-            logger.info("Langfuse shutdown complete")
-        except Exception as e:
-            logger.warning(f"Langfuse shutdown warning: {e}")
 
         # Clear connection pools
         clear_connection_pools()

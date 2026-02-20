@@ -1,0 +1,1201 @@
+{
+	"info": {
+		"_postman_id": "gatewayz-cache-collection-2025",
+		"name": "Gatewayz Cache APIs - Complete Collection",
+		"description": "Complete collection of all Gatewayz endpoints that use or manage cache systems.\n\n**Setup Instructions:**\n1. Import this collection into Postman\n2. Create an environment with variables:\n   - `base_url`: https://api.gatewayz.ai\n   - `api_key`: Your API key\n   - `admin_api_key`: Your admin API key\n3. Select the environment before running requests\n\n**Collection Structure:**\n- Cache Management (Direct)\n- Model Catalog (Cache Consumers)\n- Provider Catalog\n- Gateway Management\n- Chat/Inference\n- Modelz Integration\n- HuggingFace Discovery\n- Statistics & Analytics\n- Admin Endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Cache Management (Direct)",
+			"item": [
+				{
+					"name": "GET Cache Status (All Gateways)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/status",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "status"]
+						},
+						"description": "Get cache status for all gateways including:\n- Models cached count\n- Last refresh timestamp\n- TTL and cache age\n- Health status"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refresh Gateway Cache",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/refresh/openrouter?force=true",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "refresh", "openrouter"],
+							"query": [
+								{
+									"key": "force",
+									"value": "true",
+									"description": "Force refresh even if cache is valid"
+								}
+							]
+						},
+						"description": "Force refresh cache for a specific gateway.\n\nValid gateways: openrouter, featherless, chutes, groq, fireworks, together, etc."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Clear All Caches",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/clear",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "clear"]
+						},
+						"description": "⚠️ WARNING: Clears ALL gateway caches. Use with caution."
+					},
+					"response": []
+				},
+				{
+					"name": "POST Clear Specific Gateway Cache",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/clear?gateway=openrouter",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "clear"],
+							"query": [
+								{
+									"key": "gateway",
+									"value": "openrouter"
+								}
+							]
+						},
+						"description": "Clear cache for a specific gateway only."
+					},
+					"response": []
+				},
+				{
+					"name": "GET Cache Warmer Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/warmer/stats",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "warmer", "stats"]
+						},
+						"description": "Get cache warmer statistics:\n- Background refreshes\n- Coalesced requests\n- Error rates\n- In-flight refreshes\n- Redis & local cache stats"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Cache Debouncer Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/debouncer/stats",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "debouncer", "stats"]
+						},
+						"description": "Get cache debouncer statistics:\n- Scheduled operations\n- Executed vs coalesced\n- Efficiency percentage\n- Pending invalidations"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Modelz Cache Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/modelz/status",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "modelz", "status"]
+						},
+						"description": "Get Modelz cache status and metadata"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refresh Modelz Cache",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/modelz/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "modelz", "refresh"]
+						},
+						"description": "Force refresh Modelz cache from API"
+					},
+					"response": []
+				},
+				{
+					"name": "DELETE Clear Modelz Cache",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/modelz/clear",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "modelz", "clear"]
+						},
+						"description": "Clear Modelz cache"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refresh Pricing Cache",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/cache/pricing/refresh",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "pricing", "refresh"]
+						},
+						"description": "Force refresh pricing cache from manual pricing file"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Invalidate Cache (Background)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/api/cache/invalidate?gateway=openrouter",
+							"host": ["{{base_url}}"],
+							"path": ["api", "cache", "invalidate"],
+							"query": [
+								{
+									"key": "gateway",
+									"value": "openrouter",
+									"description": "Optional: specific gateway to invalidate"
+								}
+							]
+						},
+						"description": "Invalidate cache with background processing"
+					},
+					"response": []
+				}
+			],
+			"description": "Direct cache management endpoints for refreshing, clearing, and monitoring cache systems"
+		},
+		{
+			"name": "2. Model Catalog (Cache Consumers)",
+			"item": [
+				{
+					"name": "GET All Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models?gateway=openrouter&limit=100&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["models"],
+							"query": [
+								{
+									"key": "gateway",
+									"value": "openrouter",
+									"description": "openrouter, all, featherless, chutes, groq, etc."
+								},
+								{
+									"key": "limit",
+									"value": "100"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "provider",
+									"value": "",
+									"disabled": true,
+									"description": "Filter by provider"
+								},
+								{
+									"key": "is_private",
+									"value": "",
+									"disabled": true,
+									"description": "true/false"
+								},
+								{
+									"key": "include_huggingface",
+									"value": "false",
+									"disabled": true
+								},
+								{
+									"key": "unique_models",
+									"value": "false",
+									"disabled": true,
+									"description": "Deduplicate models across providers"
+								}
+							]
+						},
+						"description": "🔥 MAIN ENDPOINT: Get all models from cache.\n\nReads from: get_cached_models(gateway)\n\nSupports multiple gateways and filtering options."
+					},
+					"response": []
+				},
+				{
+					"name": "GET All Models (All Gateways)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models?gateway=all&limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["models"],
+							"query": [
+								{
+									"key": "gateway",
+									"value": "all"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get models from ALL gateways (reads all caches)"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Trending Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/trending?time_range=24h&limit=10&sort_by=requests",
+							"host": ["{{base_url}}"],
+							"path": ["models", "trending"],
+							"query": [
+								{
+									"key": "time_range",
+									"value": "24h",
+									"description": "1h, 24h, 7d, 30d"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								},
+								{
+									"key": "sort_by",
+									"value": "requests",
+									"description": "requests, tokens, users"
+								},
+								{
+									"key": "gateway",
+									"value": "all",
+									"disabled": true
+								}
+							]
+						},
+						"description": "Get trending models based on usage (uses cache for metadata)"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Low-Latency Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/low-latency?include_ultra_only=false&include_alternatives=true",
+							"host": ["{{base_url}}"],
+							"path": ["models", "low-latency"],
+							"query": [
+								{
+									"key": "include_ultra_only",
+									"value": "false",
+									"description": "Only <100ms models"
+								},
+								{
+									"key": "include_alternatives",
+									"value": "true"
+								}
+							]
+						},
+						"description": "Get models optimized for low latency (<500ms)\n\nReads from cache and filters by performance metrics"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Unique Models (Deduplicated)",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/unique?limit=100&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["models", "unique"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "100"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Get deduplicated models across all gateways\n\nReads all caches and merges"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Search Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/search?q=gpt-4&gateway=all&limit=50",
+							"host": ["{{base_url}}"],
+							"path": ["models", "search"],
+							"query": [
+								{
+									"key": "q",
+									"value": "gpt-4",
+									"description": "Search query"
+								},
+								{
+									"key": "gateway",
+									"value": "all"
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Search models by name/ID in cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Specific Model",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/openai/gpt-4",
+							"host": ["{{base_url}}"],
+							"path": ["models", "openai", "gpt-4"]
+						},
+						"description": "Get specific model details from cache\n\nPath: /models/{provider}/{model_name}"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Batch Compare Models",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"model_ids\": [\n    \"openai/gpt-4\",\n    \"anthropic/claude-3-opus\",\n    \"google/gemini-pro\"\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/models/batch-compare",
+							"host": ["{{base_url}}"],
+							"path": ["models", "batch-compare"]
+						},
+						"description": "Compare multiple models (reads from cache)"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Compare Model",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/models/openai/gpt-4/compare",
+							"host": ["{{base_url}}"],
+							"path": ["models", "openai", "gpt-4", "compare"]
+						},
+						"description": "Compare a model with similar ones (uses cache)"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints that read from model cache to return model catalog data"
+		},
+		{
+			"name": "3. Provider Catalog",
+			"item": [
+				{
+					"name": "GET All Providers",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/provider?gateway=all&limit=50&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["provider"],
+							"query": [
+								{
+									"key": "gateway",
+									"value": "all",
+									"description": "all, openrouter, featherless, etc."
+								},
+								{
+									"key": "limit",
+									"value": "50"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								},
+								{
+									"key": "moderated_only",
+									"value": "false",
+									"disabled": true
+								}
+							]
+						},
+						"description": "🔥 Get all providers with model counts\n\nReads from: get_cached_providers() + get_cached_models()"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Provider Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/provider/openai/stats?time_range=7d",
+							"host": ["{{base_url}}"],
+							"path": ["provider", "openai", "stats"],
+							"query": [
+								{
+									"key": "time_range",
+									"value": "7d",
+									"description": "1h, 24h, 7d, 30d, all"
+								}
+							]
+						},
+						"description": "Get provider usage statistics (may use cached provider data)"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Provider Top Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/provider/openai/top-models?time_range=7d&limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["provider", "openai", "top-models"],
+							"query": [
+								{
+									"key": "time_range",
+									"value": "7d"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Get top models for a provider (uses cache for metadata)"
+					},
+					"response": []
+				}
+			],
+			"description": "Endpoints that read provider cache data"
+		},
+		{
+			"name": "4. Gateway Management",
+			"item": [
+				{
+					"name": "GET All Gateways",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/gateways",
+							"host": ["{{base_url}}"],
+							"path": ["gateways"]
+						},
+						"description": "Get all available gateways for frontend auto-discovery\n\nReturns gateway configurations from GATEWAY_REGISTRY"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Gateway Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/gateways/status",
+							"host": ["{{base_url}}"],
+							"path": ["gateways", "status"]
+						},
+						"description": "Get health status of all gateways\n\nUses cache to check gateway health"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Gateway Summary",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/gateways/summary",
+							"host": ["{{base_url}}"],
+							"path": ["gateways", "summary"]
+						},
+						"description": "Get summary statistics for all gateways\n\nReads from cache for model counts"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Gateway Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/gateway/openrouter/stats?time_range=24h",
+							"host": ["{{base_url}}"],
+							"path": ["gateway", "openrouter", "stats"],
+							"query": [
+								{
+									"key": "time_range",
+									"value": "24h"
+								}
+							]
+						},
+						"description": "Get statistics for a specific gateway"
+					},
+					"response": []
+				}
+			],
+			"description": "Gateway discovery and status endpoints that use cache"
+		},
+		{
+			"name": "5. Chat & Inference (Cache Consumers)",
+			"item": [
+				{
+					"name": "POST Chat Completions (OpenAI Compatible)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"model\": \"openai/gpt-4\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello, how are you?\"\n    }\n  ],\n  \"stream\": false,\n  \"temperature\": 0.7,\n  \"max_tokens\": 150\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/chat/completions",
+							"host": ["{{base_url}}"],
+							"path": ["chat", "completions"],
+							"query": [
+								{
+									"key": "session_id",
+									"value": "",
+									"disabled": true,
+									"description": "Optional: Chat session ID to save messages"
+								}
+							]
+						},
+						"description": "🔥 MAIN INFERENCE ENDPOINT\n\nUses cache for:\n- Model validation (get_cached_models)\n- Butter.dev response caching (if enabled)\n- Provider client caching"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Messages (Anthropic Compatible)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "anthropic-version",
+								"value": "2023-06-01"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"model\": \"anthropic/claude-3-opus\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Hello Claude\"\n    }\n  ],\n  \"max_tokens\": 1024\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/messages",
+							"host": ["{{base_url}}"],
+							"path": ["messages"]
+						},
+						"description": "Anthropic-compatible messages endpoint\n\nUses same cache systems as chat/completions"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Responses (Alternative Chat)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"model\": \"openai/gpt-4\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"Test message\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/responses",
+							"host": ["{{base_url}}"],
+							"path": ["responses"]
+						},
+						"description": "Alternative chat endpoint with same caching behavior"
+					},
+					"response": []
+				}
+			],
+			"description": "Chat/inference endpoints that use cache for model validation and response caching"
+		},
+		{
+			"name": "6. Modelz Integration",
+			"item": [
+				{
+					"name": "GET Modelz Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/modelz/models?is_graduated=true",
+							"host": ["{{base_url}}"],
+							"path": ["modelz", "models"],
+							"query": [
+								{
+									"key": "is_graduated",
+									"value": "true",
+									"description": "true, false, or null for all"
+								}
+							]
+						},
+						"description": "Get models from Modelz with token data\n\nUses Modelz cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Modelz Model IDs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/modelz/ids",
+							"host": ["{{base_url}}"],
+							"path": ["modelz", "ids"]
+						},
+						"description": "Get available Modelz model IDs from cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Check Model on Modelz",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/modelz/check/meta-llama/llama-3.1-8b-instruct",
+							"host": ["{{base_url}}"],
+							"path": ["modelz", "check", "meta-llama", "llama-3.1-8b-instruct"]
+						},
+						"description": "Check if a specific model exists on Modelz (cache lookup)"
+					},
+					"response": []
+				}
+			],
+			"description": "Modelz integration endpoints that use Modelz cache"
+		},
+		{
+			"name": "7. HuggingFace Discovery",
+			"item": [
+				{
+					"name": "GET HuggingFace Discovery",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/huggingface/discovery?limit=20&offset=0",
+							"host": ["{{base_url}}"],
+							"path": ["huggingface", "discovery"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "offset",
+									"value": "0"
+								}
+							]
+						},
+						"description": "Discover HuggingFace models (uses HF cache)"
+					},
+					"response": []
+				},
+				{
+					"name": "GET HuggingFace Search",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/huggingface/search?query=llama&limit=10",
+							"host": ["{{base_url}}"],
+							"path": ["huggingface", "search"],
+							"query": [
+								{
+									"key": "query",
+									"value": "llama"
+								},
+								{
+									"key": "limit",
+									"value": "10"
+								}
+							]
+						},
+						"description": "Search HuggingFace models in cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET HuggingFace Model Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/huggingface/models/meta-llama/Llama-3.1-8B-Instruct/details",
+							"host": ["{{base_url}}"],
+							"path": ["huggingface", "models", "meta-llama", "Llama-3.1-8B-Instruct", "details"]
+						},
+						"description": "Get HuggingFace model details from cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET HuggingFace Model Card",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/huggingface/models/meta-llama/Llama-3.1-8B-Instruct/card",
+							"host": ["{{base_url}}"],
+							"path": ["huggingface", "models", "meta-llama", "Llama-3.1-8B-Instruct", "card"]
+						},
+						"description": "Get HuggingFace model card"
+					},
+					"response": []
+				},
+				{
+					"name": "GET HuggingFace Author Models",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/huggingface/author/meta-llama/models",
+							"host": ["{{base_url}}"],
+							"path": ["huggingface", "author", "meta-llama", "models"]
+						},
+						"description": "Get models by HuggingFace author (filtered from cache)"
+					},
+					"response": []
+				}
+			],
+			"description": "HuggingFace model discovery endpoints using HF cache"
+		},
+		{
+			"name": "8. User Cache Settings & Analytics",
+			"item": [
+				{
+					"name": "GET User Cache Settings",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/user/cache-settings",
+							"host": ["{{base_url}}"],
+							"path": ["user", "cache-settings"]
+						},
+						"description": "Get user's Butter.dev cache settings\n\n✅ Requires authentication"
+					},
+					"response": []
+				},
+				{
+					"name": "PUT Update Cache Settings",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"enable_butter_cache\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/user/cache-settings",
+							"host": ["{{base_url}}"],
+							"path": ["user", "cache-settings"]
+						},
+						"description": "Update user's Butter.dev cache preferences\n\n✅ Requires authentication"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Cache Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/analytics/cache?days=30",
+							"host": ["{{base_url}}"],
+							"path": ["analytics", "cache"],
+							"query": [
+								{
+									"key": "days",
+									"value": "30",
+									"description": "1-90 days"
+								}
+							]
+						},
+						"description": "Get Butter.dev cache performance analytics:\n- Cache hit rates\n- Cost savings\n- Top cached models\n\n✅ Requires authentication"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Cache Summary",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/analytics/cache/summary",
+							"host": ["{{base_url}}"],
+							"path": ["analytics", "cache", "summary"]
+						},
+						"description": "Quick cache performance summary\n\n✅ Requires authentication"
+					},
+					"response": []
+				}
+			],
+			"description": "User-specific cache settings and analytics (requires authentication)"
+		},
+		{
+			"name": "9. Health & Optimization Cache",
+			"item": [
+				{
+					"name": "GET Optimization Cache Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/optimizations/cache",
+							"host": ["{{base_url}}"],
+							"path": ["health", "optimizations", "cache"]
+						},
+						"description": "Get response cache statistics and health"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Clear Optimization Cache",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health/optimizations/cache/clear",
+							"host": ["{{base_url}}"],
+							"path": ["health", "optimizations", "cache", "clear"]
+						},
+						"description": "Clear the response cache"
+					},
+					"response": []
+				},
+				{
+					"name": "GET System Health",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}/health",
+							"host": ["{{base_url}}"],
+							"path": ["health"]
+						},
+						"description": "Overall system health (includes cache status)"
+					},
+					"response": []
+				}
+			],
+			"description": "Health monitoring endpoints that check cache systems"
+		},
+		{
+			"name": "10. Admin Cache Endpoints",
+			"item": [
+				{
+					"name": "GET Admin Cache Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/cache-status",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "cache-status"]
+						},
+						"description": "Get provider cache metadata\n\n🔒 Requires admin role"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Admin HuggingFace Cache Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/huggingface-cache-status",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "huggingface-cache-status"]
+						},
+						"description": "Get HuggingFace cache status and statistics\n\n🔒 Requires admin role"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refresh HuggingFace Cache",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/refresh-huggingface-cache",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "refresh-huggingface-cache"]
+						},
+						"description": "Clear HuggingFace cache to force refresh\n\n🔒 Requires admin role"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Clear Rate Limit Cache",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/clear-rate-limit-cache",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "clear-rate-limit-cache"]
+						},
+						"description": "Clear rate limit configuration cache\n\n🔒 Requires admin role"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Clear Provider Credit Cache",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/balance/clear-cache?provider=openrouter",
+							"host": ["{{base_url}}"],
+							"path": ["balance", "clear-cache"],
+							"query": [
+								{
+									"key": "provider",
+									"value": "openrouter",
+									"description": "Optional: specific provider or all"
+								}
+							]
+						},
+						"description": "Clear provider credit balance cache\n\n🔒 Requires admin role"
+					},
+					"response": []
+				},
+				{
+					"name": "POST Refresh Providers Cache",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_api_key}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/refresh-providers",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "refresh-providers"]
+						},
+						"description": "Refresh providers cache\n\n🔒 Requires admin role"
+					},
+					"response": []
+				}
+			],
+			"description": "Admin-only cache management endpoints (require admin API key)"
+		},
+		{
+			"name": "11. Prometheus Cache",
+			"item": [
+				{
+					"name": "DELETE Invalidate Prometheus Cache",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/cache/invalidate?pattern=*",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "invalidate"],
+							"query": [
+								{
+									"key": "pattern",
+									"value": "*",
+									"description": "* for all or specific pattern"
+								}
+							]
+						},
+						"description": "Invalidate prometheus data cache entries\n\nOptional authentication"
+					},
+					"response": []
+				},
+				{
+					"name": "GET Prometheus Cache Status",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{api_key}}",
+								"disabled": true
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/cache/status",
+							"host": ["{{base_url}}"],
+							"path": ["cache", "status"]
+						},
+						"description": "Get prometheus cache status and statistics\n\nOptional authentication"
+					},
+					"response": []
+				}
+			],
+			"description": "Prometheus data cache management"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://api.gatewayz.ai",
+			"type": "string"
+		},
+		{
+			"key": "api_key",
+			"value": "your_api_key_here",
+			"type": "string"
+		},
+		{
+			"key": "admin_api_key",
+			"value": "your_admin_api_key_here",
+			"type": "string"
+		}
+	]
+}

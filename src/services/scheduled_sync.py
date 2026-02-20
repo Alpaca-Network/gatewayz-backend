@@ -12,6 +12,7 @@ Features:
 - Health monitoring integration
 """
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -39,31 +40,88 @@ _last_sync_status: dict[str, Any] = {
 }
 
 
+async def warm_caches_after_sync(changed_providers: list[str]) -> None:
+    """
+    Proactively warm caches after a successful incremental sync.
+
+    Runs as a fire-and-forget background task so no user pays the
+    full cache rebuild cost on the first request after sync.
+    Failures are non-fatal — logged as warnings only.
+    """
+    from src.services.model_catalog_cache import (
+        get_cached_full_catalog,
+        warm_unique_models_cache_all_variants,
+        cache_catalog_stats,
+    )
+    from src.db.models_catalog_db import get_models_stats
+
+    logger.info(
+        f"Cache warming started after sync "
+        f"(providers with changes: {changed_providers})"
+    )
+
+    # Brief delay to let DB writes propagate
+    await asyncio.sleep(2)
+
+    # Phase 1: Full catalog
+    try:
+        catalog = await asyncio.to_thread(get_cached_full_catalog)
+        model_count = len(catalog) if catalog else 0
+        logger.info(f"Cache warm [1/3]: Full catalog warmed ({model_count} models)")
+    except Exception as e:
+        logger.warning(f"Cache warm [1/3]: Full catalog warming failed (non-fatal): {e}")
+
+    # Phase 2: Unique models (all filter/sort variants)
+    try:
+        warm_stats = await warm_unique_models_cache_all_variants()
+        logger.info(
+            f"Cache warm [2/3]: Unique models warmed "
+            f"({warm_stats.get('successful', 0)}/{warm_stats.get('total_variants', 0)} variants)"
+        )
+    except Exception as e:
+        logger.warning(f"Cache warm [2/3]: Unique models warming failed (non-fatal): {e}")
+
+    # Phase 3: Catalog stats
+    try:
+        stats = await asyncio.to_thread(get_models_stats)
+        if stats:
+            cache_catalog_stats(stats)
+            logger.info("Cache warm [3/3]: Catalog stats warmed")
+        else:
+            logger.warning("Cache warm [3/3]: get_models_stats returned empty")
+    except Exception as e:
+        logger.warning(f"Cache warm [3/3]: Catalog stats warming failed (non-fatal): {e}")
+
+    logger.info("Cache warming complete after sync")
+
+
 async def run_scheduled_model_sync():
     """
-    Run the scheduled model sync job.
+    Run the scheduled model sync job with incremental change detection.
 
     This function is called by APScheduler at the configured interval.
-    It syncs all providers to the database and updates health metrics.
+    It syncs all providers to the database using efficient incremental sync:
+    - Fetches models from ALL providers
+    - Compares with DB using content hashing
+    - Only writes changed/new models
+    - Only invalidates cache for providers with changes
+
+    This minimizes DB writes and cache invalidation overhead.
     """
-    from src.services.model_catalog_sync import sync_all_providers
+    from src.services.incremental_sync import sync_all_providers_incremental
 
     start_time = datetime.now(timezone.utc)
     _last_sync_status["last_run_time"] = start_time
     _last_sync_status["total_runs"] += 1
 
     logger.info("=" * 80)
-    logger.info("Starting scheduled model sync")
+    logger.info("Starting scheduled incremental model sync")
     logger.info("=" * 80)
 
     try:
-        # Sync all providers in a background thread so the event loop stays
-        # free to serve incoming HTTP requests.  sync_all_providers() is fully
-        # synchronous (HTTP calls + DB writes) and would otherwise block every
-        # request for the 10-20 minutes it takes to finish.
-        import asyncio
-
-        result = await asyncio.to_thread(sync_all_providers, dry_run=False)
+        # Run incremental sync in background thread to avoid blocking event loop
+        # This uses content-based change detection to minimize DB writes
+        result = await asyncio.to_thread(sync_all_providers_incremental, dry_run=False)
 
         # Calculate duration
         end_time = datetime.now(timezone.utc)
@@ -80,13 +138,29 @@ async def run_scheduled_model_sync():
             )
 
             logger.info("=" * 80)
-            logger.info("✅ Scheduled model sync SUCCESSFUL")
+            logger.info("✅ Scheduled incremental sync SUCCESSFUL")
             logger.info(f"   Duration: {duration:.2f}s")
-            logger.info(f"   Models synced: {result.get('total_models_synced', 0)}")
+            logger.info(f"   Models fetched: {result.get('total_models_fetched', 0):,}")
+            logger.info(f"   Models changed: {result.get('total_models_changed', 0):,}")
+            logger.info(f"   Models synced: {result.get('total_models_synced', 0):,}")
+            logger.info(f"   Change rate: {result.get('change_rate_percent', 0):.1f}%")
+            logger.info(f"   Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%")
             logger.info(
                 f"   Providers synced: {result.get('providers_synced', 0)}/{result.get('total_providers', 0)}"
             )
+            logger.info(f"   Providers with changes: {result.get('providers_with_changes', 0)}")
             logger.info("=" * 80)
+
+            # Proactively warm caches so no user pays the rebuild cost
+            if result.get("providers_with_changes", 0) > 0:
+                changed = result.get("changed_providers", [])
+                asyncio.create_task(
+                    warm_caches_after_sync(changed),
+                    name="post_sync_cache_warm",
+                )
+                logger.info(
+                    f"Cache warming task queued for {len(changed)} changed providers"
+                )
 
         else:
             # Failed
@@ -260,8 +334,6 @@ def trigger_manual_sync() -> dict[str, Any]:
     Returns:
         Status of the manual sync
     """
-    import asyncio
-
     logger.info("Manual sync triggered via API")
 
     # Run sync synchronously

@@ -971,14 +971,15 @@ class ModelHealthMonitor:
 
 
 # Global health monitor instance with rate-limited configuration
+# HEALTH FIX #1094: Reduced batch size and increased interval to prevent rate limits
 # This prevents hitting provider rate limits by:
-# - Checking models in small batches (20 at a time)
-# - Adding 15-second delay between batches (4 batches/min max)
+# - Checking models in small batches (10 at a time) - REDUCED from 20
+# - Adding 30-second delay between batches (2 batches/min max) - INCREASED from 15s
 # - Running checks every 5 minutes by default
 # This is especially important for OpenRouter's 4 model switches/minute limit
 health_monitor = ModelHealthMonitor(
     check_interval=300,  # Check every 5 minutes
-    batch_size=20,  # Process 20 models per batch
-    batch_interval=15.0,  # 15 second delay between batches (4 batches/min)
+    batch_size=10,  # CHANGED: 20 → 10 (process 10 models per batch)
+    batch_interval=30.0,  # CHANGED: 15s → 30s (30 second delay between batches)
     fetch_chunk_size=100,  # Fetch models in chunks of 100
 )

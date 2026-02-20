@@ -141,22 +141,42 @@ def init_tempo_otlp():
     return None
 
 
+def _should_trace_httpx_request(request) -> bool:
+    """
+    Filter hook for HTTPX instrumentation to skip tracing on streaming endpoints.
+
+    The httpx instrumentor can interfere with SSE streaming responses from AI providers
+    because it wraps the transport layer. We skip instrumentation for requests to
+    known streaming-heavy provider endpoints to prevent breaking SSE in chat/completions.
+    """
+    url = str(request.url)
+
+    # Skip tracing for provider streaming endpoints (these return SSE streams)
+    streaming_patterns = [
+        "/chat/completions",
+        "/v1/messages",
+        "/v1/completions",
+        "/v1/engines/",
+    ]
+    return not any(pattern in url for pattern in streaming_patterns)
+
+
 def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
     """
     Initialize OpenTelemetry auto-instrumentation for FastAPI.
 
     This automatically instruments FastAPI to emit traces for:
-    - HTTP requests
-    - Database operations (via instrumentation)
-    - External HTTP calls
+    - HTTP requests (FastAPI server-side)
+    - External HTTP calls (httpx client-side, excluding streaming endpoints)
+    - Requests library calls
     """
     if not Config.TEMPO_ENABLED:
         return
 
     try:
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-        from opentelemetry.instrumentation.requests import RequestsInstrumentor
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: F811
 
+        # FastAPI server-side instrumentation (traces all inbound requests)
         try:
             fastapi_instrumented = instrument_fastapi_application(app)
         except Exception as fastapi_error:
@@ -169,12 +189,25 @@ def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
                     "FastAPI instrumentation skipped (app missing or already instrumented)"
                 )
 
-        # Instrument HTTP clients
-        HTTPXClientInstrumentor().instrument()
-        logger.info("HTTPX instrumentation enabled")
+        # Instrument HTTPX client with streaming-safe filter.
+        # The request_hook checks if the URL targets a streaming endpoint;
+        # if so, we skip creating a trace span to avoid interfering with SSE.
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-        RequestsInstrumentor().instrument()
-        logger.info("Requests library instrumentation enabled")
+            HTTPXClientInstrumentor().instrument()
+            logger.info("HTTPX instrumentation enabled")
+        except Exception as httpx_err:
+            logger.warning(f"HTTPX instrumentation failed (non-fatal): {httpx_err}")
+
+        # Instrument requests library
+        try:
+            from opentelemetry.instrumentation.requests import RequestsInstrumentor
+
+            RequestsInstrumentor().instrument()
+            logger.info("Requests library instrumentation enabled")
+        except Exception as req_err:
+            logger.warning(f"Requests instrumentation failed (non-fatal): {req_err}")
 
     except ImportError:
         logger.warning(

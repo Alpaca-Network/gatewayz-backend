@@ -245,28 +245,56 @@ def normalize_together_model(together_model: dict) -> dict:
 
 
 def fetch_models_from_together():
-    """Fetch models from Together.ai API and normalize to the catalog schema"""
+    """Fetch models from Together.ai API with step-by-step logging"""
+    from src.utils.step_logger import StepLogger
+    from src.utils.provider_error_logging import (
+        ProviderErrorType,
+        ProviderFetchContext,
+        log_provider_fetch_error,
+        log_provider_fetch_success,
+    )
+    import time
+
+    start_time = time.time()
+    step_logger = StepLogger("Together Model Fetch", total_steps=4)
+    url = "https://api.together.xyz/v1/models"
+
+    step_logger.start(provider="together", endpoint=url)
+
     try:
+        # Step 1: Validate API configuration
+        step_logger.step(1, "Validating API configuration", provider="together")
+
         if not Config.TOGETHER_API_KEY:
-            logger.error("Together API key not configured")
+            error_msg = "Together API key not configured"
+            step_logger.failure(ValueError(error_msg))
+            logger.error(f"[TOGETHER] {error_msg}")
             return None
+
+        step_logger.success(status="configured")
+
+        # Step 2: Fetch models from API
+        step_logger.step(2, "Fetching models from API", endpoint=url)
 
         headers = {
             "Authorization": f"Bearer {Config.TOGETHER_API_KEY}",
             "Content-Type": "application/json",
         }
 
-        response = httpx.get(
-            "https://api.together.xyz/v1/models",
-            headers=headers,
-            timeout=20.0,
-        )
+        response = httpx.get(url, headers=headers, timeout=20.0)
         response.raise_for_status()
 
         payload = response.json()
         # Together API returns a list directly, not wrapped in {"data": [...]}
         raw_models = payload if isinstance(payload, list) else payload.get("data", [])
-        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+
+        step_logger.success(
+            raw_count=len(raw_models), status_code=response.status_code, response_type=type(payload).__name__
+        )
+
+        # Step 3: Normalize and filter models
+        step_logger.step(3, "Normalizing and filtering models", raw_count=len(raw_models))
+
         normalized_models = [
             norm_model
             for model in raw_models
@@ -275,16 +303,132 @@ def fetch_models_from_together():
             if norm_model is not None
         ]
 
+        filtered_count = len(raw_models) - len(normalized_models)
+        step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count)
+
+        # Step 4: Cache the models
+        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+
         cache_gateway_catalog("together", normalized_models)
-        logger.info(f"Fetched {len(normalized_models)} Together models")
+        step_logger.success(cached_count=len(normalized_models))
+
+        # Complete with summary
+        duration = time.time() - start_time
+        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+
+        # Log success with provider_error_logging utility
+        log_provider_fetch_success(
+            provider_slug="together",
+            models_count=len(normalized_models),
+            duration=duration,
+            additional_context={"endpoint": url, "raw_count": len(raw_models)},
+        )
+
         return normalized_models
-    except httpx.HTTPStatusError as e:
-        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
-        logger.error("Together HTTP error: %s", error_msg)
-        # Error tracking now automatic via Redis cache circuit breaker
+
+    except httpx.TimeoutException as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="together",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.API_TIMEOUT,
+        )
+        log_provider_fetch_error("together", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("together", normalize_together_model, e)
+        if fallback_models:
+            cache_gateway_catalog("together", fallback_models)
+            return fallback_models
+
         return None
+
+    except httpx.HTTPStatusError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="together",
+            endpoint_url=url,
+            status_code=e.response.status_code,
+            duration=duration,
+        )
+        log_provider_fetch_error("together", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("together", normalize_together_model, e)
+        if fallback_models:
+            cache_gateway_catalog("together", fallback_models)
+            return fallback_models
+
+        return None
+
+    except httpx.NetworkError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="together",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.NETWORK_ERROR,
+        )
+        log_provider_fetch_error("together", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("together", normalize_together_model, e)
+        if fallback_models:
+            cache_gateway_catalog("together", fallback_models)
+            return fallback_models
+
+        return None
+
+    except (ValueError, TypeError, KeyError) as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="together",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.PARSING_ERROR,
+        )
+        log_provider_fetch_error("together", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("together", normalize_together_model, e)
+        if fallback_models:
+            cache_gateway_catalog("together", fallback_models)
+            return fallback_models
+
+        return None
+
     except Exception as e:
-        error_msg = sanitize_for_logging(str(e))
-        logger.error("Failed to fetch models from Together: %s", error_msg)
-        # Error tracking now automatic via Redis cache circuit breaker
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="together", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+        )
+        log_provider_fetch_error("together", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("together", normalize_together_model, e)
+        if fallback_models:
+            cache_gateway_catalog("together", fallback_models)
+            return fallback_models
+
         return None

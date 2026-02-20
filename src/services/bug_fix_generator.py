@@ -3,6 +3,13 @@ Automated bug fix generator using Claude API.
 
 Analyzes error patterns and generates fixes with explanations.
 Integrates with git and GitHub for automated PR creation.
+
+Improvements in this version:
+- Comprehensive request/response logging with correlation IDs
+- Retry logic with exponential backoff for transient failures
+- Prompt sanitization and length validation
+- Better error handling and reporting
+- API key validation on initialization
 """
 
 import asyncio
@@ -15,11 +22,22 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from src.config.config import Config
 from src.services.error_monitor import ErrorPattern
 
 logger = logging.getLogger(__name__)
+
+
+# Maximum prompt size to prevent API errors (Claude has a large context window, but let's be safe)
+MAX_PROMPT_LENGTH = 50000  # characters
+MAX_ERROR_MESSAGE_LENGTH = 10000  # characters
 
 
 @dataclass
@@ -58,55 +76,52 @@ class BugFix:
 
 
 class BugFixGenerator:
-    """Generates bug fixes using Claude API."""
+    """Generates bug fixes using Claude API with improved reliability."""
 
     def __init__(self, github_token: str | None = None):
         self.anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
         if not self.anthropic_key:
+            logger.error(
+                "ANTHROPIC_API_KEY is not configured. "
+                "Bug fix generation is disabled. "
+                "Set ANTHROPIC_API_KEY environment variable to enable automated bug fixes."
+            )
             raise RuntimeError(
                 "ANTHROPIC_API_KEY is not configured. "
                 "Set this environment variable to enable automated bug fixes."
             )
-        self.github_token = github_token or Config.GITHUB_TOKEN
+
+        # Validate API key format
+        if not self.anthropic_key.startswith("sk-ant-"):
+            logger.warning(
+                "ANTHROPIC_API_KEY does not start with 'sk-ant-'. "
+                "This may indicate an invalid API key."
+            )
+
+        self.github_token = github_token or getattr(Config, "GITHUB_TOKEN", None)
         self.anthropic_url = "https://api.anthropic.com/v1"
+        self.anthropic_model = getattr(Config, "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
         self.session: httpx.AsyncClient | None = None
         self.generated_fixes: dict[str, BugFix] = {}
+        self.api_key_validated = False
 
     async def initialize(self):
-        """Initialize the generator."""
+        """Initialize the generator and validate API key."""
         self.session = httpx.AsyncClient(timeout=30.0)
 
-    async def close(self):
-        """Close the generator."""
-        if self.session:
-            await self.session.aclose()
+        # Validate API key on initialization
+        try:
+            await self._validate_api_key()
+            self.api_key_validated = True
+            logger.info("✓ Claude API key validated successfully")
+        except Exception as e:
+            logger.error(f"Failed to validate Claude API key: {e}")
+            logger.warning("Bug fix generation may fail due to invalid API key")
 
-    async def analyze_error(self, error: ErrorPattern) -> str:
-        """Use Claude to analyze an error and determine root cause."""
+    async def _validate_api_key(self):
+        """Validate the Claude API key with a minimal test request."""
         if not self.session:
-            await self.initialize()
-
-        prompt = f"""You are an expert Python developer and DevOps engineer. Analyze this error and determine the root cause.
-
-Error Type: {error.error_type}
-Message: {error.message}
-Category: {error.category.value}
-Severity: {error.severity.value}
-File: {error.file or 'unknown'}
-Line: {error.line or 'unknown'}
-Function: {error.function or 'unknown'}
-
-Stack Trace:
-{error.stack_trace or 'Not provided'}
-
-Error Count: {error.count}
-Last Seen: {error.last_seen}
-
-Provide a concise analysis of:
-1. Root cause
-2. Impact
-3. Why this is happening
-4. Which component is affected"""
+            raise RuntimeError("Session not initialized. Call initialize() first.")
 
         try:
             response = await self.session.post(
@@ -117,39 +132,228 @@ Provide a concise analysis of:
                     "content-type": "application/json",
                 },
                 json={
-                    "model": "claude-sonnet-4-5-20250929",
-                    "max_tokens": 1024,
-                    "messages": [{"role": "user", "content": prompt}],
+                    "model": self.anthropic_model,
+                    "max_tokens": 10,
+                    "messages": [{"role": "user", "content": "test"}],
                 },
+                timeout=10.0,
             )
+            response.raise_for_status()
+            logger.debug("API key validation successful")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise ValueError("Invalid ANTHROPIC_API_KEY: Authentication failed") from e
+            elif e.response.status_code == 400:
+                logger.debug(f"API key validation response: {e.response.text}")
+                raise ValueError(
+                    f"ANTHROPIC_API_KEY validation failed with 400 Bad Request. "
+                    f"Response: {e.response.text[:200]}"
+                ) from e
+            else:
+                raise
+        except httpx.TimeoutException as e:
+            logger.warning("API key validation timed out - Claude API may be slow")
+            # Don't fail on timeout, API might just be slow
+        except Exception as e:
+            logger.error(f"Unexpected error validating API key: {e}")
+            raise
+
+    async def close(self):
+        """Close the generator."""
+        if self.session:
+            await self.session.aclose()
+
+    def _sanitize_text(self, text: str, max_length: int = MAX_ERROR_MESSAGE_LENGTH) -> str:
+        """Sanitize text for API requests."""
+        if not text:
+            return ""
+
+        # Truncate to max length
+        if len(text) > max_length:
+            text = text[:max_length] + f"\n... (truncated from {len(text)} chars)"
+
+        # Escape special characters that might break JSON
+        text = text.replace("\x00", "")  # Remove null bytes
+
+        return text
+
+    def _prepare_prompt(self, prompt: str) -> str:
+        """Prepare and validate prompt before sending."""
+        if len(prompt) > MAX_PROMPT_LENGTH:
+            logger.warning(
+                f"Prompt too long ({len(prompt)} chars), truncating to {MAX_PROMPT_LENGTH}"
+            )
+            prompt = prompt[:MAX_PROMPT_LENGTH] + "\n... (truncated due to length)"
+
+        return prompt
+
+    @retry(
+        retry=retry_if_exception_type((httpx.TimeoutException, httpx.ConnectError)),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    async def _make_claude_request(
+        self, prompt: str, max_tokens: int = 1024, request_id: str | None = None
+    ) -> dict:
+        """Make a request to Claude API with retry logic and logging."""
+        if not self.session:
+            await self.initialize()
+
+        request_id = request_id or str(uuid4())[:8]
+
+        # Prepare request payload
+        request_payload = {
+            "model": self.anthropic_model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+
+        logger.debug(
+            f"[{request_id}] Sending request to Claude API "
+            f"(prompt length: {len(prompt)} chars, max_tokens: {max_tokens})"
+        )
+
+        try:
+            response = await self.session.post(
+                f"{self.anthropic_url}/messages",
+                headers={
+                    "x-api-key": self.anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json=request_payload,
+                timeout=30.0,
+            )
+
+            logger.debug(f"[{request_id}] Response status: {response.status_code}")
+
+            # Log error response body for debugging
+            if response.status_code >= 400:
+                error_body = response.text[:500]
+                logger.error(
+                    f"[{request_id}] Claude API error response: "
+                    f"status={response.status_code}, body={error_body}"
+                )
+
             response.raise_for_status()
             data = response.json()
 
-            if data.get("content"):
-                return data["content"][0].get("text", "Analysis failed")
-            return "Analysis failed"
+            logger.debug(f"[{request_id}] Successfully received response from Claude API")
+            return data
 
+        except httpx.HTTPStatusError as e:
+            # Log detailed error information
+            logger.error(
+                f"[{request_id}] HTTP error from Claude API: {e.response.status_code} - "
+                f"{e.response.text[:200]}"
+            )
+            raise
+        except httpx.TimeoutException as e:
+            logger.warning(f"[{request_id}] Request to Claude API timed out: {e}")
+            raise
+        except httpx.ConnectError as e:
+            logger.error(f"[{request_id}] Failed to connect to Claude API: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Error analyzing with Claude: {e}")
-            return f"Error analysis failed: {str(e)}"
+            logger.error(f"[{request_id}] Unexpected error calling Claude API: {e}", exc_info=True)
+            raise
+
+    async def analyze_error(self, error: ErrorPattern) -> str:
+        """Use Claude to analyze an error and determine root cause."""
+        if not self.session:
+            await self.initialize()
+
+        # Sanitize error data
+        sanitized_message = self._sanitize_text(error.message, MAX_ERROR_MESSAGE_LENGTH)
+        sanitized_stack_trace = self._sanitize_text(
+            error.stack_trace or "Not provided", MAX_ERROR_MESSAGE_LENGTH
+        )
+
+        prompt = f"""You are an expert Python developer and DevOps engineer. Analyze this error and determine the root cause.
+
+Error Type: {error.error_type}
+Message: {sanitized_message}
+Category: {error.category.value}
+Severity: {error.severity.value}
+File: {error.file or 'unknown'}
+Line: {error.line or 'unknown'}
+Function: {error.function or 'unknown'}
+
+Stack Trace:
+{sanitized_stack_trace}
+
+Error Count: {error.count}
+Last Seen: {error.last_seen}
+
+Provide a concise analysis of:
+1. Root cause
+2. Impact
+3. Why this is happening
+4. Which component is affected"""
+
+        prompt = self._prepare_prompt(prompt)
+        request_id = str(uuid4())[:8]
+
+        try:
+            logger.info(f"[{request_id}] Analyzing error: {error.message[:100]}...")
+            data = await self._make_claude_request(prompt, max_tokens=1024, request_id=request_id)
+
+            if data.get("content"):
+                analysis = data["content"][0].get("text", "Analysis failed")
+                logger.info(f"[{request_id}] Analysis completed successfully")
+                return analysis
+
+            logger.warning(f"[{request_id}] No content in Claude response")
+            return "Analysis failed: No content in response"
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.error(
+                    f"[{request_id}] Bad request to Claude API. This may indicate "
+                    f"invalid prompt or API configuration."
+                )
+            elif e.response.status_code == 401:
+                logger.error(
+                    f"[{request_id}] Authentication failed. Check ANTHROPIC_API_KEY configuration."
+                )
+            return f"Error analysis failed: {e.response.status_code} - {str(e)[:100]}"
+        except Exception as e:
+            logger.error(f"[{request_id}] Error analyzing with Claude: {e}")
+            return f"Error analysis failed: {str(e)[:100]}"
 
     async def generate_fix(self, error: ErrorPattern) -> BugFix | None:
         """Generate a fix for the error using Claude."""
         if not self.session:
             await self.initialize()
 
-        # First, analyze the error
-        analysis = await self.analyze_error(error)
+        request_id = str(uuid4())[:8]
 
-        # Then generate a fix
-        fix_prompt = f"""Based on this error analysis, generate a specific fix.
+        try:
+            # First, analyze the error
+            logger.info(f"[{request_id}] Starting fix generation for: {error.message[:100]}...")
+            analysis = await self.analyze_error(error)
 
-Error: {error.message}
+            if analysis.startswith("Error analysis failed"):
+                logger.warning(
+                    f"[{request_id}] Skipping fix generation due to failed analysis: {analysis}"
+                )
+                return None
+
+            # Sanitize error data
+            sanitized_message = self._sanitize_text(error.message, MAX_ERROR_MESSAGE_LENGTH)
+            sanitized_file = self._sanitize_text(error.file or "unknown", 500)
+            sanitized_analysis = self._sanitize_text(analysis, MAX_ERROR_MESSAGE_LENGTH)
+
+            # Then generate a fix
+            fix_prompt = f"""Based on this error analysis, generate a specific fix.
+
+Error: {sanitized_message}
 Category: {error.category.value}
-File: {error.file or 'unknown'}
+File: {sanitized_file}
 
 Analysis:
-{analysis}
+{sanitized_analysis}
 
 Generate a fix that includes:
 1. Root cause fix
@@ -172,28 +376,19 @@ Format your response as JSON:
   ]
 }}"""
 
-        try:
-            response = await self.session.post(
-                f"{self.anthropic_url}/messages",
-                headers={
-                    "x-api-key": self.anthropic_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-sonnet-4-5-20250929",
-                    "max_tokens": 2048,
-                    "messages": [{"role": "user", "content": fix_prompt}],
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+            fix_prompt = self._prepare_prompt(fix_prompt)
+
+            logger.info(f"[{request_id}] Generating fix with Claude API...")
+            data = await self._make_claude_request(fix_prompt, max_tokens=2048, request_id=request_id)
 
             if not data.get("content"):
-                logger.error("No content in Claude response")
+                logger.error(f"[{request_id}] No content in Claude response")
                 return None
 
             response_text = data["content"][0].get("text", "")
+            logger.debug(
+                f"[{request_id}] Received fix response (length: {len(response_text)} chars)"
+            )
 
             # Extract JSON from response
             try:
@@ -202,11 +397,14 @@ Format your response as JSON:
                 json_end = response_text.rfind("}") + 1
                 if json_start >= 0 and json_end > json_start:
                     fix_data = json.loads(response_text[json_start:json_end])
+                    logger.debug(f"[{request_id}] Successfully parsed fix JSON")
                 else:
-                    logger.error("No JSON found in Claude response")
+                    logger.error(f"[{request_id}] No JSON found in Claude response")
+                    logger.debug(f"[{request_id}] Response text: {response_text[:500]}")
                     return None
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Claude response as JSON: {e}")
+                logger.error(f"[{request_id}] Failed to parse Claude response as JSON: {e}")
+                logger.debug(f"[{request_id}] Response text: {response_text[:500]}")
                 return None
 
             # Create code changes mapping
@@ -233,10 +431,28 @@ Format your response as JSON:
             )
 
             self.generated_fixes[fix.id] = fix
+            logger.info(
+                f"[{request_id}] Successfully generated fix (ID: {fix.id}, "
+                f"files affected: {len(files_affected)})"
+            )
             return fix
 
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.error(
+                    f"[{request_id}] Bad request to Claude API during fix generation. "
+                    f"This may indicate invalid prompt or API configuration."
+                )
+            elif e.response.status_code == 401:
+                logger.error(
+                    f"[{request_id}] Authentication failed during fix generation. "
+                    f"Check ANTHROPIC_API_KEY configuration."
+                )
+            else:
+                logger.error(f"[{request_id}] HTTP error during fix generation: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Error generating fix with Claude: {e}")
+            logger.error(f"[{request_id}] Error generating fix with Claude: {e}", exc_info=True)
             return None
 
     async def create_branch_and_commit(

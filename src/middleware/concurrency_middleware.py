@@ -15,6 +15,7 @@ and proper streaming support.
 import asyncio
 import json
 import logging
+import threading
 import time
 
 from prometheus_client import Counter, Gauge
@@ -69,6 +70,8 @@ class ConcurrencyMiddleware:
         self.queue_size = queue_size
         self.queue_timeout = queue_timeout
         self._waiting = 0
+        self._lock = threading.Lock()
+        self._active_count = 0
         logger.info(
             f"Concurrency middleware initialized "
             f"(limit={limit}, queue={queue_size}, timeout={queue_timeout}s)"
@@ -91,36 +94,46 @@ class ConcurrencyMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Fast path: try non-blocking acquire
-        acquired = self.semaphore._value > 0
-        if acquired:
+        # Fast path: try non-blocking acquire with zero timeout
+        try:
+            await asyncio.wait_for(self.semaphore.acquire(), timeout=0)
+        except asyncio.TimeoutError:
+            pass  # Semaphore full, fall through to queued path
+        else:
+            # Successfully acquired without waiting
+            with self._lock:
+                self._active_count += 1
+            concurrency_active.inc()
             try:
-                self.semaphore._value -= 1
-                concurrency_active.inc()
-                try:
-                    await self.app(scope, receive, send)
-                finally:
-                    self.semaphore.release()
-                    concurrency_active.dec()
-                return
-            except Exception:
-                # If the fast-path manipulation failed, fall through to normal path
-                self.semaphore._value += 1
+                await self.app(scope, receive, send)
+            finally:
+                self.semaphore.release()
+                with self._lock:
+                    self._active_count -= 1
                 concurrency_active.dec()
+            return
 
-        # Queue is full — reject immediately
-        if self._waiting >= self.queue_size:
-            method = scope.get("method", "UNKNOWN")
+        # Queue is full — reject immediately (atomic check-then-act)
+        with self._lock:
+            if self._waiting >= self.queue_size:
+                method = scope.get("method", "UNKNOWN")
+                active_snapshot = self._active_count
+                waiting_snapshot = self._waiting
+                reject = True
+            else:
+                # Atomically increment _waiting inside the lock
+                self._waiting += 1
+                reject = False
+
+        if reject:
             concurrency_rejected.labels(reason="queue_full").inc()
             logger.warning(
                 f"Concurrency gate REJECT (queue full): {method} {path} "
-                f"(active={self.limit - self.semaphore._value}, queued={self._waiting})"
+                f"(active={active_snapshot}, queued={waiting_snapshot})"
             )
             await self._send_503(scope, send, "Server at capacity, please retry")
             return
 
-        # Queue the request with timeout
-        self._waiting += 1
         concurrency_queued.inc()
         wait_start = time.monotonic()
 
@@ -130,7 +143,8 @@ class ConcurrencyMiddleware:
                 timeout=self.queue_timeout,
             )
         except asyncio.TimeoutError:
-            self._waiting -= 1
+            with self._lock:
+                self._waiting -= 1
             concurrency_queued.dec()
             method = scope.get("method", "UNKNOWN")
             wait_time = time.monotonic() - wait_start
@@ -143,7 +157,9 @@ class ConcurrencyMiddleware:
             return
 
         # Acquired after waiting — process the request
-        self._waiting -= 1
+        with self._lock:
+            self._waiting -= 1
+            self._active_count += 1
         concurrency_queued.dec()
         concurrency_active.inc()
 
@@ -151,6 +167,8 @@ class ConcurrencyMiddleware:
             await self.app(scope, receive, send)
         finally:
             self.semaphore.release()
+            with self._lock:
+                self._active_count -= 1
             concurrency_active.dec()
 
     @staticmethod

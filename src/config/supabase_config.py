@@ -1,3 +1,27 @@
+"""
+Supabase client configuration with module-level singleton pool.
+
+Connection pooling strategy
+---------------------------
+The Supabase Python SDK uses ``httpx.Client`` (sync) internally for all
+PostgREST queries.  By default the SDK creates a new ``httpx.Client`` per
+``create_client()`` call, which means each call would open fresh TCP
+connections on every request — no connection reuse.
+
+To fix this we:
+1. Create each ``httpx.Client`` once, configured with ``httpx.Limits``
+   (max_connections, max_keepalive_connections) and inject it into the
+   PostgREST session (``client.postgrest.session = httpx_client``).
+2. Cache the resulting Supabase ``Client`` objects in module-level globals
+   (``_supabase_client``, ``_read_replica_client``, ``_sync_client``).
+3. Guard each initialisation path with a ``threading.Lock`` + double-checked
+   locking so only one thread ever builds the client.
+
+The three singleton clients and their connection budgets:
+  - Primary API client  : 80 connections  (general reads + writes)
+  - Read-replica client : 30-100 connections  (catalog SELECT queries, if configured)
+  - Sync client         : 20 connections  (bulk model sync, isolated to prevent API downtime)
+"""
 import logging
 import os
 import threading
@@ -15,10 +39,12 @@ logger = logging.getLogger(__name__)
 
 _supabase_client: Client | None = None
 _read_replica_client: Client | None = None  # Read-only replica for catalog queries
+_sync_client: Client | None = None  # Dedicated client for model sync operations (separate pool)
 _last_error: Exception | None = None  # Track last initialization error
 _last_error_time: float = 0  # Timestamp of last error
 _client_lock = threading.Lock()  # Thread-safe client access
 _replica_lock = threading.Lock()  # Thread-safe replica access
+_sync_lock = threading.Lock()  # Thread-safe sync client access
 ERROR_CACHE_TTL = 60.0  # Retry after 60 seconds
 
 # Connection error types that indicate the connection needs to be refreshed
@@ -103,9 +129,13 @@ def get_supabase_client() -> Client:
             max_conn, keepalive_conn = 30, 10
             logger.info("Using serverless-optimized connection pool settings")
         else:
-            # Container/Railway: Higher limits for better concurrent request handling
-            max_conn, keepalive_conn = 100, 30
-            logger.info("Using container-optimized connection pool settings")
+            # Container/Railway: Reduced from 100 to 80 to reserve 20 for sync client
+            # TOTAL CONNECTIONS = 80 (API) + 20 (sync) = 100 connections
+            max_conn, keepalive_conn = 80, 25
+            logger.info(
+                "Using container-optimized connection pool: 80 connections "
+                "(20 reserved for sync operations)"
+            )
 
         # Configure transport with retry for transient connection errors
         # IMPORTANT: Disable HTTP/2 to fix "Bad file descriptor" errors (errno 9)
@@ -150,7 +180,9 @@ def get_supabase_client() -> Client:
         if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
             _supabase_client.postgrest.session = httpx_client
             logger.info(
-                "Configured Supabase client with optimized HTTP/2 connection pooling (base_url: %s)",
+                "Configured Supabase client with optimized connection pool "
+                "(HTTP/1.1, %d max connections, base_url: %s)",
+                max_conn,
                 postgrest_base_url,
             )
 
@@ -297,25 +329,50 @@ def get_initialization_status() -> dict:
 
 def cleanup_supabase_client():
     """
-    Cleanup the Supabase client and close httpx connections.
+    Cleanup all Supabase clients and close httpx connections.
 
     This should be called during application shutdown to ensure
     all connections are properly closed and resources are released.
+
+    Cleans up:
+    - Primary API client
+    - Read replica client
+    - Dedicated sync client
     """
-    global _supabase_client
+    global _supabase_client, _read_replica_client, _sync_client
 
     try:
+        # Cleanup primary client
         with _client_lock:
             if _supabase_client is not None:
-                # Close httpx client if it was injected
                 if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
                     session = _supabase_client.postgrest.session
                     if hasattr(session, 'close'):
                         session.close()
-                        logger.info("✅ Supabase httpx client closed successfully")
-
+                        logger.info("✅ Primary Supabase client closed successfully")
                 _supabase_client = None
-                logger.info("✅ Supabase client cleanup completed")
+
+        # Cleanup read replica client
+        with _replica_lock:
+            if _read_replica_client is not None:
+                if hasattr(_read_replica_client, 'postgrest') and hasattr(_read_replica_client.postgrest, 'session'):
+                    session = _read_replica_client.postgrest.session
+                    if hasattr(session, 'close'):
+                        session.close()
+                        logger.info("✅ Read replica client closed successfully")
+                _read_replica_client = None
+
+        # Cleanup sync client
+        with _sync_lock:
+            if _sync_client is not None:
+                if hasattr(_sync_client, 'postgrest') and hasattr(_sync_client.postgrest, 'session'):
+                    session = _sync_client.postgrest.session
+                    if hasattr(session, 'close'):
+                        session.close()
+                        logger.info("✅ Sync client closed successfully")
+                _sync_client = None
+
+        logger.info("✅ All Supabase clients cleaned up successfully")
     except Exception as e:
         logger.warning(f"Error during Supabase client cleanup: {e}")
 
@@ -587,19 +644,122 @@ def get_read_replica_client() -> Client | None:
             return None
 
 
-def get_client_for_query(read_only: bool = False) -> Client:
+def get_sync_client() -> Client:
+    """
+    Get dedicated Supabase client for model sync operations.
+
+    This client has a SEPARATE connection pool (20 connections) to prevent
+    sync operations from exhausting connections needed for API requests.
+
+    CONNECTION POOL ISOLATION:
+    - API requests: 80 connections (primary client)
+    - Model sync: 20 connections (this client)
+    - Total: 100 connections to Supabase
+
+    This prevents the 8-minute API downtime during bulk model syncs.
+
+    Returns:
+        Dedicated Supabase client for sync operations
+
+    Usage:
+        # In model sync operations
+        sync_client = get_sync_client()
+        sync_client.table("models").insert(models).execute()
+    """
+    global _sync_client
+
+    # Fast path: return cached client if available
+    if _sync_client is not None:
+        return _sync_client
+
+    # Slow path: initialize client with thread safety
+    with _sync_lock:
+        # Double-check after acquiring lock
+        if _sync_client is not None:
+            return _sync_client
+
+        try:
+            Config.validate()
+
+            logger.info("🔄 Initializing dedicated Supabase sync client...")
+            logger.info(f"   Config validation: {'OK' if Config.SUPABASE_URL else 'MISSING URL'}")
+
+            postgrest_base_url = f"{Config.SUPABASE_URL}/rest/v1"
+            logger.info(f"   PostgREST URL: {postgrest_base_url[:50]}...")
+
+            # SYNC-SPECIFIC CONNECTION POOL: Smaller pool for sync operations
+            # This prevents sync from exhausting all available connections
+            max_conn = 20  # Dedicated for sync (vs 80-100 for API)
+            keepalive_conn = 10
+
+            logger.info(
+                f"🔧 Sync client connection pool: {max_conn} max connections "
+                f"(isolated from API traffic)"
+            )
+
+            # Configure transport with retry
+            transport = httpx.HTTPTransport(
+                retries=3,
+                http2=False,  # Disable HTTP/2 for stability
+            )
+
+            httpx_client = httpx.Client(
+                base_url=postgrest_base_url,
+                headers={
+                    "apikey": Config.SUPABASE_KEY,
+                    "Authorization": f"Bearer {Config.SUPABASE_KEY}",
+                },
+                # Longer timeout for sync operations (can take time for bulk inserts)
+                timeout=httpx.Timeout(60.0, connect=10.0),
+                limits=httpx.Limits(
+                    max_connections=max_conn,
+                    max_keepalive_connections=keepalive_conn,
+                    keepalive_expiry=120.0,
+                ),
+                transport=transport,
+            )
+
+            _sync_client = create_client(
+                supabase_url=Config.SUPABASE_URL,
+                supabase_key=Config.SUPABASE_KEY,
+                options=ClientOptions(
+                    postgrest_client_timeout=60,  # Longer timeout for bulk operations
+                    storage_client_timeout=60,
+                    schema="public",
+                    headers={"X-Client-Info": "gatewayz-backend-sync/1.0"},
+                ),
+            )
+
+            # Inject the configured httpx client
+            if hasattr(_sync_client, 'postgrest') and hasattr(_sync_client.postgrest, 'session'):
+                _sync_client.postgrest.session = httpx_client
+                logger.info(
+                    "✅ Configured dedicated sync client with isolated connection pool "
+                    f"({max_conn} connections)"
+                )
+
+            return _sync_client
+
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize sync client: {type(e).__name__}: {e}")
+            raise RuntimeError(f"Sync client initialization failed: {e}") from e
+
+
+def get_client_for_query(read_only: bool = False, for_sync: bool = False) -> Client:
     """
     Get appropriate Supabase client based on query type.
 
     This is the recommended way to get a database client as it automatically
-    routes read-only queries to the read replica when available.
+    routes queries to the appropriate connection pool.
 
     Args:
         read_only: True for SELECT queries, False for writes (INSERT/UPDATE/DELETE)
+        for_sync: True for model sync operations (uses dedicated pool to prevent API downtime)
 
     Returns:
-        Read replica client for read-only queries (if configured),
-        otherwise primary client
+        - Sync client for sync operations (dedicated 20-connection pool)
+        - Read replica client for read-only queries (if configured)
+        - Primary client for regular writes (80-100 connection pool)
 
     Usage:
         # Read-only query (use replica if available)
@@ -609,7 +769,16 @@ def get_client_for_query(read_only: bool = False) -> Client:
         # Write query (always use primary)
         client = get_client_for_query(read_only=False)
         client.table("models").insert({"name": "gpt-4"}).execute()
+
+        # Model sync operation (use dedicated sync pool)
+        client = get_client_for_query(for_sync=True)
+        client.table("models").upsert(bulk_models).execute()
     """
+    # Sync operations get dedicated pool to prevent API downtime
+    if for_sync:
+        logger.debug("Using dedicated sync client (isolated connection pool)")
+        return get_sync_client()
+
     if read_only:
         replica = get_read_replica_client()
         if replica:

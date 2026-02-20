@@ -753,6 +753,74 @@ class DetailedErrorFactory:
         return ErrorResponse(error=error)
 
     @staticmethod
+    def provider_unavailable(
+        provider: str,
+        model: str,
+        retry_after: int = 60,
+        circuit_breaker_state: str = "open",
+        request_id: Optional[str] = None,
+    ) -> ErrorResponse:
+        """
+        Create a provider unavailable error (circuit breaker open).
+
+        This error is raised when the circuit breaker is open for a provider,
+        preventing requests from being sent to an unhealthy provider.
+
+        Args:
+            provider: Provider name
+            model: Model ID
+            retry_after: Seconds until provider will be retried
+            circuit_breaker_state: Current circuit breaker state (open/half_open)
+            request_id: Optional request ID
+
+        Returns:
+            ErrorResponse with provider unavailable error (503)
+        """
+        code = ErrorCode.PROVIDER_ERROR
+        message = f"Provider '{provider}' is temporarily unavailable for model '{model}'"
+
+        detail = (
+            f"The circuit breaker for provider '{provider}' is currently {circuit_breaker_state.upper()}. "
+            f"This provider has been experiencing issues and has been temporarily disabled to prevent cascading failures. "
+            f"The provider will be automatically retried in {retry_after} seconds."
+        )
+
+        context = ErrorContext(
+            provider=provider,
+            requested_model=model,
+            provider_status="circuit_breaker_open",
+            retry_after=retry_after,
+            additional_info={
+                "circuit_breaker_state": circuit_breaker_state,
+                "auto_retry_in_seconds": retry_after,
+                "reason": "Provider health check failed, circuit breaker activated",
+            },
+        )
+
+        suggestions = [
+            f"Wait {retry_after} seconds for automatic retry",
+            "Try a different model that uses a different provider",
+            "Check the status page for provider health: https://status.gatewayz.ai",
+            "Contact support if the issue persists",
+        ]
+
+        error = ErrorDetail(
+            type=get_error_type(code),
+            message=message,
+            detail=detail,
+            code=code,
+            status=503,  # Service Unavailable
+            request_id=request_id or f"req_{uuid.uuid4().hex[:12]}",
+            timestamp=datetime.utcnow().isoformat() + "Z",
+            suggestions=suggestions,
+            context=context,
+            docs_url="https://docs.gatewayz.ai/troubleshooting/circuit-breaker",
+            support_url="https://gatewayz.ai/support",
+        )
+
+        return ErrorResponse(error=error)
+
+    @staticmethod
     def all_providers_failed(
         model: str,
         failed_providers: List[str],

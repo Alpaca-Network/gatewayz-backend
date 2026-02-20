@@ -22,12 +22,14 @@ CACHE_PREFIX_SUMMARY = "health:summary"
 CACHE_PREFIX_DASHBOARD = "health:dashboard"
 
 # Default TTLs (in seconds)
-DEFAULT_TTL_SYSTEM = 60
-DEFAULT_TTL_PROVIDERS = 60
-DEFAULT_TTL_MODELS = 120
-DEFAULT_TTL_GATEWAYS = 60
-DEFAULT_TTL_SUMMARY = 60
-DEFAULT_TTL_DASHBOARD = 30
+# Aligned with HEALTH_CHECK_INTERVAL (300s) + buffer to prevent cache expiration
+# between health check cycles and avoid fallback to database queries
+DEFAULT_TTL_SYSTEM = 360       # 6 minutes (5min health check + 1min buffer)
+DEFAULT_TTL_PROVIDERS = 360    # 6 minutes
+DEFAULT_TTL_MODELS = 360       # 6 minutes (was 120s - caused 3min gap)
+DEFAULT_TTL_GATEWAYS = 360     # 6 minutes
+DEFAULT_TTL_SUMMARY = 360      # 6 minutes
+DEFAULT_TTL_DASHBOARD = 90     # 1.5 minutes (more frequently accessed)
 
 
 class SimpleHealthCache:
@@ -36,14 +38,15 @@ class SimpleHealthCache:
     def __init__(self):
         self.redis_client = get_redis_client()
 
-    def set_cache(self, key: str, data: Any, ttl: int = 60) -> bool:
+    def set_cache(self, key: str, data: Any, ttl: int = 60, max_retries: int = 2) -> bool:
         """
-        Store data in Redis cache
+        Store data in Redis cache with retry logic for transient failures
 
         Args:
             key: Cache key
             data: Data to cache (dict or dataclass)
             ttl: Time to live in seconds
+            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             True if successful, False otherwise
@@ -52,35 +55,76 @@ class SimpleHealthCache:
             logger.debug("Redis client not available, skipping cache")
             return False
 
-        try:
-            # Serialize data to JSON
-            if isinstance(data, dict):
-                serialized = json.dumps(data, default=str)
-            else:
-                # Handle dataclass/Pydantic model
-                if hasattr(data, "model_dump"):
-                    serialized = json.dumps(data.model_dump(), default=str)
-                elif hasattr(data, "__dict__"):
-                    serialized = json.dumps(data.__dict__, default=str)
-                else:
+        # TRANSIENT FAILURE FIX: Retry logic for Redis cache operations
+        for attempt in range(max_retries + 1):
+            try:
+                # Serialize data to JSON
+                if isinstance(data, dict):
                     serialized = json.dumps(data, default=str)
+                else:
+                    # Handle dataclass/Pydantic model
+                    if hasattr(data, "model_dump"):
+                        serialized = json.dumps(data.model_dump(), default=str)
+                    elif hasattr(data, "__dict__"):
+                        serialized = json.dumps(data.__dict__, default=str)
+                    else:
+                        serialized = json.dumps(data, default=str)
 
-            # Store in Redis
-            self.redis_client.setex(key, ttl, serialized)
-            logger.debug(f"Cached {key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
-            return True
+                # Store in Redis
+                self.redis_client.setex(key, ttl, serialized)
 
-        except Exception as e:
-            logger.error(f"Failed to cache {key}: {e}", exc_info=True)
-            logger.error(f"Cache write error type: {type(e).__name__}, Data type: {type(data).__name__}")
-            return False
+                if attempt > 0:
+                    logger.debug(f"Cached {key} after {attempt + 1} attempts (TTL: {ttl}s, size: {len(serialized)} bytes)")
+                else:
+                    logger.debug(f"Cached {key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
+                return True
 
-    def get_cache(self, key: str) -> dict | None:
+            except Exception as e:
+                # TRANSIENT FAILURE FIX: Check if error is transient
+                error_str = str(e).lower()
+                is_transient = any(
+                    pattern in error_str
+                    for pattern in [
+                        "timeout",
+                        "connection",
+                        "network",
+                        "redis",
+                        "upstash",
+                        "unavailable",
+                        "refused",
+                        "reset",
+                    ]
+                )
+
+                if is_transient and attempt < max_retries:
+                    logger.warning(
+                        f"Transient Redis cache write error for {key} "
+                        f"(attempt {attempt + 1}/{max_retries + 1}): {type(e).__name__}, retrying..."
+                    )
+                    # Brief delay before retry
+                    import time
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
+                    continue
+
+                # Non-transient error or max retries reached
+                logger.error(
+                    f"Failed to cache {key} after {attempt + 1} attempts: "
+                    f"{type(e).__name__}: {str(e)[:100]}"
+                )
+                if attempt == 0:
+                    # Log full traceback only on first attempt
+                    logger.debug(f"Cache write error details", exc_info=True)
+                return False
+
+        return False
+
+    def get_cache(self, key: str, max_retries: int = 2) -> dict | None:
         """
-        Retrieve data from Redis cache
+        Retrieve data from Redis cache with retry logic for transient failures
 
         Args:
             key: Cache key
+            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             Deserialized data or None if not found
@@ -89,18 +133,56 @@ class SimpleHealthCache:
             logger.debug("Redis client not available, skipping cache retrieval")
             return None
 
-        try:
-            data = self.redis_client.get(key)
-            if data:
-                logger.debug(f"Cache HIT for {key} (size: {len(data)} bytes)")
-                return json.loads(data)
-            logger.debug(f"Cache MISS for {key}")
-            return None
+        # TRANSIENT FAILURE FIX: Retry logic for Redis cache reads
+        for attempt in range(max_retries + 1):
+            try:
+                data = self.redis_client.get(key)
+                if data:
+                    if attempt > 0:
+                        logger.debug(f"Cache HIT for {key} after {attempt + 1} attempts (size: {len(data)} bytes)")
+                    else:
+                        logger.debug(f"Cache HIT for {key} (size: {len(data)} bytes)")
+                    return json.loads(data)
+                logger.debug(f"Cache MISS for {key}")
+                return None
 
-        except Exception as e:
-            logger.error(f"Failed to retrieve cache {key}: {e}", exc_info=True)
-            logger.error(f"Cache retrieval error type: {type(e).__name__}")
-            return None
+            except Exception as e:
+                # TRANSIENT FAILURE FIX: Check if error is transient
+                error_str = str(e).lower()
+                is_transient = any(
+                    pattern in error_str
+                    for pattern in [
+                        "timeout",
+                        "connection",
+                        "network",
+                        "redis",
+                        "upstash",
+                        "unavailable",
+                        "refused",
+                        "reset",
+                    ]
+                )
+
+                if is_transient and attempt < max_retries:
+                    logger.warning(
+                        f"Transient Redis cache read error for {key} "
+                        f"(attempt {attempt + 1}/{max_retries + 1}): {type(e).__name__}, retrying..."
+                    )
+                    # Brief delay before retry
+                    import time
+                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
+                    continue
+
+                # Non-transient error or max retries reached
+                logger.error(
+                    f"Failed to read cache {key} after {attempt + 1} attempts: "
+                    f"{type(e).__name__}: {str(e)[:100]}"
+                )
+                if attempt == 0:
+                    logger.debug(f"Cache read error details", exc_info=True)
+                return None
+
+        return None
 
     def delete_cache(self, key: str) -> bool:
         """Delete cache entry"""

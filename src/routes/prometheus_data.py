@@ -7,10 +7,10 @@ This module provides REST API endpoints specifically designed for the Railway Gr
 All endpoints are under the /prometheus/data/* path.
 
 Endpoints:
-- GET /prometheus/data/metrics               → Prometheus format metrics for scraping
-- GET /prometheus/data/cache/status          → Cache status and statistics
-- DELETE /prometheus/data/cache/invalidate   → Invalidate all caches
-- GET /prometheus/data/instrumentation/*     → Instrumentation status (Loki, Tempo)
+- GET /prometheus/data/metrics                    → Prometheus format metrics for scraping
+- GET /prometheus/data/admin/cache/status         → Cache status and statistics (admin-only)
+- DELETE /prometheus/data/admin/cache/invalidate  → Invalidate all caches (admin-only)
+- GET /prometheus/data/instrumentation/*          → Instrumentation status (Loki, Tempo)
 
 PROMETHEUS METRICS EXPOSED (for Grafana alerting):
 - health_score{provider="..."} - Provider health score (0-100)
@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
-from src.security.deps import get_optional_api_key
+from src.security.deps import get_optional_api_key, require_admin
 
 logger = logging.getLogger(__name__)
 
@@ -79,10 +79,10 @@ async def _invalidate_cache(pattern: str = "*") -> int:
 # Cache Management Endpoints
 # ============================================================================
 
-@router.delete("/cache/invalidate")
+@router.delete("/admin/cache/invalidate")
 async def invalidate_cache(
     pattern: str = Query("*", description="Cache key pattern to invalidate (* for all)"),
-    api_key: str | None = Depends(get_optional_api_key)
+    admin_user: dict = Depends(require_admin)
 ):
     """
     Invalidate prometheus data cache entries.
@@ -99,8 +99,8 @@ async def invalidate_cache(
     }
 
 
-@router.get("/cache/status")
-async def get_cache_status(api_key: str | None = Depends(get_optional_api_key)):
+@router.get("/admin/cache/status")
+async def get_cache_status(admin_user: dict = Depends(require_admin)):
     """
     Get cache status and statistics.
 

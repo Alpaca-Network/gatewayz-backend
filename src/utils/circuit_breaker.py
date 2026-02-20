@@ -19,13 +19,17 @@ Usage:
         raise
 """
 
+import json
 import logging
 import time
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import RLock
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_REDIS_KEY_PREFIX = "circuit_breaker"
+_REDIS_TTL = 3600  # 1 hour — auto-expire stale entries
 
 
 @dataclass
@@ -65,7 +69,7 @@ class ProviderCircuitBreaker:
         self.recovery_timeout = recovery_timeout
         self.success_threshold = success_threshold
         self._states: dict[str, ProviderState] = {}
-        self._lock = Lock()
+        self._lock = RLock()
 
         logger.info(
             f"Circuit breaker initialized: "
@@ -73,10 +77,76 @@ class ProviderCircuitBreaker:
             f"recovery_timeout={recovery_timeout}s"
         )
 
+    # ------------------------------------------------------------------
+    # Redis persistence (optional — degrades gracefully when unavailable)
+    # ------------------------------------------------------------------
+
+    def _save_state_to_redis(self, provider: str) -> None:
+        """Persist the current state for *provider* to Redis.
+
+        Called whenever the circuit transitions state (open / half-open /
+        closed). Silently skips if Redis is unavailable so the breaker
+        continues to work in-memory only.
+        """
+        try:
+            from src.config.redis_config import get_redis_client
+            client = get_redis_client()
+            if client is None:
+                return
+            state = self._states.get(provider)
+            if state is None:
+                return
+            payload = json.dumps({
+                "failure_count": state.failure_count,
+                "last_failure_time": state.last_failure_time,
+                "last_success_time": state.last_success_time,
+                "consecutive_failures": state.consecutive_failures,
+                "is_open": state.is_open,
+                "total_requests": state.total_requests,
+                "total_failures": state.total_failures,
+            })
+            key = f"{_REDIS_KEY_PREFIX}:{provider}"
+            client.setex(key, _REDIS_TTL, payload)
+        except Exception as exc:
+            logger.debug(f"circuit_breaker: failed to save state for {provider} to Redis: {exc}")
+
+    def _restore_state_from_redis(self, provider: str) -> None:
+        """Load persisted state for *provider* from Redis into memory.
+
+        Called lazily from ``_get_state`` the first time a provider is
+        accessed after a restart. If Redis is unavailable or holds no
+        entry the provider starts with a fresh ``ProviderState``.
+        """
+        try:
+            from src.config.redis_config import get_redis_client
+            client = get_redis_client()
+            if client is None:
+                return
+            key = f"{_REDIS_KEY_PREFIX}:{provider}"
+            raw = client.get(key)
+            if raw is None:
+                return
+            data = json.loads(raw)
+            state = self._states[provider]  # already created by _get_state
+            state.failure_count = int(data.get("failure_count", 0))
+            state.last_failure_time = float(data.get("last_failure_time", 0.0))
+            state.last_success_time = float(data.get("last_success_time", 0.0))
+            state.consecutive_failures = int(data.get("consecutive_failures", 0))
+            state.is_open = bool(data.get("is_open", False))
+            state.total_requests = int(data.get("total_requests", 0))
+            state.total_failures = int(data.get("total_failures", 0))
+            if state.is_open:
+                logger.info(
+                    f"Circuit breaker RESTORED OPEN state for {provider} from Redis"
+                )
+        except Exception as exc:
+            logger.debug(f"circuit_breaker: failed to restore state for {provider} from Redis: {exc}")
+
     def _get_state(self, provider: str) -> ProviderState:
-        """Get or create provider state."""
+        """Get or create provider state, restoring from Redis on first access."""
         if provider not in self._states:
             self._states[provider] = ProviderState()
+            self._restore_state_from_redis(provider)
         return self._states[provider]
 
     def should_skip(self, provider: str) -> bool:
@@ -122,6 +192,7 @@ class ProviderCircuitBreaker:
                 # Close the circuit on success (half-open → closed)
                 state.is_open = False
                 logger.info(f"Circuit breaker CLOSED for {provider} (success after recovery)")
+                self._save_state_to_redis(provider)
 
     def record_failure(self, provider: str, error: str | None = None) -> None:
         """Record a failed request to provider."""
@@ -141,6 +212,7 @@ class ProviderCircuitBreaker:
                         f"(consecutive failures: {state.consecutive_failures}, "
                         f"error: {error or 'unknown'})"
                     )
+                    self._save_state_to_redis(provider)
 
     def reset(self, provider: str) -> None:
         """Manually reset circuit for a provider."""
@@ -148,6 +220,13 @@ class ProviderCircuitBreaker:
             if provider in self._states:
                 self._states[provider] = ProviderState()
                 logger.info(f"Circuit breaker RESET for {provider}")
+                try:
+                    from src.config.redis_config import get_redis_client
+                    client = get_redis_client()
+                    if client:
+                        client.delete(f"{_REDIS_KEY_PREFIX}:{provider}")
+                except Exception as exc:
+                    logger.debug(f"circuit_breaker: failed to delete Redis key for {provider}: {exc}")
 
     def reset_all(self) -> None:
         """Reset all circuit breakers."""

@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 # Get app name from environment or use default
 APP_NAME = os.environ.get("APP_NAME", "gatewayz")
 
+
+def get_trace_exemplar() -> dict[str, str] | None:
+    """
+    Get the current OpenTelemetry trace ID as a Prometheus exemplar.
+
+    Returns {"trace_id": "<hex>"} when a valid trace context exists,
+    or None when tracing is unavailable. Prometheus exemplars let you
+    click from a metric datapoint directly to the corresponding trace
+    in Tempo via Grafana.
+    """
+    try:
+        from opentelemetry import trace
+
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        if ctx and ctx.is_valid:
+            return {"trace_id": format(ctx.trace_id, "032x")}
+    except Exception:
+        pass
+    return None
+
 # Clear any existing metrics from the registry to avoid duplication issues
 # This is necessary because Prometheus uses a global registry that persists across imports
 try:
@@ -74,7 +95,7 @@ fastapi_requests_total = get_or_create_metric(
     Counter,
     "fastapi_requests_total",
     "Total FastAPI requests",
-    ["app_name", "method", "path", "status_code"],
+    ["app_name", "method", "path", "status_code", "status_class"],
 )
 
 fastapi_requests_duration_seconds = get_or_create_metric(
@@ -97,7 +118,7 @@ http_request_count = get_or_create_metric(
     Counter,
     "http_requests_total",
     "Total HTTP requests by method, endpoint and status code",
-    ["method", "endpoint", "status_code"],
+    ["method", "endpoint", "status_code", "status_class"],
 )
 
 http_request_duration = get_or_create_metric(
@@ -527,6 +548,45 @@ current_rate_limit = get_or_create_metric(
     ["limit_type"],
 )
 
+# ==================== Velocity Mode Metrics ====================
+# Metrics for tracking velocity mode activations and system protection
+velocity_mode_active = get_or_create_metric(
+    Gauge,
+    "velocity_mode_active",
+    "Velocity mode status (1=active, 0=inactive)",
+)
+
+velocity_mode_activations_total = get_or_create_metric(
+    Counter,
+    "velocity_mode_activations_total",
+    "Total velocity mode activations",
+)
+
+velocity_mode_duration_seconds = get_or_create_metric(
+    Histogram,
+    "velocity_mode_duration_seconds",
+    "Duration of velocity mode activations in seconds",
+    buckets=(10, 30, 60, 120, 180, 300, 600),
+)
+
+velocity_mode_error_rate = get_or_create_metric(
+    Gauge,
+    "velocity_mode_error_rate",
+    "Error rate that triggered velocity mode (0-1)",
+)
+
+velocity_mode_trigger_request_count = get_or_create_metric(
+    Gauge,
+    "velocity_mode_trigger_request_count",
+    "Number of requests in window when velocity mode triggered",
+)
+
+velocity_mode_trigger_error_count = get_or_create_metric(
+    Gauge,
+    "velocity_mode_trigger_error_count",
+    "Number of errors in window when velocity mode triggered",
+)
+
 # ==================== Provider Health Metrics ====================
 provider_availability = get_or_create_metric(
     Gauge,
@@ -707,6 +767,10 @@ queue_size = get_or_create_metric(
 # Scraped from Redis INFO on every Prometheus /metrics request.
 # Metric names match the standard redis_exporter convention so
 # the Grafana Redis-Cache dashboard queries work out of the box.
+#
+# These are all Gauges (not Counters) because we read absolute values
+# from Redis INFO. PromQL rate() works on monotonically-increasing
+# Gauges the same way it works on Counters.
 
 redis_up = get_or_create_metric(
     Gauge,
@@ -720,22 +784,65 @@ redis_memory_used_bytes = get_or_create_metric(
     "Total bytes allocated by Redis",
 )
 
+redis_memory_max_bytes = get_or_create_metric(
+    Gauge,
+    "redis_memory_max_bytes",
+    "Maximum memory configured for Redis (maxmemory)",
+)
+
 redis_connected_clients = get_or_create_metric(
     Gauge,
     "redis_connected_clients",
     "Number of connected client connections",
 )
 
-redis_expired_keys = get_or_create_metric(
+redis_uptime_in_seconds = get_or_create_metric(
     Gauge,
-    "redis_expired_keys",
+    "redis_uptime_in_seconds",
+    "Redis server uptime in seconds",
+)
+
+redis_commands_processed_total = get_or_create_metric(
+    Gauge,
+    "redis_commands_processed_total",
+    "Total number of commands processed by Redis",
+)
+
+redis_keyspace_hits_total = get_or_create_metric(
+    Gauge,
+    "redis_keyspace_hits_total",
+    "Total number of successful key lookups",
+)
+
+redis_keyspace_misses_total = get_or_create_metric(
+    Gauge,
+    "redis_keyspace_misses_total",
+    "Total number of failed key lookups",
+)
+
+redis_expired_keys_total = get_or_create_metric(
+    Gauge,
+    "redis_expired_keys_total",
     "Total number of keys expired by TTL",
 )
 
-redis_evicted_keys = get_or_create_metric(
+redis_evicted_keys_total = get_or_create_metric(
     Gauge,
-    "redis_evicted_keys",
+    "redis_evicted_keys_total",
     "Total number of keys evicted due to maxmemory policy",
+)
+
+redis_total_connections_received_total = get_or_create_metric(
+    Gauge,
+    "redis_total_connections_received_total",
+    "Total number of connections accepted by Redis",
+)
+
+redis_db_keys = get_or_create_metric(
+    Gauge,
+    "redis_db_keys",
+    "Number of keys in a Redis database",
+    ["db"],
 )
 
 # ==================== Performance Stage Metrics ====================
@@ -809,13 +916,26 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
     # Use provided app_name or fall back to environment variable
     app = app_name or APP_NAME
 
+    # Derive a human-readable status class to distinguish success vs client vs server errors
+    if 200 <= status_code < 300:
+        status_class = "2xx"
+    elif 400 <= status_code < 500:
+        status_class = "4xx"
+    elif 500 <= status_code < 600:
+        status_class = "5xx"
+    else:
+        status_class = "other"
+
     # Record in new Grafana-compatible metrics
     fastapi_requests_total.labels(
-        app_name=app, method=method, path=endpoint, status_code=status_code
+        app_name=app, method=method, path=endpoint, status_code=status_code,
+        status_class=status_class,
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
-    http_request_count.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
+    http_request_count.labels(
+        method=method, endpoint=endpoint, status_code=status_code, status_class=status_class,
+    ).inc()
 
 
 @contextmanager
@@ -830,14 +950,24 @@ def track_model_inference(provider: str, model: str):
         logger.debug(f"Model inference completed with status: {status} for {provider}/{model}")
     finally:
         duration = time.time() - start_time
-        model_inference_duration.labels(provider=provider, model=model).observe(duration)
-        model_inference_requests.labels(provider=provider, model=model, status=status).inc()
+        exemplar = get_trace_exemplar()
+        model_inference_duration.labels(provider=provider, model=model).observe(
+            duration, exemplar=exemplar
+        )
+        model_inference_requests.labels(provider=provider, model=model, status=status).inc(
+            1, exemplar=exemplar
+        )
 
 
 def record_tokens_used(provider: str, model: str, input_tokens: int, output_tokens: int):
     """Record token consumption metrics."""
-    tokens_used.labels(provider=provider, model=model, token_type="input").inc(input_tokens)
-    tokens_used.labels(provider=provider, model=model, token_type="output").inc(output_tokens)
+    exemplar = get_trace_exemplar()
+    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+        input_tokens, exemplar=exemplar
+    )
+    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+        output_tokens, exemplar=exemplar
+    )
 
 
 def record_credits_used(provider: str, model: str, user_id: str, credits: float):
@@ -1005,6 +1135,47 @@ def record_rate_limited_request(api_key: str, limit_type: str):
     # Note: api_key parameter kept for backwards compatibility but not used in labels
     # (avoid exposing PII in metric labels)
     rate_limited_requests.labels(limit_type=limit_type).inc()
+
+
+# ==================== Velocity Mode Helper Functions ====================
+
+
+def set_velocity_mode_active(active: bool):
+    """Set velocity mode active status.
+
+    Args:
+        active: True if velocity mode is active, False otherwise
+    """
+    velocity_mode_active.set(1 if active else 0)
+
+
+def record_velocity_mode_activation(error_rate: float, total_requests: int, error_count: int):
+    """Record a velocity mode activation event.
+
+    Args:
+        error_rate: Error rate that triggered activation (0-1)
+        total_requests: Total requests in the window
+        error_count: Number of errors in the window
+    """
+    velocity_mode_activations_total.inc()
+    velocity_mode_error_rate.set(error_rate)
+    velocity_mode_trigger_request_count.set(total_requests)
+    velocity_mode_trigger_error_count.set(error_count)
+    set_velocity_mode_active(True)
+
+
+def record_velocity_mode_deactivation(duration_seconds: float):
+    """Record velocity mode deactivation and duration.
+
+    Args:
+        duration_seconds: How long velocity mode was active
+    """
+    velocity_mode_duration_seconds.observe(duration_seconds)
+    set_velocity_mode_active(False)
+    # Reset trigger metrics
+    velocity_mode_error_rate.set(0)
+    velocity_mode_trigger_request_count.set(0)
+    velocity_mode_trigger_error_count.set(0)
 
 
 def set_provider_availability(provider: str, available: bool):
@@ -1845,6 +2016,16 @@ def collect_redis_info():
     Called automatically before each /metrics response via the
     metrics endpoint in main.py. Uses the existing Redis client
     from redis_config — no extra connections needed.
+
+    Exports all metrics needed by the Grafana Redis-Cache dashboard:
+    - Health: redis_up
+    - Memory: redis_memory_used_bytes, redis_memory_max_bytes
+    - Clients: redis_connected_clients
+    - Server: redis_uptime_in_seconds
+    - Stats: redis_commands_processed_total, redis_keyspace_hits_total,
+             redis_keyspace_misses_total, redis_expired_keys_total,
+             redis_evicted_keys_total, redis_total_connections_received_total
+    - Keyspace: redis_db_keys (per-database key count)
     """
     try:
         from src.config.redis_config import get_redis_client
@@ -1857,13 +2038,40 @@ def collect_redis_info():
         client.ping()
         redis_up.set(1)
 
+        # Fetch all INFO sections at once
         info = client.info()
 
+        # Memory
         redis_memory_used_bytes.set(info.get("used_memory", 0))
+        maxmemory = info.get("maxmemory", 0)
+        # Upstash and some configs report maxmemory=0 (unlimited) — use used_memory
+        # as a floor so Memory Usage % gauge doesn't divide by zero
+        if maxmemory and maxmemory > 0:
+            redis_memory_max_bytes.set(maxmemory)
+        else:
+            # For unlimited configs, report a sentinel so the gauge renders
+            # (dashboard handles 0 gracefully)
+            redis_memory_max_bytes.set(0)
+
+        # Clients
         redis_connected_clients.set(info.get("connected_clients", 0))
-        redis_expired_keys.set(info.get("expired_keys", 0))
-        redis_evicted_keys.set(info.get("evicted_keys", 0))
+
+        # Server
+        redis_uptime_in_seconds.set(info.get("uptime_in_seconds", 0))
+
+        # Stats (monotonically increasing — PromQL rate() works on these)
+        redis_commands_processed_total.set(info.get("total_commands_processed", 0))
+        redis_keyspace_hits_total.set(info.get("keyspace_hits", 0))
+        redis_keyspace_misses_total.set(info.get("keyspace_misses", 0))
+        redis_expired_keys_total.set(info.get("expired_keys", 0))
+        redis_evicted_keys_total.set(info.get("evicted_keys", 0))
+        redis_total_connections_received_total.set(info.get("total_connections_received", 0))
+
+        # Keyspace — per-database key counts (db0, db1, ...)
+        for key, value in info.items():
+            if key.startswith("db") and isinstance(value, dict):
+                redis_db_keys.labels(db=key).set(value.get("keys", 0))
 
     except Exception as e:
         redis_up.set(0)
-        logger.debug(f"Redis INFO collection failed: {e}")
+        logger.warning(f"Redis INFO collection failed: {type(e).__name__}: {e}")

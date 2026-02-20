@@ -7,7 +7,9 @@ This module provides endpoints to monitor connection pools, caching, and request
 import logging
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.security.deps import require_admin
 
 from src.services.connection_pool import get_pool_stats
 from src.services.request_prioritization import get_priority_stats
@@ -52,8 +54,8 @@ async def get_connection_pool_stats() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/health/optimizations/cache")
-async def get_cache_health() -> dict[str, Any]:
+@router.get("/admin/health/optimizations/cache")
+async def get_cache_health(admin_user: dict = Depends(require_admin)) -> dict[str, Any]:
     """
     Get response cache statistics.
 
@@ -82,8 +84,8 @@ async def get_prioritization_stats() -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/health/optimizations/cache/clear")
-async def clear_cache() -> dict[str, str]:
+@router.post("/admin/health/optimizations/cache/clear")
+async def clear_cache(admin_user: dict = Depends(require_admin)) -> dict[str, str]:
     """
     Clear the response cache.
 

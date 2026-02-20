@@ -17,7 +17,7 @@ import json
 import asyncio
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timedelta
 
 import src.config.supabase_config
 import src.db.users as users_module

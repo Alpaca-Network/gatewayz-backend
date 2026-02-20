@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 from openai import OpenAI
 
-from src.services.model_catalog_cache import cache_gateway_catalog, clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.gateway_health_service import clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
@@ -229,7 +230,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
     provider_model_id = model.get("id") or model.get("model_id")
     if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
-        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        logger.debug(
+            "AiHubMix model missing both 'id' and 'model_id' fields: %s",
+            sanitize_for_logging(str(model)),
+        )
         return None
 
     try:
@@ -244,7 +248,10 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         normalized_pricing = normalize_pricing_dict(pricing_data, PricingFormat.PER_1K_TOKENS)
 
         # Filter out models with zero pricing (free models can drain credits)
-        if float(normalized_pricing.get("prompt", 0)) == 0 and float(normalized_pricing.get("completion", 0)) == 0:
+        if (
+            float(normalized_pricing.get("prompt", 0)) == 0
+            and float(normalized_pricing.get("completion", 0)) == 0
+        ):
             logger.debug(f"Filtering out AiHubMix model {provider_model_id} with zero pricing")
             return None
 
@@ -311,12 +318,19 @@ def normalize_aihubmix_model(model) -> dict | None:
         provider_model_id = getattr(model, "id", None) or getattr(model, "model_id", None)
         raw_model_name = getattr(model, "name", provider_model_id)
         created_at = getattr(model, "created_at", None)
-        description = getattr(model, "description", None) or getattr(model, "desc", None) or "Model from AiHubMix"
+        description = (
+            getattr(model, "description", None)
+            or getattr(model, "desc", None)
+            or "Model from AiHubMix"
+        )
         context_length = getattr(model, "context_length", 4096)
 
     if not provider_model_id:
         # Use debug level to avoid excessive logging during catalog refresh
-        logger.debug("AiHubMix model missing both 'id' and 'model_id' fields: %s", sanitize_for_logging(str(model)))
+        logger.debug(
+            "AiHubMix model missing both 'id' and 'model_id' fields: %s",
+            sanitize_for_logging(str(model)),
+        )
         return None
 
     # Clean malformed model names (remove company prefix, parentheses, etc.)
@@ -390,7 +404,9 @@ def fetch_models_from_aihubmix():
         # Normalize models and filter out None (models without valid pricing)
         normalized_models = [
             m
-            for m in (normalize_aihubmix_model_with_pricing(model) for model in models_data if model)
+            for m in (
+                normalize_aihubmix_model_with_pricing(model) for model in models_data if model
+            )
             if m
         ]
 

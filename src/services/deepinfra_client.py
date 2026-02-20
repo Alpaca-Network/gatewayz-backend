@@ -232,32 +232,44 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
 
 
 def fetch_models_from_deepinfra():
-    """Fetch models from DeepInfra API and normalize to the catalog schema"""
+    """Fetch models from DeepInfra API with step-by-step logging"""
+    from src.utils.step_logger import StepLogger
+    from src.utils.provider_error_logging import (
+        ProviderErrorType,
+        ProviderFetchContext,
+        log_provider_fetch_error,
+        log_provider_fetch_success,
+    )
+    import time
+
+    start_time = time.time()
+    step_logger = StepLogger("DeepInfra Model Fetch", total_steps=4)
+    url = "https://api.deepinfra.com/models/list"
+
+    step_logger.start(provider="deepinfra", endpoint=url)
+
     try:
+        # Step 1: Validate API configuration
+        step_logger.step(1, "Validating API configuration", provider="deepinfra")
+
         if not Config.DEEPINFRA_API_KEY:
-            logger.error(
-                "DeepInfra API key not configured - please set DEEPINFRA_API_KEY environment variable"
-            )
+            error_msg = "DeepInfra API key not configured - please set DEEPINFRA_API_KEY environment variable"
+            step_logger.failure(ValueError(error_msg))
+            logger.error(f"[DEEPINFRA] {error_msg}")
             return None
 
-        # Log that we're attempting to fetch
-        api_key_preview = (
-            Config.DEEPINFRA_API_KEY[:5] + "***" if Config.DEEPINFRA_API_KEY else "NONE"
-        )
-        logger.info(f"DeepInfra API key found (preview: {api_key_preview})")
+        api_key_preview = Config.DEEPINFRA_API_KEY[:5] + "***"
+        step_logger.success(status="configured", api_key_preview=api_key_preview)
+
+        # Step 2: Fetch models from API
+        step_logger.step(2, "Fetching models from API", endpoint=url)
 
         headers = {
             "Authorization": f"Bearer {Config.DEEPINFRA_API_KEY}",
             "Content-Type": "application/json",
         }
 
-        # DeepInfra API - use /models/list endpoint which has better model data
-        url = "https://api.deepinfra.com/models/list"
-        logger.info("Fetching DeepInfra models from %s", sanitize_for_logging(str(url)))
-
         response = httpx.get(url, headers=headers, timeout=20.0)
-
-        logger.info(f"DeepInfra API response status: {response.status_code}")
         response.raise_for_status()
 
         payload = response.json()
@@ -268,9 +280,13 @@ def fetch_models_from_deepinfra():
         else:
             raw_models = payload.get("data", [])
 
-        logger.info(f"Fetched {len(raw_models)} models from DeepInfra")
+        step_logger.success(
+            raw_count=len(raw_models), status_code=response.status_code, response_type=type(payload).__name__
+        )
 
-        # Filter out None values since enrich_model_with_pricing may return None for gateway providers
+        # Step 3: Normalize and filter models
+        step_logger.step(3, "Normalizing and filtering models", raw_count=len(raw_models))
+
         normalized_models = [
             norm_model
             for model in raw_models
@@ -279,16 +295,96 @@ def fetch_models_from_deepinfra():
             if norm_model is not None
         ]
 
+        filtered_count = len(raw_models) - len(normalized_models)
+        step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count)
+
+        # Step 4: Cache the models
+        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+
         cache_gateway_catalog("deepinfra", normalized_models)
-        logger.info(f"Successfully cached {len(normalized_models)} DeepInfra models")
+        step_logger.success(cached_count=len(normalized_models))
+
+        # Complete with summary
+        duration = time.time() - start_time
+        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+
+        # Log success with provider_error_logging utility
+        log_provider_fetch_success(
+            provider_slug="deepinfra",
+            models_count=len(normalized_models),
+            duration=duration,
+            additional_context={"endpoint": url, "raw_count": len(raw_models)},
+        )
+
         return normalized_models
-    except httpx.HTTPStatusError as e:
-        error_msg = f"HTTP {e.response.status_code} - {sanitize_for_logging(e.response.text)}"
-        logger.error("DeepInfra HTTP error: %s", error_msg)
-        # Error tracking now automatic via Redis cache circuit breaker
+
+    except httpx.TimeoutException as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="deepinfra",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.API_TIMEOUT,
+        )
+        log_provider_fetch_error("deepinfra", e, context)
         return None
+
+    except httpx.HTTPStatusError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="deepinfra",
+            endpoint_url=url,
+            status_code=e.response.status_code,
+            duration=duration,
+        )
+        log_provider_fetch_error("deepinfra", e, context)
+        return None
+
+    except httpx.NetworkError as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="deepinfra",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.NETWORK_ERROR,
+        )
+        log_provider_fetch_error("deepinfra", e, context)
+        return None
+
+    except (ValueError, TypeError, KeyError) as e:
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="deepinfra",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.PARSING_ERROR,
+        )
+        log_provider_fetch_error("deepinfra", e, context)
+        return None
+
     except Exception as e:
-        error_msg = sanitize_for_logging(str(e))
-        logger.error("Failed to fetch models from DeepInfra: %s", error_msg, exc_info=True)
-        # Error tracking now automatic via Redis cache circuit breaker
+        duration = time.time() - start_time
+        step_logger.failure(e)
+
+        context = ProviderFetchContext(
+            provider_slug="deepinfra", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+        )
+        log_provider_fetch_error("deepinfra", e, context)
+
+        # Attempt database fallback
+        from src.services.models import apply_database_fallback
+
+        fallback_models = apply_database_fallback("deepinfra", normalize_deepinfra_model, e)
+        if fallback_models:
+            cache_gateway_catalog("deepinfra", fallback_models)
+            return fallback_models
+
         return None

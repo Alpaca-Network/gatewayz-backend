@@ -211,6 +211,36 @@ def enforce_model_failover_rules(
         suffix = normalized.split(":", 1)[1]
         if suffix in _OPENROUTER_SUFFIX_LOCKS:
             if "openrouter" in provider_chain:
+                # EMERGENCY FAILOVER: If OpenRouter circuit breaker is open,
+                # allow failover to paid alternatives for :free models
+                # This prevents complete service failure when OpenRouter is down
+                if suffix == "free":
+                    try:
+                        from src.services.circuit_breaker import get_circuit_breaker
+                        from src.services.circuit_breaker import CircuitState
+
+                        breaker = get_circuit_breaker("openrouter")
+                        breaker_state = breaker.get_state()
+
+                        if breaker_state.get("state") == CircuitState.OPEN.value:
+                            # Circuit breaker is open - try fallback providers
+                            # Strip :free suffix and use the base model
+                            base_model = model_id.rsplit(":", 1)[0]
+                            logger.warning(
+                                "⚠️ EMERGENCY FAILOVER: OpenRouter circuit breaker OPEN for model '%s'. "
+                                "Attempting failover to paid alternatives using base model '%s'. "
+                                "Paid rates may apply. Retry in %ss.",
+                                model_id,
+                                base_model,
+                                breaker_state.get("seconds_until_retry", 60)
+                            )
+                            # Return full provider chain to allow failover
+                            # The base model (without :free) should work on other providers
+                            return provider_chain
+                    except Exception as e:
+                        # If circuit breaker check fails, fall through to normal logic
+                        logger.warning(f"Failed to check circuit breaker for {model_id}: {e}")
+
                 logger.info(
                     "Model '%s' has OpenRouter-specific suffix ':%s'; locking to OpenRouter",
                     model_id,
@@ -219,6 +249,31 @@ def enforce_model_failover_rules(
                 return ["openrouter"]
 
     return provider_chain
+
+
+def get_fallback_model_id(model_id: str, provider: str) -> str:
+    """
+    Transform model ID for fallback provider when circuit breaker triggers failover.
+
+    For :free models when OpenRouter circuit breaker is open, strip the :free suffix
+    to allow the model to work on alternative (paid) providers.
+
+    Args:
+        model_id: Original model ID (e.g., "xiaomi/mimo-v2-flash:free")
+        provider: The fallback provider being used
+
+    Returns:
+        Transformed model ID suitable for the fallback provider
+    """
+    # Only transform :free models when failing over from OpenRouter
+    if ":free" in model_id.lower() and provider != "openrouter":
+        base_model = model_id.rsplit(":", 1)[0]
+        logger.info(
+            f"🔄 Model transformation for failover: '{model_id}' → '{base_model}' (provider: {provider})"
+        )
+        return base_model
+
+    return model_id
 
 
 def filter_by_circuit_breaker(

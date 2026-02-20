@@ -64,7 +64,8 @@ class TestDatabaseQueryInsights:
             mock_sentry.start_span.assert_called_once()
             call_kwargs = mock_sentry.start_span.call_args[1]
             assert call_kwargs["op"] == "db.postgresql"
-            assert call_kwargs["name"] == "SELECT * FROM users WHERE id = ?"
+            # Note: sentry-sdk 2.0.0 uses 'description', newer versions use 'name'
+            assert call_kwargs["description"] == "SELECT * FROM users WHERE id = ?"
 
     def test_trace_database_query_sets_required_attributes(self):
         """Test that db.system attribute is set for Sentry Queries Insights."""
@@ -132,7 +133,8 @@ class TestCacheInsights:
             mock_sentry.start_span.assert_called_once()
             call_kwargs = mock_sentry.start_span.call_args[1]
             assert call_kwargs["op"] == "cache.get"
-            assert call_kwargs["name"] == "user:123"
+            # Note: sentry-sdk 2.0.0 uses 'description', newer versions use 'name'
+            assert call_kwargs["description"] == "user:123"
 
             # Verify cache.hit and cache.key were set
             mock_span.set_data.assert_any_call("cache.key", ["user:123"])
@@ -201,7 +203,8 @@ class TestCacheInsights:
                 pass
 
             call_kwargs = mock_sentry.start_span.call_args[1]
-            assert call_kwargs["name"] == "user:1, user:2, user:3"
+            # Note: sentry-sdk 2.0.0 uses 'description', newer versions use 'name'
+            assert call_kwargs["description"] == "user:1, user:2, user:3"
 
             mock_span.set_data.assert_any_call("cache.key", ["user:1", "user:2", "user:3"])
 
@@ -260,7 +263,8 @@ class TestQueueMonitoring:
 
             call_kwargs = mock_sentry.start_span.call_args[1]
             assert call_kwargs["op"] == "queue.publish"
-            assert call_kwargs["name"] == "notifications"
+            # Note: sentry-sdk 2.0.0 uses 'description', newer versions use 'name'
+            assert call_kwargs["description"] == "notifications"
 
             mock_span.set_data.assert_any_call("messaging.destination.name", "notifications")
             mock_span.set_data.assert_any_call("messaging.system", "redis")
@@ -286,7 +290,8 @@ class TestQueueMonitoring:
 
             call_kwargs = mock_sentry.start_span.call_args[1]
             assert call_kwargs["op"] == "queue.process"
-            assert call_kwargs["name"] == "notifications"
+            # Note: sentry-sdk 2.0.0 uses 'description', newer versions use 'name'
+            assert call_kwargs["description"] == "notifications"
 
             mock_span.set_data.assert_any_call("messaging.destination.name", "notifications")
             mock_span.set_data.assert_any_call("messaging.message.retry.count", 2)

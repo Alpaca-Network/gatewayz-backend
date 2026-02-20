@@ -150,6 +150,9 @@ class Config:
 
     # Anthropic Direct API / Autonomous Monitoring
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    # Model to use for Anthropic API calls (bug fix generator, autonomous monitoring)
+    # Valid models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
+    ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
     # Chutes.ai Configuration
     CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
@@ -303,6 +306,14 @@ class Config:
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
+    # GZip Compression Configuration
+    # Minimum response size (bytes) before GZip compression is applied.
+    # 1 KB (1024 bytes) is a reasonable floor: below this the gzip header overhead
+    # (~20 bytes) and CPU cost outweigh the savings. Streaming responses (SSE, ndjson)
+    # are always excluded regardless of this setting.
+    # Override with GZIP_MINIMUM_SIZE env var.
+    GZIP_MINIMUM_SIZE: int = int(os.environ.get("GZIP_MINIMUM_SIZE", "1024"))
+
     # ==================== Monitoring & Observability Configuration ====================
 
     # Sentry Configuration
@@ -358,6 +369,15 @@ class Config:
     TEMPO_SKIP_REACHABILITY_CHECK = os.environ.get(
         "TEMPO_SKIP_REACHABILITY_CHECK", "true"
     ).lower() in {"1", "true", "yes"}
+    # When FastAPIInstrumentor is active it already creates a server span per request
+    # (including HTTP method, route, and status code). Set this to true to prevent
+    # TraceContextMiddleware from emitting duplicate request/response log lines.
+    # Header injection (x-trace-id, x-span-id) is always performed regardless of this flag.
+    OTEL_AUTO_INSTRUMENTED = os.environ.get("OTEL_AUTO_INSTRUMENTED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     # Grafana Loki Configuration
     LOKI_ENABLED = os.environ.get("LOKI_ENABLED", "false").lower() in {
@@ -396,30 +416,6 @@ class Config:
     ARIZE_SPACE_ID = os.environ.get("ARIZE_SPACE_ID")
     ARIZE_API_KEY = os.environ.get("ARIZE_API_KEY")
     ARIZE_PROJECT_NAME = os.environ.get("ARIZE_PROJECT_NAME", "GATEWAYZ")
-
-    # Langfuse LLM Observability Configuration
-    # Langfuse provides tracing, scoring, and analytics for LLM applications
-    # See: https://langfuse.com or self-host at https://github.com/langfuse/langfuse
-    LANGFUSE_ENABLED = os.environ.get("LANGFUSE_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    LANGFUSE_PUBLIC_KEY = os.environ.get("LANGFUSE_PUBLIC_KEY")
-    LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY")
-    LANGFUSE_HOST = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com")
-    # Enable debug mode for Langfuse SDK (logs all SDK operations)
-    LANGFUSE_DEBUG = os.environ.get("LANGFUSE_DEBUG", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # Flush interval in seconds for batching traces (default: 1 second)
-    LANGFUSE_FLUSH_INTERVAL = float(os.environ.get("LANGFUSE_FLUSH_INTERVAL", "1.0"))
-    # Enable OpenAI SDK auto-instrumentation via Langfuse
-    LANGFUSE_OPENAI_INSTRUMENTATION = os.environ.get(
-        "LANGFUSE_OPENAI_INSTRUMENTATION", "false"
-    ).lower() in {"1", "true", "yes"}
 
     # Redis Configuration (for real-time metrics and rate limiting)
     REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {

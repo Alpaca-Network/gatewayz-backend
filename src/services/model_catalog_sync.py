@@ -154,7 +154,17 @@ def extract_pricing(model: dict[str, Any]) -> dict[str, Decimal | None]:
 
 
 def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
-    """Extract capability flags from normalized model"""
+    """Extract capability flags from normalized model.
+
+    Capability resolution strategy (metadata-first, name-based fallback):
+    1. Check explicit capability fields on the model dict (set by provider clients
+       that have authoritative knowledge, e.g. cohere_client.py).
+    2. Check architecture metadata (input_modalities for vision; supported_parameters
+       for function calling) — derived from provider API responses.
+    3. Fall back to model-name heuristics only when metadata is absent.
+       Name-based detection is a last resort because it breaks for new models
+       whose names don't follow the expected pattern.
+    """
     # Check metadata.architecture first (new location)
     metadata = model.get("metadata", {})
     architecture = metadata.get("architecture") if isinstance(metadata, dict) else None
@@ -165,14 +175,45 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
     # Determine capabilities based on modality and architecture
     supports_streaming = model.get("supports_streaming", False)
-    supports_function_calling = model.get("supports_function_calling", False)
 
-    # Check for vision support
-    supports_vision = False
-    if isinstance(architecture, dict):
-        input_modalities = architecture.get("input_modalities", [])
+    # --- supports_function_calling ---
+    # Strategy: explicit field > supported_parameters metadata > name-based fallback
+    if model.get("supports_function_calling") is not None:
+        # Explicit flag set by provider client (authoritative)
+        supports_function_calling = bool(model["supports_function_calling"])
+    else:
+        supported_params = model.get("supported_parameters") or []
+        if isinstance(supported_params, list) and supported_params:
+            # Provider API returned a parameter list — check for tool/function support
+            supports_function_calling = any(
+                p in supported_params for p in ("tools", "tool_choice", "function_call", "functions")
+            )
+        else:
+            # Fall back to name-based detection only if metadata is missing.
+            # This is approximate and may miss newly released models.
+            model_id = (model.get("id") or model.get("slug") or "").lower()
+            supports_function_calling = any(
+                pattern in model_id
+                for pattern in ("gpt-4", "gpt-3.5-turbo", "claude-3", "gemini", "mistral", "llama-3")
+            )
+
+    # --- supports_vision ---
+    # Strategy: explicit field > input_modalities metadata > name-based fallback
+    if model.get("supports_vision") is not None:
+        # Explicit flag set by provider client (authoritative)
+        supports_vision = bool(model["supports_vision"])
+    elif isinstance(architecture, dict) and architecture.get("input_modalities"):
+        # Provider API returned input_modalities — use that (authoritative)
+        input_modalities = architecture["input_modalities"]
         if isinstance(input_modalities, list):
             supports_vision = "image" in input_modalities
+        else:
+            supports_vision = False
+    else:
+        # Fall back to name-based detection only if metadata is missing.
+        # This is approximate and may miss newly released vision models.
+        model_id = (model.get("id") or model.get("slug") or "").lower()
+        supports_vision = "vision" in model_id or "vl" in model_id
 
     return {
         "supports_streaming": supports_streaming,
@@ -205,7 +246,12 @@ def transform_normalized_model_to_db_schema(
         )
 
         if not provider_model_id:
-            logger.warning(f"Skipping model without provider_model_id from {provider_slug}: {normalized_model}")
+            logger.warning(
+                f"[{provider_slug.upper()}] Model SKIPPED | "
+                f"Reason: Missing provider_model_id | "
+                f"Available keys: {list(normalized_model.keys())} | "
+                f"Name: {normalized_model.get('name', 'N/A')}"
+            )
             return None
 
         # Extract model_name (common display name - NOT necessarily unique)
@@ -219,7 +265,12 @@ def transform_normalized_model_to_db_schema(
         )
 
         if not model_name:
-            logger.warning(f"Skipping model without model_name from {provider_slug}: {normalized_model}")
+            logger.warning(
+                f"[{provider_slug.upper()}] Model SKIPPED | "
+                f"Reason: Missing model_name | "
+                f"Provider Model ID: {provider_model_id} | "
+                f"Available keys: {list(normalized_model.keys())}"
+            )
             return None
 
         # Safety validation: ensure name is clean even if normalization missed it
@@ -317,8 +368,17 @@ def transform_normalized_model_to_db_schema(
         return model_data
 
     except Exception as e:
+        model_id = normalized_model.get('id', 'UNKNOWN')
+        model_name = normalized_model.get('name', 'UNKNOWN')
         logger.error(
-            f"Error transforming model {normalized_model.get('id')} from {provider_slug}: {e}"
+            f"[{provider_slug.upper()}] Transformation EXCEPTION | "
+            f"Model ID: {model_id} | "
+            f"Model Name: {model_name} | "
+            f"Error Type: {type(e).__name__} | "
+            f"Error: {str(e)} | "
+            f"Available Keys: {list(normalized_model.keys())[:10]} | "
+            f"Provider ID: {provider_id}",
+            exc_info=False  # Don't include full traceback for transformation errors
         )
         return None
 
@@ -536,7 +596,7 @@ def sync_provider_models(
     provider_slug: str, dry_run: bool = False, batch_mode: bool = False
 ) -> dict[str, Any]:
     """
-    Sync models for a specific provider
+    Sync models for a specific provider with comprehensive performance tracking
 
     Args:
         provider_slug: Provider slug (e.g., 'openrouter', 'deepinfra')
@@ -545,11 +605,25 @@ def sync_provider_models(
             full catalog / unique / stats invalidation — caller handles those)
 
     Returns:
-        Dictionary with sync results
+        Dictionary with sync results including performance metrics
     """
+    import time
+
+    # Performance tracking
+    start_time = time.time()
+    metrics = {
+        "provider_check_duration": 0,
+        "fetch_duration": 0,
+        "transform_duration": 0,
+        "db_sync_duration": 0,
+        "cache_invalidation_duration": 0,
+    }
+
     try:
         # Ensure provider exists in database
+        provider_check_start = time.time()
         provider = ensure_provider_exists(provider_slug)
+        metrics["provider_check_duration"] = time.time() - provider_check_start
         if not provider:
             return {
                 "success": False,
@@ -576,13 +650,19 @@ def sync_provider_models(
                 "models_synced": 0,
             }
 
-        logger.info(f"Fetching models from {provider_slug}...")
+        logger.info(f"[{provider_slug.upper()}] Starting model fetch...")
 
         # Fetch models from provider API (these are already normalized)
+        fetch_start = time.time()
         normalized_models = fetch_func()
+        metrics["fetch_duration"] = time.time() - fetch_start
 
         if not normalized_models:
-            logger.warning(f"No models returned from {provider_slug}")
+            total_duration = time.time() - start_time
+            logger.warning(
+                f"[{provider_slug.upper()}] No models returned | "
+                f"Duration: {total_duration:.2f}s"
+            )
             return {
                 "success": True,
                 "provider": provider_slug,
@@ -590,11 +670,19 @@ def sync_provider_models(
                 "models_fetched": 0,
                 "models_synced": 0,
                 "message": "No models fetched (may be API error or empty catalog)",
+                "metrics": metrics,
+                "total_duration": total_duration,
             }
 
-        logger.info(f"Fetched {len(normalized_models)} models from {provider_slug}")
+        logger.info(
+            f"[{provider_slug.upper()}] Fetch completed | "
+            f"Models: {len(normalized_models)} | "
+            f"Duration: {metrics['fetch_duration']:.2f}s | "
+            f"Rate: {len(normalized_models) / metrics['fetch_duration']:.0f} models/sec"
+        )
 
         # Transform to database schema
+        transform_start = time.time()
         db_models = []
         skipped = 0
         for model in normalized_models:
@@ -607,11 +695,18 @@ def sync_provider_models(
                 else:
                     skipped += 1
             except Exception as e:
-                logger.error(f"Error transforming model {model.get('id')}: {e}")
+                logger.error(
+                    f"[{provider_slug.upper()}] Transformation FAILED | "
+                    f"Model ID: {model.get('id', 'UNKNOWN')} | "
+                    f"Error: {type(e).__name__}: {str(e)}"
+                )
                 skipped += 1
                 continue
 
+        metrics["transform_duration"] = time.time() - transform_start
+
         if not db_models:
+            total_duration = time.time() - start_time
             return {
                 "success": False,
                 "error": f"Failed to transform any models ({skipped} skipped)",
@@ -619,16 +714,32 @@ def sync_provider_models(
                 "provider_id": provider["id"],
                 "models_fetched": len(normalized_models),
                 "models_synced": 0,
+                "metrics": metrics,
+                "total_duration": total_duration,
             }
 
-        logger.info(f"Transformed {len(db_models)} models for {provider_slug} ({skipped} skipped)")
+        logger.info(
+            f"[{provider_slug.upper()}] Transformation completed | "
+            f"Transformed: {len(db_models)} | "
+            f"Skipped: {skipped} | "
+            f"Duration: {metrics['transform_duration']:.2f}s | "
+            f"Rate: {len(db_models) / metrics['transform_duration']:.0f} models/sec"
+        )
 
         # Sync to database (unless dry run)
         if not dry_run:
-            logger.info(f"Syncing {len(db_models)} models to database...")
+            logger.info(f"[{provider_slug.upper()}] Starting database sync...")
+            db_sync_start = time.time()
             synced_models = bulk_upsert_models(db_models)
             models_synced = len(synced_models) if synced_models else 0
-            logger.info(f"Successfully synced {models_synced} models for {provider_slug}")
+            metrics["db_sync_duration"] = time.time() - db_sync_start
+
+            logger.info(
+                f"[{provider_slug.upper()}] Database sync completed | "
+                f"Synced: {models_synced} | "
+                f"Duration: {metrics['db_sync_duration']:.2f}s | "
+                f"Rate: {models_synced / metrics['db_sync_duration']:.0f} models/sec"
+            )
 
             # Pricing is now synced directly during model sync via metadata.pricing_raw
             # The separate pricing sync service has been deprecated
@@ -637,6 +748,7 @@ def sync_provider_models(
             # In batch_mode, only invalidate provider-specific cache (no cascade
             # to full catalog). The caller (sync_all_providers) handles global
             # invalidation ONCE at the end instead of 38+ times per provider.
+            cache_invalidation_start = time.time()
             try:
                 from src.services.model_catalog_cache import (
                     invalidate_provider_catalog,
@@ -647,22 +759,32 @@ def sync_provider_models(
                 if batch_mode:
                     # Provider-only: cascade=False prevents invalidating full catalog
                     invalidate_provider_catalog(provider_slug, cascade=False)
-                    logger.debug(f"Cache INVALIDATE (batch, no cascade): Provider {provider_slug}")
+                    logger.debug(f"[{provider_slug.upper()}] Cache INVALIDATE (batch, no cascade)")
                 else:
                     # Single-provider sync: full cascade
                     invalidate_provider_catalog(provider_slug, cascade=True)
                     invalidate_unique_models()
                     invalidate_catalog_stats()
+                    logger.info(f"[{provider_slug.upper()}] Cache INVALIDATE (full cascade)")
 
-                logger.info(
-                    f"Cache invalidated for {provider_slug} after model sync. "
-                    f"Next request will fetch from database (DB-first) or API (legacy)."
-                )
             except Exception as cache_e:
-                logger.warning(f"Cache invalidation failed for {provider_slug}: {cache_e}")
+                logger.warning(f"[{provider_slug.upper()}] Cache invalidation failed: {cache_e}")
+
+            metrics["cache_invalidation_duration"] = time.time() - cache_invalidation_start
         else:
             models_synced = 0
-            logger.info(f"DRY RUN: Would sync {len(db_models)} models for {provider_slug}")
+            logger.info(f"[{provider_slug.upper()}] DRY RUN: Would sync {len(db_models)} models")
+
+        # Calculate total duration and efficiency metrics
+        total_duration = time.time() - start_time
+        models_per_sec = len(normalized_models) / total_duration if total_duration > 0 else 0
+
+        logger.info(
+            f"[{provider_slug.upper()}] SYNC COMPLETE | "
+            f"Total Duration: {total_duration:.2f}s | "
+            f"Models: {models_synced}/{len(normalized_models)} | "
+            f"Overall Rate: {models_per_sec:.0f} models/sec"
+        )
 
         return {
             "success": True,
@@ -673,6 +795,9 @@ def sync_provider_models(
             "models_skipped": skipped,
             "models_synced": models_synced,
             "dry_run": dry_run,
+            "metrics": metrics,
+            "total_duration": total_duration,
+            "models_per_sec": round(models_per_sec, 2),
         }
 
     except Exception as e:
@@ -690,17 +815,21 @@ def sync_all_providers(
     provider_slugs: list[str] | None = None, dry_run: bool = False
 ) -> dict[str, Any]:
     """
-    Sync models from all providers (or specified list)
+    Sync models from all providers with comprehensive performance tracking
 
     Args:
         provider_slugs: Optional list of specific providers to sync
         dry_run: If True, fetch but don't write to database
 
     Returns:
-        Dictionary with overall sync results
+        Dictionary with overall sync results and performance metrics
     """
+    import time
+
     try:
         from src.config.config import Config
+
+        sync_start_time = time.time()
 
         # Get providers to sync
         if provider_slugs:
@@ -715,7 +844,12 @@ def sync_all_providers(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
                 )
 
-        logger.info(f"Starting model sync for {len(providers_to_sync)} providers...")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"{'STARTING PROVIDER SYNC':^80}")
+        logger.info(f"{'='*80}")
+        logger.info(f"Providers to sync: {len(providers_to_sync)}")
+        logger.info(f"Dry run mode: {dry_run}")
+        logger.info(f"{'='*80}\n")
 
         results = []
         total_fetched = 0
@@ -727,7 +861,7 @@ def sync_all_providers(
         import gc
 
         for i, provider_slug in enumerate(providers_to_sync, 1):
-            logger.info(f"\n{'='*60}\nSyncing provider ({i}/{len(providers_to_sync)}): {provider_slug}\n{'='*60}")
+            logger.info(f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}")
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
 
@@ -764,25 +898,89 @@ def sync_all_providers(
                 logger.warning(f"Post-sync global cache invalidation failed: {cache_e}")
 
         success = len(errors) == 0
+        total_duration = time.time() - sync_start_time
 
-        logger.info(f"\n{'='*60}\nSync Summary\n{'='*60}")
-        logger.info(f"Providers processed: {len(providers_to_sync)}")
-        logger.info(f"Total models fetched: {total_fetched}")
-        logger.info(f"Total models transformed: {total_transformed}")
-        logger.info(f"Total models skipped: {total_skipped}")
-        logger.info(f"Total models synced: {total_synced}")
-        logger.info(f"Errors: {len(errors)}")
+        # Calculate performance metrics
+        avg_duration_per_provider = total_duration / len(providers_to_sync) if providers_to_sync else 0
+        overall_models_per_sec = total_fetched / total_duration if total_duration > 0 else 0
+
+        # Find slowest and fastest providers
+        slowest = max(results, key=lambda r: r.get('total_duration', 0)) if results else None
+        fastest = min(results, key=lambda r: r.get('total_duration', 999999)) if results else None
+
+        # Calculate success rate
+        success_count = sum(1 for r in results if r.get("success"))
+        success_rate = (success_count / len(results) * 100) if results else 0
+
+        # Print comprehensive dashboard
+        logger.info(f"\n{'='*80}")
+        logger.info(f"{'SYNC SUMMARY DASHBOARD':^80}")
+        logger.info(f"{'='*80}\n")
+
+        # Overall Statistics
+        logger.info(f"{'OVERALL STATISTICS':-<80}")
+        logger.info(f"{'Total Duration':<40} {total_duration:>19.2f}s")
+        logger.info(f"{'Providers Processed':<40} {len(providers_to_sync):>20}")
+        logger.info(f"{'Successful Syncs':<40} {success_count:>20} ({success_rate:.1f}%)")
+        logger.info(f"{'Failed Syncs':<40} {len(errors):>20}")
+        logger.info(f"{'Dry Run Mode':<40} {str(dry_run):>20}\n")
+
+        # Model Statistics
+        logger.info(f"{'MODEL STATISTICS':-<80}")
+        logger.info(f"{'Total Fetched':<40} {total_fetched:>20}")
+        logger.info(f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)")
+        logger.info(f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)")
+        logger.info(f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n")
+
+        # Performance Metrics
+        logger.info(f"{'PERFORMANCE METRICS':-<80}")
+        logger.info(f"{'Overall Rate':<40} {overall_models_per_sec:>15.0f} models/sec")
+        logger.info(f"{'Avg Duration per Provider':<40} {avg_duration_per_provider:>19.2f}s")
+
+        if slowest:
+            logger.info(f"{'Slowest Provider':<40} {slowest['provider']:>20} ({slowest.get('total_duration', 0):.2f}s)")
+        if fastest:
+            logger.info(f"{'Fastest Provider':<40} {fastest['provider']:>20} ({fastest.get('total_duration', 0):.2f}s)\n")
+
+        # Top 5 Largest Providers (by models synced)
+        top_providers = sorted(results, key=lambda r: r.get("models_synced", 0), reverse=True)[:5]
+        if top_providers:
+            logger.info(f"{'TOP 5 PROVIDERS (by models synced)':-<80}")
+            for rank, provider_result in enumerate(top_providers, 1):
+                prov_name = provider_result.get("provider", "unknown")
+                prov_count = provider_result.get("models_synced", 0)
+                prov_duration = provider_result.get("total_duration", 0)
+                prov_rate = provider_result.get("models_per_sec", 0)
+                logger.info(
+                    f"{rank}. {prov_name:<25} {prov_count:>10} models | "
+                    f"{prov_duration:>6.2f}s | {prov_rate:>6.0f} m/s"
+                )
+            logger.info("")
+
+        # Error Details
         if errors:
-            for error in errors:
-                logger.error(f"  - {error['provider']}: {error['error']}")
+            logger.info(f"{'ERRORS':-<80}")
+            for i, error in enumerate(errors, 1):
+                logger.error(f"{i}. {error['provider']:<25} {error['error']}")
+            logger.info("")
+
+        logger.info(f"{'='*80}\n")
 
         return {
             "success": success,
             "providers_processed": len(providers_to_sync),
+            "successful_syncs": success_count,
+            "failed_syncs": len(errors),
+            "success_rate_percent": round(success_rate, 2),
             "total_models_fetched": total_fetched,
             "total_models_transformed": total_transformed,
             "total_models_skipped": total_skipped,
             "total_models_synced": total_synced,
+            "total_duration": round(total_duration, 2),
+            "avg_duration_per_provider": round(avg_duration_per_provider, 2),
+            "overall_models_per_sec": round(overall_models_per_sec, 2),
+            "slowest_provider": slowest['provider'] if slowest else None,
+            "fastest_provider": fastest['provider'] if fastest else None,
             "errors": errors,
             "results": results,
             "dry_run": dry_run,

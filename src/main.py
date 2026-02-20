@@ -76,8 +76,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         dsn=Config.SENTRY_DSN,
         # Add data like request headers and IP for users
         send_default_pii=True,
-        # Enable sending logs to Sentry
-        enable_logs=True,
         # Set environment (development, staging, production)
         environment=Config.SENTRY_ENVIRONMENT,
         # Release tracking for Sentry release management
@@ -86,8 +84,6 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         traces_sampler=sentry_traces_sampler,
         # Reduced profiling: 5% (down from default)
         profiles_sample_rate=0.05,
-        # Set profile_lifecycle to "trace" to run profiler during transactions
-        profile_lifecycle="trace",
     )
     logger.info(
         f"✅ Sentry initialized with adaptive sampling "
@@ -197,32 +193,92 @@ def create_app() -> FastAPI:
 
     logger.info(f"   Allowed Headers: {allowed_headers}")
 
-    # OPTIMIZED: Add security middleware first to block bots before heavy logic
-    from src.config.redis_config import get_redis_client
+    # ---------------------------------------------------------------------------
+    # Middleware registration
+    #
+    # IMPORTANT: In FastAPI/Starlette, middleware added LAST is executed FIRST
+    # (it becomes the outermost wrapper around the application).  To reason
+    # about the stack in natural "request enters here first" order, register
+    # middleware from innermost → outermost, i.e. innermost first, outermost
+    # last.
+    #
+    # Desired execution order (outermost → innermost, i.e. first-to-last):
+    #   [1] Security        — IP rate limiting, bot blocking; must run first
+    #   [2] Timeout         — enforces 55 s hard deadline around everything below
+    #   [3] Concurrency     — global admission gate (queue / shed load)
+    #   [4] RequestID       — assigns X-Request-ID for correlation
+    #   [5] TraceContext    — propagates distributed-trace context
+    #   [6] AutoSentry      — captures unhandled errors before CORS/GZip strip them
+    #   [7] CORS            — handles OPTIONS pre-flight and injects CORS headers
+    #   [8] Observability   — records Prometheus metrics / latency after routing
+    #   [9] GZip            — compresses response bodies (innermost, last to touch body)
+    #  [10] StagingSecurity — staging-env access gate (no-op in production)
+    #  [11] Deprecation     — appends deprecation warnings to responses (innermost)
+    #
+    # Registration order below is therefore [11] → [1] (innermost first).
+    # ---------------------------------------------------------------------------
 
-    try:
-        redis_client = get_redis_client()
-        if redis_client:
-            app.add_middleware(SecurityMiddleware, redis_client=redis_client)
-            logger.info("  🛡️  Security middleware enabled (IP tiering & fingerprinting)")
-        else:
-            app.add_middleware(SecurityMiddleware)
-            logger.warning(
-                "  🛡️  Security middleware enabled with LOCAL fallback (Redis not available)"
-            )
-    except Exception as e:
-        # Fallback to in-memory limiting if redis is unavailable
-        app.add_middleware(SecurityMiddleware)
-        logger.warning(f"  🛡️  Security middleware enabled with LOCAL fallback (Redis error: {e})")
+    # [11] Deprecation — innermost; appends deprecation headers/warnings
+    from src.middleware.deprecation import DeprecationMiddleware
 
-    # OPTIMIZED: Add request timeout middleware first to prevent 504 Gateway Timeouts
-    # Middleware order matters! Last added = first executed
-    from src.middleware.request_timeout_middleware import RequestTimeoutMiddleware
+    app.add_middleware(DeprecationMiddleware)
+    logger.info("  ⚠️  [11] Deprecation middleware enabled (legacy endpoint warnings)")
 
-    app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
-    logger.info("  ⏱️  Request timeout middleware enabled (55s timeout to prevent 504 errors)")
+    # [10] StagingSecurity — gates access to the staging environment
+    from src.middleware.staging_security import StagingSecurityMiddleware
 
-    # Add concurrency control middleware (global admission gate)
+    app.add_middleware(StagingSecurityMiddleware)
+    logger.info("  🔒 [10] Staging security middleware enabled")
+
+    # [9] GZip — compresses response bodies; skips streaming (SSE/ndjson)
+    # GZip compression: threshold is 1 KB by default (configurable via GZIP_MINIMUM_SIZE env var).
+    # Responses smaller than the threshold are sent uncompressed — gzip header overhead
+    # (~20 bytes) and CPU cost make compression counterproductive for tiny payloads.
+    # SelectiveGZipMiddleware skips compression entirely for streaming responses
+    # (SSE / ndjson) to avoid buffering issues that would break chunk delivery.
+    app.add_middleware(SelectiveGZipMiddleware, minimum_size=Config.GZIP_MINIMUM_SIZE)
+    logger.info(
+        f"  🗜  [9] Selective GZip compression middleware enabled "
+        f"(threshold: {Config.GZIP_MINIMUM_SIZE} bytes, skips SSE/streaming)"
+    )
+
+    # [8] Observability — records Prometheus metrics and request latency
+    from src.middleware.observability_middleware import ObservabilityMiddleware
+
+    app.add_middleware(ObservabilityMiddleware)
+    logger.info("  📊 [8] Observability middleware enabled (automatic metrics tracking)")
+
+    # [7] CORS — handles OPTIONS pre-flight and injects Access-Control-* headers
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=allowed_headers,
+    )
+    logger.info("  🌐 [7] CORS middleware enabled")
+
+    # [6] AutoSentry — captures unhandled exceptions for Sentry before they are
+    #     swallowed or transformed by CORS / GZip layers above
+    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
+        from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
+
+        app.add_middleware(AutoSentryMiddleware)
+        logger.info("  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)")
+
+    # [5] TraceContext — propagates W3C traceparent / baggage for distributed tracing
+    from src.middleware.trace_context_middleware import TraceContextMiddleware
+
+    app.add_middleware(TraceContextMiddleware)
+    logger.info("  🔗 [5] Trace context middleware enabled (log-to-trace correlation)")
+
+    # [4] RequestID — assigns a unique X-Request-ID to every request
+    from src.middleware.request_id_middleware import RequestIDMiddleware
+
+    app.add_middleware(RequestIDMiddleware)
+    logger.info("  🆔 [4] Request ID middleware enabled (unique ID for all requests)")
+
+    # [3] Concurrency — global admission gate; queues or sheds excess requests
     from src.middleware.concurrency_middleware import ConcurrencyMiddleware
 
     app.add_middleware(
@@ -232,62 +288,33 @@ def create_app() -> FastAPI:
         queue_timeout=Config.CONCURRENCY_QUEUE_TIMEOUT,
     )
     logger.info(
-        f"  🚦 Concurrency middleware enabled "
+        f"  🚦 [3] Concurrency middleware enabled "
         f"(limit={Config.CONCURRENCY_LIMIT}, queue={Config.CONCURRENCY_QUEUE_SIZE})"
     )
 
-    # Add request ID middleware for error tracking and correlation
-    from src.middleware.request_id_middleware import RequestIDMiddleware
+    # [2] Timeout — enforces a 55 s hard deadline; wraps concurrency + inner layers
+    from src.middleware.request_timeout_middleware import RequestTimeoutMiddleware
 
-    app.add_middleware(RequestIDMiddleware)
-    logger.info("  🆔 Request ID middleware enabled (unique ID for all requests)")
+    app.add_middleware(RequestTimeoutMiddleware, timeout_seconds=55.0)
+    logger.info("  ⏱️  [2] Request timeout middleware enabled (55s timeout to prevent 504 errors)")
 
-    # Add trace context middleware for distributed tracing
-    from src.middleware.trace_context_middleware import TraceContextMiddleware
+    # [1] Security — outermost layer; IP rate limiting and bot blocking run first
+    from src.config.redis_config import get_redis_client
 
-    app.add_middleware(TraceContextMiddleware)
-    logger.info("  🔗 Trace context middleware enabled (log-to-trace correlation)")
-
-    # Add automatic Sentry error capture middleware (captures ALL route errors)
-    if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
-        from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
-
-        app.add_middleware(AutoSentryMiddleware)
-        logger.info("  🎯 Auto-Sentry middleware enabled (automatic error capture for all routes)")
-
-    # Add CORS middleware second (must be early for OPTIONS requests)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allowed_origins,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=allowed_headers,
-    )
-
-    # Add observability middleware for automatic metrics collection
-    from src.middleware.observability_middleware import ObservabilityMiddleware
-
-    app.add_middleware(ObservabilityMiddleware)
-    logger.info("  📊 Observability middleware enabled (automatic metrics tracking)")
-
-    # OPTIMIZED: Add GZip compression last (larger threshold = 10KB for better CPU efficiency)
-    # Only compress large responses (model catalogs, large JSON payloads)
-    # Uses SelectiveGZipMiddleware to skip compression for SSE streaming responses
-    # This prevents buffering issues where SSE chunks get bundled together
-    app.add_middleware(SelectiveGZipMiddleware, minimum_size=10000)
-    logger.info("  🗜  Selective GZip compression middleware enabled (threshold: 10KB, skips SSE)")
-
-    # Add staging security middleware (protects staging environment from unauthorized access)
-    from src.middleware.staging_security import StagingSecurityMiddleware
-
-    app.add_middleware(StagingSecurityMiddleware)
-    logger.info("  🔒 Staging security middleware enabled")
-
-    # Add deprecation middleware to warn users about legacy endpoints
-    from src.middleware.deprecation import DeprecationMiddleware
-
-    app.add_middleware(DeprecationMiddleware)
-    logger.info("  ⚠️  Deprecation middleware enabled (legacy endpoint warnings)")
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            app.add_middleware(SecurityMiddleware, redis_client=redis_client)
+            logger.info("  🛡️  [1] Security middleware enabled (IP tiering & fingerprinting)")
+        else:
+            app.add_middleware(SecurityMiddleware)
+            logger.warning(
+                "  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis not available)"
+            )
+    except Exception as e:
+        # Fallback to in-memory limiting if redis is unavailable
+        app.add_middleware(SecurityMiddleware)
+        logger.warning(f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})")
 
     # Security
     HTTPBearer()
@@ -304,24 +331,32 @@ def create_app() -> FastAPI:
     from src.services import prometheus_metrics  # noqa: F401
 
     @app.get("/metrics", tags=["monitoring"], include_in_schema=False)
-    async def metrics():
+    async def metrics(request: Request):
         """
         Prometheus metrics endpoint for monitoring.
 
-        Exposes metrics in Prometheus text format including:
-        - HTTP request counts and durations
-        - Model inference metrics (requests, latency, tokens)
-        - Database query metrics
-        - Cache hit/miss rates
-        - Rate limiting metrics
-        - Provider health metrics
-        - Business metrics (credits, tokens, subscriptions)
-        - Redis INFO metrics (memory, keyspace, clients, commands)
+        Supports both Prometheus text format and OpenMetrics format.
+        OpenMetrics format is required for serving exemplars (trace_id links
+        that let you click from a metric datapoint to the trace in Tempo).
+        Prometheus requests OpenMetrics when --enable-feature=exemplar-storage is set.
         """
         # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking)
         import asyncio
 
         await asyncio.to_thread(prometheus_metrics.collect_redis_info)
+
+        # Content negotiation: serve OpenMetrics when requested (carries exemplars),
+        # fall back to Prometheus text format for backward compatibility
+        accept = request.headers.get("accept", "")
+        if "application/openmetrics-text" in accept:
+            from prometheus_client.openmetrics.exposition import (
+                CONTENT_TYPE_LATEST as OPENMETRICS_CT,
+            )
+            from prometheus_client.openmetrics.exposition import (
+                generate_latest as generate_openmetrics,
+            )
+            return Response(generate_openmetrics(REGISTRY), media_type=OPENMETRICS_CT)
+
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
 
     logger.info("  [OK] Prometheus metrics endpoint at /metrics")
@@ -471,6 +506,7 @@ def create_app() -> FastAPI:
         ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
         ("rate_limits", "Rate Limiting"),
+        ("ip_whitelist", "IP Whitelist Management"),  # Admin IP whitelist management
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links
@@ -488,6 +524,7 @@ def create_app() -> FastAPI:
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
+        ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
     ]
 
     loaded_count = 0

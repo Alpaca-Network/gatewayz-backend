@@ -1,0 +1,48 @@
+# Ignore git repository
+.git
+.gitignore
+.gitguardian.yml
+.github
+
+# Ignore system files
+.DS_Store
+
+# Ignore dependencies and virtual environments
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.sqlite3
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Ignore local configuration
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Ignore build artifacts
+build
+dist
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+test_output.log
+logs.*.json
+
+# Ignore temporary files
+diagnose_otel.py
+test_limit.sh
+test_otel_connection.py
+test_pagination.py
+test_refactored_endpoints.py
+count_models_by_provider.py
+count_models_per_provider.py

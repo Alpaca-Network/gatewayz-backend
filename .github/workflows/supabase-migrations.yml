@@ -2,402 +2,199 @@ name: Supabase Migrations
 
 on:
   push:
-    branches:
-      - main
-      - staging
+    branches: [main]
     paths:
       - "supabase/migrations/*.sql"
-      - ".github/workflows/supabase-migrations.yml"
-  pull_request:
-    branches:
-      - main
-      - staging
-    paths:
-      - "supabase/migrations/*.sql"
+  schedule:
+    # Drift check every 6 hours
+    - cron: "0 */6 * * *"
   workflow_dispatch:
     inputs:
-      environment:
-        description: "Environment to apply migrations to"
-        required: true
-        default: "staging"
-        type: choice
-        options:
-          - production
-          - staging
       dry_run:
-        description: "Dry run (validate only, don't apply)"
+        description: "Dry run — validate only, don't apply"
         required: false
         default: false
         type: boolean
 
-concurrency:
-  group: supabase-migrations-${{ github.ref }}
-  cancel-in-progress: false  # Don't cancel migrations in progress
+permissions:
+  contents: write
+  pull-requests: write
 
-env:
-  SUPABASE_CLI_VERSION: "2.62.10"
+concurrency:
+  group: supabase-migrations
+  cancel-in-progress: false
 
 jobs:
-  # Determine environment based on branch
-  setup-environment:
-    name: Setup Environment
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    outputs:
-      environment: ${{ steps.set-env.outputs.environment }}
+  validate:
+    name: Validate Migrations
+    runs-on: ubuntu-latest
+    # Only validate when migration files are pushed (not on schedule/dispatch)
+    if: github.event_name == 'push'
 
     steps:
-      - name: Determine environment
-        id: set-env
+      - uses: actions/checkout@v4
+
+      - name: Check migration file naming
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            ENV="${{ github.event.inputs.environment }}"
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            # PRs always target staging for validation
-            ENV="staging"
-          else
-            # Auto-detect from branch
-            if [ "${{ github.ref }}" == "refs/heads/main" ]; then
-              ENV="production"
-            elif [ "${{ github.ref }}" == "refs/heads/staging" ]; then
-              ENV="staging"
-            else
-              ENV="staging"
-            fi
+          shopt -s nullglob
+          files=(supabase/migrations/*.sql)
+          shopt -u nullglob
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No migration files found"
+            exit 0
           fi
 
-          echo "environment=$ENV" >> $GITHUB_OUTPUT
-          echo "✅ Detected environment: $ENV"
-
-  # Validate migrations before applying
-  validate-migrations:
-    name: Validate Migrations
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: setup-environment
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history to detect new migrations
-
-      - name: Install Supabase CLI
-        run: |
-          echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-
-          # Download to temp directory to avoid conflicts with supabase/ config directory
-          mkdir -p /tmp/supabase-cli
-          cd /tmp/supabase-cli
-
-          # Download and extract
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
-
-          # Move to system path
-          sudo mv supabase /usr/local/bin/
-
-          # Verify installation
-          supabase --version
-
-      - name: Validate migration files syntax
-        run: |
-          echo "🔍 Validating SQL syntax in migration files..."
-
-          # Check for common SQL errors
-          error_count=0
-
-          for file in supabase/migrations/*.sql; do
-            if [ -f "$file" ]; then
-              echo "Checking: $file"
-
-              # Check for basic syntax issues
-              if grep -q "CREAT TABLE" "$file"; then
-                echo "❌ Error in $file: Found 'CREAT TABLE' (missing E)"
-                error_count=$((error_count + 1))
-              fi
-
-              if grep -q "SELCT\|SEELCT" "$file"; then
-                echo "❌ Error in $file: Found typo in SELECT"
-                error_count=$((error_count + 1))
-              fi
-
-              # Check for missing semicolons at end of statements
-              if ! tail -1 "$file" | grep -q ";"; then
-                echo "⚠️  Warning in $file: Last line doesn't end with semicolon"
-              fi
-
-              echo "✅ $file passed basic validation"
+          for file in "${files[@]}"; do
+            filename=$(basename "$file")
+            if ! [[ "$filename" =~ ^[0-9]{14}_[a-z0-9_]+\.sql$ ]]; then
+              echo "::error::Invalid migration filename: $filename (expected YYYYMMDDHHMMSS_description.sql)"
+              exit 1
             fi
           done
-
-          if [ $error_count -gt 0 ]; then
-            echo "❌ Found $error_count error(s) in migration files"
-            exit 1
-          fi
-
-          echo "✅ All migration files passed validation"
+          echo "All migration filenames are valid"
 
       - name: Check for destructive operations
         run: |
-          echo "🔍 Checking for potentially destructive operations..."
-
-          # Look for dangerous operations
-          dangerous_patterns=(
-            "DROP DATABASE"
-            "DROP SCHEMA public"
-            "TRUNCATE.*CASCADE"
-            "DELETE FROM.*WHERE.*1.*=.*1"
-          )
-
-          found_dangerous=false
-
           for file in supabase/migrations/*.sql; do
-            if [ -f "$file" ]; then
-              for pattern in "${dangerous_patterns[@]}"; do
-                if grep -iE "$pattern" "$file" > /dev/null; then
-                  echo "⚠️  WARNING: Found potentially destructive operation in $file: $pattern"
-                  found_dangerous=true
-                fi
-              done
-            fi
-          done
-
-          if [ "$found_dangerous" == "true" ]; then
-            echo "⚠️  Destructive operations detected - proceed with caution"
-            if [ "${{ needs.setup-environment.outputs.environment }}" == "production" ]; then
-              echo "❌ Blocking destructive operations in production"
-              echo "Please review migrations manually before applying"
+            [ -f "$file" ] || continue
+            if grep -iE "DROP DATABASE|DROP SCHEMA public|TRUNCATE.*CASCADE" "$file"; then
+              echo "::error::Destructive operation found in $file — review manually before applying"
               exit 1
             fi
-          else
-            echo "✅ No destructive operations detected"
-          fi
+          done
+          echo "No destructive operations detected"
 
-      - name: List new migrations
-        run: |
-          echo "📝 Detecting new migration files..."
-
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Compare against base branch
-            git diff --name-only origin/${{ github.base_ref }}...HEAD -- supabase/migrations/*.sql || echo "No new migrations"
-          else
-            # Show all migrations
-            ls -lh supabase/migrations/*.sql || echo "No migrations found"
-          fi
-
-  # Apply migrations to Supabase
-  apply-migrations:
-    name: Apply Migrations (${{ needs.setup-environment.outputs.environment }})
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [setup-environment, validate-migrations]
-    if: github.event_name != 'pull_request' && github.event.inputs.dry_run != 'true'
-    environment:
-      name: ${{ needs.setup-environment.outputs.environment }}
+  sync:
+    name: Sync Migrations
+    runs-on: ubuntu-latest
+    needs: validate
+    # Run after validate on push, or always on schedule/dispatch
+    if: |
+      always() &&
+      (needs.validate.result == 'success' || needs.validate.result == 'skipped')
+    environment: production
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
         with:
-          fetch-depth: 0
+          version: latest
 
-      - name: Install Supabase CLI
-        run: |
-          echo "📦 Installing Supabase CLI v${{ env.SUPABASE_CLI_VERSION }}..."
-
-          # Download to temp directory to avoid conflicts with supabase/ config directory
-          mkdir -p /tmp/supabase-cli
-          cd /tmp/supabase-cli
-
-          # Download and extract
-          curl -sSfL https://github.com/supabase/cli/releases/download/v${{ env.SUPABASE_CLI_VERSION }}/supabase_linux_amd64.tar.gz | tar -xzf -
-
-          # Move to system path
-          sudo mv supabase /usr/local/bin/
-
-          # Verify installation
-          supabase --version
-
-      - name: Configure Supabase CLI
+      - name: Link Supabase project
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          echo "🔐 Authenticating with Supabase..."
-
-          # Login with access token (recommended method)
-          if [ -n "$SUPABASE_ACCESS_TOKEN" ]; then
-            echo "$SUPABASE_ACCESS_TOKEN" | supabase login --token "$SUPABASE_ACCESS_TOKEN"
-            echo "✅ Authenticated with access token"
-          else
-            echo "⚠️  No access token found, will use database password"
-          fi
-
-      - name: Link to Supabase project
-        env:
-          ENVIRONMENT: ${{ needs.setup-environment.outputs.environment }}
-          # Production secrets
-          PROD_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
-          PROD_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          # Staging secrets
-          STAGING_PROJECT_REF: ${{ secrets.SUPABASE_STAGING_PROJECT_REF }}
-          STAGING_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
-        run: |
-          echo "🔗 Linking to Supabase project ($ENVIRONMENT)..."
-
-          # Select credentials based on environment
-          if [ "$ENVIRONMENT" == "production" ]; then
-            PROJECT_REF="$PROD_PROJECT_REF"
-            DB_PASSWORD="$PROD_DB_PASSWORD"
-          else
-            PROJECT_REF="$STAGING_PROJECT_REF"
-            DB_PASSWORD="$STAGING_DB_PASSWORD"
-          fi
-
-          # Link to the project
-          supabase link --project-ref "$PROJECT_REF" --password "$DB_PASSWORD" || {
-            echo "❌ Failed to link to Supabase project"
-            echo "This might be due to:"
-            echo "  1. Invalid project reference"
-            echo "  2. Invalid database password"
-            echo "  3. Network connectivity issues"
-            echo "  4. Insufficient permissions"
-            exit 1
-          }
-
-          echo "✅ Successfully linked to project: $PROJECT_REF"
+          supabase link --project-ref "${{ secrets.SUPABASE_PROJECT_REF }}" \
+                        --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
 
       - name: Check migration status
-        run: |
-          echo "📊 Checking current migration status..."
-
-          # List applied migrations
-          supabase migration list || {
-            echo "⚠️  Could not retrieve migration list"
-          }
-
-      - name: Apply pending migrations
-        id: apply
+        id: status
         env:
-          ENVIRONMENT: ${{ needs.setup-environment.outputs.environment }}
-          # Production secrets
-          PROD_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          # Staging secrets
-          STAGING_DB_PASSWORD: ${{ secrets.SUPABASE_STAGING_DB_PASSWORD }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          echo "🚀 Applying pending migrations to $ENVIRONMENT..."
+          supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-status.txt
 
-          # Select credentials based on environment
-          if [ "$ENVIRONMENT" == "production" ]; then
-            DB_PASSWORD="$PROD_DB_PASSWORD"
+          # Detect drift: lines where REMOTE has a version but LOCAL is empty
+          # Format: "   LOCAL          | REMOTE         | TIME"
+          DRIFT=$(awk -F'|' '{
+            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            if ($2 ~ /^[0-9]{14}$/ && $1 !~ /^[0-9]{14}$/) print $2
+          }' migration-status.txt || true)
+
+          if [ -n "$DRIFT" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Schema drift detected — remote has migrations not in local repo:"
+            echo "$DRIFT"
           else
-            DB_PASSWORD="$STAGING_DB_PASSWORD"
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+            echo "No drift detected"
           fi
 
-          set +e  # Don't exit immediately on error
+          # Check for pending local-only migrations
+          PENDING=$(awk -F'|' '{
+            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            if ($1 ~ /^[0-9]{14}$/ && $2 !~ /^[0-9]{14}$/) print $1
+          }' migration-status.txt || true)
 
-          # Apply migrations with detailed output
-          supabase db push --password "$DB_PASSWORD" 2>&1 | tee migration-output.txt
-
-          MIGRATION_EXIT_CODE=$?
-
-          if [ $MIGRATION_EXIT_CODE -eq 0 ]; then
-            echo "✅ Migrations applied successfully!"
-            echo "migration_status=success" >> $GITHUB_OUTPUT
+          if [ -n "$PENDING" ]; then
+            echo "pending=true" >> "$GITHUB_OUTPUT"
+            echo "Pending migrations to push:"
+            echo "$PENDING"
           else
-            echo "❌ Migration failed!"
-            echo "migration_status=failed" >> $GITHUB_OUTPUT
+            echo "pending=false" >> "$GITHUB_OUTPUT"
+            echo "No pending migrations"
+          fi
 
-            # Show detailed error
-            echo "=== Migration Error Details ==="
-            cat migration-output.txt
+      - name: Pull remote migrations
+        if: steps.status.outputs.drift == 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          supabase db pull --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
+          echo "Pulled remote-only migrations into supabase/migrations/"
 
+      - name: Open PR for pulled migrations
+        if: steps.status.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="fix/schema-drift-$(date +%Y%m%d%H%M%S)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add supabase/migrations/
+          git commit -m "fix: pull schema drift from remote database"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --title "fix: sync schema drift from remote database" \
+            --body "$(cat <<'EOF'
+          ## Schema Drift Detected
+
+          The remote database has migrations that are not in this repo.
+          This PR pulls those changes so the repo stays in sync.
+
+          **Review the SQL carefully before merging.**
+
+          Detected by the scheduled drift check workflow.
+          EOF
+          )" \
+            --base main \
+            --head "$BRANCH"
+
+      - name: Push migrations to remote
+        if: |
+          steps.status.outputs.drift == 'false' &&
+          steps.status.outputs.pending == 'true' &&
+          github.event.inputs.dry_run != 'true'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          # Pipe 'yes' to skip the interactive confirmation prompt in CI.
+          # db push automatically skips already-applied migrations and only
+          # applies new ones — all local files must be present for this to work.
+          yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
+          # PIPESTATUS[1] is the exit code of supabase (PIPESTATUS[0] is yes)
+          if [ ${PIPESTATUS[1]} -ne 0 ]; then
+            echo "::error::Migration push failed — see logs above"
             exit 1
           fi
+          echo "Migrations applied successfully"
 
-      - name: Verify migration application
-        run: |
-          echo "🔍 Verifying migrations were applied..."
+      - name: Verify migration status
+        if: steps.status.outputs.drift == 'false'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase migration list --password "${{ secrets.SUPABASE_DB_PASSWORD }}"
 
-          # Check migration status again
-          supabase migration list
-
-          echo "✅ Migration verification complete"
-
-      - name: Upload migration logs
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: migration-logs-${{ needs.setup-environment.outputs.environment }}
-          path: migration-output.txt
+          name: migration-logs
+          path: |
+            migration-status.txt
+            migration-output.txt
           if-no-files-found: ignore
-
-  # Rollback on failure (optional - be careful with this)
-  rollback-on-failure:
-    name: Rollback on Failure
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [setup-environment, apply-migrations]
-    if: failure() && needs.setup-environment.outputs.environment == 'staging'
-
-    steps:
-      - name: Manual rollback notification
-        run: |
-          echo "❌ Migration failed in ${{ needs.setup-environment.outputs.environment }}"
-          echo ""
-          echo "⚠️  MANUAL ROLLBACK REQUIRED"
-          echo ""
-          echo "To rollback, run locally:"
-          echo "  supabase migration repair --status reverted <timestamp>"
-          echo ""
-          echo "Or restore from a backup in the Supabase Dashboard:"
-          echo "  https://supabase.com/dashboard → Your Project → Database → Backups"
-
-  # Notification job
-  notify:
-    name: Notify Migration Status
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [setup-environment, apply-migrations]
-    if: always() && github.event_name != 'pull_request'
-
-    steps:
-      - name: Migration summary
-        run: |
-          ENVIRONMENT="${{ needs.setup-environment.outputs.environment }}"
-          STATUS="${{ needs.apply-migrations.result }}"
-
-          echo "=== Migration Summary ==="
-          echo "Environment: $ENVIRONMENT"
-          echo "Status: $STATUS"
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Commit: ${{ github.sha }}"
-          echo "Triggered by: ${{ github.actor }}"
-          echo ""
-
-          if [ "$STATUS" == "success" ]; then
-            echo "✅ Migrations applied successfully to $ENVIRONMENT!"
-          else
-            echo "❌ Migration failed in $ENVIRONMENT"
-            echo "Check the logs above for details"
-          fi
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const status = '${{ needs.apply-migrations.result }}';
-            const environment = '${{ needs.setup-environment.outputs.environment }}';
-
-            let message = '';
-            if (status === 'success') {
-              message = `✅ **Database Migrations Validated**\n\n` +
-                `Environment: **${environment}**\n` +
-                `All migrations have been validated and are ready to apply.`;
-            } else {
-              message = `❌ **Migration Validation Failed**\n\n` +
-                `Environment: **${environment}**\n` +
-                `Please review the migration errors in the [workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId})`;
-            }
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: message
-            });

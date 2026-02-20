@@ -12,11 +12,15 @@ restartPolicyMaxRetries = 10
 # - Database connectivity
 # - Redis/health cache availability
 # - Minimum gateway health threshold (30%)
-# Returns HTTP 503 if system is degraded to trigger Railway restarts
+# Returns HTTP 200 during warmup, enabling Railway to mark service healthy
+#
+# Timing: App loads 50+ routes, initializes Supabase (with retries),
+# and starts 10+ background tasks - needs ~60-90s to be fully ready.
+# Previous 30s timeout caused deployment failures on cold containers.
 healthcheckPath = "/health/railway"
-healthcheckTimeout = 30
-healthcheckInterval = 20
-initialDelaySeconds = 45
+healthcheckTimeout = 120
+healthcheckInterval = 10
+initialDelaySeconds = 30
 
 # ============================================
 # Cron Jobs - Automated Model & Pricing Sync

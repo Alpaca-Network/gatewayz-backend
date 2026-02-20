@@ -15,40 +15,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.get("/")
-async def root():
-    """
-    Root endpoint that returns a welcome message.
-
-    Returns:
-        dict: Welcome message and API status
-
-    Example response:
-        {
-            "message": "Welcome to Gatewayz Universal Inference API",
-            "status": "operational"
-        }
-    """
-    return {"message": "Welcome to Gatewayz Universal Inference API", "status": "operational"}
-
-
-@router.get("/health")
-async def health_check():
-    """
-    Health check endpoint that verifies the API is operational.
-
-    Returns:
-        dict: Health status
-
-    Example response:
-        {
-            "status": "healthy",
-            "timestamp": "2025-10-27T10:30:00.000000"
-        }
-    """
-    from datetime import datetime, timezone
-
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+# NOTE: Root (/) and health (/health) endpoints are defined in root.py and health.py respectively.
+# They were removed from here to avoid duplicate Operation ID warnings.
 
 
 @router.get("/ping")

@@ -24,19 +24,44 @@ router = APIRouter(prefix="/error-monitor", tags=["error-monitor"])
 
 @router.get("/health")
 async def monitor_health():
-    """Check if error monitoring is enabled."""
+    """Check if error monitoring is enabled with detailed status."""
     try:
         monitor = await get_error_monitor()
         autonomous_monitor = get_autonomous_monitor()
+
+        # Check bug fix generator configuration
+        bug_fix_status = {"configured": False, "api_key_validated": False, "error": None}
+        try:
+            generator = await get_bug_fix_generator()
+            bug_fix_status = {
+                "configured": True,
+                "api_key_validated": generator.api_key_validated,
+                "model": generator.anthropic_model,
+                "github_token_configured": bool(generator.github_token),
+                "generated_fixes_count": len(generator.generated_fixes),
+            }
+        except RuntimeError as e:
+            bug_fix_status["error"] = str(e)
+        except Exception as e:
+            bug_fix_status["error"] = f"Unexpected error: {str(e)}"
+
         return {
             "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "monitoring_enabled": monitor.loki_enabled,
             "error_patterns_tracked": len(monitor.error_patterns),
             "autonomous_monitoring": {
                 "enabled": autonomous_monitor.enabled,
                 "running": autonomous_monitor.is_running,
                 "auto_fix": autonomous_monitor.auto_fix_enabled,
+                "last_scan": (
+                    autonomous_monitor.last_scan.isoformat()
+                    if autonomous_monitor.last_scan
+                    else None
+                ),
+                "errors_since_last_fix": autonomous_monitor.errors_since_last_fix,
             },
+            "bug_fix_generator": bug_fix_status,
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")

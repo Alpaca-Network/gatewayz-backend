@@ -15,8 +15,10 @@ from html import escape
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
+
+from src.security.deps import require_admin
 
 from src.services.model_catalog_cache import (
     clear_models_cache,
@@ -1140,8 +1142,52 @@ async def trigger_gateway_fix(
 # ============================================================================
 
 
-@router.get("/cache/warmer/stats", tags=["cache", "monitoring"])
-async def get_cache_warmer_stats():
+@router.get("/admin/cache/debouncer/stats", tags=["admin", "cache", "monitoring"])
+async def get_cache_debouncer_stats(admin_user: dict = Depends(require_admin)):
+    """
+    Get cache debouncer statistics (Issue #1099).
+
+    Shows effectiveness of debouncing in preventing cache thrashing:
+    - Number of invalidations scheduled
+    - Number executed vs coalesced (deduplicated)
+    - Efficiency percentage
+    - Currently pending invalidations
+
+    Returns detailed metrics about the cache debouncing system.
+    """
+    try:
+        from src.services.model_catalog_cache import _invalidation_debouncer
+
+        debouncer_stats = _invalidation_debouncer.get_stats()
+
+        return {
+            "success": True,
+            "debouncer": {
+                "status": "active",
+                "delay_seconds": _invalidation_debouncer.delay,
+                "scheduled": debouncer_stats["scheduled"],
+                "executed": debouncer_stats["executed"],
+                "coalesced": debouncer_stats["coalesced"],
+                "pending": debouncer_stats["pending_count"],
+                "efficiency_percent": debouncer_stats["efficiency_percent"],
+                "description": "Coalesces rapid invalidation requests to prevent cache thrashing (Issue #1099)",
+            },
+            "impact": {
+                "operations_prevented": debouncer_stats["coalesced"],
+                "operations_saved_percent": debouncer_stats["efficiency_percent"],
+                "status": "healthy" if debouncer_stats["efficiency_percent"] > 0 else "idle"
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cache debouncer stats: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get cache debouncer stats: {str(e)}"
+        ) from e
+
+
+@router.get("/admin/cache/warmer/stats", tags=["admin", "cache", "monitoring"])
+async def get_cache_warmer_stats(admin_user: dict = Depends(require_admin)):
     """
     Get cache warmer statistics including:
     - Background refresh counts
@@ -1207,8 +1253,8 @@ async def get_cache_warmer_stats():
         ) from e
 
 
-@router.get("/cache/status", tags=["cache"])
-async def get_cache_status():
+@router.get("/admin/cache/status", tags=["admin", "cache"])
+async def get_cache_status(admin_user: dict = Depends(require_admin)):
     """
     Get cache status for all gateways.
 
@@ -1328,10 +1374,11 @@ async def get_cache_status():
         raise HTTPException(status_code=500, detail=f"Failed to get cache status: {str(e)}") from e
 
 
-@router.post("/cache/refresh/{gateway}", tags=["cache"])
+@router.post("/admin/cache/refresh/{gateway}", tags=["admin", "cache"])
 async def refresh_gateway_cache(
     gateway: str,
     force: bool = Query(False, description="Force refresh even if cache is still valid"),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Force refresh cache for a specific gateway.
@@ -1439,11 +1486,12 @@ async def refresh_gateway_cache(
         raise HTTPException(status_code=500, detail=f"Failed to refresh cache: {str(e)}") from e
 
 
-@router.post("/cache/clear", tags=["cache"])
+@router.post("/admin/cache/clear", tags=["admin", "cache"])
 async def clear_all_caches(
     gateway: str | None = Query(
         None, description="Specific gateway to clear, or all if not specified"
-    )
+    ),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Clear cache for all gateways or a specific gateway.
@@ -1763,8 +1811,8 @@ async def check_single_gateway(gateway: str):
 # ============================================================================
 
 
-@router.get("/cache/modelz/status", tags=["cache", "modelz"])
-async def get_modelz_cache_status():
+@router.get("/admin/cache/modelz/status", tags=["admin", "cache", "modelz"])
+async def get_modelz_cache_status(admin_user: dict = Depends(require_admin)):
     """
     Get the current status of the Modelz cache.
 
@@ -1801,8 +1849,8 @@ async def get_modelz_cache_status():
         ) from e
 
 
-@router.post("/cache/modelz/refresh", tags=["cache", "modelz"])
-async def refresh_modelz_cache_endpoint():
+@router.post("/admin/cache/modelz/refresh", tags=["admin", "cache", "modelz"])
+async def refresh_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Force refresh the Modelz cache by fetching fresh data from the API.
 
@@ -1842,8 +1890,8 @@ async def refresh_modelz_cache_endpoint():
         ) from e
 
 
-@router.delete("/cache/modelz/clear", tags=["cache", "modelz"])
-async def clear_modelz_cache_endpoint():
+@router.delete("/admin/cache/modelz/clear", tags=["admin", "cache", "modelz"])
+async def clear_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Clear the Modelz cache.
 
@@ -1877,20 +1925,111 @@ async def clear_modelz_cache_endpoint():
         ) from e
 
 
-@router.post("/api/cache/invalidate", tags=["cache"])
+_last_invalidation_time: float = 0.0
+_INVALIDATION_COOLDOWN_SECONDS = 30.0
+
+
+def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> None:
+    """
+    Background task: Perform cache invalidation operations with debouncing.
+
+    This function runs in the background to avoid blocking the API response.
+    Performs all cache invalidation operations including gateway caches,
+    provider caches, and pricing refresh.
+
+    Includes a 30-second cooldown: if a full invalidation ran recently,
+    duplicate calls are skipped to prevent thundering herd from rapid-fire
+    admin dashboard clicks or retries.
+
+    Args:
+        gateway: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
+        cache_type: Optional cache type ('models', 'providers', 'pricing')
+    """
+    global _last_invalidation_time
+    import time
+
+    # Skip duplicate full-invalidation calls within cooldown window
+    if not gateway and not cache_type:
+        now = time.monotonic()
+        elapsed = now - _last_invalidation_time
+        if elapsed < _INVALIDATION_COOLDOWN_SECONDS:
+            logger.info(
+                f"Background task: Skipping duplicate full cache invalidation "
+                f"({elapsed:.1f}s since last, cooldown={_INVALIDATION_COOLDOWN_SECONDS}s)"
+            )
+            return
+        _last_invalidation_time = now
+
+    try:
+        start_time = datetime.now(timezone.utc)
+        invalidated = []
+
+        if gateway:
+            gateway = gateway.lower()
+            logger.info(f"Background task: Invalidating cache for gateway '{gateway}' (debounced)")
+            # Enable debouncing and cascade for frontend-triggered invalidations (Issue #1099, #1100)
+            clear_models_cache(gateway, debounce=True, cascade=True)
+            invalidated.append(f"models:{gateway}")
+        elif cache_type == "models":
+            # Clear all gateway model caches using batch operation (Issue #1099)
+            gateways = get_all_gateway_names()
+            logger.info(f"Background task: Batch invalidating model caches for {len(gateways)} gateways")
+            # Use batch invalidation with cascade to refresh catalog (Issue #1099, #1100)
+            from src.services.model_catalog_cache import get_model_catalog_cache
+            cache = get_model_catalog_cache()
+            result = cache.invalidate_providers_batch(gateways, cascade=True)
+            logger.info(f"Batch invalidation result: {result}")
+            invalidated.extend([f"models:{gw}" for gw in gateways])
+        elif cache_type == "providers":
+            logger.info("Background task: Invalidating provider cache")
+            clear_providers_cache()
+            invalidated.append("providers")
+        elif cache_type == "pricing":
+            logger.info("Background task: Refreshing pricing cache")
+            refresh_pricing_cache()
+            invalidated.append("pricing")
+        else:
+            # Clear all caches using batch operation (Issue #1099)
+            gateways = get_all_gateway_names()
+            logger.info(f"Background task: Batch invalidating all caches ({len(gateways)} gateways + providers + pricing)")
+            # Use batch invalidation for better performance (1 Redis operation vs 30+)
+            from src.services.model_catalog_cache import get_model_catalog_cache
+            cache = get_model_catalog_cache()
+            result = cache.invalidate_providers_batch(gateways, cascade=False)
+            logger.info(f"Batch invalidation result: {result}")
+            clear_providers_cache()
+            refresh_pricing_cache()
+            invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
+
+        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+        logger.info(
+            f"Background task: Cache invalidation scheduled in {duration:.2f}s. "
+            f"Invalidated (debounced): {', '.join(invalidated[:5])}{' and more...' if len(invalidated) > 5 else ''}"
+        )
+
+    except Exception as e:
+        logger.error(f"Background task: Failed to invalidate cache: {e}", exc_info=True)
+
+
+@router.post("/admin/api/cache/invalidate", tags=["admin", "cache"])
 async def invalidate_cache(
+    background_tasks: BackgroundTasks,
     gateway: str | None = Query(
         None, description="Specific gateway cache to invalidate, or all if not specified"
     ),
     cache_type: str | None = Query(
         None, description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified"
     ),
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Invalidate cache for specified gateway or cache type.
 
     This endpoint is called by the frontend dashboard to invalidate caches
     after configuration changes.
+
+    **Performance:** Returns immediately and performs invalidation in the background.
+    This prevents long wait times when clearing multiple gateway caches.
 
     **Parameters:**
     - `gateway`: Optional gateway name to invalidate (e.g., 'openrouter', 'together')
@@ -1900,49 +2039,41 @@ async def invalidate_cache(
     ```bash
     curl -X POST "http://localhost:8000/api/cache/invalidate?gateway=openrouter"
     ```
+
+    **Note:** The actual cache invalidation happens asynchronously in the background.
+    Check logs for completion status.
     """
     try:
-        invalidated = []
-
+        # Determine what will be invalidated for response message
         if gateway:
-            gateway = gateway.lower()
-            clear_models_cache(gateway)
-            invalidated.append(f"models:{gateway}")
-        elif cache_type == "models":
-            # Clear all gateway model caches
-            gateways = get_all_gateway_names()
-            for gw in gateways:
-                clear_models_cache(gw)
-            invalidated.extend([f"models:{gw}" for gw in gateways])
-        elif cache_type == "providers":
-            clear_providers_cache()
-            invalidated.append("providers")
-        elif cache_type == "pricing":
-            refresh_pricing_cache()
-            invalidated.append("pricing")
+            scope = f"gateway '{gateway}'"
+        elif cache_type:
+            scope = f"{cache_type} cache"
         else:
-            # Clear all caches
-            gateways = get_all_gateway_names()
-            for gw in gateways:
-                clear_models_cache(gw)
-            clear_providers_cache()
-            refresh_pricing_cache()
-            invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
+            scope = "all caches"
+
+        # Schedule background task
+        background_tasks.add_task(_perform_cache_invalidation, gateway, cache_type)
+
+        logger.info(f"Cache invalidation task scheduled for: {scope}")
 
         return {
             "success": True,
-            "message": "Cache invalidated successfully",
-            "invalidated": invalidated,
+            "message": f"Cache invalidation started in background for {scope}",
+            "status": "processing",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
-        logger.error(f"Failed to invalidate cache: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to invalidate cache: {str(e)}") from e
+        logger.error(f"Failed to schedule cache invalidation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to schedule cache invalidation: {str(e)}"
+        ) from e
 
 
-@router.post("/cache/pricing/refresh", tags=["cache", "pricing"])
-async def refresh_pricing_cache_endpoint():
+@router.post("/admin/cache/pricing/refresh", tags=["admin", "cache", "pricing"])
+async def refresh_pricing_cache_endpoint(admin_user: dict = Depends(require_admin)):
     """
     Force refresh the pricing cache by reloading from the manual pricing file.
 
@@ -1978,6 +2109,153 @@ async def refresh_pricing_cache_endpoint():
         logger.error(f"Failed to refresh pricing cache: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to refresh pricing cache: {str(e)}"
+        ) from e
+
+
+# ============================================================================
+# Velocity Mode Status Endpoint
+# ============================================================================
+
+
+@router.get("/velocity-mode-status", tags=["security", "monitoring"])
+async def get_velocity_mode_status():
+    """
+    Get the current velocity mode status from the security middleware.
+
+    Velocity mode is an automatic protection system that activates during high error rates
+    to protect the service from cascading failures by temporarily reducing rate limits.
+
+    **Returns:**
+    ```json
+    {
+        "active": false,
+        "until": null,
+        "remaining_seconds": 0,
+        "trigger_count": 0,
+        "current_error_rate": 0.0,
+        "sample_size": 0,
+        "threshold": 25.0,
+        "limits": {
+            "normal": {
+                "ip_limit": 300,
+                "strict_ip_limit": 60,
+                "fingerprint_limit": 100
+            },
+            "velocity": {
+                "ip_limit": 150,
+                "strict_ip_limit": 30,
+                "fingerprint_limit": 50
+            }
+        }
+    }
+    ```
+
+    **Status Codes:**
+    - 200: Successfully retrieved velocity mode status
+    - 503: Security middleware not available
+    """
+    try:
+        # Import here to avoid circular dependencies
+        from src.middleware.security_middleware import (
+            DEFAULT_IP_LIMIT,
+            STRICT_IP_LIMIT,
+            FINGERPRINT_LIMIT,
+            VELOCITY_ERROR_THRESHOLD,
+            VELOCITY_WINDOW_SECONDS,
+            VELOCITY_LIMIT_MULTIPLIER,
+        )
+
+        # Try to get the security middleware instance from the app
+        from src.main import app
+
+        security_middleware = None
+        for middleware in app.user_middleware:
+            if hasattr(middleware, "cls") and middleware.cls.__name__ == "SecurityMiddleware":
+                # Get the actual middleware instance
+                if hasattr(middleware, "kwargs"):
+                    security_middleware = middleware.kwargs.get("dispatch")
+                break
+
+        # If we can't find it via app.user_middleware, try getting it from the app's middleware stack
+        if not security_middleware and hasattr(app, "middleware_stack"):
+            for mw in app.middleware_stack:
+                if hasattr(mw, "app") and mw.app.__class__.__name__ == "SecurityMiddleware":
+                    security_middleware = mw.app
+                    break
+
+        if not security_middleware:
+            # Return default status if middleware not found
+            logger.warning("Security middleware instance not found - returning default status")
+            return {
+                "active": False,
+                "until": None,
+                "remaining_seconds": 0,
+                "trigger_count": 0,
+                "current_error_rate": 0.0,
+                "sample_size": 0,
+                "threshold": VELOCITY_ERROR_THRESHOLD * 100,
+                "limits": {
+                    "normal": {
+                        "ip_limit": DEFAULT_IP_LIMIT,
+                        "strict_ip_limit": STRICT_IP_LIMIT,
+                        "fingerprint_limit": FINGERPRINT_LIMIT,
+                    },
+                    "velocity": {
+                        "ip_limit": int(DEFAULT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                        "strict_ip_limit": int(STRICT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                        "fingerprint_limit": int(FINGERPRINT_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    },
+                },
+                "warning": "Security middleware instance not found - showing configuration only",
+            }
+
+        # Get current velocity mode status from middleware
+        import time
+
+        now = time.time()
+        is_active = security_middleware._is_velocity_mode_active()
+
+        # Calculate current error rate
+        cutoff = now - VELOCITY_WINDOW_SECONDS
+        recent_requests = [
+            (ts, err, status)
+            for ts, err, status in security_middleware._request_log
+            if ts >= cutoff
+        ]
+
+        error_rate = 0.0
+        if len(recent_requests) > 0:
+            error_count = sum(1 for _, is_error, _ in recent_requests if is_error)
+            error_rate = error_count / len(recent_requests)
+
+        return {
+            "active": is_active,
+            "until": security_middleware._velocity_mode_until if is_active else None,
+            "remaining_seconds": (
+                max(0, int(security_middleware._velocity_mode_until - now)) if is_active else 0
+            ),
+            "trigger_count": security_middleware._velocity_mode_triggered_count,
+            "current_error_rate": round(error_rate * 100, 2),
+            "sample_size": len(recent_requests),
+            "threshold": VELOCITY_ERROR_THRESHOLD * 100,
+            "limits": {
+                "normal": {
+                    "ip_limit": DEFAULT_IP_LIMIT,
+                    "strict_ip_limit": STRICT_IP_LIMIT,
+                    "fingerprint_limit": FINGERPRINT_LIMIT,
+                },
+                "velocity": {
+                    "ip_limit": int(DEFAULT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    "strict_ip_limit": int(STRICT_IP_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                    "fingerprint_limit": int(FINGERPRINT_LIMIT * VELOCITY_LIMIT_MULTIPLIER),
+                },
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get velocity mode status: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get velocity mode status: {str(e)}"
         ) from e
 
 
