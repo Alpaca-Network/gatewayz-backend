@@ -21,6 +21,10 @@ import time
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+# Pyroscope tag_wrapper is imported lazily inside __call__ via pyroscope_config
+# so the middleware can be loaded even when pyroscope-io is not installed.
+from src.services.pyroscope_config import tag_wrapper as _pyroscope_tag_wrapper
+
 from src.services.prometheus_metrics import (
     APP_NAME,
     fastapi_request_size_bytes,
@@ -144,7 +148,15 @@ class ObservabilityMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, receive, send_with_metrics)
+            # Tag every Pyroscope sample taken during this request with the
+            # normalised endpoint and HTTP method.  This lets you filter the
+            # Grafana flamegraph to a specific route and ask:
+            #   "Which Python functions consume the most CPU on POST /v1/chat/completions?"
+            # For streaming responses the context stays open for the full SSE
+            # window, so slow streaming code shows up correctly in the profile.
+            # Falls back to nullcontext() when Pyroscope is disabled or not installed.
+            with _pyroscope_tag_wrapper({"endpoint": endpoint, "method": method}):
+                await self.app(scope, receive, send_with_metrics)
 
             # Record response size metric
             fastapi_response_size_bytes.labels(

@@ -135,6 +135,18 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"FastAPI instrumentation warning: {e}")
 
+        # Initialize Pyroscope continuous profiling.
+        # Starts a background sampling thread that captures CPU/memory flamegraphs
+        # every 10 ms and pushes them to Grafana Cloud every 15 s.
+        # Gated by PYROSCOPE_ENABLED=true — does nothing when the env var is absent,
+        # so local and test environments are never affected.
+        # Must run AFTER OTel instrumentation so the asyncio event loop is ready.
+        try:
+            from src.services.pyroscope_config import init_pyroscope
+            init_pyroscope()
+        except Exception as e:
+            logger.warning(f"Pyroscope initialisation warning: {e}")
+
         # Initialize Tempo/OpenTelemetry OTLP exporter in background with retry
         # Uses exponential backoff to handle Railway timing issues where Tempo
         # may not be ready when the backend starts
@@ -505,6 +517,15 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
+
+        # Flush final Pyroscope profile data before the process exits.
+        # The sampler buffers ~15 s of flamegraph data in memory; without an
+        # explicit shutdown that data is lost when the container stops.
+        try:
+            from src.services.pyroscope_config import shutdown_pyroscope
+            shutdown_pyroscope()
+        except Exception as e:
+            logger.warning(f"Pyroscope shutdown warning: {e}")
 
         # Shutdown OpenTelemetry (Tempo tracing)
         try:
