@@ -46,6 +46,11 @@ sentry-sdk[fastapi]>=2.20.0
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
 
+# Continuous profiling — pushes CPU/memory flamegraphs to Grafana Cloud Pyroscope.
+# Requires PYROSCOPE_ENABLED=true + PYROSCOPE_SERVER_ADDRESS env vars (see pyroscope_config.py).
+# If the package is absent the profiler silently stays disabled; nothing else breaks.
+pyroscope-io>=0.8.7
+
 # OpenTelemetry - Pinned to prevent dependency resolution backtracking
 # packaging==24.0 (removed)
 opentelemetry-api==1.33.0
