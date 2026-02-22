@@ -312,6 +312,24 @@ class OpenTelemetryConfig:
 
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
+
+                # ProviderSpanEnricher: runs BEFORE the batch exporter so that
+                # peer.service is present on spans when Tempo indexes them.
+                # This is what makes the Service Graph & Topology section draw
+                # edges between gatewayz-backend and each AI provider.
+                try:
+                    from src.services.provider_span_enricher import ProviderSpanEnricher
+
+                    cls._tracer_provider.add_span_processor(ProviderSpanEnricher())
+                    logger.info(
+                        "   ProviderSpanEnricher registered "
+                        "(peer.service will be added to AI provider HTTP spans)"
+                    )
+                except Exception as enricher_e:
+                    logger.warning(
+                        f"   ProviderSpanEnricher unavailable (non-fatal): {enricher_e}"
+                    )
+
                 cls._tracer_provider.add_span_processor(resilient_processor)
                 logger.info(
                     "   Resilient batch span processor configured (queue: 2048, batch: 512)"

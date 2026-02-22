@@ -340,10 +340,18 @@ def create_app() -> FastAPI:
         that let you click from a metric datapoint to the trace in Tempo).
         Prometheus requests OpenMetrics when --enable-feature=exemplar-storage is set.
         """
-        # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking)
+        # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking).
+        # Hard cap at 5 s so a slow Upstash round-trip never causes the Prometheus scrape
+        # to time out (scrape_timeout=10s in prometheus.yml → up{job="gatewayz_production"}=0).
         import asyncio
 
-        await asyncio.to_thread(prometheus_metrics.collect_redis_info)
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(prometheus_metrics.collect_redis_info),
+                timeout=5.0,
+            )
+        except asyncio.TimeoutError:
+            pass  # Serve stale Redis gauges rather than miss the scrape window
 
         # Content negotiation: serve OpenMetrics when requested (carries exemplars),
         # fall back to Prometheus text format for backward compatibility
