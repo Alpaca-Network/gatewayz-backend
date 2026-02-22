@@ -57,6 +57,22 @@ try:
 except Exception as e:
     logger.warning(f"Could not clear Prometheus registry: {e}")
 
+# Re-register the built-in default collectors that expose process-level metrics.
+# The clearing loop above removes ProcessCollector, PlatformCollector, and GCCollector
+# along with custom metrics, causing process_cpu_seconds_total,
+# process_resident_memory_bytes, process_open_fds, process_max_fds, and
+# process_start_time_seconds to disappear from /metrics.
+# These are required by the CPU / Saturation panels in Grafana.
+try:
+    from prometheus_client import GCCollector, PlatformCollector, ProcessCollector
+
+    REGISTRY.register(ProcessCollector())
+    REGISTRY.register(PlatformCollector())
+    REGISTRY.register(GCCollector())
+    logger.debug("Re-registered default process/platform/gc collectors")
+except Exception as e:
+    logger.warning(f"Could not re-register default collectors: {e}")
+
 
 # Helper function to handle metric registration with --reload support
 def get_or_create_metric(metric_class, name, *args, **kwargs):
