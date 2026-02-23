@@ -398,14 +398,13 @@ async def update_full_model_catalog_loop() -> None:
                         "Background Refresh: %d consecutive empty results - "
                         "cache may go stale!", consecutive_errors
                     )
-                continue
-
-            elapsed = time.monotonic() - refresh_start
-            consecutive_errors = 0
-            logger.info(
-                f"✅ Background Refresh: Updated catalog with {len(api_models)} models "
-                f"(took {elapsed:.1f}s)"
-            )
+            else:
+                elapsed = time.monotonic() - refresh_start
+                consecutive_errors = 0
+                logger.info(
+                    f"✅ Background Refresh: Updated catalog with {len(api_models)} models "
+                    f"(took {elapsed:.1f}s)"
+                )
 
         except Exception as e:
             consecutive_errors += 1

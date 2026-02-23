@@ -6,7 +6,6 @@ cached per-provider catalogs, avoiding the single-giant-query timeout that
 truncates results.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 

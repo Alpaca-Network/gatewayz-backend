@@ -1276,7 +1276,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     MAX_WORKERS = 10
     all_models: list[dict[str, Any]] = []
     provider_counts: dict[str, int] = {}
-    failed_providers: list[str] = []
+    empty_providers: list[str] = []
 
     def _fetch_provider(slug: str) -> tuple[str, list[dict[str, Any]]]:
         """Fetch a single provider's catalog (runs in thread pool)."""
@@ -1289,8 +1289,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
             )
             return (slug, [])
 
-    import time as _time
-    fetch_start = _time.monotonic()
+    fetch_start = time.monotonic()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
@@ -1300,31 +1299,31 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         for future in as_completed(futures):
             slug = futures[future]
             try:
-                slug, models = future.result(timeout=120)
+                _returned_slug, models = future.result(timeout=120)
                 if models:
                     all_models.extend(models)
                     provider_counts[slug] = len(models)
                 else:
-                    failed_providers.append(slug)
+                    empty_providers.append(slug)
             except Exception as exc:
                 logger.warning(
                     f"rebuild_full_catalog_from_providers: {slug} future failed: {exc}"
                 )
-                failed_providers.append(slug)
+                empty_providers.append(slug)
 
-    fetch_elapsed = _time.monotonic() - fetch_start
+    fetch_elapsed = time.monotonic() - fetch_start
 
     logger.info(
         f"rebuild_full_catalog_from_providers: assembled {len(all_models)} models "
         f"from {len(provider_counts)} providers in {fetch_elapsed:.1f}s "
-        f"(empty: {len(failed_providers)})"
+        f"(empty: {len(empty_providers)})"
     )
-    if failed_providers:
+    if empty_providers:
         # Some providers legitimately have 0 models (e.g., xai, nebius have no
         # public model listing). Only log at debug level.
         logger.debug(
             f"rebuild_full_catalog_from_providers: providers with 0 models: "
-            f"{failed_providers}"
+            f"{empty_providers}"
         )
 
     # --- Step 3: Cache the assembled full catalog ---
