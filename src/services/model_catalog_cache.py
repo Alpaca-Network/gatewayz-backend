@@ -1221,7 +1221,11 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     # --- Step 1: Discover provider slugs ---
     # Use the database as the authoritative source of active provider slugs.
     # This avoids hardcoding the list and automatically picks up new providers.
+    # We query ALL active providers — even those without a live API fetch function
+    # may have models synced to the DB via model_catalog_sync.py.
+    # Providers with 0 models simply return empty lists (harmless).
     provider_slugs: list[str] = []
+
     try:
         from src.config.supabase_config import get_client_for_query
 
@@ -1233,7 +1237,9 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
             .execute()
         )
         provider_slugs = [
-            row["slug"] for row in (response.data or []) if row.get("slug")
+            row["slug"]
+            for row in (response.data or [])
+            if row.get("slug")
         ]
         logger.info(
             f"rebuild_full_catalog_from_providers: discovered {len(provider_slugs)} "
@@ -1242,11 +1248,14 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning(
             f"rebuild_full_catalog_from_providers: failed to fetch provider slugs "
-            f"from database ({e}), falling back to PROVIDER_SLUGS from catalog"
+            f"from database ({e}), falling back to GATEWAY_REGISTRY keys"
         )
+        # Fallback: derive slugs from GATEWAY_REGISTRY directly (not PROVIDER_SLUGS
+        # which applies GATEWAY_FETCH_SLUG_OVERRIDES like huggingface→hug, but the
+        # DB stores models under the original slug "huggingface").
         try:
-            from src.routes.catalog import PROVIDER_SLUGS
-            provider_slugs = list(PROVIDER_SLUGS)
+            from src.routes.catalog import GATEWAY_REGISTRY
+            provider_slugs = list(GATEWAY_REGISTRY.keys())
         except Exception:
             logger.error(
                 "rebuild_full_catalog_from_providers: cannot determine provider slugs, "
@@ -1308,10 +1317,12 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     logger.info(
         f"rebuild_full_catalog_from_providers: assembled {len(all_models)} models "
         f"from {len(provider_counts)} providers in {fetch_elapsed:.1f}s "
-        f"(failed: {len(failed_providers)})"
+        f"(empty: {len(failed_providers)})"
     )
     if failed_providers:
-        logger.warning(
+        # Some providers legitimately have 0 models (e.g., xai, nebius have no
+        # public model listing). Only log at debug level.
+        logger.debug(
             f"rebuild_full_catalog_from_providers: providers with 0 models: "
             f"{failed_providers}"
         )
