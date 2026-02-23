@@ -51,7 +51,10 @@ SUPABASE_PAGE_SIZE = 1000  # Supabase PostgREST default max rows per request
 # Maximum total wall-clock seconds allowed for any single paginated DB operation.
 # Individual HTTP requests are already bounded to 30 s by the httpx client in
 # supabase_config; this constant caps the *aggregate* time across all page fetches.
-DB_QUERY_TIMEOUT_SECONDS: float = 120.0
+# NOTE: The hot path now uses rebuild_full_catalog_from_providers() which assembles
+# per-provider catalogs (small queries). This timeout mainly applies to
+# get_all_models_for_catalog() used by admin endpoints and legacy callers.
+DB_QUERY_TIMEOUT_SECONDS: float = 300.0
 
 # Retry config for catalog DB reads: up to 2 retries (3 total attempts),
 # 0.5s -> 1.0s exponential backoff on transient connection/timeout errors.

@@ -252,21 +252,19 @@ async def lifespan(app):
                     except Exception as e:
                         logger.warning(f"Database connection warmup warning: {e}")
 
-                # Phase 2: Preload full model catalog (heavy - 13k+ models)
-                # Wait for DB connection to stabilize after Phase 1
+                # Phase 2: Preload full model catalog (heavy - 17k+ models)
+                # Build bottom-up from per-provider catalogs to avoid the single-
+                # giant-query timeout that truncates at ~3600 of 17k+ models.
+                # Per-provider caches are populated as a side-effect.
                 await asyncio.sleep(3)
                 try:
-                    logger.info("🔥 [2/5] Preloading full model catalog cache...")
-                    from src.services.model_catalog_cache import get_cached_full_catalog
-                    from src.services.background_tasks import _split_and_cache_gateway_catalogs
+                    logger.info("🔥 [2/5] Preloading full model catalog cache (per-provider assembly)...")
+                    from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
-                    full_catalog = await asyncio.to_thread(get_cached_full_catalog)
+                    full_catalog = await asyncio.to_thread(rebuild_full_catalog_from_providers)
 
                     catalog_count = len(full_catalog) if full_catalog else 0
                     logger.info(f"✅ [2/5] Catalog cache warming complete: {catalog_count} models loaded")
-
-                    if full_catalog:
-                        await asyncio.to_thread(_split_and_cache_gateway_catalogs, full_catalog)
                 except Exception as e:
                     logger.warning(f"Model cache preload warning: {e}")
 
