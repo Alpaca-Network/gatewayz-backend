@@ -4,7 +4,6 @@ Fetches models from Cohere API for model catalog synchronization
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +111,7 @@ def fetch_models_from_cohere():
         return []
 
 
-def fetch_cohere_model_info(model_id: str) -> Optional[dict]:
+def fetch_cohere_model_info(model_id: str) -> dict | None:
     """
     Get information about a specific Cohere model
 

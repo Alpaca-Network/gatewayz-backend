@@ -1,6 +1,5 @@
 """Pydantic schemas for trial analytics endpoints"""
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,10 +15,10 @@ class TrialUser(BaseModel):
     api_key_id: int
     api_key_preview: str
     is_trial: bool
-    trial_start_date: Optional[datetime]
-    trial_end_date: Optional[datetime]
+    trial_start_date: datetime | None
+    trial_end_date: datetime | None
     trial_status: str  # "active", "expired", "converted"
-    trial_days_remaining: Optional[int]
+    trial_days_remaining: int | None
     trial_used_tokens: int = 0
     trial_max_tokens: int = 500000
     trial_token_utilization: float = 0.0
@@ -30,12 +29,12 @@ class TrialUser(BaseModel):
     trial_allocated_credits: float = 10.0
     trial_credit_utilization: float = 0.0
     trial_converted: bool = False
-    conversion_date: Optional[datetime] = None
-    requests_at_conversion: Optional[int] = None
-    tokens_at_conversion: Optional[int] = None
+    conversion_date: datetime | None = None
+    requests_at_conversion: int | None = None
+    tokens_at_conversion: int | None = None
     created_at: datetime
-    signup_ip: Optional[str] = None
-    last_request_at: Optional[datetime] = None
+    signup_ip: str | None = None
+    last_request_at: datetime | None = None
 
 
 class TrialUsersPagination(BaseModel):
@@ -128,7 +127,7 @@ class IPAnalysis(BaseModel):
     total_requests: int
     total_tokens: int
     flagged: bool
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class IPAnalysisResponse(BaseModel):

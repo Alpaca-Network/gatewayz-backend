@@ -9,7 +9,7 @@ PERF: Includes in-memory caching to reduce database queries by ~95%
 import logging
 import time
 import traceback
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import (
@@ -58,7 +58,7 @@ def _parse_trial_end_utc(s: str) -> datetime:
     if "T" not in s:
         # Date-only -> use end of that day timezone.utc (friendliest interpretation)
         d = datetime.fromisoformat(s)
-        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        return datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=UTC)
     # Full datetime
     if s.endswith("Z"):
         dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
@@ -66,9 +66,9 @@ def _parse_trial_end_utc(s: str) -> datetime:
         dt = datetime.fromisoformat(s)
     # Ensure timezone.utc-aware
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
     return dt
 
 
@@ -94,7 +94,7 @@ def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[
                 try:
                     from src.db.plans import is_admin_tier_user
                     if is_admin_tier_user(user_id):
-                        logger.info(f"Admin tier user - bypassing trial validation")
+                        logger.info("Admin tier user - bypassing trial validation")
                         return {
                             "is_valid": True,
                             "is_trial": False,
@@ -152,7 +152,7 @@ def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[
         if trial_end_date:
             try:
                 trial_end = _parse_trial_end_utc(trial_end_date)
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if trial_end <= now:
                     return {
                         "is_valid": False,
@@ -280,8 +280,8 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
         )
         ttl = _trial_cache_ttl_expired if is_expired_or_invalid else _trial_cache_ttl
 
-        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=ttl):
-            logger.debug(f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s, ttl: {ttl}s)")
+        if datetime.now(UTC) - cache_time < timedelta(seconds=ttl):
+            logger.debug(f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s, ttl: {ttl}s)")
             return cached_result
         else:
             # Cache expired, remove it
@@ -295,7 +295,7 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
     # Cache the result
     _trial_cache[api_key] = {
         "result": result,
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": datetime.now(UTC),
     }
 
     return result

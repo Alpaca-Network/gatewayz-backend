@@ -195,7 +195,7 @@ class ModelCatalogCache:
         """
         import redis
 
-        error_name = type(error).__name__
+        error_name = type(error).__name__  # noqa: F841
 
         # Redis connection errors
         if isinstance(error, redis.ConnectionError):
@@ -647,7 +647,6 @@ class ModelCatalogCache:
                 "duration_ms": 0
             }
 
-        import time
         start_time = time.time()
 
         try:
@@ -1659,7 +1658,7 @@ def set_provider_catalog_smart(
                 cached_count += 1
 
         # Store index of model IDs for this provider
-        index_key = f"index:{provider_name}"
+        index_key = f"index:{provider_name}"  # noqa: F841
         model_ids = [
             m.get("id") or m.get("slug") or m.get("provider_model_id")
             for m in catalog

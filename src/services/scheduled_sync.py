@@ -14,7 +14,7 @@ Features:
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -110,7 +110,7 @@ async def run_scheduled_model_sync():
     """
     from src.services.incremental_sync import sync_all_providers_incremental
 
-    start_time = datetime.now(timezone.utc)
+    start_time = datetime.now(UTC)
     _last_sync_status["last_run_time"] = start_time
     _last_sync_status["total_runs"] += 1
 
@@ -124,7 +124,7 @@ async def run_scheduled_model_sync():
         result = await asyncio.to_thread(sync_all_providers_incremental, dry_run=False)
 
         # Calculate duration
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         duration = (end_time - start_time).total_seconds()
 
         if result.get("success"):
@@ -177,7 +177,7 @@ async def run_scheduled_model_sync():
 
     except Exception as e:
         # Unexpected error
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         duration = (end_time - start_time).total_seconds()
 
         _last_sync_status["failed_runs"] += 1
@@ -283,7 +283,7 @@ def get_sync_status() -> dict[str, Any]:
     last_success = _last_sync_status["last_success_time"]
     minutes_since_last_sync = None
     if last_success:
-        delta = datetime.now(timezone.utc) - last_success
+        delta = datetime.now(UTC) - last_success
         minutes_since_last_sync = delta.total_seconds() / 60
 
     # Determine health status
@@ -343,5 +343,5 @@ def trigger_manual_sync() -> dict[str, Any]:
     return {
         "success": True,
         "message": "Manual sync triggered - check logs for progress",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }

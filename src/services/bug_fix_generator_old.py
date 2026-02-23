@@ -10,7 +10,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import uuid4
 
@@ -143,7 +143,7 @@ class BugFixGenerator:
                 ) from e
             else:
                 raise
-        except httpx.TimeoutException as e:
+        except httpx.TimeoutException:
             logger.warning("API key validation timed out - Claude API may be slow")
             # Don't fail on timeout, API might just be slow
         except Exception as e:
@@ -410,7 +410,7 @@ Format your response as JSON:
                 code_changes=code_changes,
                 files_affected=files_affected,
                 severity=error.severity.value,
-                generated_at=datetime.now(timezone.utc),
+                generated_at=datetime.now(UTC),
             )
 
             self.generated_fixes[fix.id] = fix

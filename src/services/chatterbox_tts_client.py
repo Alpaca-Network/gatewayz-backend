@@ -442,8 +442,8 @@ async def _generate_speech_local(
     the event loop.
     """
     try:
-        import torch
-        import torchaudio
+        import torch  # noqa: F401
+        import torchaudio  # noqa: F401
     except ImportError:
         raise RuntimeError(
             "Local TTS requires torch and torchaudio. "

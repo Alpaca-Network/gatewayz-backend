@@ -8,14 +8,14 @@ from enum import Enum
 from pydantic import BaseModel, Field, validator
 
 
-class CouponScope(str, Enum):
+class CouponScope(str, Enum):  # noqa: UP042
     """Coupon scope types"""
 
     USER_SPECIFIC = "user_specific"
     GLOBAL = "global"
 
 
-class CouponType(str, Enum):
+class CouponType(str, Enum):  # noqa: UP042
     """Coupon type categories"""
 
     PROMOTIONAL = "promotional"
@@ -24,7 +24,7 @@ class CouponType(str, Enum):
     PARTNERSHIP = "partnership"
 
 
-class CreatorType(str, Enum):
+class CreatorType(str, Enum):  # noqa: UP042
     """Who created the coupon"""
 
     ADMIN = "admin"

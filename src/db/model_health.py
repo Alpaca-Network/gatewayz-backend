@@ -6,7 +6,7 @@ including response times, success rates, and health status.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from postgrest.exceptions import APIError
 
@@ -98,7 +98,7 @@ def record_model_call(
                 "gateway": effective_gateway,
                 "last_response_time_ms": response_time_ms,
                 "last_status": status,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
+                "last_called_at": datetime.now(UTC).isoformat(),
                 "call_count": new_call_count,
                 "success_count": new_success_count,
                 "error_count": new_error_count,
@@ -122,7 +122,7 @@ def record_model_call(
                 "gateway": effective_gateway,
                 "last_response_time_ms": response_time_ms,
                 "last_status": status,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
+                "last_called_at": datetime.now(UTC).isoformat(),
                 "call_count": 1,
                 "success_count": 1 if status == "success" else 0,
                 "error_count": 1 if status != "success" else 0,
@@ -469,7 +469,7 @@ def delete_old_health_records(days: int = 30) -> int:
     """
     supabase = get_supabase_client()
 
-    cutoff_date = datetime.now(timezone.utc).replace(
+    cutoff_date = datetime.now(UTC).replace(
         hour=0, minute=0, second=0, microsecond=0
     ) - timedelta(days=days)
 

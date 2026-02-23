@@ -6,7 +6,7 @@ Handles low balance notifications, trial expiry alerts, and user communication
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 import requests
@@ -99,16 +99,16 @@ class NotificationService:
                         "trial_expiry_reminder_days": preferences.trial_expiry_reminder_days,
                         "plan_expiry_reminder_days": preferences.plan_expiry_reminder_days,
                         "usage_alerts": preferences.usage_alerts,
-                        "created_at": datetime.now(timezone.utc).isoformat(),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "created_at": datetime.now(UTC).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 )
                 .execute()
             )
 
             if result.data:
-                preferences.created_at = datetime.now(timezone.utc)
-                preferences.updated_at = datetime.now(timezone.utc)
+                preferences.created_at = datetime.now(UTC)
+                preferences.updated_at = datetime.now(UTC)
 
             return preferences
         except Exception as e:
@@ -118,7 +118,7 @@ class NotificationService:
     def update_user_preferences(self, user_id: int, updates: dict[str, Any]) -> bool:
         """Update user notification preferences"""
         try:
-            updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+            updates["updated_at"] = datetime.now(UTC).isoformat()
 
             result = (
                 self.supabase.table("notification_preferences")
@@ -172,7 +172,7 @@ class NotificationService:
                             trial_end_date = datetime.fromisoformat(
                                 trial_end.replace("Z", "+00:00")
                             )
-                            remaining_days = (trial_end_date - datetime.now(timezone.utc)).days
+                            remaining_days = (trial_end_date - datetime.now(UTC)).days
                             alert.trial_remaining_days = max(0, remaining_days)
                         except Exception:
                             pass
@@ -194,7 +194,7 @@ class NotificationService:
     ) -> bool:
         """Check if user has received a notification of this type recently"""
         try:
-            since = datetime.now(timezone.utc) - timedelta(hours=hours)
+            since = datetime.now(UTC) - timedelta(hours=hours)
             result = (
                 self.supabase.table("notifications")
                 .select("id")
@@ -232,7 +232,7 @@ class NotificationService:
 
             try:
                 trial_end_date = datetime.fromisoformat(trial_end_date_str.replace("Z", "+00:00"))
-                remaining_days = (trial_end_date - datetime.now(timezone.utc)).days
+                remaining_days = (trial_end_date - datetime.now(UTC)).days
 
                 # Send reminder exactly 1 day before expiry
                 if remaining_days == 1:
@@ -284,7 +284,7 @@ class NotificationService:
 
             try:
                 end_date = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                remaining_days = (end_date - datetime.now(timezone.utc)).days
+                remaining_days = (end_date - datetime.now(UTC)).days
 
                 # Send daily alerts starting 5 days before expiry
                 if 1 <= remaining_days <= 5:
@@ -436,9 +436,9 @@ class NotificationService:
                 "subject": request.subject,
                 "content": request.content,
                 "status": NotificationStatus.SENT if success else NotificationStatus.FAILED,
-                "sent_at": datetime.now(timezone.utc).isoformat() if success else None,
+                "sent_at": datetime.now(UTC).isoformat() if success else None,
                 "metadata": request.metadata,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             }
 
             if not success:

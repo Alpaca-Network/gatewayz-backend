@@ -13,10 +13,9 @@ Usage:
 """
 
 from enum import Enum
-from typing import Dict
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(str, Enum):  # noqa: UP042
     """High-level error categories for organization."""
 
     MODEL_ERRORS = "model_errors"
@@ -29,7 +28,7 @@ class ErrorCategory(str, Enum):
     SERVICE_ERRORS = "service_errors"
 
 
-class ErrorCode(str, Enum):
+class ErrorCode(str, Enum):  # noqa: UP042
     """
     Standardized error codes for all API errors.
 
@@ -119,7 +118,7 @@ class ErrorCode(str, Enum):
 
 
 # Error code to HTTP status code mapping
-ERROR_STATUS_CODES: Dict[ErrorCode, int] = {
+ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     # Model errors -> 404
     ErrorCode.MODEL_NOT_FOUND: 404,
     ErrorCode.MODEL_UNAVAILABLE: 503,
@@ -204,7 +203,7 @@ ERROR_STATUS_CODES: Dict[ErrorCode, int] = {
 
 
 # Error code to category mapping
-ERROR_CATEGORIES: Dict[ErrorCode, ErrorCategory] = {
+ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     # Model errors
     ErrorCode.MODEL_NOT_FOUND: ErrorCategory.MODEL_ERRORS,
     ErrorCode.MODEL_UNAVAILABLE: ErrorCategory.MODEL_ERRORS,

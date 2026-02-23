@@ -27,9 +27,8 @@ Related Issues: #1043, #1039
 
 import logging
 import time
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from threading import Lock
 from typing import Any, Callable
@@ -46,7 +45,7 @@ from src.services.prometheus_metrics import (
 logger = logging.getLogger(__name__)
 
 
-class CircuitState(str, Enum):
+class CircuitState(str, Enum):  # noqa: UP042
     """Circuit breaker states"""
     CLOSED = "closed"  # Normal operation
     OPEN = "open"  # Failing, reject requests
@@ -365,7 +364,7 @@ class CircuitBreaker:
             result = func(*args, **kwargs)
             self._record_success()
             return result
-        except Exception as e:
+        except Exception:
             self._record_failure()
             raise
 
@@ -401,7 +400,7 @@ class CircuitBreaker:
             result = await func(*args, **kwargs)
             self._record_success()
             return result
-        except Exception as e:
+        except Exception:
             self._record_failure()
             raise
 
@@ -418,7 +417,7 @@ class CircuitBreaker:
                 "success_count": self._success_count,
                 "failure_rate": failure_rate,
                 "recent_requests": total_requests,
-                "opened_at": datetime.fromtimestamp(self._opened_at, tz=timezone.utc).isoformat() if self._opened_at else None,
+                "opened_at": datetime.fromtimestamp(self._opened_at, tz=UTC).isoformat() if self._opened_at else None,
                 "seconds_until_retry": max(0, int(self.config.timeout_seconds - (time.time() - self._opened_at))) if self._state == CircuitState.OPEN else 0,
             }
 

@@ -1,7 +1,7 @@
 """Trial Analytics Routes - Admin endpoints for monitoring trial usage and conversions"""
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -18,7 +18,6 @@ from src.schemas.trial_analytics import (
     ConversionFunnelResponse,
     DomainAnalysis,
     DomainAnalysisResponse,
-    IPAnalysis,
     IPAnalysisResponse,
     SaveConversionMetricsRequest,
     SaveConversionMetricsResponse,
@@ -93,7 +92,7 @@ async def get_trial_users(
     """
     try:
         client = get_supabase_client()
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
 
         # Build base query joining users and api_keys
         query = (
@@ -312,7 +311,7 @@ async def get_domain_analysis(
                 logger.warning(f"Failed to decode cached domain analysis: {e}, fetching fresh data")
 
         client = get_supabase_client()
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
 
         # Fetch all trial users with their API key data
         # Note: Supabase has a default limit of 1000, so we need to paginate
@@ -654,7 +653,7 @@ async def save_conversion_metrics(
                 "trial_days_used": request.trial_days_used,
                 "converted_plan": request.converted_plan,
                 "conversion_trigger": request.conversion_trigger,
-                "conversion_date": datetime.now(timezone.utc).isoformat(),
+                "conversion_date": datetime.now(UTC).isoformat(),
             })
             .execute()
         )
@@ -687,7 +686,7 @@ async def get_cohort_analysis(
     """
     try:
         client = get_supabase_client()
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
 
         # Calculate cohort periods
         cohorts = []

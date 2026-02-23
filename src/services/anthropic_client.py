@@ -9,7 +9,6 @@ API Documentation: https://docs.anthropic.com/en/api/getting-started
 """
 
 import logging
-from datetime import datetime, timezone
 
 import httpx
 

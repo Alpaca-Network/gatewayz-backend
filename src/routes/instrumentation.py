@@ -10,7 +10,7 @@ This module provides endpoints for:
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -48,7 +48,7 @@ async def instrumentation_health():
     """
     return {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "loki": {
             "enabled": Config.LOKI_ENABLED,
             "url": Config.LOKI_PUSH_URL if Config.LOKI_ENABLED else None,
@@ -78,7 +78,7 @@ async def get_trace_context():
     return {
         "trace_id": trace_id or "none",
         "span_id": span_id or "none",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -103,7 +103,7 @@ async def loki_status(admin_key: str = Depends(get_admin_key)):
             "environment": Config.APP_ENV,
             "service": "gatewayz-api",
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -128,7 +128,7 @@ async def tempo_status(admin_key: str = Depends(get_admin_key)):
             "service.version": "2.0.3",
             "deployment.environment": Config.APP_ENV,
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -173,7 +173,7 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
             "OTEL_SERVICE_NAME": Config.OTEL_SERVICE_NAME,
             "APP_ENV": Config.APP_ENV,
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -207,7 +207,7 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
             "tracer_provider_exists": OpenTelemetryConfig._tracer_provider is not None,
             "tempo_enabled": Config.TEMPO_ENABLED,
             "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     trace_id = None
@@ -217,13 +217,13 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
     with tracer.start_as_current_span("test_trace_export") as span:
         span.set_attribute("test", True)
         span.set_attribute("test.type", "diagnostic")
-        span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
+        span.set_attribute("timestamp", datetime.now(UTC).isoformat())
 
         trace_id = get_current_trace_id()
         span_id = get_current_span_id()
 
         logger.info(
-            f"Test trace generated",
+            "Test trace generated",
             extra={
                 "trace_id": trace_id,
                 "span_id": span_id,
@@ -255,7 +255,7 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
         "message": "Test trace generated. Check Tempo for trace details."
         if flush_result
         else "Trace created but flush failed - check Tempo connection.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -287,7 +287,7 @@ async def test_log(admin_key: str = Depends(get_admin_key)):
         "trace_id": trace_id,
         "span_id": span_id,
         "message": "Test log generated successfully. Check Loki for log details.",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -324,7 +324,7 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
             "ENVIRONMENT": os.environ.get("ENVIRONMENT", "development"),
             "OTEL_SERVICE_NAME": os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api"),
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -349,7 +349,7 @@ async def otel_status(admin_key: str = Depends(get_admin_key)):
     tracer = OpenTelemetryConfig.get_tracer(__name__)
     if tracer:
         try:
-            with tracer.start_as_current_span("otel_status_check") as span:
+            with tracer.start_as_current_span("otel_status_check") as span:  # noqa: F841
                 test_trace_id = get_current_trace_id()
                 can_create_spans = test_trace_id is not None
         except Exception as e:
@@ -367,5 +367,5 @@ async def otel_status(admin_key: str = Depends(get_admin_key)):
             "environment": Config.APP_ENV,
             "skip_reachability_check": Config.TEMPO_SKIP_REACHABILITY_CHECK,
         },
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }

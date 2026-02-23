@@ -3,9 +3,8 @@ Gateway Analytics Database Layer
 Provides functions to analyze usage across different gateways and providers
 """
 
-import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -39,7 +38,7 @@ def get_provider_stats(
     # CRITICAL: Never query without a time filter to prevent timeouts
     if not time_range or time_range == "all":
         time_range = "24h"
-        logger.debug(f"Defaulting time_range to 24h for provider stats query")
+        logger.debug("Defaulting time_range to 24h for provider stats query")
 
     try:
         supabase = get_supabase_client()
@@ -118,7 +117,7 @@ def get_gateway_stats(
     # CRITICAL: Never query without a time filter to prevent timeouts
     if not time_range or time_range == "all":
         time_range = "24h"
-        logger.debug(f"Defaulting time_range to 24h for gateway stats query")
+        logger.debug("Defaulting time_range to 24h for gateway stats query")
 
     try:
         supabase = get_supabase_client()
@@ -192,7 +191,7 @@ def get_trending_models(
     # Check in-memory cache first
     if cache_key in _trending_cache:
         cached_data, cache_time = _trending_cache[cache_key]
-        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=TRENDING_CACHE_TTL_SECONDS):
+        if datetime.now(UTC) - cache_time < timedelta(seconds=TRENDING_CACHE_TTL_SECONDS):
             logger.debug(f"Returning cached trending models for {cache_key}")
             return cached_data
 
@@ -286,7 +285,7 @@ def get_trending_models(
         result = trending[:limit]
 
         # Cache the result
-        _trending_cache[cache_key] = (result, datetime.now(timezone.utc))
+        _trending_cache[cache_key] = (result, datetime.now(UTC))
 
         return result
 
@@ -416,7 +415,7 @@ def get_top_models_by_provider(
 def _get_time_filter(time_range: str) -> str | None:
     """Convert time range string to ISO timestamp"""
     try:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if time_range == "1h":
             delta = timedelta(hours=1)

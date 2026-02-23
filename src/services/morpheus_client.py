@@ -7,7 +7,6 @@ Documentation: https://apidocs.mor.org/
 """
 
 import logging
-from datetime import datetime, timezone
 
 import httpx
 

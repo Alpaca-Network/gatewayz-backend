@@ -6,7 +6,7 @@ including cache hit rates, cost savings, and usage trends.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -51,7 +51,7 @@ async def get_cache_analytics(
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         user_id = user.get("id")
-        since_date = datetime.now(timezone.utc) - timedelta(days=days)
+        since_date = datetime.now(UTC) - timedelta(days=days)
 
         client = get_supabase_client()
 
@@ -134,7 +134,7 @@ async def get_cache_analytics(
         return {
             "period_days": days,
             "start_date": since_date.isoformat(),
-            "end_date": datetime.now(timezone.utc).isoformat(),
+            "end_date": datetime.now(UTC).isoformat(),
             "total_requests": total_requests,
             "cache_hits": cache_hits,
             "cache_misses": cache_misses,
@@ -191,7 +191,7 @@ async def get_cache_summary(
             }
 
         # Get last 30 days of data
-        since_date = datetime.now(timezone.utc) - timedelta(days=30)
+        since_date = datetime.now(UTC) - timedelta(days=30)
 
         client = get_supabase_client()
 

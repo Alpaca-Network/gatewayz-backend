@@ -21,7 +21,6 @@ from src.services.model_catalog_sync import (
 )
 from src.services.incremental_sync import (
     sync_all_providers_incremental,
-    sync_provider_incremental,
 )
 from src.services.provider_model_sync_service import (
     sync_providers_to_database,
@@ -171,7 +170,7 @@ async def sync_single_provider(
                     f"provider={provider_slug} | error={cache_error}"
                 )
         else:
-            logger.debug(f"[SYNC-CACHE] Skipping cache invalidation (dry_run=True)")
+            logger.debug("[SYNC-CACHE] Skipping cache invalidation (dry_run=True)")
 
         # TRACE: Build response
         total_duration = time.time() - start_time

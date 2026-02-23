@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 import httpx
 
@@ -8,7 +7,6 @@ from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_fireworks_pooled_client
 from src.utils.model_name_validator import clean_model_name
-from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)

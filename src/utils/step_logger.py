@@ -8,7 +8,6 @@ making it easy to trace the entire flow from provider fetch to cache population.
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class StepLogger:
         step_logger.success(rows_inserted=150)
     """
 
-    def __init__(self, operation_name: str, total_steps: Optional[int] = None, log_level: int = logging.INFO):
+    def __init__(self, operation_name: str, total_steps: int | None = None, log_level: int = logging.INFO):
         """
         Initialize step logger.
 
@@ -191,7 +190,7 @@ def log_operation_step(
     step_num: int,
     step_name: str,
     operation_name: str = "Operation",
-    total_steps: Optional[int] = None,
+    total_steps: int | None = None,
     **metadata
 ):
     """
@@ -216,7 +215,7 @@ def log_operation_step(
 def log_step_success(
     step_num: int,
     step_name: str,
-    total_steps: Optional[int] = None,
+    total_steps: int | None = None,
     **result_metadata
 ):
     """Log step success."""
@@ -233,7 +232,7 @@ def log_step_failure(
     step_num: int,
     step_name: str,
     error: Exception,
-    total_steps: Optional[int] = None,
+    total_steps: int | None = None,
     **metadata
 ):
     """Log step failure."""

@@ -11,7 +11,6 @@ import time
 import uuid
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
@@ -28,59 +27,13 @@ import src.services.trial_validation as trial_module
 from src.config import Config
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
-from src.services.aihubmix_client import (
-    make_aihubmix_request_openai,
-    process_aihubmix_response,
-)
-from src.services.alibaba_cloud_client import (
-    make_alibaba_cloud_request_openai,
-    process_alibaba_cloud_response,
-)
-from src.services.anannas_client import (
-    make_anannas_request_openai,
-    process_anannas_response,
-)
 from src.services.anthropic_transformer import (
     extract_text_from_content,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
 )
-from src.services.cerebras_client import (
-    make_cerebras_request_openai,
-    process_cerebras_response,
-)
-from src.services.featherless_client import (
-    make_featherless_request_openai,
-    process_featherless_response,
-)
-from src.services.fireworks_client import make_fireworks_request_openai, process_fireworks_response
-from src.services.google_vertex_client import (
-    make_google_vertex_request_openai,
-    process_google_vertex_response,
-)
-from src.services.huggingface_client import (
-    make_huggingface_request_openai,
-    process_huggingface_response,
-)
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.openrouter_client import (
-    make_openrouter_request_openai,
-    process_openrouter_response,
-)
 from src.services.passive_health_monitor import capture_model_health
-from src.services.pricing import calculate_cost
-from src.services.provider_failover import (
-    build_provider_failover_chain,
-    enforce_model_failover_rules,
-    filter_by_circuit_breaker,
-    map_provider_error,
-    should_failover,
-)
-from src.services.together_client import make_together_request_openai, process_together_response
-from src.services.vercel_ai_gateway_client import (
-    make_vercel_ai_gateway_request_openai,
-    process_vercel_ai_gateway_response,
-)
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
@@ -89,7 +42,6 @@ from src.utils.token_estimator import estimate_message_tokens
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.adapters.chat import AnthropicChatAdapter
-from src.schemas.internal.chat import InternalChatRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

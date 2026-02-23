@@ -15,7 +15,6 @@ For LLM models, we use OpenAI SDK to access their OpenAI-compatible endpoint.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from src.services.model_catalog_cache import cache_gateway_catalog

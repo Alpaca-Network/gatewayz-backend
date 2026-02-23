@@ -10,7 +10,7 @@ import asyncio
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator, Dict, Optional, Union
+from typing import Any, AsyncIterator
 from fastapi import Request
 
 from src.db.chat_completion_requests import save_chat_completion_request
@@ -64,10 +64,10 @@ class ChatInferenceHandler:
     """
 
     def __init__(
-        self, 
-        api_key: str, 
-        background_tasks: Optional[Any] = None,
-        request: Optional[Request] = None
+        self,
+        api_key: str,
+        background_tasks: Any | None = None,
+        request: Request | None = None
     ):
         """
         Initialize the handler with user context.
@@ -80,8 +80,8 @@ class ChatInferenceHandler:
         self.api_key = api_key
         self.background_tasks = background_tasks
         self.request = request
-        self.user: Optional[Dict[str, Any]] = None
-        self.trial: Optional[Dict[str, Any]] = None
+        self.user: dict[str, Any] | None = None
+        self.trial: dict[str, Any] | None = None
         self.request_id = str(uuid.uuid4())
         self.start_time = time.monotonic()
 
@@ -173,7 +173,7 @@ class ChatInferenceHandler:
         self,
         model_id: str,
         messages: list[dict],
-        max_tokens: Optional[int],
+        max_tokens: int | None,
     ) -> None:
         """
         Pre-flight credit check: verify user has sufficient credits for maximum possible cost.
@@ -192,7 +192,6 @@ class ChatInferenceHandler:
         Raises:
             HTTPException: 402 Payment Required if insufficient credits
         """
-        from fastapi import HTTPException
 
         # Trial users don't need credit checks
         if self.trial.get("is_trial", False):
@@ -549,7 +548,7 @@ class ChatInferenceHandler:
         input_tokens: int,
         output_tokens: int,
         status: str = "completed",
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> None:
         """
         Log request metadata to chat_completion_requests table.
@@ -951,7 +950,7 @@ class ChatInferenceHandler:
                             accumulated_content += content
 
                         if chunk_finish_reason:
-                            finish_reason = chunk_finish_reason
+                            finish_reason = chunk_finish_reason  # noqa: F841
 
                         # Extract usage from final chunk if available
                         if hasattr(provider_chunk, "usage") and provider_chunk.usage:

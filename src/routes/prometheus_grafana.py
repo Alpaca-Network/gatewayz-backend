@@ -18,7 +18,6 @@ https://github.com/grafana/simple-json-datasource
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field

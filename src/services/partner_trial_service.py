@@ -7,8 +7,7 @@ the standard 3-day basic trial.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -29,7 +28,7 @@ class PartnerTrialService:
         cache_key = partner_code.upper()
         if cache_key in cls._config_cache:
             config, cached_at = cls._config_cache[cache_key]
-            if (datetime.now(timezone.utc) - cached_at).total_seconds() < cls.CACHE_TTL_SECONDS:
+            if (datetime.now(UTC) - cached_at).total_seconds() < cls.CACHE_TTL_SECONDS:
                 return config
             # Cache expired, remove it
             del cls._config_cache[cache_key]
@@ -38,7 +37,7 @@ class PartnerTrialService:
     @classmethod
     def _set_cached_config(cls, partner_code: str, config: dict[str, Any]) -> None:
         """Cache partner config"""
-        cls._config_cache[partner_code.upper()] = (config, datetime.now(timezone.utc))
+        cls._config_cache[partner_code.upper()] = (config, datetime.now(UTC))
 
     @classmethod
     def invalidate_cache(cls, partner_code: str | None = None) -> None:
@@ -145,7 +144,7 @@ class PartnerTrialService:
 
         try:
             client = get_supabase_client()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             trial_end = now + timedelta(days=partner_config["trial_duration_days"])
 
             # Update user with partner trial info
@@ -243,7 +242,7 @@ class PartnerTrialService:
                 return {"has_partner_trial": False}
 
             trial = result.data[0]
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Parse trial expiration
             expires_at_str = trial["trial_expires_at"]
@@ -342,7 +341,7 @@ class PartnerTrialService:
         """
         try:
             client = get_supabase_client()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Update analytics record
             client.table("partner_trial_analytics").update(
@@ -391,7 +390,7 @@ class PartnerTrialService:
         """
         try:
             client = get_supabase_client()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             # Update analytics
             client.table("partner_trial_analytics").update(

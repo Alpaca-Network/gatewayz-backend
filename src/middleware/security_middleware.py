@@ -13,14 +13,12 @@ import hashlib
 import logging
 import time
 from collections import Counter, deque
-from typing import Optional
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-from src.config import Config
 from src.services.prometheus_metrics import rate_limited_requests
 
 logger = logging.getLogger(__name__)

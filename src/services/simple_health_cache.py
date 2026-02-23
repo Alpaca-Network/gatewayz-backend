@@ -113,7 +113,7 @@ class SimpleHealthCache:
                 )
                 if attempt == 0:
                     # Log full traceback only on first attempt
-                    logger.debug(f"Cache write error details", exc_info=True)
+                    logger.debug("Cache write error details", exc_info=True)
                 return False
 
         return False
@@ -179,7 +179,7 @@ class SimpleHealthCache:
                     f"{type(e).__name__}: {str(e)[:100]}"
                 )
                 if attempt == 0:
-                    logger.debug(f"Cache read error details", exc_info=True)
+                    logger.debug("Cache read error details", exc_info=True)
                 return None
 
         return None

@@ -8,7 +8,7 @@ processed by the handler, then converted back FROM these schemas.
 This provides a single source of truth for what a "chat request" is internally.
 """
 
-from typing import Optional, Literal, Union, List, Any, Dict
+from typing import Literal, Any
 from pydantic import BaseModel, Field
 
 
@@ -23,12 +23,12 @@ class InternalMessage(BaseModel):
     role: Literal["system", "user", "assistant", "tool"] = Field(
         ..., description="Role of the message sender"
     )
-    content: Union[str, List[Dict[str, Any]], None] = Field(
+    content: str | list[dict[str, Any]] | None = Field(
         ..., description="Message content - can be text, multimodal array, or None for tool responses"
     )
-    name: Optional[str] = Field(None, description="Optional name of the sender (for function calls)")
-    tool_call_id: Optional[str] = Field(None, description="ID of the tool call this message is responding to")
-    tool_calls: Optional[List[Dict[str, Any]]] = Field(
+    name: str | None = Field(None, description="Optional name of the sender (for function calls)")
+    tool_call_id: str | None = Field(None, description="ID of the tool call this message is responding to")
+    tool_calls: list[dict[str, Any]] | None = Field(
         None, description="Tool/function calls made by the assistant"
     )
 
@@ -42,34 +42,34 @@ class InternalChatRequest(BaseModel):
     """
 
     # Core required fields
-    messages: List[InternalMessage] = Field(..., description="Conversation messages")
+    messages: list[InternalMessage] = Field(..., description="Conversation messages")
     model: str = Field(..., description="Model identifier (original user-requested model)")
 
     # Generation parameters (unified across all formats)
-    temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
-    max_tokens: Optional[int] = Field(None, ge=1, description="Maximum tokens to generate")
-    top_p: Optional[float] = Field(None, ge=0.0, le=1.0, description="Nucleus sampling threshold")
-    frequency_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Frequency penalty")
-    presence_penalty: Optional[float] = Field(None, ge=-2.0, le=2.0, description="Presence penalty")
-    stop: Optional[Union[str, List[str]]] = Field(None, description="Stop sequences")
+    temperature: float | None = Field(None, ge=0.0, le=2.0, description="Sampling temperature")
+    max_tokens: int | None = Field(None, ge=1, description="Maximum tokens to generate")
+    top_p: float | None = Field(None, ge=0.0, le=1.0, description="Nucleus sampling threshold")
+    frequency_penalty: float | None = Field(None, ge=-2.0, le=2.0, description="Frequency penalty")
+    presence_penalty: float | None = Field(None, ge=-2.0, le=2.0, description="Presence penalty")
+    stop: str | list[str] | None = Field(None, description="Stop sequences")
 
     # Streaming
     stream: bool = Field(False, description="Whether to stream the response")
 
     # Tools/function calling
-    tools: Optional[List[Dict[str, Any]]] = Field(None, description="Available tools/functions")
-    tool_choice: Optional[Union[str, Dict[str, Any]]] = Field(
+    tools: list[dict[str, Any]] | None = Field(None, description="Available tools/functions")
+    tool_choice: str | dict[str, Any] | None = Field(
         None, description="Tool choice strategy ('auto', 'none', or specific tool)"
     )
 
     # Response format
-    response_format: Optional[Dict[str, Any]] = Field(None, description="Desired response format (e.g., JSON)")
+    response_format: dict[str, Any] | None = Field(None, description="Desired response format (e.g., JSON)")
 
     # Metadata
-    user: Optional[str] = Field(None, description="End-user identifier for abuse monitoring")
+    user: str | None = Field(None, description="End-user identifier for abuse monitoring")
 
     # Anthropic-specific (mapped from system parameter)
-    system_message: Optional[str] = Field(
+    system_message: str | None = Field(
         None, description="System message (Anthropic formats use separate field)"
     )
 
@@ -107,12 +107,12 @@ class InternalChatResponse(BaseModel):
     usage: InternalUsage = Field(..., description="Token usage statistics")
 
     # Completion metadata
-    finish_reason: Optional[str] = Field(None, description="Reason completion finished (stop, length, etc.)")
-    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Tool calls made by the model")
+    finish_reason: str | None = Field(None, description="Reason completion finished (stop, length, etc.)")
+    tool_calls: list[dict[str, Any]] | None = Field(None, description="Tool calls made by the model")
 
     # Provider metadata
     provider_used: str = Field(..., description="Provider that handled the request (openrouter, cerebras, etc.)")
-    provider_response_id: Optional[str] = Field(None, description="Original response ID from provider")
+    provider_response_id: str | None = Field(None, description="Original response ID from provider")
 
     # Cost tracking (calculated by handler)
     cost_usd: float = Field(..., ge=0.0, description="Total cost in USD")
@@ -120,7 +120,7 @@ class InternalChatResponse(BaseModel):
     output_cost_usd: float = Field(..., ge=0.0, description="Cost of output tokens in USD")
 
     # Timing
-    processing_time_ms: Optional[float] = Field(None, description="Processing time in milliseconds")
+    processing_time_ms: float | None = Field(None, description="Processing time in milliseconds")
 
     class Config:
         extra = "allow"  # Allow provider-specific response fields
@@ -135,11 +135,11 @@ class InternalStreamChunk(BaseModel):
 
     id: str = Field(..., description="Request identifier")
     model: str = Field(..., description="Model identifier")
-    content: Optional[str] = Field(None, description="Incremental content delta")
-    role: Optional[str] = Field(None, description="Role (for first chunk)")
-    finish_reason: Optional[str] = Field(None, description="Finish reason (for last chunk)")
-    tool_calls: Optional[List[Dict[str, Any]]] = Field(None, description="Incremental tool call data")
-    usage: Optional[InternalUsage] = Field(None, description="Usage data (typically in final chunk)")
+    content: str | None = Field(None, description="Incremental content delta")
+    role: str | None = Field(None, description="Role (for first chunk)")
+    finish_reason: str | None = Field(None, description="Finish reason (for last chunk)")
+    tool_calls: list[dict[str, Any]] | None = Field(None, description="Incremental tool call data")
+    usage: InternalUsage | None = Field(None, description="Usage data (typically in final chunk)")
     created: int = Field(..., description="Unix timestamp")
 
     class Config:

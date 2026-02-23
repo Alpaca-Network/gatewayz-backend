@@ -1,11 +1,9 @@
 import logging
-from datetime import datetime, timezone
 
 import httpx
 from openai import OpenAI
 
 from src.cache import (
-    clear_gateway_error,
     is_gateway_in_error_state,
     set_gateway_error,
 )

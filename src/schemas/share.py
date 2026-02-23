@@ -1,6 +1,5 @@
 """Schema definitions for share chat functionality."""
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel

@@ -230,7 +230,7 @@ async def handle_credits_and_usage(
         has_stripe_customer_id = user.get("stripe_customer_id") is not None
         has_paid_tier = user.get("tier") in ("pro", "max", "admin")
         has_subscription_allowance = (user.get("subscription_allowance") or 0) > 0
-        has_active_status = user.get("subscription_status") == "active"
+        has_active_status = user.get("subscription_status") == "active"  # noqa: F841
 
         # Count how many indicators suggest the user is NOT on trial
         subscription_indicators = [

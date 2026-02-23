@@ -34,7 +34,7 @@ from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Callable
 
 # Try to import OpenTelemetry - it's optional
 try:
@@ -52,7 +52,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class AIRequestType(str, Enum):
+class AIRequestType(str, Enum):  # noqa: UP042
     """Types of AI requests for categorization in traces."""
 
     CHAT_COMPLETION = "chat_completion"
@@ -65,7 +65,7 @@ class AIRequestType(str, Enum):
     FUNCTION_CALL = "function_call"
 
 
-class CircuitState(str, Enum):
+class CircuitState(str, Enum):  # noqa: UP042
     """Circuit breaker states."""
 
     CLOSED = "closed"  # Normal operation
@@ -82,7 +82,7 @@ class AISpanContext:
     on OpenTelemetry spans.
     """
 
-    span: Optional[Span] = None
+    span: Span | None = None
     start_time: float = field(default_factory=time.time)
     provider: str = ""
     model: str = ""
@@ -91,7 +91,7 @@ class AISpanContext:
         self,
         input_tokens: int = 0,
         output_tokens: int = 0,
-        total_tokens: Optional[int] = None,
+        total_tokens: int | None = None,
     ) -> "AISpanContext":
         """Set token usage attributes on the span.
 
@@ -121,8 +121,8 @@ class AISpanContext:
     def set_response_model(
         self,
         response_model: str,
-        finish_reason: Optional[str] = None,
-        response_id: Optional[str] = None,
+        finish_reason: str | None = None,
+        response_id: str | None = None,
     ) -> "AISpanContext":
         """Set the actual model returned by the provider.
 
@@ -147,11 +147,11 @@ class AISpanContext:
 
     def set_model_parameters(
         self,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        top_p: Optional[float] = None,
-        frequency_penalty: Optional[float] = None,
-        presence_penalty: Optional[float] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
     ) -> "AISpanContext":
         """Set model generation parameters.
 
@@ -178,9 +178,9 @@ class AISpanContext:
 
     def set_routing_info(
         self,
-        original_model: Optional[str] = None,
+        original_model: str | None = None,
         fallback_used: bool = False,
-        routing_strategy: Optional[str] = None,
+        routing_strategy: str | None = None,
     ) -> "AISpanContext":
         """Set routing decision information."""
         if self.span and OTEL_AVAILABLE:
@@ -207,7 +207,7 @@ class AISpanContext:
     def set_cache_info(
         self,
         cache_hit: bool,
-        cache_key: Optional[str] = None,
+        cache_key: str | None = None,
     ) -> "AISpanContext":
         """Set cache hit/miss information."""
         if self.span and OTEL_AVAILABLE:
@@ -218,9 +218,9 @@ class AISpanContext:
 
     def set_user_info(
         self,
-        user_id: Optional[str] = None,
-        api_key_hash: Optional[str] = None,
-        tier: Optional[str] = None,
+        user_id: str | None = None,
+        api_key_hash: str | None = None,
+        tier: str | None = None,
     ) -> "AISpanContext":
         """Set user context information (redacted for privacy).
 
@@ -240,7 +240,7 @@ class AISpanContext:
     def set_error(
         self,
         error: Exception,
-        error_type: Optional[str] = None,
+        error_type: str | None = None,
     ) -> "AISpanContext":
         """Record an error on the span."""
         if self.span and OTEL_AVAILABLE:
@@ -252,9 +252,9 @@ class AISpanContext:
 
     def set_latency_breakdown(
         self,
-        queue_time_ms: Optional[float] = None,
-        inference_time_ms: Optional[float] = None,
-        network_time_ms: Optional[float] = None,
+        queue_time_ms: float | None = None,
+        inference_time_ms: float | None = None,
+        network_time_ms: float | None = None,
     ) -> "AISpanContext":
         """Set latency breakdown for detailed performance analysis."""
         if self.span and OTEL_AVAILABLE:
@@ -266,7 +266,7 @@ class AISpanContext:
                 self.span.set_attribute("ai.latency.network_ms", network_time_ms)
         return self
 
-    def add_event(self, name: str, attributes: Optional[dict] = None) -> "AISpanContext":
+    def add_event(self, name: str, attributes: dict | None = None) -> "AISpanContext":
         """Add an event to the span timeline."""
         if self.span and OTEL_AVAILABLE:
             self.span.add_event(name, attributes=attributes or {})
@@ -303,7 +303,7 @@ class AITracer:
         provider: str,
         model: str,
         request_type: AIRequestType = AIRequestType.CHAT_COMPLETION,
-        operation_name: Optional[str] = None,
+        operation_name: str | None = None,
     ):
         """
         Async context manager for tracing AI inference calls.
@@ -368,7 +368,7 @@ class AITracer:
         provider: str,
         model: str,
         request_type: AIRequestType = AIRequestType.CHAT_COMPLETION,
-        operation_name: Optional[str] = None,
+        operation_name: str | None = None,
     ):
         """
         Synchronous context manager for tracing AI inference calls.

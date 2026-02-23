@@ -5,7 +5,7 @@ Handles storage and retrieval of ping counts using Supabase
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from src.config.supabase_config import get_supabase_client
 
@@ -34,7 +34,7 @@ def increment_ping_count() -> int | None:
             # Update count
             update_result = (
                 client.table("ping_stats")
-                .update({"count": new_count, "last_ping_at": datetime.now(timezone.utc).isoformat()})
+                .update({"count": new_count, "last_ping_at": datetime.now(UTC).isoformat()})
                 .eq("id", 1)
                 .execute()
             )
@@ -123,7 +123,7 @@ def reset_ping_count() -> bool:
 
         result = (
             client.table("ping_stats")
-            .update({"count": 0, "last_ping_at": datetime.now(timezone.utc).isoformat()})
+            .update({"count": 0, "last_ping_at": datetime.now(UTC).isoformat()})
             .eq("id", 1)
             .execute()
         )
@@ -157,7 +157,7 @@ def init_ping_stats_table() -> bool:
             # Insert initial row
             insert_result = (
                 client.table("ping_stats")
-                .insert({"id": 1, "count": 0, "last_ping_at": datetime.now(timezone.utc).isoformat()})
+                .insert({"id": 1, "count": 0, "last_ping_at": datetime.now(UTC).isoformat()})
                 .execute()
             )
 

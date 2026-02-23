@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -245,10 +245,10 @@ def get_user_plan(user_id: int) -> dict[str, Any] | None:
     if cache_key in _user_plan_cache:
         entry = _user_plan_cache[cache_key]
         cache_time = entry["timestamp"]
-        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_user_plan_cache_ttl):
+        if datetime.now(UTC) - cache_time < timedelta(seconds=_user_plan_cache_ttl):
             logger.debug(
                 f"User plan cache hit for user {user_id} "
-                f"(age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)"
+                f"(age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)"
             )
             return entry["data"]
         else:
@@ -263,7 +263,7 @@ def get_user_plan(user_id: int) -> dict[str, Any] | None:
     # Cache the result (even if None, to avoid repeated DB queries for users without plans)
     _user_plan_cache[cache_key] = {
         "data": result,
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": datetime.now(UTC),
     }
 
     return result
@@ -283,7 +283,7 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
         client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
 
         # Create new plan assignment
-        start_date = datetime.now(timezone.utc)
+        start_date = datetime.now(UTC)
         end_date = start_date + timedelta(days=30 * duration_months)
 
         user_plan_data = {
@@ -301,7 +301,7 @@ def assign_user_plan(user_id: int, plan_id: int, duration_months: int = 1) -> bo
 
         # Update user subscription status
         client.table("users").update(
-            {"subscription_status": "active", "updated_at": datetime.now(timezone.utc).isoformat()}
+            {"subscription_status": "active", "updated_at": datetime.now(UTC).isoformat()}
         ).eq("id", user_id).execute()
 
         # Invalidate user plan cache since we just changed the plan
@@ -355,7 +355,7 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                     except Exception:
                         end_dt = None
 
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
 
                 # If expired, mark expired and return the expired payload
                 if end_dt and end_dt < now:
@@ -435,7 +435,7 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
         # Check expiration only if end_date is set
         if user_plan.get("end_date"):
             end_date = datetime.fromisoformat(user_plan["end_date"].replace("Z", "+00:00"))
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             if end_date < now:
                 client = get_supabase_client()
                 client.table("user_plans").update({"is_active": False}).eq(
@@ -500,7 +500,7 @@ def _get_user_usage_within_plan_limits_uncached(user_id: int) -> dict[str, Any]:
         entitlements = check_plan_entitlements(user_id)
 
         # Get usage for today and this month
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -571,8 +571,8 @@ def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
     if cache_key in _usage_cache:
         entry = _usage_cache[cache_key]
         cache_time = entry["timestamp"]
-        if datetime.now(timezone.utc) - cache_time < timedelta(seconds=_usage_cache_ttl):
-            logger.debug(f"Usage cache hit for user {user_id} (age: {(datetime.now(timezone.utc) - cache_time).total_seconds():.1f}s)")
+        if datetime.now(UTC) - cache_time < timedelta(seconds=_usage_cache_ttl):
+            logger.debug(f"Usage cache hit for user {user_id} (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)")
             return entry["data"]
         else:
             # Cache expired, remove it
@@ -586,7 +586,7 @@ def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
     # Cache the result (even if None, to avoid repeated DB queries for invalid users)
     _usage_cache[cache_key] = {
         "data": result,
-        "timestamp": datetime.now(timezone.utc),
+        "timestamp": datetime.now(UTC),
     }
 
     return result

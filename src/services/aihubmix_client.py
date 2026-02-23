@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 from openai import OpenAI
 
@@ -224,7 +223,6 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
 
     Note: AiHubMix API may return 'id' or 'model_id' depending on the endpoint version.
     """
-    from src.services.pricing_lookup import enrich_model_with_pricing
 
     # Support both 'id' and 'model_id' field names for API compatibility
     provider_model_id = model.get("id") or model.get("model_id")

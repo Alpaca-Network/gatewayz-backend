@@ -8,7 +8,7 @@ Provides consistent error classification, structured logging, and performance tr
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from src.utils.security_validators import sanitize_for_logging
 
@@ -36,14 +36,14 @@ class ProviderFetchContext:
     """Context information for provider fetch operations"""
 
     provider_slug: str
-    endpoint_url: Optional[str] = None
-    status_code: Optional[int] = None
+    endpoint_url: str | None = None
+    status_code: int | None = None
     models_fetched: int = 0
-    models_expected: Optional[int] = None
+    models_expected: int | None = None
     retry_count: int = 0
     max_retries: int = 0
-    duration: Optional[float] = None
-    error_type: Optional[ProviderErrorType] = None
+    duration: float | None = None
+    error_type: ProviderErrorType | None = None
     additional_context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -122,7 +122,7 @@ def classify_provider_error(error: Exception) -> ProviderErrorType:
 def log_provider_fetch_error(
     provider_slug: str,
     error: Exception,
-    context: Optional[ProviderFetchContext] = None,
+    context: ProviderFetchContext | None = None,
 ) -> None:
     """
     Log a provider fetch error with standardized formatting and context.
@@ -168,8 +168,8 @@ def log_provider_fetch_error(
 def log_provider_fetch_success(
     provider_slug: str,
     models_count: int,
-    duration: Optional[float] = None,
-    additional_context: Optional[dict[str, Any]] = None,
+    duration: float | None = None,
+    additional_context: dict[str, Any] | None = None,
 ) -> None:
     """
     Log a successful provider fetch with standardized formatting.
@@ -199,7 +199,7 @@ def log_provider_fetch_success(
 def log_provider_fetch_warning(
     provider_slug: str,
     message: str,
-    context: Optional[dict[str, Any]] = None,
+    context: dict[str, Any] | None = None,
 ) -> None:
     """
     Log a provider fetch warning with standardized formatting.
@@ -221,8 +221,8 @@ def log_provider_cache_operation(
     provider_slug: str,
     operation: str,
     success: bool,
-    models_count: Optional[int] = None,
-    error: Optional[Exception] = None,
+    models_count: int | None = None,
+    error: Exception | None = None,
 ) -> None:
     """
     Log a cache operation for a provider.

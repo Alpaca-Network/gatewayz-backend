@@ -10,7 +10,6 @@ import logging
 import os
 import tempfile
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -47,12 +46,12 @@ async def create_transcription(
         default="whisper-1",
         description="Model to use for transcription (whisper-1, whisper-large-v3, etc.)",
     ),
-    language: Optional[str] = Form(
+    language: str | None = Form(
         default=None,
         description="Language of the audio in ISO-639-1 format (e.g., 'en', 'es', 'fr'). "
         "Providing this improves accuracy and speed.",
     ),
-    prompt: Optional[str] = Form(
+    prompt: str | None = Form(
         default=None,
         description="Optional text to guide the model's style or continue a previous segment. "
         "Useful for domain-specific vocabulary or maintaining context.",
@@ -66,7 +65,7 @@ async def create_transcription(
         le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic.",
     ),
-    _api_key: Optional[str] = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
+    _api_key: str | None = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe audio using OpenAI Whisper or compatible services.
@@ -229,11 +228,11 @@ async def create_transcription_base64(
         default="audio/webm", description="MIME type of the audio (e.g., 'audio/webm', 'audio/wav')"
     ),
     model: str = Form(default="whisper-1"),
-    language: Optional[str] = Form(default=None),
-    prompt: Optional[str] = Form(default=None),
+    language: str | None = Form(default=None),
+    prompt: str | None = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0, ge=0.0, le=1.0),
-    _api_key: Optional[str] = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
+    _api_key: str | None = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe base64-encoded audio.

@@ -11,13 +11,12 @@ Usage:
     suggestions = get_suggestions(ErrorCode.MODEL_NOT_FOUND)
 """
 
-from typing import Dict, List, Optional
 
 from src.utils.error_codes import ErrorCode
 
 
 # Error message templates with placeholders
-ERROR_MESSAGES: Dict[ErrorCode, str] = {
+ERROR_MESSAGES: dict[ErrorCode, str] = {
     # Model errors
     ErrorCode.MODEL_NOT_FOUND: "Model '{model_id}' not found",
     ErrorCode.MODEL_UNAVAILABLE: "Model '{model_id}' is temporarily unavailable",
@@ -102,7 +101,7 @@ ERROR_MESSAGES: Dict[ErrorCode, str] = {
 
 
 # Detailed explanations for each error type
-ERROR_DETAILS: Dict[ErrorCode, str] = {
+ERROR_DETAILS: dict[ErrorCode, str] = {
     # Model errors
     ErrorCode.MODEL_NOT_FOUND: "The requested model is not available in our catalog. Please check the model name and try again with a valid model ID.",
     ErrorCode.MODEL_UNAVAILABLE: "This model is currently unavailable due to provider maintenance or issues. Please try again later or use an alternative model.",
@@ -187,7 +186,7 @@ ERROR_DETAILS: Dict[ErrorCode, str] = {
 
 
 # Suggestions for each error type
-ERROR_SUGGESTIONS: Dict[ErrorCode, List[str]] = {
+ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
     # Model errors
     ErrorCode.MODEL_NOT_FOUND: [
         "Check the list of available models at /v1/models",
@@ -494,7 +493,7 @@ ERROR_SUGGESTIONS: Dict[ErrorCode, List[str]] = {
 
 
 # Documentation URLs for each error type
-ERROR_DOCS_URLS: Dict[ErrorCode, str] = {
+ERROR_DOCS_URLS: dict[ErrorCode, str] = {
     ErrorCode.MODEL_NOT_FOUND: "https://docs.gatewayz.ai/errors/model-not-found",
     ErrorCode.INSUFFICIENT_CREDITS: "https://docs.gatewayz.ai/errors/insufficient-credits",
     ErrorCode.RATE_LIMIT_EXCEEDED: "https://docs.gatewayz.ai/errors/rate-limits",
@@ -536,7 +535,7 @@ def get_error_detail(error_code: ErrorCode) -> str:
     return ERROR_DETAILS.get(error_code, "Please try again or contact support.")
 
 
-def get_suggestions(error_code: ErrorCode) -> List[str]:
+def get_suggestions(error_code: ErrorCode) -> list[str]:
     """
     Get actionable suggestions for resolving an error.
 
@@ -549,7 +548,7 @@ def get_suggestions(error_code: ErrorCode) -> List[str]:
     return ERROR_SUGGESTIONS.get(error_code, ["Try again later", "Contact support if the issue persists"])
 
 
-def get_docs_url(error_code: ErrorCode) -> Optional[str]:
+def get_docs_url(error_code: ErrorCode) -> str | None:
     """
     Get the documentation URL for an error code.
 

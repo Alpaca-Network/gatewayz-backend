@@ -25,7 +25,7 @@ Usage:
 
 import logging
 import os
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ def is_available() -> bool:
     return _braintrust_available and _braintrust_logger is not None
 
 
-def get_project_name() -> Optional[str]:
+def get_project_name() -> str | None:
     """
     Get the name of the Braintrust project.
 

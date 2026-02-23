@@ -14,7 +14,6 @@ Features:
 import asyncio
 import logging
 import time
-from collections import defaultdict
 from threading import Lock
 from typing import Any, Callable
 

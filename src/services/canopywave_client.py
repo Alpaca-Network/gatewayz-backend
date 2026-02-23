@@ -24,7 +24,6 @@ Features:
 """
 
 import logging
-from datetime import datetime, timezone
 from typing import Any, Iterator
 
 import httpx

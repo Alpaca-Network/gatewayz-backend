@@ -15,9 +15,9 @@ This module provides comprehensive metrics collection for:
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from functools import wraps
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class MetricsCollector:
         self.db_query_latency = 0.0
         self.external_api_calls = defaultdict(int)  # {service: count}
         self.external_api_errors = defaultdict(int)  # {service: count}
-        self.start_time = datetime.now(timezone.utc)
+        self.start_time = datetime.now(UTC)
 
     def record_request(
         self,
@@ -57,9 +57,9 @@ class MetricsCollector:
         method: str,
         latency_seconds: float,
         status_code: int,
-        error: Optional[str] = None,
-        provider: Optional[str] = None,
-        model: Optional[str] = None,
+        error: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> None:
         """
         Record a request metric.
@@ -125,7 +125,7 @@ class MetricsCollector:
         if error:
             self.external_api_errors[service] += 1
 
-    def get_percentile(self, endpoint: str, percentile: float) -> Optional[float]:
+    def get_percentile(self, endpoint: str, percentile: float) -> float | None:
         """
         Calculate latency percentile for an endpoint.
 
@@ -144,14 +144,14 @@ class MetricsCollector:
         index = int(len(sorted_latencies) * percentile)
         return sorted_latencies[min(index, len(sorted_latencies) - 1)]
 
-    def get_average_latency(self, endpoint: str) -> Optional[float]:
+    def get_average_latency(self, endpoint: str) -> float | None:
         """Get average latency for an endpoint."""
         latencies = self.request_latencies.get(endpoint, [])
         if not latencies:
             return None
         return sum(latencies) / len(latencies)
 
-    def get_metrics_snapshot(self) -> Dict[str, Any]:
+    def get_metrics_snapshot(self) -> dict[str, Any]:
         """
         Get a snapshot of all current metrics.
 
@@ -221,7 +221,7 @@ class MetricsCollector:
             self.db_query_latency / self.db_queries if self.db_queries > 0 else 0
         )
 
-        uptime_seconds = (datetime.now(timezone.utc) - self.start_time).total_seconds()
+        uptime_seconds = (datetime.now(UTC) - self.start_time).total_seconds()
 
         return {
             "latency": latency_metrics,
@@ -260,11 +260,11 @@ class MetricsCollector:
         self.db_query_latency = 0.0
         self.external_api_calls.clear()
         self.external_api_errors.clear()
-        self.start_time = datetime.now(timezone.utc)
+        self.start_time = datetime.now(UTC)
 
 
 # Global metrics collector instance
-_collector: Optional[MetricsCollector] = None
+_collector: MetricsCollector | None = None
 
 
 def get_metrics_collector() -> MetricsCollector:
@@ -278,8 +278,8 @@ def get_metrics_collector() -> MetricsCollector:
 def track_request(
     endpoint: str,
     method: str = "GET",
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> Callable:
     """
     Decorator to track request metrics.

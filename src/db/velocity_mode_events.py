@@ -6,7 +6,7 @@ which tracks when and why velocity mode protection is activated.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
@@ -41,7 +41,7 @@ def create_velocity_event(
         supabase = get_supabase_client()
 
         event_data = {
-            "activated_at": datetime.now(timezone.utc).isoformat(),
+            "activated_at": datetime.now(UTC).isoformat(),
             "error_rate": float(error_rate),
             "total_requests": total_requests,
             "error_count": error_count,
@@ -83,7 +83,7 @@ def deactivate_velocity_event(event_id: str | UUID) -> dict[str, Any] | None:
         # Convert UUID to string if necessary
         event_id_str = str(event_id) if isinstance(event_id, UUID) else event_id
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # First, get the event to calculate duration
         event_result = supabase.table("velocity_mode_events").select("*").eq("id", event_id_str).execute()
@@ -215,7 +215,7 @@ def get_velocity_event_stats(hours: int = 24) -> dict[str, Any]:
         supabase = get_supabase_client()
 
         # Calculate cutoff time
-        cutoff = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+        cutoff = datetime.now(UTC).replace(microsecond=0).isoformat()  # noqa: F841
 
         # Get events in the time window
         result = (

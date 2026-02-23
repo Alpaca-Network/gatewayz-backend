@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 
 
-class NotificationType(str, Enum):
+class NotificationType(str, Enum):  # noqa: UP042
     """Notification type enumeration"""
 
     LOW_BALANCE = "low_balance"
@@ -29,7 +29,7 @@ class NotificationType(str, Enum):
     PLAN_UPGRADE = "plan_upgrade"
 
 
-class NotificationChannel(str, Enum):
+class NotificationChannel(str, Enum):  # noqa: UP042
     """Notification channel enumeration"""
 
     EMAIL = "email"
@@ -37,7 +37,7 @@ class NotificationChannel(str, Enum):
     IN_APP = "in_app"
 
 
-class NotificationStatus(str, Enum):
+class NotificationStatus(str, Enum):  # noqa: UP042
     """Notification status enumeration"""
 
     PENDING = "pending"

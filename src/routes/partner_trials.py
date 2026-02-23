@@ -7,7 +7,6 @@ Partner trials (like Redbeard) offer extended trial periods with enhanced benefi
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field

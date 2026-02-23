@@ -7,7 +7,7 @@ and system capacity utilization to help identify and resolve 503 errors.
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
 from src.config import Config
 
@@ -101,7 +101,6 @@ async def get_provider_timing_summary() -> dict[str, Any]:
     """
     try:
         from src.services.prometheus_metrics import (
-            provider_response_duration,
             provider_slow_requests_total,
         )
 

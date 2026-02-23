@@ -13,8 +13,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
-from html import escape
+from datetime import datetime, UTC
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query
@@ -37,7 +36,7 @@ _telemetry: dict[str, deque] = {
 
 
 def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------

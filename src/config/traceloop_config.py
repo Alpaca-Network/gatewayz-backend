@@ -25,7 +25,6 @@ Usage:
 import json
 import logging
 import os
-from typing import Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -34,7 +33,7 @@ logger = logging.getLogger(__name__)
 _initialized = False
 
 
-def _get_otlp_endpoint() -> Optional[str]:
+def _get_otlp_endpoint() -> str | None:
     """
     Get the OTLP endpoint for Traceloop SDK.
 
@@ -224,9 +223,9 @@ def initialize_traceloop() -> bool:
 
 
 def set_association_properties(
-    user_id: Optional[str] = None,
-    api_key_id: Optional[str] = None,
-    session_id: Optional[str] = None,
+    user_id: str | None = None,
+    api_key_id: str | None = None,
+    session_id: str | None = None,
     **custom_properties,
 ) -> None:
     """
@@ -274,8 +273,8 @@ def set_association_properties(
 
 
 def set_prompt_tracing(
-    prompt_name: Optional[str] = None,
-    prompt_version: Optional[str] = None,
+    prompt_name: str | None = None,
+    prompt_version: str | None = None,
 ) -> None:
     """
     Associate the current trace with a prompt template for tracking.

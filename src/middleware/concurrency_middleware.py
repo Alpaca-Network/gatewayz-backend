@@ -129,7 +129,7 @@ class ConcurrencyMiddleware:
                 self.semaphore.acquire(),
                 timeout=self.queue_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._waiting -= 1
             concurrency_queued.dec()
             method = scope.get("method", "UNKNOWN")

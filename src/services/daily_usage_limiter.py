@@ -4,7 +4,7 @@ Tracks and enforces daily usage limits for all users.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -27,7 +27,7 @@ class DailyUsageLimitExceeded(Exception):
 
 def get_daily_reset_time() -> datetime:
     """Get the next daily reset time (midnight UTC)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     next_reset = now.replace(hour=DAILY_LIMIT_RESET_HOUR, minute=0, second=0, microsecond=0)
 
     # If we've already passed today's reset time, get tomorrow's
@@ -51,7 +51,7 @@ def get_daily_usage(user_id: int) -> float:
         client = get_supabase_client()
 
         # Get start of current day (UTC midnight)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Query credit transactions for today

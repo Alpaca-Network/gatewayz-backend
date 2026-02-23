@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 import httpx
@@ -486,7 +486,7 @@ def test_gateway_cache(gateway_name: str, config: dict[str, Any]) -> tuple[bool,
 
         # Check cache age
         if cache_timestamp:
-            cache_age = (datetime.now(timezone.utc) - cache_timestamp).total_seconds()
+            cache_age = (datetime.now(UTC) - cache_timestamp).total_seconds()
             age_hours = cache_age / 3600
             age_str = f"{age_hours:.1f}h old" if age_hours >= 1 else f"{cache_age:.0f}s old"
         else:
@@ -606,7 +606,7 @@ async def check_single_gateway(
 
     # Track if this is a recovery (was unhealthy, now healthy)
     # This would need state tracking across checks, simplified here
-    was_previously_unhealthy = gateway_result.get("_previous_status") == "unhealthy"
+    was_previously_unhealthy = gateway_result.get("_previous_status") == "unhealthy"  # noqa: F841
 
     # Auto-fix if needed and enabled
     if not is_healthy and auto_fix:
@@ -667,7 +667,7 @@ async def run_comprehensive_check(
         gateways_to_check = GATEWAY_CONFIG
 
     results = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "total_gateways": len(gateways_to_check),
         "healthy": 0,
         "unhealthy": 0,

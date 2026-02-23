@@ -11,7 +11,7 @@ See: health-service/main.py
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -120,7 +120,7 @@ async def health_check():
     # Degraded mode means DB is unavailable but app is still serving traffic
     response = {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
     # Add database status if there are issues
@@ -154,7 +154,7 @@ async def health_quick():
     """
     return {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -274,7 +274,7 @@ async def health_railway():
                 }
                 if health_cache_available
                 else {"status": "warming_up"},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
             # TRANSIENT FAILURE FIX: Add retry info if applicable
@@ -316,7 +316,7 @@ async def health_railway():
                 "error_type": type(last_error).__name__,
                 "is_transient": is_transient,
                 "retry_count": retry_count,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     # Should never reach here, but handle gracefully
@@ -326,7 +326,7 @@ async def health_railway():
         "health_cache": "unknown",
         "error": str(last_error) if last_error else "Unknown error after retries",
         "retry_count": retry_count,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -374,7 +374,7 @@ async def get_system_health(
             tracked_models=0,
             tracked_providers=0,
             system_uptime=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get system health: {e}")
@@ -399,7 +399,7 @@ async def get_system_health(
             tracked_models=0,
             tracked_providers=0,
             system_uptime=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
 
 
@@ -451,7 +451,7 @@ async def get_providers_health(
                 "metadata": {
                     "total_providers": total_providers,
                     "tracked_providers": tracked_providers,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             }
 
@@ -465,7 +465,7 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": total_providers,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
     except Exception as e:
@@ -484,7 +484,7 @@ async def get_providers_health(
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -544,7 +544,7 @@ async def get_models_health(
                 "metadata": {
                     "total_models": total_models,
                     "tracked_models": tracked_models,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             }
 
@@ -557,7 +557,7 @@ async def get_models_health(
             "metadata": {
                 "total_models": total_models,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
     except Exception as e:
@@ -575,7 +575,7 @@ async def get_models_health(
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -613,7 +613,6 @@ async def get_catalog_models(
     """
     try:
         from src.services.models import get_all_models_parallel
-        from src.routes.catalog import GATEWAY_REGISTRY
 
         # Get all models from all gateways
         all_models = get_all_models_parallel()
@@ -638,7 +637,7 @@ async def get_catalog_models(
                 if m.get("provider_slug") == provider or m.get("provider") == provider
             ]
 
-        total_count = len(filtered_models)
+        total_count = len(filtered_models)  # noqa: F841
 
         # Apply pagination
         paginated_models = filtered_models[offset : offset + limit]
@@ -672,7 +671,7 @@ async def get_catalog_models(
             "metadata": {
                 "total_models": len(all_models),
                 "tracked_models": len(all_models),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
     except Exception as e:
@@ -691,7 +690,7 @@ async def get_catalog_models(
             "metadata": {
                 "total_models": 0,
                 "tracked_models": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "error": str(e),
             },
         }
@@ -770,7 +769,7 @@ async def get_catalog_providers(
             "metadata": {
                 "total_providers": len(providers),
                 "tracked_providers": len(providers),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
     except Exception as e:
@@ -793,7 +792,7 @@ async def get_catalog_providers(
             "metadata": {
                 "total_providers": 0,
                 "tracked_providers": 0,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "error": str(e),
             },
         }
@@ -925,7 +924,7 @@ async def get_health_summary(
                 tracked_models=0,
                 tracked_providers=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Check if cache is stale (no update in last 5 minutes)
@@ -940,7 +939,7 @@ async def get_health_summary(
                         )
                     else:
                         last_updated = last_updated_str
-                    age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                    age_seconds = (datetime.now(UTC) - last_updated).total_seconds()
                     monitoring_active = age_seconds < 300  # 5 minutes
                 except Exception:
                     monitoring_active = False
@@ -952,7 +951,7 @@ async def get_health_summary(
             else [],
             models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
             monitoring_active=monitoring_active,
-            last_check=datetime.now(timezone.utc),
+            last_check=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get health summary: {e}")
@@ -975,7 +974,7 @@ async def perform_health_check(
     return {
         "message": "Health checks are handled by health-service container",
         "note": "Use health-service /check/trigger endpoint to trigger manual checks",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "force_refresh": request.force_refresh,
     }
 
@@ -997,7 +996,7 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health checks are handled by health-service container",
         "note": "Use health-service /check/trigger endpoint to trigger manual checks",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "models_in_cache": len(cached_models),
         "providers_in_cache": len(cached_providers),
         "system_status": cached_system.get("overall_status", "unknown")
@@ -1038,7 +1037,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Calculate uptime metrics from cached models
@@ -1077,7 +1076,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=successful_requests,
             failed_requests=failed_requests,
             error_rate=error_rate,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
     except Exception as e:
         logger.error(f"Failed to get uptime metrics: {e}")
@@ -1097,7 +1096,7 @@ async def get_uptime_metrics(api_key: str = Depends(get_api_key)):
             successful_requests=0,
             failed_requests=0,
             error_rate=0.0,
-            last_updated=datetime.now(timezone.utc),
+            last_updated=datetime.now(UTC),
         )
 
 
@@ -1153,7 +1152,7 @@ async def get_health_dashboard(
                 tracked_models=0,
                 tracked_providers=0,
                 system_uptime=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Get providers health from cache
@@ -1264,7 +1263,7 @@ async def get_health_dashboard(
                 successful_requests=0,
                 failed_requests=0,
                 error_rate=0.0,
-                last_updated=datetime.now(timezone.utc),
+                last_updated=datetime.now(UTC),
             )
 
         # Determine if monitoring is active based on cache availability
@@ -1275,7 +1274,7 @@ async def get_health_dashboard(
             providers=providers_status,
             models=models_status,
             uptime_metrics=uptime_metrics,
-            last_updated=system_health.last_updated or datetime.now(timezone.utc),
+            last_updated=system_health.last_updated or datetime.now(UTC),
             monitoring_active=monitoring_active,
         )
 
@@ -1314,7 +1313,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                 "message": "Health data not available - health-service may not be running",
                 "monitoring_active": False,
                 "data_source": "health-service (via Redis cache)",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Check if cache is stale (no update in last 5 minutes)
@@ -1326,7 +1325,7 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
                     last_updated = datetime.fromisoformat(last_updated_str.replace("Z", "+00:00"))
                 else:
                     last_updated = last_updated_str
-                age_seconds = (datetime.now(timezone.utc) - last_updated).total_seconds()
+                age_seconds = (datetime.now(UTC) - last_updated).total_seconds()
                 monitoring_active = age_seconds < 300  # 5 minutes
             except Exception:
                 monitoring_active = False
@@ -1338,14 +1337,14 @@ async def get_health_status(api_key: str = Depends(get_api_key)):
             "total_models": cached_system.get("total_models", 0),
             "monitoring_active": monitoring_active,
             "data_source": "health-service (via Redis cache)",
-            "timestamp": cached_system.get("last_updated", datetime.now(timezone.utc).isoformat()),
+            "timestamp": cached_system.get("last_updated", datetime.now(UTC).isoformat()),
         }
     except Exception as e:
         logger.error(f"Failed to get health status: {e}")
         return {
             "status": "error",
             "message": "Failed to retrieve health status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1371,13 +1370,13 @@ async def get_monitoring_status(api_key: str = Depends(get_api_key)):
             "health_providers_count": len(cached_providers),
             "cache_status": "populated" if cached_system else "empty",
             "note": "Health monitoring is handled by dedicated health-service container",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get monitoring status: {e}")
         return {
             "error": "Failed to retrieve monitoring status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1392,7 +1391,7 @@ async def start_health_monitoring(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health monitoring is handled by health-service container",
         "note": "To start monitoring, ensure the health-service container is running",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1407,7 +1406,7 @@ async def stop_health_monitoring(api_key: str = Depends(get_api_key)):
     return {
         "message": "Health monitoring is handled by health-service container",
         "note": "To stop monitoring, stop the health-service container",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1455,7 +1454,7 @@ async def check_google_vertex_health():
             "health_status": diagnosis.get("health_status", "unhealthy"),
             "status": diagnosis.get("health_status", "unhealthy"),
             "diagnosis": diagnosis,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -1465,7 +1464,7 @@ async def check_google_vertex_health():
             "health_status": "unhealthy",
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1499,7 +1498,7 @@ async def database_health():
                     asyncio.to_thread(lambda: supabase.table("users").limit(1).execute()),
                     timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
                 )
-            except asyncio.TimeoutError as timeout_err:
+            except TimeoutError as timeout_err:
                 last_error = timeout_err
                 retry_count = attempt + 1
 
@@ -1522,7 +1521,7 @@ async def database_health():
                         "error": f"Database query timed out after {HEALTH_CHECK_TIMEOUT_SECONDS}s ({HEALTH_CHECK_MAX_RETRIES} attempts)",
                         "initialization": init_status,
                         "retry_count": retry_count,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                     }
 
             # Success!
@@ -1537,7 +1536,7 @@ async def database_health():
                 "connection": "verified",
                 "initialization": init_status,
                 "retry_count": retry_count,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         except Exception as e:
@@ -1577,7 +1576,7 @@ async def database_health():
                 "initialization": get_initialization_status(),
                 "retry_count": retry_count,
                 "is_transient": is_transient,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     # Should never reach here, but handle it gracefully
@@ -1589,7 +1588,7 @@ async def database_health():
         "error_type": type(last_error).__name__ if last_error else "Unknown",
         "initialization": get_initialization_status(),
         "retry_count": retry_count,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1622,14 +1621,14 @@ async def get_provider_import_status():
             "loaded_providers": loaded_count,
             "failed_providers": failed_count,
             "failures": _provider_import_errors if _provider_import_errors else None,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Error checking provider health: {str(e)}")
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1697,7 +1696,7 @@ async def get_all_health(
         return {
             "status": "success",
             "overall_status": overall_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "system": cached_system
             or {
                 "status": "unknown",
@@ -1728,7 +1727,7 @@ async def get_all_health(
             "status": "error",
             "overall_status": "unknown",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1805,7 +1804,7 @@ async def get_models_health_stats(
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "stats": {
                 "total_models": total_models,
                 "healthy_models": healthy_models,
@@ -1828,7 +1827,7 @@ async def get_models_health_stats(
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1890,7 +1889,7 @@ async def get_providers_health_stats(
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "stats": {
                 "total_providers": total_providers,
                 "healthy_providers": healthy_providers,
@@ -1914,7 +1913,7 @@ async def get_providers_health_stats(
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 
@@ -1950,7 +1949,7 @@ async def get_health_insights(api_key: str = Depends(get_api_key)):
                 "status": "unknown",
                 "message": "Health data not yet available",
                 "recommendation": "Wait for first health check cycle (5 minutes)",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Group unhealthy models by provider
@@ -2068,7 +2067,7 @@ async def get_health_insights(api_key: str = Depends(get_api_key)):
             )
 
         return {
-            "timestamp": system_health.get("last_updated") or datetime.now(timezone.utc).isoformat(),
+            "timestamp": system_health.get("last_updated") or datetime.now(UTC).isoformat(),
             "overall_health": {
                 "status": system_health.get("overall_status"),
                 "health_percentage": f"{health_pct:.1f}%",

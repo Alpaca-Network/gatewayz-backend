@@ -15,7 +15,6 @@ Part of pricing standardization fix
 
 import logging
 from decimal import Decimal, InvalidOperation
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +29,7 @@ class PricingFormat:
 def normalize_to_per_token(
     price: float | str | Decimal | None,
     source_format: str = PricingFormat.PER_1M_TOKENS
-) -> Optional[Decimal]:
+) -> Decimal | None:
     """
     Normalize pricing from any format to per-token format.
 
@@ -218,7 +217,7 @@ def convert_between_formats(
     price: float | str | Decimal,
     from_format: str,
     to_format: str
-) -> Optional[Decimal]:
+) -> Decimal | None:
     """
     Convert price from one format to another.
 
@@ -293,7 +292,7 @@ def validate_normalized_price(price: Decimal | float | str) -> bool:
 def normalize_price_from_provider(
     price: float | str | Decimal | None,
     provider_slug: str
-) -> Optional[Decimal]:
+) -> Decimal | None:
     """
     Normalize price from a specific provider to per-token format.
 

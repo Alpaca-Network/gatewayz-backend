@@ -7,7 +7,7 @@ Monitors errors continuously and generates fixes without manual intervention.
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from src.config import Config
 from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator
@@ -110,7 +110,7 @@ class AutonomousMonitor:
 
         while self.is_running:
             try:
-                self.last_scan = datetime.now(timezone.utc)
+                self.last_scan = datetime.now(UTC)
                 logger.debug(f"Scanning for errors (lookback: {self.lookback_hours}h)")
 
                 # Scan for errors

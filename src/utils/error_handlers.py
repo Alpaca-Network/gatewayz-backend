@@ -12,13 +12,12 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.schemas.errors import ErrorResponse
-from src.utils.error_codes import ErrorCode, get_error_type
 from src.utils.error_factory import DetailedErrorFactory
 
 logger = logging.getLogger(__name__)
@@ -70,8 +69,8 @@ async def detailed_http_exception_handler(
 
 def _map_http_exception_to_detailed_error(
     exc: HTTPException,
-    request_id: Optional[str] = None,
-    request: Optional[Request] = None,
+    request_id: str | None = None,
+    request: Request | None = None,
 ) -> ErrorResponse:
     """
     Map HTTPException to detailed error response.
@@ -240,7 +239,7 @@ def _map_http_exception_to_detailed_error(
         )
 
 
-def _extract_field_name(detail: str) -> Optional[str]:
+def _extract_field_name(detail: str) -> str | None:
     """Extract field name from error detail message."""
     # Common patterns: "Missing required field: 'field_name'"
     import re
@@ -259,7 +258,7 @@ def _extract_field_name(detail: str) -> Optional[str]:
     return None
 
 
-def _extract_credit_amounts(detail: str) -> tuple[Optional[float], Optional[float]]:
+def _extract_credit_amounts(detail: str) -> tuple[float | None, float | None]:
     """Extract current and required credit amounts from detail message."""
     import re
 
@@ -290,7 +289,7 @@ def _extract_credit_amounts(detail: str) -> tuple[Optional[float], Optional[floa
     return None, None
 
 
-def _extract_model_id(detail: str) -> Optional[str]:
+def _extract_model_id(detail: str) -> str | None:
     """Extract model ID from error detail message."""
     import re
 
@@ -308,7 +307,7 @@ def _extract_model_id(detail: str) -> Optional[str]:
     return None
 
 
-def _extract_ip_address(detail: str) -> Optional[str]:
+def _extract_ip_address(detail: str) -> str | None:
     """Extract IP address from error detail message."""
     import re
 
@@ -322,7 +321,7 @@ def _extract_ip_address(detail: str) -> Optional[str]:
     return None
 
 
-def _extract_provider_and_model(detail: str) -> tuple[Optional[str], Optional[str]]:
+def _extract_provider_and_model(detail: str) -> tuple[str | None, str | None]:
     """Extract provider and model from error detail message."""
     import re
 
@@ -347,7 +346,7 @@ def _extract_provider_and_model(detail: str) -> tuple[Optional[str], Optional[st
 def create_error_response_dict(
     error_response: ErrorResponse,
     include_request_id_header: bool = True,
-) -> tuple[Dict[str, Any], Optional[Dict[str, str]]]:
+) -> tuple[dict[str, Any], dict[str, str] | None]:
     """
     Convert ErrorResponse to dict and optional headers.
 

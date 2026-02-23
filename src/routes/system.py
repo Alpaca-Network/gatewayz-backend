@@ -8,13 +8,11 @@ import inspect
 import io
 import json
 import logging
-import os
 from contextlib import redirect_stdout
-from datetime import date, datetime, timezone
+from datetime import date, datetime, UTC
 from html import escape
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
@@ -27,7 +25,6 @@ from src.services.model_catalog_cache import (
     get_provider_cache_metadata as get_providers_cache,
 )
 from src.services.modelz_client import clear_modelz_cache
-from src.config import Config
 from src.services.huggingface_models import fetch_models_from_hug
 
 # Import fetch_models functions from their respective client files
@@ -175,14 +172,14 @@ def _normalize_timestamp(value: Any) -> datetime | None:
         return None
 
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
 
     if isinstance(value, date):
-        return datetime.combine(value, datetime.min.time(), tzinfo=timezone.utc)
+        return datetime.combine(value, datetime.min.time(), tzinfo=UTC)
 
     if isinstance(value, int | float):
         try:
-            return datetime.fromtimestamp(value, tz=timezone.utc)
+            return datetime.fromtimestamp(value, tz=UTC)
         except (OSError, OverflowError, ValueError):
             return None
 
@@ -190,7 +187,7 @@ def _normalize_timestamp(value: Any) -> datetime | None:
         try:
             cleaned = value.replace("Z", "+00:00") if value.endswith("Z") else value
             parsed = datetime.fromisoformat(cleaned)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
         except ValueError:
             return None
 
@@ -1177,7 +1174,7 @@ async def get_cache_debouncer_stats(admin_user: dict = Depends(require_admin)):
                 "operations_saved_percent": debouncer_stats["efficiency_percent"],
                 "status": "healthy" if debouncer_stats["efficiency_percent"] > 0 else "idle"
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get cache debouncer stats: {e}")
@@ -1299,7 +1296,7 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
                 if timestamp:
                     normalized_timestamp = _normalize_timestamp(timestamp)
                     if normalized_timestamp:
-                        age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                        age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                         cache_age_seconds = int(age)
                         is_stale = age > ttl
 
@@ -1337,7 +1334,7 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
             if timestamp:
                 normalized_timestamp = _normalize_timestamp(timestamp)
                 if normalized_timestamp:
-                    age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                    age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                     cache_age_seconds = int(age)
                     is_stale = age > ttl
 
@@ -1366,7 +1363,7 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
         return {
             "success": True,
             "data": cache_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -1418,7 +1415,7 @@ async def refresh_gateway_cache(
             if timestamp:
                 normalized_timestamp = _normalize_timestamp(timestamp)
                 if normalized_timestamp:
-                    age = (datetime.now(timezone.utc) - normalized_timestamp).total_seconds()
+                    age = (datetime.now(UTC) - normalized_timestamp).total_seconds()
                     needs_refresh = age > ttl
 
         if not needs_refresh:
@@ -1427,7 +1424,7 @@ async def refresh_gateway_cache(
                 "message": f"Cache for {gateway} is still valid. Use force=true to refresh anyway.",
                 "gateway": gateway,
                 "action": "skipped",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Clear existing cache
@@ -1458,7 +1455,7 @@ async def refresh_gateway_cache(
                 "message": "DeepInfra does not support bulk cache refresh. Models are fetched on-demand.",
                 "gateway": gateway,
                 "action": "not_supported",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             raise HTTPException(status_code=400, detail=f"Unknown gateway: {gateway}")
@@ -1476,7 +1473,7 @@ async def refresh_gateway_cache(
             "gateway": gateway,
             "models_cached": models_count,
             "action": "refreshed",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1506,7 +1503,7 @@ async def clear_all_caches(
                 "success": True,
                 "message": f"Cache cleared for {gateway}",
                 "gateway": gateway,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             # Clear all gateways dynamically
@@ -1519,7 +1516,7 @@ async def clear_all_caches(
                 "success": True,
                 "message": "All caches cleared",
                 "gateways_cleared": gateways + ["providers"],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
@@ -1594,7 +1591,7 @@ async def check_all_gateways():
                     "unconfigured": 0,
                     "overall_health_percentage": 0,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "metadata": {
                     "cache_age_seconds": None,
                     "data_source": "none",
@@ -1631,7 +1628,7 @@ async def check_all_gateways():
                 "status": final_status,
                 "latency_ms": latency_ms if latency_ms else None,
                 "available": gateway_info.get('available', final_status == 'healthy'),
-                "last_check": gateway_info.get('last_check', datetime.now(timezone.utc).isoformat()),
+                "last_check": gateway_info.get('last_check', datetime.now(UTC).isoformat()),
                 "error": gateway_info.get('error', None),
             }
 
@@ -1653,7 +1650,7 @@ async def check_all_gateways():
                     1
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "metadata": {
                 "cache_age_seconds": None,  # Could be calculated if we store cache timestamp
                 "data_source": "health-service-cache",
@@ -1794,7 +1791,7 @@ async def check_single_gateway(gateway: str):
             "success": True,
             "gateway": gateway.lower(),
             "data": gateway_health,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1840,7 +1837,7 @@ async def get_modelz_cache_status(admin_user: dict = Depends(require_admin)):
         return {
             "success": True,
             "data": cache_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to get Modelz cache status: {e}")
@@ -1881,7 +1878,7 @@ async def refresh_modelz_cache_endpoint(admin_user: dict = Depends(require_admin
         return {
             "success": True,
             "data": refresh_result,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to refresh Modelz cache: {e}")
@@ -1916,7 +1913,7 @@ async def clear_modelz_cache_endpoint(admin_user: dict = Depends(require_admin))
         return {
             "success": True,
             "message": "Modelz cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to clear Modelz cache: {e}")
@@ -1961,7 +1958,7 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
         _last_invalidation_time = now
 
     try:
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC)
         invalidated = []
 
         if gateway:
@@ -2001,7 +1998,7 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
             refresh_pricing_cache()
             invalidated = [f"models:{gw}" for gw in gateways] + ["providers", "pricing"]
 
-        duration = (datetime.now(timezone.utc) - start_time).total_seconds()
+        duration = (datetime.now(UTC) - start_time).total_seconds()
         logger.info(
             f"Background task: Cache invalidation scheduled in {duration:.2f}s. "
             f"Invalidated (debounced): {', '.join(invalidated[:5])}{' and more...' if len(invalidated) > 5 else ''}"
@@ -2061,7 +2058,7 @@ async def invalidate_cache(
             "success": True,
             "message": f"Cache invalidation started in background for {scope}",
             "status": "processing",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -2103,7 +2100,7 @@ async def refresh_pricing_cache_endpoint(admin_user: dict = Depends(require_admi
             "success": True,
             "message": "Pricing cache refreshed successfully",
             "providers_loaded": provider_count,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to refresh pricing cache: {e}")

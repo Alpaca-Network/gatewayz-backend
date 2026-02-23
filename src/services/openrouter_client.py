@@ -1,7 +1,6 @@
 import json
 import logging
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -10,7 +9,6 @@ from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
 from src.services.model_catalog_cache import (
     update_provider_catalog_incremental,
-    get_cached_gateway_catalog,
 )
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools

@@ -4,8 +4,8 @@ Provides monitoring and alerting for API key tracking quality.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
@@ -48,7 +48,7 @@ async def get_api_key_tracking_quality(
         client = get_supabase_client()
 
         # Calculate time window
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         start_time = end_time - timedelta(hours=hours)
 
         # Get total requests in time window
@@ -208,7 +208,7 @@ async def get_api_key_tracking_trend(
     try:
         client = get_supabase_client()
 
-        end_time = datetime.now(timezone.utc)
+        end_time = datetime.now(UTC)
         start_time = end_time - timedelta(days=days)
 
         # Get daily breakdown

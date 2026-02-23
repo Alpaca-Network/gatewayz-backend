@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from functools import lru_cache
 from typing import Any
 
@@ -131,7 +131,7 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+                    reset_time=datetime.now(UTC) + timedelta(seconds=60),
                     retry_after=60,
                     reason="Concurrency limit exceeded",
                     concurrency_remaining=0,
@@ -148,7 +148,7 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(timezone.utc)
+                    reset_time=datetime.now(UTC)
                     + timedelta(seconds=burst_check["retry_after"]),
                     retry_after=burst_check["retry_after"],
                     reason="Burst limit exceeded",
@@ -189,7 +189,7 @@ class SlidingWindowRateLimiter:
                 reset_time=(
                     window_check.get("reset_time")
                     if isinstance(window_check.get("reset_time"), datetime)
-                    else datetime.now(timezone.utc) + timedelta(minutes=1)
+                    else datetime.now(UTC) + timedelta(minutes=1)
                 ),
                 retry_after=None,
                 reason=None,
@@ -208,7 +208,7 @@ class SlidingWindowRateLimiter:
                 allowed=True,
                 remaining_requests=config.requests_per_minute,
                 remaining_tokens=config.tokens_per_minute,
-                reset_time=datetime.now(timezone.utc) + timedelta(minutes=1),
+                reset_time=datetime.now(UTC) + timedelta(minutes=1),
                 reason="Rate limit check failed, allowing request",
             )
             _populate_rate_limit_headers(
@@ -321,7 +321,7 @@ class SlidingWindowRateLimiter:
         self, api_key: str, config: RateLimitConfig, tokens_used: int
     ) -> dict[str, Any]:
         """Check sliding window rate limits"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         window_start = now - timedelta(seconds=config.window_size_seconds)
 
         if self.redis_client:
@@ -639,21 +639,21 @@ class RateLimitManager:
                 from src.db.plans import is_admin_tier_user
                 is_admin = await asyncio.to_thread(is_admin_tier_user, user.get("id"))
                 if is_admin:
-                    logger.info(f"Admin tier user - bypassing rate limit checks")
+                    logger.info("Admin tier user - bypassing rate limit checks")
                     # Return unlimited rate limit result for admin users
                     return RateLimitResult(
                         allowed=True,
                         remaining_requests=2147483647,  # Max int
                         remaining_tokens=2147483647,
-                        reset_time=datetime.now(timezone.utc) + timedelta(days=365),
+                        reset_time=datetime.now(UTC) + timedelta(days=365),
                         retry_after=None,
                         reason="Admin tier - unlimited access",
                         burst_remaining=2147483647,
                         concurrency_remaining=1000,
                         ratelimit_limit_requests=2147483647,
                         ratelimit_limit_tokens=2147483647,
-                        ratelimit_reset_requests=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
-                        ratelimit_reset_tokens=int((datetime.now(timezone.utc) + timedelta(days=365)).timestamp()),
+                        ratelimit_reset_requests=int((datetime.now(UTC) + timedelta(days=365)).timestamp()),
+                        ratelimit_reset_tokens=int((datetime.now(UTC) + timedelta(days=365)).timestamp()),
                         burst_window_description="unlimited",
                     )
             except Exception as e:
@@ -789,7 +789,7 @@ class RateLimitManager:
         return {
             "requests_remaining": config.requests_per_minute,
             "tokens_remaining": config.tokens_per_minute,
-            "reset_time": int((datetime.now(timezone.utc) + timedelta(minutes=1)).timestamp()),
+            "reset_time": int((datetime.now(UTC) + timedelta(minutes=1)).timestamp()),
         }
 
 

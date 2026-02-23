@@ -10,7 +10,7 @@ import json
 import logging
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Any
 from urllib.parse import urlparse
@@ -22,7 +22,7 @@ from src.config.config import Config
 logger = logging.getLogger(__name__)
 
 
-class ErrorSeverity(str, Enum):
+class ErrorSeverity(str, Enum):  # noqa: UP042
     """Error severity levels."""
 
     CRITICAL = "critical"
@@ -32,7 +32,7 @@ class ErrorSeverity(str, Enum):
     INFO = "info"
 
 
-class ErrorCategory(str, Enum):
+class ErrorCategory(str, Enum):  # noqa: UP042
     """Error categories for classification."""
 
     PROVIDER_ERROR = "provider_error"  # OpenRouter, Featherless, etc.
@@ -233,14 +233,14 @@ class ErrorMonitor:
         """Extract details from error log."""
         message = error_data.get("message", "Unknown error")
         stack_trace = error_data.get("stack_trace", "")
-        timestamp = error_data.get("timestamp", datetime.now(timezone.utc))
+        timestamp = error_data.get("timestamp", datetime.now(UTC))
 
         # Parse timestamp if it's a string
         if isinstance(timestamp, str):
             try:
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             except (ValueError, AttributeError):
-                timestamp = datetime.now(timezone.utc)
+                timestamp = datetime.now(UTC)
 
         # Extract file, line, and function from stack trace
         file_match = re.search(r'File "([^"]+)", line (\d+)', stack_trace)

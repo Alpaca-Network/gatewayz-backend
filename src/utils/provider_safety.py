@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 import httpx
 
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-class CircuitState(str, Enum):
+class CircuitState(str, Enum):  # noqa: UP042
     """Circuit breaker states."""
 
     CLOSED = "closed"  # Normal operation
@@ -83,7 +83,7 @@ class CircuitBreaker:
 
         self.state = CircuitState.CLOSED
         self.failure_count = 0
-        self.last_failure_time: Optional[float] = None
+        self.last_failure_time: float | None = None
         self.half_open_calls = 0
 
     def call(self, func: Callable[[], T]) -> T:
@@ -122,7 +122,7 @@ class CircuitBreaker:
             result = func()
             self._on_success()
             return result
-        except Exception as e:
+        except Exception:
             self._on_failure()
             raise
 
@@ -226,7 +226,7 @@ def retry_with_backoff(
     return decorator
 
 
-async def retry_async_with_backoff(
+async def retry_async_with_backoff(  # noqa: UP047
     func: Callable[..., T],
     max_retries: int = 3,
     initial_delay: float = 0.5,
@@ -288,11 +288,11 @@ async def retry_async_with_backoff(
     )
 
 
-def safe_provider_call(
+def safe_provider_call(  # noqa: UP047
     func: Callable[[], T],
     provider_name: str,
     timeout: float = 30.0,
-    circuit_breaker: Optional[CircuitBreaker] = None,
+    circuit_breaker: CircuitBreaker | None = None,
 ) -> T:
     """
     Safely execute provider API call with timeout and circuit breaker.
@@ -374,7 +374,7 @@ def validate_provider_response(
         raise ProviderError(f"{provider_name}: Response is None")
 
     # Convert to dict - prioritize model_dump for Pydantic models
-    if hasattr(response, "model_dump") and callable(getattr(response, "model_dump")):
+    if hasattr(response, "model_dump") and callable(response.model_dump):
         response_dict = response.model_dump()
     elif isinstance(response, dict):
         response_dict = response

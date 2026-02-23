@@ -12,7 +12,6 @@ This prevents:
 """
 
 import logging
-from typing import Optional
 
 from src.services.pricing import calculate_cost
 from src.utils.token_estimator import estimate_message_tokens
@@ -72,7 +71,7 @@ def get_model_max_tokens(model_id: str) -> int:
 def calculate_maximum_cost(
     model_id: str,
     messages: list[dict],
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
 ) -> tuple[float, int, int]:
     """
     Calculate the MAXIMUM possible cost for a request.
@@ -173,7 +172,7 @@ def estimate_and_check_credits(
     model_id: str,
     messages: list[dict],
     user_credits: float,
-    max_tokens: Optional[int] = None,
+    max_tokens: int | None = None,
     is_trial: bool = False,
 ) -> dict[str, any]:
     """

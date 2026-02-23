@@ -6,7 +6,7 @@ optimal models based on price/performance trade-offs.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from enum import Enum
 from typing import Any
 
@@ -18,7 +18,7 @@ HEALTH_DATA_STALE_SECONDS = 300  # 5 minutes - health data older than this is st
 MODEL_COOLDOWN_SECONDS = 60  # 1 minute cooldown after failures
 
 
-class PromptCategory(str, Enum):
+class PromptCategory(str, Enum):  # noqa: UP042
     """Classification of prompt types for routing decisions."""
 
     SIMPLE_QA = "simple_qa"  # Short factual questions
@@ -35,7 +35,7 @@ class PromptCategory(str, Enum):
     UNKNOWN = "unknown"  # Catch-all for low-confidence classification
 
 
-class RouterOptimization(str, Enum):
+class RouterOptimization(str, Enum):  # noqa: UP042
     """Optimization target for model selection."""
 
     PRICE = "price"  # Optimize for lowest cost
@@ -192,7 +192,7 @@ class ModelHealthSnapshot:
     @property
     def is_stale(self) -> bool:
         """Check if health data is too old to trust."""
-        age_seconds = (datetime.now(timezone.utc) - self.last_updated).total_seconds()
+        age_seconds = (datetime.now(UTC) - self.last_updated).total_seconds()
         return age_seconds > HEALTH_DATA_STALE_SECONDS
 
     @property
@@ -200,7 +200,7 @@ class ModelHealthSnapshot:
         """Check if model is in cooldown after failure."""
         if not self.last_failure_at:
             return False
-        since_failure = (datetime.now(timezone.utc) - self.last_failure_at).total_seconds()
+        since_failure = (datetime.now(UTC) - self.last_failure_at).total_seconds()
         return since_failure < MODEL_COOLDOWN_SECONDS
 
 

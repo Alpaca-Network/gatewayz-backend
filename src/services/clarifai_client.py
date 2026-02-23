@@ -18,7 +18,6 @@ Model ID Format:
 """
 
 import logging
-from datetime import datetime, timezone
 
 from src.config import Config
 from src.services.model_catalog_cache import cache_gateway_catalog

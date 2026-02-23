@@ -3,7 +3,7 @@ Optimized system health endpoints for large scale data.
 
 This module provides fast endpoints that can handle:
 - 9,000+ models
-- 37 providers  
+- 37 providers  # noqa: W291
 - 28 gateways
 
 Key optimizations:
@@ -13,9 +13,8 @@ Key optimizations:
 4. Efficient data structures
 """
 
-import asyncio
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import datetime, UTC
+from typing import Any
 
 from ..cache import get_models_cache
 from ..routes.system import _run_gateway_check
@@ -31,7 +30,7 @@ def _normalize_timestamp(timestamp):
     if isinstance(timestamp, datetime):
         return timestamp
     if isinstance(timestamp, (int, float)):
-        return datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        return datetime.fromtimestamp(timestamp, tz=UTC)
     if isinstance(timestamp, str):
         try:
             return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -43,7 +42,7 @@ def _normalize_timestamp(timestamp):
 async def get_optimized_gateway_data(
     include_live_tests: bool = False,
     auto_fix: bool = False
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get optimized gateway data that can handle large scale.
     
@@ -61,7 +60,7 @@ async def get_optimized_gateway_data(
         cached_gateways = simple_health_cache.get_gateways_health() or {}
         
         # Step 2: Get system health for summary
-        system_health = simple_health_cache.get_system_health() or {}
+        system_health = simple_health_cache.get_system_health() or {}  # noqa: F841
         
         # Step 3: Build gateway data structure
         gateways_data = {}
@@ -198,7 +197,7 @@ async def get_optimized_gateway_data(
                 "unconfigured": 0,
                 "overall_health_percentage": 0,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "error": str(e),
             "metadata": {
                 "fallback_mode": True
@@ -206,7 +205,7 @@ async def get_optimized_gateway_data(
         }
 
 
-async def get_optimized_providers_data() -> Dict[str, Any]:
+async def get_optimized_providers_data() -> dict[str, Any]:
     """Get optimized providers data using cache."""
     try:
         # Get providers from cache (fast)
@@ -237,7 +236,7 @@ async def get_optimized_providers_data() -> Dict[str, Any]:
                 "healthy_count": provider.get('healthy_models', 0),
                 "uptime": provider.get('overall_uptime', '0%'),
                 "avg_response_time": provider.get('avg_response_time_ms', '0ms'),
-                "last_checked": provider.get('last_checked', datetime.now(timezone.utc).isoformat()),
+                "last_checked": provider.get('last_checked', datetime.now(UTC).isoformat()),
             })
         
         return {
@@ -252,7 +251,7 @@ async def get_optimized_providers_data() -> Dict[str, Any]:
                 "unhealthy": unhealthy_count,
                 "overall_health_percentage": round((healthy_count / tracked_providers) * 100, 1) if tracked_providers > 0 else 0,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         
     except Exception as e:
@@ -270,17 +269,17 @@ async def get_optimized_providers_data() -> Dict[str, Any]:
             "total_providers": 0,
             "tracked_providers": 0,
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
 
 async def get_optimized_models_data(
-    gateway: Optional[str] = None,
-    provider: Optional[str] = None,
-    status: Optional[str] = None,
+    gateway: str | None = None,
+    provider: str | None = None,
+    status: str | None = None,
     limit: int = 1000,
     offset: int = 0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get optimized models data using cache with pagination."""
     try:
         # Get models from cache (fast)
@@ -316,7 +315,7 @@ async def get_optimized_models_data(
                 "response_time": f"{model.get('response_time_ms', 0)}ms",
                 "uptime_percentage": model.get("uptime_percentage", 0),
                 "uptime": f"{model.get('uptime_percentage', 0)}%",
-                "last_checked": model.get("last_checked", datetime.now(timezone.utc).isoformat()),
+                "last_checked": model.get("last_checked", datetime.now(UTC).isoformat()),
                 "success_rate": model.get("success_rate", 0),
                 "error_count": model.get("error_count", 0),
                 "total_requests": model.get("total_requests", 0),
@@ -335,7 +334,7 @@ async def get_optimized_models_data(
                 "has_more": offset + limit < len(filtered_models),
                 "total_filtered": len(filtered_models)
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
         
     except Exception as e:
@@ -354,5 +353,5 @@ async def get_optimized_models_data(
             "total_models": 0,
             "tracked_models": 0,
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }

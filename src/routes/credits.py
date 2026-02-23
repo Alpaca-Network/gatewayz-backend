@@ -6,7 +6,7 @@ These endpoints match the admin dashboard API expectations.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -151,7 +151,7 @@ async def add_credits_endpoint(
         # Update user's credits
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", request.user_id)
             .execute()
         )
@@ -187,7 +187,7 @@ async def add_credits_endpoint(
             new_balance=balance_after,
             amount_changed=request.amount,
             transaction_id=transaction.get("id") if transaction else None,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     except HTTPException:
@@ -243,7 +243,7 @@ async def adjust_credits_endpoint(
         # Update user's credits
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", request.user_id)
             .execute()
         )
@@ -284,7 +284,7 @@ async def adjust_credits_endpoint(
             new_balance=balance_after,
             amount_changed=request.amount,
             transaction_id=transaction.get("id") if transaction else None,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     except HTTPException:
@@ -353,7 +353,7 @@ async def bulk_add_credits_endpoint(
                 # Update user's credits
                 update_result = (
                     client.table("users")
-                    .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+                    .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
                     .eq("id", user_id)
                     .execute()
                 )
@@ -416,7 +416,7 @@ async def bulk_add_credits_endpoint(
             amount_per_user=request.amount,
             total_credits_added=request.amount * successful,
             results=results,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     except HTTPException:
@@ -465,7 +465,7 @@ async def refund_credits_endpoint(
         # Update user's credits
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", request.user_id)
             .execute()
         )
@@ -503,7 +503,7 @@ async def refund_credits_endpoint(
             new_balance=balance_after,
             amount_changed=request.amount,
             transaction_id=transaction.get("id") if transaction else None,
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=datetime.now(UTC).isoformat(),
         )
 
     except HTTPException:
@@ -558,7 +558,7 @@ async def get_credits_summary_endpoint(
                     "from_date": from_date,
                     "to_date": to_date,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             # Get system-wide summary
@@ -615,7 +615,7 @@ async def get_credits_summary_endpoint(
                     "from_date": from_date,
                     "to_date": to_date,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
@@ -742,7 +742,7 @@ async def get_credits_transactions_endpoint(
                 "sort_by": sort_by,
                 "sort_order": sort_order,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:

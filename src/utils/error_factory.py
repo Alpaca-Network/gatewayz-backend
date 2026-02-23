@@ -23,7 +23,7 @@ Usage:
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from src.schemas.errors import ErrorContext, ErrorDetail, ErrorResponse
 from src.utils.error_codes import ErrorCode, get_error_type, get_status_code
@@ -43,9 +43,9 @@ class DetailedErrorFactory:
     @staticmethod
     def model_not_found(
         model_id: str,
-        provider: Optional[str] = None,
-        suggested_models: Optional[List[str]] = None,
-        request_id: Optional[str] = None,
+        provider: str | None = None,
+        suggested_models: list[str] | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create a model not found error with suggestions.
@@ -92,9 +92,9 @@ class DetailedErrorFactory:
     @staticmethod
     def model_unavailable(
         model_id: str,
-        provider: Optional[str] = None,
-        reason: Optional[str] = None,
-        request_id: Optional[str] = None,
+        provider: str | None = None,
+        reason: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a model unavailable error."""
         code = ErrorCode.MODEL_UNAVAILABLE
@@ -129,8 +129,8 @@ class DetailedErrorFactory:
     @staticmethod
     def missing_required_field(
         field_name: str,
-        endpoint: Optional[str] = None,
-        request_id: Optional[str] = None,
+        endpoint: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a missing required field error."""
         code = ErrorCode.MISSING_REQUIRED_FIELD
@@ -160,11 +160,11 @@ class DetailedErrorFactory:
     def invalid_parameter(
         parameter_name: str,
         parameter_value: Any,
-        expected_type: Optional[str] = None,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
-        allowed_values: Optional[List[Any]] = None,
-        request_id: Optional[str] = None,
+        expected_type: str | None = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
+        allowed_values: list[Any] | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create an invalid parameter error.
@@ -233,8 +233,8 @@ class DetailedErrorFactory:
     def context_length_exceeded(
         input_tokens: int,
         max_context_length: int,
-        model_id: Optional[str] = None,
-        request_id: Optional[str] = None,
+        model_id: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a context length exceeded error."""
         code = ErrorCode.CONTEXT_LENGTH_EXCEEDED
@@ -267,7 +267,7 @@ class DetailedErrorFactory:
 
     @staticmethod
     def empty_messages_array(
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create an empty messages array error."""
         code = ErrorCode.EMPTY_MESSAGES_ARRAY
@@ -291,9 +291,9 @@ class DetailedErrorFactory:
 
     @staticmethod
     def invalid_api_key(
-        reason: Optional[str] = None,
-        key_prefix: Optional[str] = None,
-        request_id: Optional[str] = None,
+        reason: str | None = None,
+        key_prefix: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create an invalid API key error.
@@ -333,7 +333,7 @@ class DetailedErrorFactory:
 
     @staticmethod
     def api_key_missing(
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create an API key missing error."""
         code = ErrorCode.API_KEY_MISSING
@@ -356,7 +356,7 @@ class DetailedErrorFactory:
 
     @staticmethod
     def trial_expired(
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a trial expired error."""
         code = ErrorCode.TRIAL_EXPIRED
@@ -383,9 +383,9 @@ class DetailedErrorFactory:
     @staticmethod
     def plan_limit_reached(
         reason: str,
-        plan_name: Optional[str] = None,
-        limit: Optional[int] = None,
-        request_id: Optional[str] = None,
+        plan_name: str | None = None,
+        limit: int | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a plan limit reached error."""
         code = ErrorCode.PLAN_LIMIT_REACHED
@@ -414,8 +414,8 @@ class DetailedErrorFactory:
     @staticmethod
     def ip_restricted(
         ip_address: str,
-        allowed_ips: Optional[List[str]] = None,
-        request_id: Optional[str] = None,
+        allowed_ips: list[str] | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create an IP restricted error."""
         code = ErrorCode.IP_RESTRICTED
@@ -447,7 +447,7 @@ class DetailedErrorFactory:
     def insufficient_credits(
         current_credits: float,
         required_credits: float,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create an insufficient credits error.
@@ -497,8 +497,8 @@ class DetailedErrorFactory:
         max_cost: float,
         model_id: str,
         max_tokens: int,
-        input_tokens: Optional[int] = None,
-        request_id: Optional[str] = None,
+        input_tokens: int | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create an insufficient credits error for credit reservation (pre-flight check).
@@ -588,11 +588,11 @@ class DetailedErrorFactory:
     @staticmethod
     def rate_limit_exceeded(
         limit_type: str,
-        retry_after: Optional[int] = None,
-        limit_value: Optional[int] = None,
-        current_usage: Optional[int] = None,
-        reset_time: Optional[str] = None,
-        request_id: Optional[str] = None,
+        retry_after: int | None = None,
+        limit_value: int | None = None,
+        current_usage: int | None = None,
+        reset_time: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create a rate limit exceeded error.
@@ -642,7 +642,7 @@ class DetailedErrorFactory:
     def daily_quota_exceeded(
         limit: int,
         used: int,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a daily quota exceeded error."""
         code = ErrorCode.DAILY_QUOTA_EXCEEDED
@@ -675,9 +675,9 @@ class DetailedErrorFactory:
     def provider_error(
         provider: str,
         model: str,
-        provider_message: Optional[str] = None,
+        provider_message: str | None = None,
         status_code: int = 502,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create a provider error.
@@ -725,8 +725,8 @@ class DetailedErrorFactory:
     @staticmethod
     def provider_timeout(
         provider: str,
-        model: Optional[str] = None,
-        request_id: Optional[str] = None,
+        model: str | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a provider timeout error."""
         code = ErrorCode.PROVIDER_TIMEOUT
@@ -758,7 +758,7 @@ class DetailedErrorFactory:
         model: str,
         retry_after: int = 60,
         circuit_breaker_state: str = "open",
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create a provider unavailable error (circuit breaker open).
@@ -823,8 +823,8 @@ class DetailedErrorFactory:
     @staticmethod
     def all_providers_failed(
         model: str,
-        failed_providers: List[str],
-        request_id: Optional[str] = None,
+        failed_providers: list[str],
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create an all providers failed error."""
         code = ErrorCode.ALL_PROVIDERS_FAILED
@@ -855,8 +855,8 @@ class DetailedErrorFactory:
     @staticmethod
     def internal_error(
         operation: str = "operation",
-        error: Optional[Exception] = None,
-        request_id: Optional[str] = None,
+        error: Exception | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """
         Create an internal server error.
@@ -899,8 +899,8 @@ class DetailedErrorFactory:
     @staticmethod
     def service_unavailable(
         service: str = "service",
-        retry_after: Optional[int] = None,
-        request_id: Optional[str] = None,
+        retry_after: int | None = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a service unavailable error."""
         code = ErrorCode.SERVICE_UNAVAILABLE
@@ -928,7 +928,7 @@ class DetailedErrorFactory:
     @staticmethod
     def database_error(
         operation: str = "database operation",
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> ErrorResponse:
         """Create a database error."""
         code = ErrorCode.DATABASE_ERROR

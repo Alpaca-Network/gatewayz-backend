@@ -16,7 +16,6 @@ Note: OpenTelemetry is optional. If not installed, tracing will be gracefully di
 
 import logging
 import socket
-from typing import Optional
 from urllib.parse import urlparse
 
 # Try to import OpenTelemetry core - it's optional for deployments like Vercel
@@ -158,7 +157,7 @@ class OpenTelemetryConfig:
     """
 
     _initialized = False
-    _tracer_provider: Optional[TracerProvider] = None
+    _tracer_provider: TracerProvider | None = None
 
     @classmethod
     def initialize(cls) -> bool:
@@ -192,7 +191,7 @@ class OpenTelemetryConfig:
             # Railway internal DNS detection (same project) - check FIRST
             if ".railway.internal" in tempo_endpoint:
                 # Using Railway internal DNS - keep as-is with port
-                logger.info(f"   Railway internal DNS detected - using private network")
+                logger.info("   Railway internal DNS detected - using private network")
                 # Ensure http:// for internal (no SSL)
                 if not tempo_endpoint.startswith("http://") and not tempo_endpoint.startswith(
                     "https://"
@@ -211,8 +210,8 @@ class OpenTelemetryConfig:
                             f"auto-corrected to: {tempo_endpoint}"
                         )
                         logger.warning(
-                            f"   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318 "
-                            f"in Railway environment variables to avoid this warning"
+                            "   💡 TIP: Set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318 "
+                            "in Railway environment variables to avoid this warning"
                         )
 
                 logger.info(f"   [DEBUG] After internal DNS processing: {tempo_endpoint}")
@@ -225,7 +224,7 @@ class OpenTelemetryConfig:
                     tempo_endpoint = tempo_endpoint.replace("http://", "https://")
                 elif not tempo_endpoint.startswith("https://"):
                     tempo_endpoint = f"https://{tempo_endpoint}"
-                logger.info(f"   Railway public deployment detected - using HTTPS proxy")
+                logger.info("   Railway public deployment detected - using HTTPS proxy")
                 logger.info(f"   [DEBUG] After public URL processing: {tempo_endpoint}")
 
             logger.info(f"   Tempo endpoint (base URL): {tempo_endpoint}")
@@ -288,7 +287,7 @@ class OpenTelemetryConfig:
                 )
 
                 # Log the actual endpoint the exporter is using
-                logger.info(f"   [DEBUG] OTLP exporter created successfully")
+                logger.info("   [DEBUG] OTLP exporter created successfully")
                 logger.info(f"   [DEBUG] Traces will be sent to: {traces_endpoint}")
                 logger.info(f"   OTLP exporter configured with {timeout_seconds}s timeout")
             except Exception as e:

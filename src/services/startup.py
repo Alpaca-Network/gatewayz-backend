@@ -23,7 +23,7 @@ from src.services.prometheus_remote_write import (
     shutdown_prometheus_remote_write,
 )
 from src.services.response_cache import get_cache
-from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
+from src.services.tempo_otlp import init_tempo_otlp_fastapi
 
 logger = logging.getLogger(__name__)
 

@@ -9,7 +9,6 @@ Nebius Token Factory provides access to various LLM models including DeepSeek, L
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from src.services.model_catalog_cache import cache_gateway_catalog

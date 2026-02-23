@@ -13,7 +13,6 @@ in a structured JSON format.
 import logging
 import re
 from collections import defaultdict
-from typing import Optional
 
 import httpx
 
@@ -33,7 +32,7 @@ class PrometheusMetricsParser:
         self.metrics_url = metrics_url
         self.timeout = 10.0  # 10 second timeout for metrics fetch
 
-    async def fetch_metrics(self) -> Optional[str]:
+    async def fetch_metrics(self) -> str | None:
         """
         Fetch raw metrics from the Prometheus endpoint.
         
@@ -195,7 +194,7 @@ class PrometheusMetricsParser:
 
     def _calculate_percentile(
         self, sorted_buckets: list[tuple[float, float]], percentile: float
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         Calculate percentile from histogram buckets.
         
@@ -257,7 +256,7 @@ class PrometheusMetricsParser:
 
 
 # Global parser instance
-_parser: Optional[PrometheusMetricsParser] = None
+_parser: PrometheusMetricsParser | None = None
 
 
 def get_metrics_parser(metrics_url: str = "http://localhost:8000/metrics") -> PrometheusMetricsParser:

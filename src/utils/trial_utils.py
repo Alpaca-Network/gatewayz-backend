@@ -5,7 +5,7 @@ Shared utilities for trial access validation and tracking
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import HTTPException
@@ -83,9 +83,9 @@ def validate_trial_expiration(user: dict) -> None:
 
             # Ensure both datetimes are timezone-aware for comparison
             if expiry_date.tzinfo is None:
-                expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+                expiry_date = expiry_date.replace(tzinfo=UTC)
 
-            current_time = datetime.now(timezone.utc)
+            current_time = datetime.now(UTC)
 
             if current_time > expiry_date:
                 logger.info(

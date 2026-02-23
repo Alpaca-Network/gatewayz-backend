@@ -30,7 +30,6 @@ from typing import Any
 import httpx
 
 from src.config import Config
-from datetime import UTC
 from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
@@ -1502,10 +1501,10 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         version_info = api_model.get("versionId", "")
         raw_display_name = api_model.get("openSourceCategory", "") or provider_model_id
         # Clean malformed model names (remove company prefix, parentheses, etc.)
-        display_name = clean_model_name(raw_display_name)
+        display_name = clean_model_name(raw_display_name)  # noqa: F841
 
         # Extract from publisherModelTemplate if available
-        template = api_model.get("publisherModelTemplate", {})
+        template = api_model.get("publisherModelTemplate", {})  # noqa: F841
 
         # Get context length from inputTokenLimit or default
         input_token_limit = None
@@ -1515,7 +1514,7 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         if "inputTokenLimit" in api_model:
             input_token_limit = api_model.get("inputTokenLimit")
         if "outputTokenLimit" in api_model:
-            output_token_limit = api_model.get("outputTokenLimit")
+            output_token_limit = api_model.get("outputTokenLimit")  # noqa: F841
 
         # Default context lengths based on model family
         if input_token_limit is None:
@@ -1699,7 +1698,6 @@ def fetch_models_from_google_vertex():
     Falls back to static configuration if the API call fails.
     Merges dynamic models with static config to get accurate pricing.
     """
-    from datetime import datetime
 
     from src.services.model_catalog_cache import cache_gateway_catalog
 

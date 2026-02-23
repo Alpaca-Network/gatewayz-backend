@@ -5,7 +5,7 @@ CRUD operations for payment records in Supabase
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import execute_with_retry, get_supabase_client
@@ -61,7 +61,7 @@ def create_payment(
             "payment_method": payment_method,
             "status": status,
             "metadata": metadata or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Add Stripe fields if provided
@@ -252,7 +252,7 @@ def update_payment_status(
         Updated payment record or None if failed
     """
     try:
-        update_data = {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {"status": status, "updated_at": datetime.now(UTC).isoformat()}
 
         if stripe_payment_intent_id:
             update_data["stripe_payment_intent_id"] = stripe_payment_intent_id
@@ -262,11 +262,11 @@ def update_payment_status(
 
         # Add completion timestamp for completed payments
         if status == "completed":
-            update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+            update_data["completed_at"] = datetime.now(UTC).isoformat()
 
         # Add failed timestamp and error for failed payments
         if status == "failed":
-            update_data["failed_at"] = datetime.now(timezone.utc).isoformat()
+            update_data["failed_at"] = datetime.now(UTC).isoformat()
             if error_message:
                 # Store error in metadata
                 payment = get_payment(payment_id)
@@ -318,7 +318,7 @@ def update_payment_metadata(payment_id: int, metadata: dict[str, Any]) -> dict[s
 
         update_data = {
             "metadata": updated_metadata,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         result = client.table("payments").update(update_data).eq("id", payment_id).execute()
@@ -495,7 +495,7 @@ def get_payment_trends(days: int = 30) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        start_date = datetime.now(timezone.utc) - timedelta(days=days)
+        start_date = datetime.now(UTC) - timedelta(days=days)
 
         result = (
             client.table("payments").select("*").gte("created_at", start_date.isoformat()).execute()

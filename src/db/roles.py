@@ -4,7 +4,7 @@ Handles user roles and permissions
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -137,7 +137,7 @@ def update_user_role(
         # Update user role
         result = (
             client.table("users")
-            .update({"role": new_role, "updated_at": datetime.now(timezone.utc).isoformat()})
+            .update({"role": new_role, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", user_id)
             .execute()
         )

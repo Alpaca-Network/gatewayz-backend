@@ -21,7 +21,7 @@ Security Design:
 import hashlib
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ def _hash_ip(ip_address: str) -> str:
 
 def _get_today_key() -> str:
     """Get today's date key for rate limiting."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _cleanup_memory_cache():

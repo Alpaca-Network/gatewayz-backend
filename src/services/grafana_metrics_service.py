@@ -16,14 +16,11 @@ import logging
 import os
 import random
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from prometheus_client import (
     REGISTRY,
-    Counter,
-    Gauge,
-    Histogram,
     generate_latest,
 )
 
@@ -237,7 +234,7 @@ class GrafanaMetricsService:
             "app_name": APP_NAME,
             "environment": ENVIRONMENT,
             "service_name": SERVICE_NAME,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "metrics_endpoint": "/metrics",
             "grafana_compatible": True,
             "supported_dashboards": [
@@ -272,7 +269,7 @@ class GrafanaMetricsService:
             dict: Structured log entry compatible with Loki
         """
         log_entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": level.upper(),
             "service": SERVICE_NAME,
             "environment": ENVIRONMENT,

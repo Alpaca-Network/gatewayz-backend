@@ -17,7 +17,6 @@ import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +54,9 @@ class AuthRateLimitResult:
     """Result of auth rate limit check"""
     allowed: bool
     remaining: int
-    retry_after: Optional[int] = None
-    reason: Optional[str] = None
-    limit_type: Optional[AuthRateLimitType] = None
+    retry_after: int | None = None
+    reason: str | None = None
+    limit_type: AuthRateLimitType | None = None
 
 
 # Default configuration
@@ -249,7 +248,7 @@ class AuthRateLimiter:
 
 
 # Global auth rate limiter instance
-_auth_rate_limiter: Optional[AuthRateLimiter] = None
+_auth_rate_limiter: AuthRateLimiter | None = None
 
 
 def get_auth_rate_limiter() -> AuthRateLimiter:

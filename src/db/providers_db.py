@@ -4,7 +4,7 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -200,7 +200,7 @@ def update_provider_health(
     try:
         update_data = {
             "health_status": health_status,
-            "last_health_check_at": datetime.now(timezone.utc).isoformat(),
+            "last_health_check_at": datetime.now(UTC).isoformat(),
         }
 
         if average_response_time_ms is not None:

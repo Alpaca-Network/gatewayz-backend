@@ -1,6 +1,6 @@
 """Pydantic schemas for system health timeline endpoints"""
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 
 class IncidentMetadata(BaseModel):
     """Metadata for an incident within a time bucket"""
-    type: Optional[str] = Field(None, description="Incident type (e.g., latency_spike, error_surge, downtime)")
-    region: Optional[str] = Field(None, description="Affected region")
-    error_rate: Optional[float] = Field(None, description="Error rate percentage during incident")
+    type: str | None = Field(None, description="Incident type (e.g., latency_spike, error_surge, downtime)")
+    region: str | None = Field(None, description="Affected region")
+    error_rate: float | None = Field(None, description="Error rate percentage during incident")
 
 
 class IncidentSummary(BaseModel):
@@ -37,7 +37,7 @@ class UptimeSample(BaseModel):
         description="Status during this time bucket"
     )
     duration_minutes: int = Field(..., description="Duration of the bucket in minutes")
-    incident: Optional[IncidentMetadata] = Field(None, description="Incident details if any occurred")
+    incident: IncidentMetadata | None = Field(None, description="Incident details if any occurred")
 
 
 # ===========================

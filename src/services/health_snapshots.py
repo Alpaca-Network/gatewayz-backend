@@ -9,7 +9,7 @@ This is critical for meeting the < 2ms latency budget.
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -147,7 +147,7 @@ class HealthSnapshotService:
                     }
                 }
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Filter to healthy models
         all_healthy = []
@@ -291,7 +291,7 @@ class HealthSnapshotService:
         if not timestamp:
             return False
 
-        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+        age = (datetime.now(UTC) - timestamp).total_seconds()
         return age < max_age_seconds
 
 

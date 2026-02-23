@@ -8,7 +8,7 @@ to bypass rate limiting (even during velocity mode).
 
 import ipaddress
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
@@ -187,7 +187,7 @@ def is_ip_whitelisted(ip_address: str, user_id: str | UUID | None = None) -> boo
             return False
 
         # Get all active whitelist entries (both global and user-specific)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         query = (
             supabase.table("ip_whitelist")
@@ -254,7 +254,7 @@ def get_whitelist_entries(
             query = query.eq("enabled", True)
 
         if not include_expired:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             query = query.or_(f"expires_at.is.null,expires_at.gte.{now}")
 
         if user_id:
@@ -296,7 +296,7 @@ def get_all_whitelist_entries(
             query = query.eq("enabled", True)
 
         if not include_expired:
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             query = query.or_(f"expires_at.is.null,expires_at.gte.{now}")
 
         result = query.order("created_at", desc=True).execute()

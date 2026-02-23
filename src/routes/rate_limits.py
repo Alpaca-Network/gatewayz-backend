@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -102,7 +102,7 @@ async def get_user_rate_limits_advanced(api_key: str = Depends(get_api_key)):
             "status": "success",
             "user_id": result["user"]["id"],
             "rate_limit_configs": result["configs"],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -160,7 +160,7 @@ async def update_user_rate_limits_advanced(
             "message": "Rate limit configuration updated successfully",
             "key_id": key_id,
             "updated_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -210,7 +210,7 @@ async def bulk_update_user_rate_limits(
             "message": f"Rate limit configuration updated for {updated_count} API keys",
             "updated_count": updated_count,
             "updated_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -254,7 +254,7 @@ async def get_api_key_rate_limit_usage(
             "time_window": time_window,
             "usage_stats": usage_stats,
             "rate_limit_config": rate_limit_config,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -273,7 +273,7 @@ async def get_system_rate_limits(admin_user: dict = Depends(require_admin)):
         return {
             "status": "success",
             "system_stats": stats,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -296,7 +296,7 @@ async def get_rate_limit_alerts_endpoint(
             "status": "success",
             "total_alerts": len(alerts),
             "alerts": alerts,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -376,7 +376,7 @@ async def get_admin_rate_limit_config(
                 "api_key": api_key[:15] + "...",
                 "config": config or DEFAULT_RATE_LIMIT_CONFIG,
                 "is_default": config is None,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
         else:
             # Return default configuration
@@ -384,7 +384,7 @@ async def get_admin_rate_limit_config(
                 "status": "success",
                 "config": DEFAULT_RATE_LIMIT_CONFIG,
                 "description": "Default system rate limit configuration",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
@@ -430,7 +430,7 @@ async def set_admin_rate_limit_config(
             "message": "Rate limit configuration updated successfully",
             "api_key": request.api_key[:15] + "...",
             "config": config_dict,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -475,7 +475,7 @@ async def reset_rate_limit_config(
             "message": "Rate limit configuration reset to defaults",
             "api_key": api_key[:15] + "...",
             "config": DEFAULT_RATE_LIMIT_CONFIG,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -519,7 +519,7 @@ async def update_admin_rate_limits(
             "message": "Rate limits updated successfully",
             "api_key": request.api_key[:15] + "...",
             "config": config_dict,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except ValueError as e:
@@ -576,7 +576,7 @@ async def delete_rate_limits(
                 client.table("api_keys_new")
                 .update({
                     "rate_limit_config": None,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 })
                 .eq("api_key", target_api_key)
                 .execute()
@@ -597,7 +597,7 @@ async def delete_rate_limits(
                         "reset_in_api_keys": reset_in_api_keys,
                         "admin_user": admin_user.get('username'),
                     },
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }).execute()
             except Exception as audit_error:
                 logger.debug(f"Failed to create audit log: {audit_error}")
@@ -621,7 +621,7 @@ async def delete_rate_limits(
             "deleted_from_rate_limit_configs": result["deleted_from_rate_limit_configs"],
             "reset_in_api_keys": result["reset_in_api_keys"],
             "default_config": DEFAULT_RATE_LIMIT_CONFIG,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -757,7 +757,7 @@ async def get_users_rate_limits(
                 "user_id": user_id,
                 "has_custom_config": has_custom_config,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:

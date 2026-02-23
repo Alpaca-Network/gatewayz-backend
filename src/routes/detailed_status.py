@@ -9,8 +9,8 @@ Provides real-time visibility into internal server metrics:
 """
 
 import logging
-from datetime import datetime, timezone
-from typing import Any, Dict
+from datetime import datetime, UTC
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from prometheus_client import REGISTRY
@@ -31,7 +31,7 @@ def get_prometheus_metric(metric_name: str) -> float:
                 return metric.samples[0].value
     return 0.0
 
-@router.get("/detailed", response_model=Dict[str, Any])
+@router.get("/detailed", response_model=dict[str, Any])
 async def get_detailed_status(api_key: str = Depends(get_api_key)):
     """
     Get detailed internal system status.
@@ -53,7 +53,7 @@ async def get_detailed_status(api_key: str = Depends(get_api_key)):
         cache_available = simple_health_cache.get_system_health() is not None
 
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "concurrency": {
                 "active": active_requests,
                 "queued": queued_requests,
@@ -76,5 +76,5 @@ async def get_detailed_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }

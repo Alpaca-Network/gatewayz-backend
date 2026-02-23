@@ -22,11 +22,9 @@ import hashlib
 import json
 import logging
 import time
-from collections import defaultdict
-from datetime import datetime, timezone
 from typing import Any
 
-from src.db.models_catalog_db import bulk_upsert_models, get_models_by_gateway_for_catalog
+from src.db.models_catalog_db import bulk_upsert_models
 from src.services.model_catalog_sync import (
     PROVIDER_FETCH_FUNCTIONS,
     ensure_provider_exists,
