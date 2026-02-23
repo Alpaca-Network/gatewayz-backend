@@ -111,7 +111,7 @@ fastapi_requests_total = get_or_create_metric(
     Counter,
     "fastapi_requests_total",
     "Total FastAPI requests",
-    ["app_name", "method", "path", "status_code"],
+    ["app_name", "method", "path", "status_code", "status_class"],
 )
 
 fastapi_requests_duration_seconds = get_or_create_metric(
@@ -134,7 +134,7 @@ http_request_count = get_or_create_metric(
     Counter,
     "http_requests_total",
     "Total HTTP requests by method, endpoint and status code",
-    ["method", "endpoint", "status_code"],
+    ["method", "endpoint", "status_code", "status_class"],
 )
 
 http_request_duration = get_or_create_metric(
@@ -932,13 +932,26 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
     # Use provided app_name or fall back to environment variable
     app = app_name or APP_NAME
 
+    # Derive a human-readable status class to distinguish success vs client vs server errors
+    if 200 <= status_code < 300:
+        status_class = "2xx"
+    elif 400 <= status_code < 500:
+        status_class = "4xx"
+    elif 500 <= status_code < 600:
+        status_class = "5xx"
+    else:
+        status_class = "other"
+
     # Record in new Grafana-compatible metrics
     fastapi_requests_total.labels(
-        app_name=app, method=method, path=endpoint, status_code=status_code
+        app_name=app, method=method, path=endpoint, status_code=status_code,
+        status_class=status_class,
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
-    http_request_count.labels(method=method, endpoint=endpoint, status_code=status_code).inc()
+    http_request_count.labels(
+        method=method, endpoint=endpoint, status_code=status_code, status_class=status_class,
+    ).inc()
 
 
 @contextmanager

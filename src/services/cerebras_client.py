@@ -370,6 +370,9 @@ def _normalize_cerebras_model(model: Any) -> dict[str, Any] | None:
         or payload.get("owned_by")
         or (model_id.split("/")[0] if "/" in model_id else "cerebras")
     )
+    # Inline normalization mirrors normalize_provider_slug() in src/services/models.py.
+    # A module-level import is avoided here to prevent a circular import (models.py
+    # imports cerebras_client at module level).
     provider_slug = str(provider_slug).lstrip("@").lower() if provider_slug else "cerebras"
 
     raw_display_name = payload.get("display_name") or payload.get("name") or model_id

@@ -306,6 +306,14 @@ class Config:
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
+    # GZip Compression Configuration
+    # Minimum response size (bytes) before GZip compression is applied.
+    # 1 KB (1024 bytes) is a reasonable floor: below this the gzip header overhead
+    # (~20 bytes) and CPU cost outweigh the savings. Streaming responses (SSE, ndjson)
+    # are always excluded regardless of this setting.
+    # Override with GZIP_MINIMUM_SIZE env var.
+    GZIP_MINIMUM_SIZE: int = int(os.environ.get("GZIP_MINIMUM_SIZE", "1024"))
+
     # ==================== Monitoring & Observability Configuration ====================
 
     # Sentry Configuration
@@ -361,6 +369,15 @@ class Config:
     TEMPO_SKIP_REACHABILITY_CHECK = os.environ.get(
         "TEMPO_SKIP_REACHABILITY_CHECK", "true"
     ).lower() in {"1", "true", "yes"}
+    # When FastAPIInstrumentor is active it already creates a server span per request
+    # (including HTTP method, route, and status code). Set this to true to prevent
+    # TraceContextMiddleware from emitting duplicate request/response log lines.
+    # Header injection (x-trace-id, x-span-id) is always performed regardless of this flag.
+    OTEL_AUTO_INSTRUMENTED = os.environ.get("OTEL_AUTO_INSTRUMENTED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     # Grafana Loki Configuration
     LOKI_ENABLED = os.environ.get("LOKI_ENABLED", "false").lower() in {

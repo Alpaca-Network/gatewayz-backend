@@ -242,7 +242,7 @@ class QualityEvaluator:
                 stdout, stderr = await asyncio.wait_for(
                     proc.communicate(), timeout=10.0
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 await proc.wait()
                 return {
@@ -509,7 +509,7 @@ class BatchEvaluator:
 
         tasks = [
             evaluate_one(tc, content, reasoning)
-            for tc, (content, reasoning) in zip(test_cases, responses)
+            for tc, (content, reasoning) in zip(test_cases, responses, strict=True)
         ]
 
         return await asyncio.gather(*tasks)

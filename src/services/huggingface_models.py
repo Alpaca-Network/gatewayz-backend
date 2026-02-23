@@ -66,6 +66,7 @@ def fetch_models_from_huggingface_api(
     direction: str = "-1",
     sort: str = "downloads",
     use_cache: bool = True,
+    timeout: float = None,
 ):
     """
     Fetch models directly from Hugging Face Models API Hub.
@@ -78,11 +79,20 @@ def fetch_models_from_huggingface_api(
         direction: Sort direction (-1 for descending, 1 for ascending)
         sort: Sort field (downloads, likes, created_at, etc.)
         use_cache: Whether to use and update cache
+        timeout: Per-request HTTP timeout in seconds.  When *None* the value
+                 from ``GATEWAY_REGISTRY["huggingface"]["timeout"]`` is used
+                 (currently 60 s).  Pass an explicit value to override.
 
     Returns:
         List of normalized model dictionaries or None on error
     """
     try:
+        # Resolve the per-request HTTP timeout.  Prefer the caller-supplied value;
+        # fall back to the registry-configured timeout for huggingface (default 60 s).
+        if timeout is None:
+            from src.routes.catalog import get_provider_fetch_timeout
+            timeout = float(get_provider_fetch_timeout("huggingface"))
+
         # Check cache first (Redis cache handles TTL internally)
         if use_cache:
             cached_models = get_cached_gateway_catalog("huggingface")
@@ -137,15 +147,15 @@ def fetch_models_from_huggingface_api(
             max_retries = 3
             retry_delay = 1.0  # Start with 1 second delay
 
-            # Use shorter timeout in test mode to prevent test timeouts
-            # Test mode: 8s * 3 attempts + 1s + 2s delays = ~27s total (within 30s test timeout)
-            # Production: 30s timeout for better reliability with slow networks
-
             for attempt in range(max_retries):
                 try:
-                    # Use shorter timeout to avoid test timeouts (10s connect, 15s read)
+                    # Use per-provider timeout from GATEWAY_REGISTRY (default 60 s for HuggingFace).
+                    # connect is capped at 10 s; the full read window uses the registry value.
                     response = httpx.get(
-                        url, params=params, headers=headers, timeout=httpx.Timeout(10.0, read=15.0)
+                        url,
+                        params=params,
+                        headers=headers,
+                        timeout=httpx.Timeout(timeout, connect=10.0),
                     )
                     response.raise_for_status()
                     break  # Success, exit retry loop

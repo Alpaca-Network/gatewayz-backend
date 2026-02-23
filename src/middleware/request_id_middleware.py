@@ -19,6 +19,7 @@ Features:
 """
 
 import logging
+import re
 import uuid
 
 from fastapi import Request
@@ -26,6 +27,18 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
+
+# Maximum length for client-supplied request IDs
+_MAX_REQUEST_ID_LENGTH = 128
+
+# Pattern to strip control characters (newlines, tabs, etc.) that enable log injection
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+# Allowlist pattern for validated request IDs: alphanumeric, dots, underscores, hyphens.
+# Rejects anything with special characters that survived sanitization (e.g. spaces, quotes,
+# angle brackets, percent-encoded sequences, etc.).  Does not require strict UUID v4 format
+# so that clients using custom ID schemes (e.g. "trace-abc123", "req.xyz") are still accepted.
+_VALID_REQUEST_ID_RE = re.compile(r"^[a-zA-Z0-9._-]{1,128}$")
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -68,11 +81,28 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         """
         # Generate or extract request ID
         # Priority: X-Request-ID header > X-Correlation-ID > generate new
-        request_id = (
+        raw_request_id = (
             request.headers.get("X-Request-ID")
             or request.headers.get("X-Correlation-ID")
-            or f"req_{uuid.uuid4().hex[:12]}"
+            or ""
         )
+
+        # Sanitize client-supplied request IDs to prevent log injection:
+        # strip control characters (newlines, carriage returns, etc.) and limit length.
+        # Then validate the sanitized value against the allowlist pattern; if it does not
+        # match (e.g. contains spaces, quotes, angle brackets, or is empty after stripping)
+        # discard it and generate a fresh UUID so the bad value never reaches logs or headers.
+        if raw_request_id:
+            sanitized = _CONTROL_CHARS_RE.sub("", raw_request_id)[:_MAX_REQUEST_ID_LENGTH]
+            if _VALID_REQUEST_ID_RE.match(sanitized):
+                request_id = sanitized
+            else:
+                logger.debug(
+                    "Client-supplied request ID failed validation and was replaced with a generated one"
+                )
+                request_id = f"req_{uuid.uuid4().hex[:12]}"
+        else:
+            request_id = f"req_{uuid.uuid4().hex[:12]}"
 
         # Normalize to ensure consistent format
         if not request_id.startswith("req_"):

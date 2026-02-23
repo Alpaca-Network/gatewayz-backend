@@ -27,6 +27,7 @@ TIMEOUT_EXEMPT_PATHS = [
     "/ai-sdk/chat/completions",  # AI SDK streaming
     "/admin/",  # Admin operations (model sync, background jobs)
     "/api/catalog",  # Model catalog fetches (can be slow)
+    "/v1/models",  # Model listing (can be slow with many providers)
     "/health",  # Health checks
     "/metrics",  # Prometheus metrics
 ]

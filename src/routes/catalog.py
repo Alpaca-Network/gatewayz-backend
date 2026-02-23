@@ -1,6 +1,25 @@
 import asyncio
+import hashlib
 import json
 import logging
+import time
+
+# orjson is 5-10x faster than stdlib json for large payloads; use it when available.
+# Add orjson to requirements.txt to enable: `orjson>=3.9`
+try:
+    import orjson as _orjson
+
+    def _dumps_fast(obj: object) -> str:
+        """Serialize obj to a JSON string using orjson (returns bytes → decoded to str)."""
+        return _orjson.dumps(obj).decode()
+
+except ImportError:  # pragma: no cover
+    _orjson = None  # type: ignore[assignment]
+
+    def _dumps_fast(obj: object) -> str:  # type: ignore[misc]
+        """Fallback to stdlib json when orjson is not installed."""
+        return json.dumps(obj)
+
 from datetime import datetime, UTC
 from typing import Any
 
@@ -19,6 +38,7 @@ from src.services.models import (
     fetch_specific_model,
     get_cached_models,
     get_model_count_by_provider,
+    normalize_provider_slug,
 )
 from src.services.modelz_client import (
     check_model_exists_on_modelz,
@@ -26,6 +46,7 @@ from src.services.modelz_client import (
     get_modelz_model_details,
     get_modelz_model_ids,
 )
+from src.services.prometheus_metrics import set_gateway_model_count
 from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
 from src.utils.security_validators import sanitize_for_logging
 
@@ -64,27 +85,42 @@ DESC_ALL_MODELS = "All models"
 DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
 
-# Gateway configuration - centralized source of truth for all gateways
-# This is used by /gateways endpoint for frontend auto-discovery
+# Gateway configuration - centralized source of truth for all gateways.
+# This is used by /gateways endpoint for frontend auto-discovery.
+#
+# Required fields for every entry:
+#   name      (str)  – human-readable display name
+#   color     (str)  – Tailwind CSS background class used by the frontend
+#   priority  (str)  – "fast" (eager load) or "slow" (deferred load)
+#   site_url  (str)  – canonical homepage URL for logo/link generation
+#
+# Optional fields:
+#   timeout   (int)  – model-list fetch timeout in seconds (default: 30)
+#   icon      (str)  – override icon name shown in the UI (e.g. "zap")
+#   aliases   (list) – alternative slug strings that map to this entry
 GATEWAY_REGISTRY = {
     # Fast gateways (priority loading)
+    # timeout: seconds allowed for a provider model-list fetch (default 30s)
     "openai": {
         "name": "OpenAI",
         "color": "bg-emerald-600",
         "priority": "fast",
         "site_url": "https://openai.com",
+        "timeout": 30,
     },
     "anthropic": {
         "name": "Anthropic",
         "color": "bg-amber-700",
         "priority": "fast",
         "site_url": "https://anthropic.com",
+        "timeout": 30,
     },
     "openrouter": {
         "name": "OpenRouter",
         "color": "bg-blue-500",
         "priority": "fast",
         "site_url": "https://openrouter.ai",
+        "timeout": 30,
     },
     "groq": {
         "name": "Groq",
@@ -92,24 +128,28 @@ GATEWAY_REGISTRY = {
         "priority": "fast",
         "icon": "zap",
         "site_url": "https://groq.com",
+        "timeout": 30,
     },
     "together": {
         "name": "Together",
         "color": "bg-indigo-500",
         "priority": "fast",
         "site_url": "https://together.ai",
+        "timeout": 30,
     },
     "fireworks": {
         "name": "Fireworks",
         "color": "bg-red-500",
         "priority": "fast",
         "site_url": "https://fireworks.ai",
+        "timeout": 30,
     },
     "vercel-ai-gateway": {
         "name": "Vercel AI",
         "color": "bg-slate-900",
         "priority": "fast",
         "site_url": "https://vercel.com/ai",
+        "timeout": 30,
     },
     # Slow gateways (deferred loading)
     "featherless": {
@@ -117,18 +157,21 @@ GATEWAY_REGISTRY = {
         "color": "bg-green-500",
         "priority": "slow",
         "site_url": "https://featherless.ai",
+        "timeout": 60,
     },
     "chutes": {
         "name": "Chutes",
         "color": "bg-yellow-500",
         "priority": "slow",
         "site_url": "https://chutes.ai",
+        "timeout": 60,
     },
     "deepinfra": {
         "name": "DeepInfra",
         "color": "bg-cyan-500",
         "priority": "slow",
         "site_url": "https://deepinfra.com",
+        "timeout": 30,
     },
     "google-vertex": {
         "name": "Google",
@@ -136,30 +179,35 @@ GATEWAY_REGISTRY = {
         "priority": "fast",
         "site_url": "https://cloud.google.com/vertex-ai",
         "aliases": ["google"],
+        "timeout": 30,
     },
     "cerebras": {
         "name": "Cerebras",
         "color": "bg-amber-600",
         "priority": "slow",
         "site_url": "https://cerebras.ai",
+        "timeout": 30,
     },
     "nebius": {
         "name": "Nebius",
         "color": "bg-slate-600",
         "priority": "slow",
         "site_url": "https://nebius.ai",
+        "timeout": 30,
     },
     "xai": {
         "name": "xAI",
         "color": "bg-black",
         "priority": "slow",
         "site_url": "https://x.ai",
+        "timeout": 30,
     },
     "novita": {
         "name": "Novita",
         "color": "bg-violet-600",
         "priority": "slow",
         "site_url": "https://novita.ai",
+        "timeout": 30,
     },
     "huggingface": {
         "name": "Hugging Face",
@@ -167,102 +215,119 @@ GATEWAY_REGISTRY = {
         "priority": "slow",
         "site_url": "https://huggingface.co",
         "aliases": ["hug"],
+        "timeout": 60,  # HF API is significantly slower than other providers
     },
     "aimo": {
         "name": "AiMo",
         "color": "bg-pink-600",
         "priority": "slow",
         "site_url": "https://aimo.network",
+        "timeout": 60,
     },
     "near": {
         "name": "NEAR",
         "color": "bg-teal-600",
         "priority": "slow",
         "site_url": "https://near.ai",
+        "timeout": 60,
     },
     "fal": {
         "name": "Fal",
         "color": "bg-emerald-600",
         "priority": "slow",
         "site_url": "https://fal.ai",
+        "timeout": 30,
     },
     "helicone": {
         "name": "Helicone",
         "color": "bg-indigo-600",
         "priority": "slow",
         "site_url": "https://helicone.ai",
+        "timeout": 30,
     },
     "alpaca": {
         "name": "Alpaca Network",
         "color": "bg-green-700",
         "priority": "slow",
         "site_url": "https://alpaca.network",
+        "timeout": 30,
     },
     "alibaba": {
         "name": "Alibaba",
         "color": "bg-orange-700",
         "priority": "slow",
         "site_url": "https://dashscope.aliyun.com",
+        "timeout": 30,
     },
     "clarifai": {
         "name": "Clarifai",
         "color": "bg-purple-600",
         "priority": "slow",
         "site_url": "https://clarifai.com",
+        "timeout": 30,
     },
     "onerouter": {
         "name": "Infron AI",
         "color": "bg-emerald-500",
         "priority": "slow",
         "site_url": "https://infron.ai",
+        "timeout": 30,
     },
     "zai": {
         "name": "Z.AI",
         "color": "bg-purple-700",
         "priority": "slow",
         "site_url": "https://z.ai",
+        "timeout": 30,
     },
     "simplismart": {
         "name": "SimpliSmart",
         "color": "bg-sky-500",
         "priority": "slow",
         "site_url": "https://simplismart.ai",
+        "timeout": 30,
     },
     "sybil": {
         "name": "Sybil",
         "color": "bg-purple-500",
         "priority": "slow",
         "site_url": "https://sybil.com",
+        "timeout": 30,
     },
     "aihubmix": {
         "name": "AiHubMix",
         "color": "bg-rose-500",
         "priority": "slow",
         "site_url": "https://aihubmix.com",
+        "timeout": 30,
     },
     "anannas": {
         "name": "Anannas",
         "color": "bg-lime-600",
         "priority": "slow",
         "site_url": "https://anannas.ai",
+        "timeout": 30,
     },
     "cloudflare-workers-ai": {
         "name": "Cloudflare Workers AI",
         "color": "bg-orange-500",
         "priority": "slow",
         "site_url": "https://developers.cloudflare.com/workers-ai",
+        "timeout": 30,
     },
     "morpheus": {
         "name": "Morpheus",
         "color": "bg-cyan-600",
         "priority": "slow",
         "site_url": "https://mor.org",
+        "timeout": 30,
     },
     "canopywave": {
         "name": "Canopy Wave",
         "color": "bg-teal-500",
         "priority": "slow",
         "site_url": "https://canopywave.io",
+        "timeout": 60,
     },
     "notdiamond": {
         "name": "NotDiamond",
@@ -270,8 +335,106 @@ GATEWAY_REGISTRY = {
         "priority": "fast",
         "site_url": "https://notdiamond.ai",
         "icon": "zap",
+        "timeout": 30,
     },
 }
+
+# Default fetch timeout (seconds) used when a provider has no explicit "timeout" entry.
+_DEFAULT_FETCH_TIMEOUT: int = 30
+
+
+def get_provider_fetch_timeout(provider_slug: str) -> int:
+    """Return the configured model-fetch timeout (in seconds) for *provider_slug*.
+
+    Falls back to ``_DEFAULT_FETCH_TIMEOUT`` (30 s) when the slug is not found
+    in ``GATEWAY_REGISTRY`` or has no explicit ``"timeout"`` value.  Also
+    resolves alias slugs (e.g. ``"hug"`` → ``"huggingface"``) transparently.
+
+    Args:
+        provider_slug: Gateway/provider key or alias (e.g. ``"huggingface"``, ``"hug"``).
+
+    Returns:
+        Timeout in seconds as an integer.
+    """
+    slug = (provider_slug or "").lower()
+
+    # Direct registry lookup
+    if slug in GATEWAY_REGISTRY:
+        return GATEWAY_REGISTRY[slug].get("timeout", _DEFAULT_FETCH_TIMEOUT)
+
+    # Resolve alias → canonical key
+    for key, config in GATEWAY_REGISTRY.items():
+        if slug in config.get("aliases", []):
+            return config.get("timeout", _DEFAULT_FETCH_TIMEOUT)
+
+    return _DEFAULT_FETCH_TIMEOUT
+
+# Pre-computed set of all valid gateway values (registry keys + aliases + "all").
+# Used for input validation in query parameters across multiple endpoints.
+_GATEWAY_REGISTRY_KEYS: set[str] = set(GATEWAY_REGISTRY.keys())
+_GATEWAY_ALIASES: set[str] = {
+    alias
+    for config in GATEWAY_REGISTRY.values()
+    for alias in config.get("aliases", [])
+}
+VALID_GATEWAY_VALUES: set[str] = _GATEWAY_REGISTRY_KEYS | _GATEWAY_ALIASES | {"all"}
+
+# Maps a GATEWAY_REGISTRY key to the fetch slug passed to get_cached_models() when the two
+# differ.  Currently only "huggingface" uses the legacy alias "hug".
+GATEWAY_FETCH_SLUG_OVERRIDES: dict[str, str] = {
+    "huggingface": "hug",
+}
+
+# Pre-computed map: any alias or registry key → its canonical fetch slug.
+# e.g. "google" → "google-vertex", "hug" → "hug", "huggingface" → "hug"
+_GATEWAY_SLUG_RESOLUTION: dict[str, str] = {}
+for _key, _cfg in GATEWAY_REGISTRY.items():
+    _fetch_slug = GATEWAY_FETCH_SLUG_OVERRIDES.get(_key, _key)
+    _GATEWAY_SLUG_RESOLUTION[_key] = _fetch_slug
+    for _alias in _cfg.get("aliases", []):
+        _GATEWAY_SLUG_RESOLUTION[_alias] = _fetch_slug
+
+# Entries in GATEWAY_REGISTRY that do not yet have a get_cached_models() implementation are
+# excluded so the generic fetch loop does not attempt to call them.
+_REGISTRY_KEYS_WITHOUT_FETCH: frozenset[str] = frozenset(
+    {
+        "canopywave",
+        "notdiamond",
+        "cloudflare-workers-ai",
+        "zai",
+        "alpaca",
+    }
+)
+
+# Ordered list of provider fetch slugs derived from GATEWAY_REGISTRY.
+# This replaces the previous pattern of hardcoding each provider slug individually.
+PROVIDER_SLUGS: list[str] = [
+    GATEWAY_FETCH_SLUG_OVERRIDES.get(key, key)
+    for key in GATEWAY_REGISTRY
+    if key not in _REGISTRY_KEYS_WITHOUT_FETCH
+]
+
+
+def _validate_gateway(gateway: str | None) -> None:
+    """Raise HTTP 400 if the gateway value is not a known gateway identifier.
+
+    Args:
+        gateway: The raw gateway query parameter value (may be None).
+
+    Raises:
+        HTTPException: 400 with a message listing valid gateway identifiers.
+    """
+    if gateway is None:
+        return
+    if gateway.lower() not in VALID_GATEWAY_VALUES:
+        sorted_valid = sorted(VALID_GATEWAY_VALUES - {"all"})
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid gateway '{gateway}'. "
+                f"Must be 'all' or one of: {', '.join(sorted_valid)}"
+            ),
+        )
 
 
 @router.get("/routers", tags=["routers"])
@@ -565,6 +728,7 @@ async def get_gateways_status():
                 model_count = 0
                 if not in_error_state:
                     error_message = str(e)
+                logger.warning("Failed to get cached model count for gateway '%s': %s", gateway_id, e)
 
             status_list.append(
                 {
@@ -639,11 +803,34 @@ def annotate_provider_sources(providers: list[dict], source: str) -> list[dict]:
     return annotated
 
 
+# Cache for derive_providers_from_models results.
+# Key: (gateway_name, models_hash) -> (result, timestamp)
+_derived_providers_cache: dict[tuple, tuple] = {}
+_DERIVED_PROVIDERS_TTL = 300  # 5 minutes
+
+
 def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[dict]:
     """
     Generic function to derive provider list from model list for any gateway.
     Used for gateways that don't have a dedicated provider endpoint.
+
+    Results are cached for 5 minutes per (gateway_name, models_hash) pair to
+    avoid re-iterating the full model list on every call.
     """
+    # Build a cheap cache key from the gateway name and a hash of model ids.
+    model_ids = [m.get("id", "") for m in (models or [])]
+    models_hash = hashlib.md5(
+        json.dumps(model_ids, sort_keys=True).encode(), usedforsecurity=False
+    ).hexdigest()
+    cache_key = (gateway_name, models_hash)
+
+    now = time.monotonic()
+    cached = _derived_providers_cache.get(cache_key)
+    if cached is not None:
+        result, ts = cached
+        if now - ts < _DERIVED_PROVIDERS_TTL:
+            return result
+
     providers: dict[str, dict] = {}
     for model in models or []:
         # Try different fields to get provider name
@@ -667,8 +854,8 @@ def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[
         if not provider_slug:
             continue
 
-        # Clean up slug
-        provider_slug = provider_slug.lstrip("@").lower()
+        # Clean up slug — use canonical normalization from src/services/models.py
+        provider_slug = normalize_provider_slug(provider_slug)
 
         if provider_slug not in providers:
             providers[provider_slug] = {
@@ -680,7 +867,13 @@ def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[
                 "source_gateways": [gateway_name],
             }
 
-    return list(providers.values())
+    result = list(providers.values())
+    # Evict stale entries to prevent unbounded memory growth
+    stale_keys = [k for k, (_, ts) in _derived_providers_cache.items() if now - ts >= _DERIVED_PROVIDERS_TTL]
+    for k in stale_keys:
+        _derived_providers_cache.pop(k, None)
+    _derived_providers_cache[cache_key] = (result, now)
+    return result
 
 
 def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
@@ -692,22 +885,24 @@ def merge_provider_lists(*provider_lists: list[list[dict]]) -> list[dict]:
                 continue
             if slug not in merged:
                 copied = provider.copy()
-                sources = list(copied.get("source_gateways", []) or [])
+                sources_seen: dict[str, None] = dict.fromkeys(
+                    s for s in (copied.get("source_gateways") or []) if s
+                )
                 source = copied.get("source_gateway")
-                if source and source not in sources:
-                    sources.append(source)
-                copied["source_gateways"] = sources
+                if source:
+                    sources_seen[source] = None
+                copied["source_gateways"] = list(sources_seen)
                 merged[slug] = copied
             else:
                 existing = merged[slug]
-                sources = existing.get("source_gateways", [])
-                for src in provider.get("source_gateways", []) or []:
-                    if src and src not in sources:
-                        sources.append(src)
+                sources_seen = dict.fromkeys(existing.get("source_gateways") or [])
+                for src in provider.get("source_gateways") or []:
+                    if src:
+                        sources_seen[src] = None
                 source = provider.get("source_gateway")
-                if source and source not in sources:
-                    sources.append(source)
-                existing["source_gateways"] = sources
+                if source:
+                    sources_seen[source] = None
+                existing["source_gateways"] = list(sources_seen)
     return list(merged.values())
 
 
@@ -739,9 +934,8 @@ async def get_providers(
     """Get all available provider list with detailed metric data including model count and logo URLs"""
     try:
         gateway_value = (gateway or "all").lower()
-        # Support both 'huggingface' and 'hug' as aliases
-        if gateway_value == "huggingface":
-            gateway_value = "hug"
+        # Resolve any alias to its canonical fetch slug (e.g. "google" → "google-vertex")
+        gateway_value = _GATEWAY_SLUG_RESOLUTION.get(gateway_value, gateway_value)
 
         openrouter_models = []
         provider_groups: list[list[dict]] = []
@@ -860,8 +1054,8 @@ async def get_models(
         None,
         description="Filter by private models: true=private only, false=non-private only, null=all models",
     ),
-    limit: int | None = Query(None, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    limit: int | None = Query(None, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, ge=0, description=DESC_OFFSET_FOR_PAGINATION),
     include_huggingface: bool = Query(
         True, description="Include Hugging Face metrics for models that have hugging_face_id"
     ),
@@ -881,12 +1075,12 @@ async def get_models(
     """Get all metric data of available models with optional filtering, pagination, Hugging Face integration, and provider logos"""
 
     try:
+        _validate_gateway(gateway)
         provider = normalize_developer_segment(provider)
         logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}")
         gateway_value = (gateway or "all").lower()
-        # Support both 'huggingface' and 'hug' as aliases
-        if gateway_value == "huggingface":
-            gateway_value = "hug"
+        # Resolve any alias to its canonical fetch slug (e.g. "google" → "google-vertex")
+        gateway_value = _GATEWAY_SLUG_RESOLUTION.get(gateway_value, gateway_value)
         logger.debug(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
@@ -912,36 +1106,21 @@ async def get_models(
         cached_response = await get_cached_catalog_response(gateway_value, cache_params)
         if cached_response:
             logger.info(f"✅ Returning cached response for gateway={gateway_value}")
-            return cached_response
+            cached_json = _dumps_fast(cached_response)
+            etag_data = json.dumps(cached_response.get("data", [])[:5], sort_keys=True)
+            etag_value = hashlib.md5(etag_data.encode(), usedforsecurity=False).hexdigest()[:16]
+            return Response(
+                content=cached_json,
+                media_type="application/json",
+                headers={
+                    "Cache-Control": "private, max-age=60, must-revalidate",
+                    "ETag": f'"{etag_value}"',
+                    "Vary": "Accept-Encoding",
+                    "X-Cache": "HIT",
+                },
+            )
 
         openrouter_models: list[dict] = []
-        onerouter_models: list[dict] = []
-        featherless_models: list[dict] = []
-        deepinfra_models: list[dict] = []
-        chutes_models: list[dict] = []
-        groq_models: list[dict] = []
-        fireworks_models: list[dict] = []
-        together_models: list[dict] = []
-        google_models: list[dict] = []
-        cerebras_models: list[dict] = []
-        nebius_models: list[dict] = []
-        xai_models: list[dict] = []
-        novita_models: list[dict] = []
-        hug_models: list[dict] = []
-        aimo_models: list[dict] = []
-        near_models: list[dict] = []
-        fal_models: list[dict] = []
-        helicone_models: list[dict] = []
-        anannas_models: list[dict] = []
-        aihubmix_models: list[dict] = []
-        vercel_ai_gateway_models: list[dict] = []
-        alibaba_models: list[dict] = []
-        simplismart_models: list[dict] = []
-        openai_models: list[dict] = []
-        anthropic_models: list[dict] = []
-        clarifai_models: list[dict] = []
-        sybil_models: list[dict] = []
-        morpheus_models: list[dict] = []
 
         # OPTIMIZATION: For gateway=all, use the aggregated multi-provider cache
         # This uses the parallel fetch with 45s timeout and proper caching
@@ -965,7 +1144,7 @@ async def get_models(
                 logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
                 try:
                     from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
-                    all_models_list = await fetch_and_merge_all_providers(timeout=30.0)
+                    all_models_list = merge_models_by_slug(await fetch_and_merge_all_providers(timeout=30.0))
                     logger.info(f"Parallel fetch returned {len(all_models_list)} models")
                 except Exception as e:
                     logger.error(f"Parallel fetch failed: {e}")
@@ -978,6 +1157,9 @@ async def get_models(
                     f"unique_models=True ignored for gateway='{gateway_value}' "
                     "(only applies to gateway='all')"
                 )
+
+        # Skip individual provider fetches if we already have the aggregated list
+        skip_individual_fetches = gateway_value == "all" and all_models_list
 
         # Import circuit breaker for individual provider fetches
         from src.utils.circuit_breaker import get_provider_circuit_breaker
@@ -1006,203 +1188,28 @@ async def get_models(
             else:
                 logger.info("Skipping openrouter (circuit breaker open)")
 
-        if gateway_value in ("onerouter", "all"):
-            onerouter_models = get_cached_models("onerouter") or []
-            if not onerouter_models and gateway_value == "onerouter":
-                logger.warning("Infron AI models unavailable - continuing without them")
+        # Fetch models for all providers in PROVIDER_SLUGS using the registry-derived list.
+        # "openrouter" is handled separately above (circuit breaker); include its result here
+        # so that provider_models is the single source of truth for all downstream code.
+        provider_models: dict[str, list[dict]] = {"openrouter": openrouter_models}
 
-        if gateway_value in ("featherless", "all"):
-            featherless_models = get_cached_models("featherless") or []
-            if not featherless_models and gateway_value == "featherless":
-                logger.warning("Featherless models unavailable - continuing without them")
+        if not skip_individual_fetches:
+            for _slug in PROVIDER_SLUGS:
+                if _slug == "openrouter":
+                    # Already fetched above with circuit-breaker logic; skip here.
+                    continue
+                if gateway_value not in (_slug, "all"):
+                    continue
+                _fetched = get_cached_models(_slug) or []
+                provider_models[_slug] = _fetched
+                if not _fetched and gateway_value == _slug:
+                    logger.warning(
+                        "%s models unavailable - continuing without them", _slug
+                    )
 
-        if gateway_value in ("deepinfra", "all"):
-            deepinfra_models = get_cached_models("deepinfra") or []
-            if not deepinfra_models and gateway_value == "deepinfra":
-                logger.warning("DeepInfra models unavailable - continuing without them")
-
-        if gateway_value in ("chutes", "all"):
-            chutes_models = get_cached_models("chutes") or []
-            if not chutes_models and gateway_value == "chutes":
-                logger.warning("Chutes models unavailable - continuing without them")
-
-        if gateway_value in ("groq", "all"):
-            groq_models = get_cached_models("groq") or []
-            if not groq_models and gateway_value == "groq":
-                logger.warning("Groq models unavailable - continuing without them")
-
-        if gateway_value in ("fireworks", "all"):
-            fireworks_models = get_cached_models("fireworks") or []
-            if not fireworks_models and gateway_value == "fireworks":
-                logger.warning("Fireworks models unavailable - continuing without them")
-
-        if gateway_value in ("together", "all"):
-            together_models = get_cached_models("together") or []
-            if not together_models and gateway_value == "together":
-                logger.warning("Together models unavailable - continuing without them")
-
-        if gateway_value in ("cerebras", "all"):
-            cerebras_models = get_cached_models("cerebras") or []
-            if not cerebras_models and gateway_value == "cerebras":
-                logger.warning("Cerebras models unavailable - continuing without them")
-
-        if gateway_value in ("nebius", "all"):
-            nebius_models = get_cached_models("nebius") or []
-            if gateway_value == "nebius" and not nebius_models:
-                logger.info(
-                    "Nebius gateway requested but no cached catalog is available; "
-                    "returning an empty list because Nebius does not publish a public model listing"
-                )
-
-        if gateway_value in ("xai", "all"):
-            xai_models = get_cached_models("xai") or []
-            if gateway_value == "xai" and not xai_models:
-                logger.info(
-                    "xAI gateway requested but no cached catalog is available; "
-                    "returning an empty list because xAI does not publish a public model listing"
-                )
-
-        if gateway_value in ("novita", "all"):
-            novita_models = get_cached_models("novita") or []
-            if not novita_models and gateway_value == "novita":
-                logger.warning("Novita models unavailable - continuing without them")
-
-        if gateway_value in ("hug", "all"):
-            hug_models = get_cached_models("hug") or []
-            if not hug_models and gateway_value == "hug":
-                logger.warning("Hugging Face models unavailable - continuing without them")
-
-        if gateway_value in ("aimo", "all"):
-            aimo_models = get_cached_models("aimo") or []
-            if not aimo_models and gateway_value == "aimo":
-                logger.warning("AIMO models unavailable - continuing without them")
-
-        if gateway_value in ("near", "all"):
-            near_models = get_cached_models("near") or []
-            if not near_models and gateway_value == "near":
-                logger.warning("Near models unavailable - continuing without them")
-
-        if gateway_value in ("fal", "all"):
-            fal_models = get_cached_models("fal") or []
-            if not fal_models and gateway_value == "fal":
-                logger.warning("Fal models unavailable - continuing without them")
-
-        if gateway_value in ("helicone", "all"):
-            helicone_models = get_cached_models("helicone") or []
-            if not helicone_models and gateway_value == "helicone":
-                logger.warning("Helicone models unavailable - continuing without them")
-
-        if gateway_value in ("anannas", "all"):
-            anannas_models = get_cached_models("anannas") or []
-            if not anannas_models and gateway_value == "anannas":
-                logger.warning("Anannas models unavailable - continuing without them")
-
-        if gateway_value in ("aihubmix", "all"):
-            aihubmix_models = get_cached_models("aihubmix") or []
-            if not aihubmix_models and gateway_value == "aihubmix":
-                logger.warning("AiHubMix models unavailable - continuing without them")
-
-        if gateway_value in ("vercel-ai-gateway", "all"):
-            vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
-            if not vercel_ai_gateway_models and gateway_value == "vercel-ai-gateway":
-                logger.warning("Vercel AI Gateway models unavailable - continuing without them")
-
-        if gateway_value in ("alibaba", "all"):
-            alibaba_models = get_cached_models("alibaba") or []
-            if not alibaba_models and gateway_value == "alibaba":
-                logger.warning("Alibaba Cloud models unavailable - continuing without them")
-
-        if gateway_value in ("google-vertex", "all"):
-            google_models = get_cached_models("google-vertex") or []
-            if not google_models and gateway_value == "google-vertex":
-                logger.warning("Google Vertex AI models unavailable - continuing without them")
-
-        if gateway_value in ("simplismart", "all"):
-            simplismart_models = get_cached_models("simplismart") or []
-            if not simplismart_models and gateway_value == "simplismart":
-                logger.warning("Simplismart models unavailable - continuing without them")
-
-        if gateway_value in ("openai", "all"):
-            openai_models = get_cached_models("openai") or []
-            if not openai_models and gateway_value == "openai":
-                logger.warning("OpenAI models unavailable - continuing without them")
-
-        if gateway_value in ("anthropic", "all"):
-            anthropic_models = get_cached_models("anthropic") or []
-            if not anthropic_models and gateway_value == "anthropic":
-                logger.warning("Anthropic models unavailable - continuing without them")
-
-        if gateway_value in ("clarifai", "all"):
-            clarifai_models = get_cached_models("clarifai") or []
-            if not clarifai_models and gateway_value == "clarifai":
-                logger.warning("Clarifai models unavailable - continuing without them")
-
-        if gateway_value in ("sybil", "all"):
-            sybil_models = get_cached_models("sybil") or []
-            if not sybil_models and gateway_value == "sybil":
-                logger.warning("Sybil models unavailable - continuing without them")
-
-        if gateway_value in ("morpheus", "all"):
-            morpheus_models = get_cached_models("morpheus") or []
-            if not morpheus_models and gateway_value == "morpheus":
-                logger.warning("Morpheus models unavailable - continuing without them")
-
-        if gateway_value == "openrouter":
-            models = openrouter_models
-        elif gateway_value == "onerouter":
-            models = onerouter_models
-        elif gateway_value == "featherless":
-            models = featherless_models
-        elif gateway_value == "deepinfra":
-            models = deepinfra_models
-        elif gateway_value == "chutes":
-            models = chutes_models
-        elif gateway_value == "groq":
-            models = groq_models
-        elif gateway_value == "fireworks":
-            models = fireworks_models
-        elif gateway_value == "together":
-            models = together_models
-        elif gateway_value == "cerebras":
-            models = cerebras_models
-        elif gateway_value == "nebius":
-            models = nebius_models
-        elif gateway_value == "xai":
-            models = xai_models
-        elif gateway_value == "novita":
-            models = novita_models
-        elif gateway_value == "hug":
-            models = hug_models
-        elif gateway_value == "aimo":
-            models = aimo_models
-        elif gateway_value == "near":
-            models = near_models
-        elif gateway_value == "fal":
-            models = fal_models
-        elif gateway_value == "helicone":
-            models = helicone_models
-        elif gateway_value == "anannas":
-            models = anannas_models
-        elif gateway_value == "aihubmix":
-            models = aihubmix_models
-        elif gateway_value == "vercel-ai-gateway":
-            models = vercel_ai_gateway_models
-        elif gateway_value == "alibaba":
-            models = alibaba_models
-        elif gateway_value == "google-vertex":
-            models = google_models
-        elif gateway_value == "simplismart":
-            models = simplismart_models
-        elif gateway_value == "openai":
-            models = openai_models
-        elif gateway_value == "anthropic":
-            models = anthropic_models
-        elif gateway_value == "clarifai":
-            models = clarifai_models
-        elif gateway_value == "sybil":
-            models = sybil_models
-        elif gateway_value == "morpheus":
-            models = morpheus_models
+        # Select the model list for the requested gateway.
+        if gateway_value != "all":
+            models = provider_models.get(gateway_value, [])
         else:
             # For "all" gateway, use aggregated cache if available
             # This is much faster than merging individual provider models
@@ -1212,36 +1219,7 @@ async def get_models(
             else:
                 # Fallback: merge individual provider models (slow path)
                 logger.warning("Aggregated cache unavailable, merging individual provider models")
-                models = merge_models_by_slug(
-                    openrouter_models,
-                    onerouter_models,
-                    featherless_models,
-                    deepinfra_models,
-                    chutes_models,
-                    groq_models,
-                    fireworks_models,
-                    together_models,
-                    google_models,
-                    cerebras_models,
-                    nebius_models,
-                    xai_models,
-                    novita_models,
-                    hug_models,
-                    aimo_models,
-                    near_models,
-                    fal_models,
-                    helicone_models,
-                    anannas_models,
-                    aihubmix_models,
-                    vercel_ai_gateway_models,
-                    alibaba_models,
-                    simplismart_models,
-                    openai_models,
-                    anthropic_models,
-                    clarifai_models,
-                    sybil_models,
-                    morpheus_models,
-                )
+                models = merge_models_by_slug(*provider_models.values())
 
         if not models:
             if gateway_value == "nebius":
@@ -1264,7 +1242,7 @@ async def get_models(
         provider_groups: list[list[dict]] = []
 
         if gateway_value in ("openrouter", "all"):
-            providers = get_cached_providers()
+            providers = await asyncio.to_thread(get_cached_providers)
             if not providers and gateway_value == "openrouter":
                 logger.warning(
                     "OpenRouter provider data unavailable - returning empty providers list"
@@ -1275,143 +1253,18 @@ async def get_models(
             )
             provider_groups.append(enhanced_providers)
 
-        if gateway_value in ("onerouter", "all"):
-            models_for_providers = onerouter_models if gateway_value == "all" else models
-            onerouter_providers = derive_providers_from_models(models_for_providers, "onerouter")
-            annotated_onerouter = annotate_provider_sources(onerouter_providers, "onerouter")
-            provider_groups.append(annotated_onerouter)
-
-        if gateway_value in ("featherless", "all"):
-            models_for_providers = featherless_models if gateway_value == "all" else models
-            featherless_providers = derive_providers_from_models(
-                models_for_providers, "featherless"
-            )
-            annotated_featherless = annotate_provider_sources(featherless_providers, "featherless")
-            provider_groups.append(annotated_featherless)
-
-        if gateway_value in ("deepinfra", "all"):
-            models_for_providers = deepinfra_models if gateway_value == "all" else models
-            deepinfra_providers = derive_providers_from_models(models_for_providers, "deepinfra")
-            annotated_deepinfra = annotate_provider_sources(deepinfra_providers, "deepinfra")
-            provider_groups.append(annotated_deepinfra)
-
-        if gateway_value in ("chutes", "all"):
-            models_for_providers = chutes_models if gateway_value == "all" else models
-            chutes_providers = derive_providers_from_models(models_for_providers, "chutes")
-            annotated_chutes = annotate_provider_sources(chutes_providers, "chutes")
-            provider_groups.append(annotated_chutes)
-
-        if gateway_value in ("groq", "all"):
-            models_for_providers = groq_models if gateway_value == "all" else models
-            groq_providers = derive_providers_from_models(models_for_providers, "groq")
-            annotated_groq = annotate_provider_sources(groq_providers, "groq")
-            provider_groups.append(annotated_groq)
-
-        if gateway_value in ("fireworks", "all"):
-            models_for_providers = fireworks_models if gateway_value == "all" else models
-            fireworks_providers = derive_providers_from_models(models_for_providers, "fireworks")
-            annotated_fireworks = annotate_provider_sources(fireworks_providers, "fireworks")
-            provider_groups.append(annotated_fireworks)
-
-        if gateway_value in ("together", "all"):
-            models_for_providers = together_models if gateway_value == "all" else models
-            together_providers = derive_providers_from_models(models_for_providers, "together")
-            annotated_together = annotate_provider_sources(together_providers, "together")
-            provider_groups.append(annotated_together)
-
-        if gateway_value in ("google-vertex", "all"):
-            models_for_providers = google_models if gateway_value == "all" else models
-            google_providers = derive_providers_from_models(models_for_providers, "google-vertex")
-            annotated_google = annotate_provider_sources(google_providers, "google-vertex")
-            provider_groups.append(annotated_google)
-
-        if gateway_value in ("cerebras", "all"):
-            models_for_providers = cerebras_models if gateway_value == "all" else models
-            cerebras_providers = derive_providers_from_models(models_for_providers, "cerebras")
-            annotated_cerebras = annotate_provider_sources(cerebras_providers, "cerebras")
-            provider_groups.append(annotated_cerebras)
-
-        if gateway_value in ("nebius", "all"):
-            models_for_providers = nebius_models if gateway_value == "all" else models
-            nebius_providers = derive_providers_from_models(models_for_providers, "nebius")
-            annotated_nebius = annotate_provider_sources(nebius_providers, "nebius")
-            provider_groups.append(annotated_nebius)
-
-        if gateway_value in ("xai", "all"):
-            models_for_providers = xai_models if gateway_value == "all" else models
-            xai_providers = derive_providers_from_models(models_for_providers, "xai")
-            annotated_xai = annotate_provider_sources(xai_providers, "xai")
-            provider_groups.append(annotated_xai)
-
-        if gateway_value in ("novita", "all"):
-            models_for_providers = novita_models if gateway_value == "all" else models
-            novita_providers = derive_providers_from_models(models_for_providers, "novita")
-            annotated_novita = annotate_provider_sources(novita_providers, "novita")
-            provider_groups.append(annotated_novita)
-
-        if gateway_value in ("hug", "all"):
-            models_for_providers = hug_models if gateway_value == "all" else models
-            hug_providers = derive_providers_from_models(models_for_providers, "hug")
-            annotated_hug = annotate_provider_sources(hug_providers, "hug")
-            provider_groups.append(annotated_hug)
-
-        if gateway_value in ("aimo", "all"):
-            models_for_providers = aimo_models if gateway_value == "all" else models
-            aimo_providers = derive_providers_from_models(models_for_providers, "aimo")
-            annotated_aimo = annotate_provider_sources(aimo_providers, "aimo")
-            provider_groups.append(annotated_aimo)
-
-        if gateway_value in ("near", "all"):
-            models_for_providers = near_models if gateway_value == "all" else models
-            near_providers = derive_providers_from_models(models_for_providers, "near")
-            annotated_near = annotate_provider_sources(near_providers, "near")
-            provider_groups.append(annotated_near)
-
-        if gateway_value in ("fal", "all"):
-            models_for_providers = fal_models if gateway_value == "all" else models
-            fal_providers = derive_providers_from_models(models_for_providers, "fal")
-            annotated_fal = annotate_provider_sources(fal_providers, "fal")
-            provider_groups.append(annotated_fal)
-
-        if gateway_value in ("anannas", "all"):
-            models_for_providers = anannas_models if gateway_value == "all" else models
-            anannas_providers = derive_providers_from_models(models_for_providers, "anannas")
-            annotated_anannas = annotate_provider_sources(anannas_providers, "anannas")
-            provider_groups.append(annotated_anannas)
-
-        if gateway_value in ("aihubmix", "all"):
-            models_for_providers = aihubmix_models if gateway_value == "all" else models
-            aihubmix_providers = derive_providers_from_models(models_for_providers, "aihubmix")
-            annotated_aihubmix = annotate_provider_sources(aihubmix_providers, "aihubmix")
-            provider_groups.append(annotated_aihubmix)
-
-        if gateway_value in ("vercel-ai-gateway", "all"):
-            models_for_providers = vercel_ai_gateway_models if gateway_value == "all" else models
-            vercel_providers = derive_providers_from_models(
-                models_for_providers, "vercel-ai-gateway"
-            )
-            annotated_vercel = annotate_provider_sources(vercel_providers, "vercel-ai-gateway")
-            provider_groups.append(annotated_vercel)
-
-        if gateway_value in ("simplismart", "all"):
-            models_for_providers = simplismart_models if gateway_value == "all" else models
-            simplismart_providers = derive_providers_from_models(
-                models_for_providers, "simplismart"
-            )
-            annotated_simplismart = annotate_provider_sources(simplismart_providers, "simplismart")
-            provider_groups.append(annotated_simplismart)
-
-        if gateway_value in ("sybil", "all"):
-            models_for_providers = sybil_models if gateway_value == "all" else models
-            sybil_providers = derive_providers_from_models(models_for_providers, "sybil")
-            annotated_sybil = annotate_provider_sources(sybil_providers, "sybil")
-            provider_groups.append(annotated_sybil)
-
-        if gateway_value in ("morpheus", "all"):
-            models_for_providers = morpheus_models if gateway_value == "all" else models
-            morpheus_providers = derive_providers_from_models(models_for_providers, "morpheus")
-            annotated_morpheus = annotate_provider_sources(morpheus_providers, "morpheus")
-            provider_groups.append(annotated_morpheus)
+        # Derive provider groups for all other fetched slugs using provider_models.
+        for _slug in PROVIDER_SLUGS:
+            if _slug == "openrouter":
+                continue  # handled above with special OpenRouter provider list logic
+            if gateway_value not in (_slug, "all"):
+                continue
+            _slug_models = provider_models.get(_slug, [])
+            _models_for_providers = _slug_models if gateway_value == "all" else models
+            if _models_for_providers:
+                _derived = derive_providers_from_models(_models_for_providers, _slug)
+                _annotated = annotate_provider_sources(_derived, _slug)
+                provider_groups.append(_annotated)
 
         enhanced_providers = merge_provider_lists(*provider_groups)
         logger.info(f"Retrieved {len(enhanced_providers)} enhanced providers from cache")
@@ -1422,8 +1275,8 @@ async def get_models(
             filtered_models = []
             for model in models:
                 model_id = (model.get("id") or "").lower()
-                provider_slug = (model.get("provider_slug") or "").lower()
-                if provider_lower in model_id or provider_lower == provider_slug:
+                provider_slug = normalize_provider_slug(model.get("provider_slug") or "")
+                if model_id.startswith(provider_lower + "/") or provider_lower == provider_slug:
                     filtered_models.append(model)
             models = filtered_models
             logger.info(
@@ -1445,12 +1298,18 @@ async def get_models(
                 )
 
         total_models = len(models)
+        logger.info(f"Catalog response: {total_models} total models, gateway={gateway_value}")
+        try:
+            set_gateway_model_count(gateway_value, total_models)
+        except Exception:
+            pass  # Never let metrics update block the response
 
         # Ensure offset and limit are integers
         try:
             offset_int = int(str(offset)) if offset else 0
             limit_int = int(str(limit)) if limit else None
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            logger.warning("Invalid pagination parameters (offset=%r, limit=%r), using defaults: %s", offset, limit, e)
             offset_int = 0
             limit_int = None
 
@@ -1541,11 +1400,11 @@ async def get_models(
         # Use private caching to prevent CDN issues after deployments
         # Cache for 60 seconds in browser only (not CDN)
         return Response(
-            content=json.dumps(result),
+            content=_dumps_fast(result),
             media_type="application/json",
             headers={
                 "Cache-Control": "private, max-age=60, must-revalidate",  # Browser cache only
-                "ETag": f'"{hash(json.dumps(enhanced_models[:5]))}"',  # Simple ETag for validation
+                "ETag": f'"{hashlib.md5(json.dumps(enhanced_models[:5], sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:16]}"',
                 "Vary": "Accept-Encoding",  # Vary cache by encoding
             },
         )
@@ -1754,7 +1613,7 @@ async def get_developer_models(
 
         for model in models:
             model_id = (model.get("id") or "").lower()
-            provider_slug = (model.get("provider_slug") or "").lower()
+            provider_slug = normalize_provider_slug(model.get("provider_slug") or "")
 
             # Check if model ID starts with developer name (e.g., "anthropic/claude-3")
             # or if provider_slug matches
@@ -1786,7 +1645,7 @@ async def get_developer_models(
             filtered_models = filtered_models[:limit]
 
         # Enhance models with provider info and HuggingFace data
-        providers = get_cached_providers()
+        providers = await asyncio.to_thread(get_cached_providers)
         enhanced_providers = enhance_providers_with_logos_and_sites(providers or [])
 
         enhanced_models = []
@@ -1981,6 +1840,7 @@ async def get_trending_models_endpoint(
         GET /catalog/models/trending?gateway=deepinfra&sort_by=tokens
     """
     try:
+        _validate_gateway(gateway)
         logger.info(
             "Fetching trending models: gateway=%s, time_range=%s, sort_by=%s",
             sanitize_for_logging(gateway),
@@ -2384,7 +2244,7 @@ async def get_all_models(
         description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)",
     ),
     gateway: str | None = Query(
-        "openrouter",
+        "all",
         description=DESC_GATEWAY_WITH_ALL,
     ),
     unique_models: bool = Query(
@@ -2577,6 +2437,15 @@ async def get_unique_models_with_providers(
             transform_unique_models_batch,
         )
 
+        # Validate sort_by; silently fall back to default for backwards compatibility
+        valid_unique_sort = {"provider_count", "name", "cheapest_price"}
+        if sort_by not in valid_unique_sort:
+            logger.warning(
+                "Invalid sort_by='%s' for /models/unique; defaulting to 'provider_count'",
+                sanitize_for_logging(sort_by),
+            )
+            sort_by = "provider_count"
+
         logger.info(
             f"Fetching unique models: limit={limit}, offset={offset}, "
             f"min_providers={min_providers}, sort_by={sort_by}, order={order}"
@@ -2594,11 +2463,17 @@ async def get_unique_models_with_providers(
             logger.info(f"Using cached unique models ({len(api_models)} models)")
         else:
             # Cache miss - fetch from database
+            # IMPORTANT: These are sync DB functions; wrap in asyncio.to_thread
+            # to avoid blocking the event loop in this async route handler.
             logger.info("Cache miss - fetching unique models from database")
-            db_unique_models = get_all_unique_models_for_catalog(include_inactive=include_inactive)
+            db_unique_models = await asyncio.to_thread(
+                get_all_unique_models_for_catalog, include_inactive=include_inactive
+            )
 
             # Transform to API format
-            api_models = transform_unique_models_batch(db_unique_models)
+            api_models = await asyncio.to_thread(
+                transform_unique_models_batch, db_unique_models
+            )
 
             # Apply filters
             if min_providers is not None:
@@ -2780,6 +2655,17 @@ async def search_models(
     - Applied filters
     """
     try:
+        _validate_gateway(gateway)
+
+        # Validate sort_by; silently fall back to default for backwards compatibility
+        valid_search_sort = {"price", "context", "popularity", "name"}
+        if sort_by not in valid_search_sort:
+            logger.warning(
+                "Invalid sort_by='%s' for /models/search; defaulting to 'price'",
+                sanitize_for_logging(sort_by),
+            )
+            sort_by = "price"
+
         # Get all models from specified gateways
         all_models = []
         gateway_value = gateway.lower() if gateway else "all"
@@ -2910,12 +2796,14 @@ async def search_models(
                 if isinstance(pricing, dict):
                     prompt = pricing.get("prompt", 0)
                     completion = pricing.get("completion", 0)
-                    if prompt and completion:
-                        return (float(prompt) + float(completion)) / 2
+                    try:
+                        return (float(prompt or 0) + float(completion or 0)) / 2
+                    except (TypeError, ValueError):
+                        pass
                 return float("inf")  # Put models without pricing at the end
 
             elif sort_by == "context":
-                return model.get("context_length", 0)
+                return float(model.get("context_length", 0) or 0)
 
             elif sort_by == "popularity":
                 # Use ranking if available, otherwise 0
@@ -2994,7 +2882,8 @@ def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, An
                 float(comp["pricing"]["completion"]) if comp["pricing"]["completion"] else 0
             )
             comp["_total_cost"] = prompt_price + completion_price
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            logger.debug("Failed to parse pricing for gateway '%s' in recommendation: %s", comp.get("gateway"), e)
             comp["_total_cost"] = float("inf")
 
     # Find cheapest
@@ -3024,7 +2913,8 @@ def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
                 completion = float(pricing["completion"])
                 total = prompt + completion
                 costs.append({"gateway": comp["gateway"], "total_cost": total})
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as e:
+            logger.debug("Failed to parse pricing for gateway '%s' in savings calculation: %s", comp.get("gateway"), e)
             continue
 
     if len(costs) < 2:

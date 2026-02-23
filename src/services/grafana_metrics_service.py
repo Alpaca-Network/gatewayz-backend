@@ -126,11 +126,20 @@ class GrafanaMetricsService:
             # Increment request counter with random status
             status = random.choice(status_codes)
             try:
+                if 200 <= status < 300:
+                    _status_class = "2xx"
+                elif 400 <= status < 500:
+                    _status_class = "4xx"
+                elif 500 <= status < 600:
+                    _status_class = "5xx"
+                else:
+                    _status_class = "other"
                 fastapi_requests_total.labels(
                     app_name=APP_NAME,
                     method=method,
                     path=path,
-                    status_code=status
+                    status_code=status,
+                    status_class=_status_class,
                 ).inc(random.randint(1, 10))
             except Exception:
                 pass

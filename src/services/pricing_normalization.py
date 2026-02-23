@@ -163,7 +163,7 @@ def get_provider_format(provider_slug: str) -> str:
 
     Examples:
         >>> get_provider_format('openrouter')
-        'per_1m'
+        'per_token'
         >>> get_provider_format('aihubmix')
         'per_1k'
     """

@@ -154,7 +154,17 @@ def extract_pricing(model: dict[str, Any]) -> dict[str, Decimal | None]:
 
 
 def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
-    """Extract capability flags from normalized model"""
+    """Extract capability flags from normalized model.
+
+    Capability resolution strategy (metadata-first, name-based fallback):
+    1. Check explicit capability fields on the model dict (set by provider clients
+       that have authoritative knowledge, e.g. cohere_client.py).
+    2. Check architecture metadata (input_modalities for vision; supported_parameters
+       for function calling) — derived from provider API responses.
+    3. Fall back to model-name heuristics only when metadata is absent.
+       Name-based detection is a last resort because it breaks for new models
+       whose names don't follow the expected pattern.
+    """
     # Check metadata.architecture first (new location)
     metadata = model.get("metadata", {})
     architecture = metadata.get("architecture") if isinstance(metadata, dict) else None
@@ -165,14 +175,45 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
     # Determine capabilities based on modality and architecture
     supports_streaming = model.get("supports_streaming", False)
-    supports_function_calling = model.get("supports_function_calling", False)
 
-    # Check for vision support
-    supports_vision = False
-    if isinstance(architecture, dict):
-        input_modalities = architecture.get("input_modalities", [])
+    # --- supports_function_calling ---
+    # Strategy: explicit field > supported_parameters metadata > name-based fallback
+    if model.get("supports_function_calling") is not None:
+        # Explicit flag set by provider client (authoritative)
+        supports_function_calling = bool(model["supports_function_calling"])
+    else:
+        supported_params = model.get("supported_parameters") or []
+        if isinstance(supported_params, list) and supported_params:
+            # Provider API returned a parameter list — check for tool/function support
+            supports_function_calling = any(
+                p in supported_params for p in ("tools", "tool_choice", "function_call", "functions")
+            )
+        else:
+            # Fall back to name-based detection only if metadata is missing.
+            # This is approximate and may miss newly released models.
+            model_id = (model.get("id") or model.get("slug") or "").lower()
+            supports_function_calling = any(
+                pattern in model_id
+                for pattern in ("gpt-4", "gpt-3.5-turbo", "claude-3", "gemini", "mistral", "llama-3")
+            )
+
+    # --- supports_vision ---
+    # Strategy: explicit field > input_modalities metadata > name-based fallback
+    if model.get("supports_vision") is not None:
+        # Explicit flag set by provider client (authoritative)
+        supports_vision = bool(model["supports_vision"])
+    elif isinstance(architecture, dict) and architecture.get("input_modalities"):
+        # Provider API returned input_modalities — use that (authoritative)
+        input_modalities = architecture["input_modalities"]
         if isinstance(input_modalities, list):
             supports_vision = "image" in input_modalities
+        else:
+            supports_vision = False
+    else:
+        # Fall back to name-based detection only if metadata is missing.
+        # This is approximate and may miss newly released vision models.
+        model_id = (model.get("id") or model.get("slug") or "").lower()
+        supports_vision = "vision" in model_id or "vl" in model_id
 
     return {
         "supports_streaming": supports_streaming,

@@ -13,14 +13,29 @@ This replaces the sequential provider fetching that caused 499 timeouts.
 
 import asyncio
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
+
+from prometheus_client import Histogram
 
 from src.services.models import get_cached_models
 from src.utils.circuit_breaker import get_provider_circuit_breaker
 
 logger = logging.getLogger(__name__)
+
+PROVIDER_FETCH_DURATION = Histogram(
+    "catalog_provider_fetch_duration_seconds",
+    "Time spent fetching models from an individual provider",
+    ["provider"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 30.0),
+)
+
+# Per-provider Retry-After deadlines (unix timestamp).
+# Populated when a 429 response carries a Retry-After header so the next
+# fetch attempt is skipped until the deadline passes.
+_retry_after: dict[str, float] = {}
 
 # All supported providers
 ALL_PROVIDERS = [
@@ -54,6 +69,8 @@ ALL_PROVIDERS = [
     "morpheus",
 ]
 
+CATALOG_FETCH_WORKERS = int(os.environ.get("CATALOG_FETCH_WORKERS", "10"))
+
 # Thread pool for parallel fetching
 _executor: ThreadPoolExecutor | None = None
 
@@ -62,10 +79,62 @@ def get_executor() -> ThreadPoolExecutor:
     """Get or create thread pool executor."""
     global _executor
     if _executor is None:
-        # Use max 10 workers to avoid overwhelming the database
-        _executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="catalog_fetch")
-        logger.info("Created catalog fetch thread pool with 10 workers")
+        # Use configurable worker count to avoid overwhelming the database
+        _executor = ThreadPoolExecutor(max_workers=CATALOG_FETCH_WORKERS, thread_name_prefix="catalog_fetch")
+        logger.info(f"Created catalog fetch thread pool with {CATALOG_FETCH_WORKERS} workers")
     return _executor
+
+
+def _validate_provider_response(
+    provider: str,
+    models: Any,
+) -> list[dict[str, Any]]:
+    """
+    Validate and sanitise the model list returned for a provider (PV-L3).
+
+    Accepts:
+    - A plain list of model dicts.
+    - A dict with a top-level "data" key whose value is a list (OpenAI-style
+      envelope that some providers return directly).
+
+    Each item must be a dict containing at minimum an "id" field.  Malformed
+    items are dropped with a WARNING log rather than failing the whole batch.
+
+    Args:
+        provider: Provider slug (used only for log messages).
+        models:   Raw value returned by get_cached_models().
+
+    Returns:
+        A (possibly empty) list of validated model dicts.
+    """
+    # Unwrap OpenAI-style envelope {"data": [...]}
+    if isinstance(models, dict):
+        models = models.get("data", [])
+
+    if not isinstance(models, list):
+        logger.warning(
+            f"Provider {provider} returned unexpected type {type(models).__name__!r}; "
+            "expected list — skipping entire batch"
+        )
+        return []
+
+    valid: list[dict[str, Any]] = []
+    for item in models:
+        if not isinstance(item, dict) or not item.get("id"):
+            logger.warning(
+                f"Provider {provider}: dropping malformed model entry (missing 'id'): "
+                f"{str(item)[:120]!r}"
+            )
+        else:
+            valid.append(item)
+
+    dropped = len(models) - len(valid)
+    if dropped:
+        logger.warning(
+            f"Provider {provider}: dropped {dropped} malformed model(s) out of {len(models)}"
+        )
+
+    return valid
 
 
 def fetch_provider_with_circuit_breaker(
@@ -89,10 +158,25 @@ def fetch_provider_with_circuit_breaker(
     """
     breaker = get_provider_circuit_breaker()
 
-    # Check circuit breaker first
+    # PV-M7: Check circuit breaker before attempting any fetch. If the circuit is open
+    # the provider has been failing recently; skip it immediately to avoid adding latency
+    # and to give the downstream service time to recover.
     if breaker.should_skip(provider):
-        logger.info(f"Skipping {provider} (circuit breaker open)")
+        logger.debug(f"Skipping {provider} (circuit breaker open)")
         return provider, []
+
+    # Honour any Retry-After deadline received from a previous 429 response
+    retry_deadline = _retry_after.get(provider)
+    if retry_deadline is not None:
+        remaining = retry_deadline - time.time()
+        if remaining > 0:
+            logger.info(
+                f"Skipping {provider} (Retry-After: {remaining:.1f}s remaining)"
+            )
+            return provider, []
+        else:
+            # Deadline has passed — clear it
+            _retry_after.pop(provider, None)
 
     start_time = time.time()
 
@@ -106,19 +190,65 @@ def fetch_provider_with_circuit_breaker(
         if elapsed > timeout:
             logger.warning(f"Provider {provider} took {elapsed:.2f}s (soft limit: {timeout}s)")
 
+        PROVIDER_FETCH_DURATION.labels(provider=provider).observe(elapsed)
+
+        # Validate response structure before propagating (PV-L3).
+        models = _validate_provider_response(provider, models)
+
         if models:
             breaker.record_success(provider)
-            logger.debug(f"Fetched {len(models)} models from {provider} in {elapsed:.2f}s")
+            logger.info(f"Provider {provider} fetched in {elapsed:.3f}s, {len(models)} models")
             return provider, models
         else:
             # Empty result is not necessarily a failure
-            logger.debug(f"No models from {provider} (elapsed: {elapsed:.2f}s)")
+            logger.info(f"Provider {provider} fetched in {elapsed:.3f}s, 0 models")
             return provider, []
 
     except Exception as e:
         elapsed = time.time() - start_time
         breaker.record_failure(provider, str(e))
-        logger.warning(f"Error fetching {provider} (elapsed: {elapsed:.2f}s): {e}")
+
+        # Categorize error type for structured logging
+        error_str = str(e)
+        status_code = getattr(e, "status_code", None) or getattr(e, "status", None)
+        if isinstance(e, TimeoutError) or "timeout" in error_str.lower():
+            category = "timeout"
+        elif isinstance(e, ConnectionError) or "connection" in error_str.lower():
+            category = "connection_error"
+        elif status_code == 429 or "429" in error_str:
+            category = "rate_limited"
+            # PV-L5: Respect Retry-After header when the exception carries one.
+            # Try both e.headers (httpx/requests style) and e.response.headers.
+            retry_after_raw = (
+                (getattr(e, "headers", None) or {}).get("Retry-After")
+                or (
+                    getattr(getattr(e, "response", None), "headers", None) or {}
+                ).get("Retry-After")
+            )
+            if retry_after_raw:
+                try:
+                    retry_after_secs = float(retry_after_raw)
+                    _retry_after[provider] = time.time() + retry_after_secs
+                    logger.warning(
+                        f"Provider {provider} rate-limited; "
+                        f"Retry-After={retry_after_secs:.0f}s — "
+                        f"skipping until deadline"
+                    )
+                except (ValueError, TypeError):
+                    logger.warning(
+                        f"Provider {provider} rate-limited; "
+                        f"Retry-After header present but unparseable: {retry_after_raw!r}"
+                    )
+            else:
+                logger.warning(f"Provider {provider} rate-limited (no Retry-After header)")
+        elif status_code in (401, 403) or any(c in error_str for c in ("401", "403", "unauthorized", "forbidden")):
+            category = "auth_failure"
+        elif (status_code is not None and 500 <= status_code < 600) or any(c in error_str for c in ("500", "502", "503", "504")):
+            category = "server_error"
+        else:
+            category = "unknown"
+
+        logger.warning(f"Provider {provider} fetch failed: {category} - {e} (elapsed: {elapsed:.2f}s)")
         return provider, []
 
 
@@ -183,7 +313,21 @@ async def fetch_all_providers_parallel(
                     breaker = get_provider_circuit_breaker()
                     breaker.record_failure(provider, "overall_timeout")
             except Exception as e:
-                logger.warning(f"Error getting result for {provider}: {e}")
+                error_str = str(e)
+                status_code = getattr(e, "status_code", None) or getattr(e, "status", None)
+                if isinstance(e, TimeoutError) or "timeout" in error_str.lower():
+                    category = "timeout"
+                elif isinstance(e, ConnectionError) or "connection" in error_str.lower():
+                    category = "connection_error"
+                elif status_code == 429 or "429" in error_str:
+                    category = "rate_limited"
+                elif status_code in (401, 403) or any(c in error_str for c in ("401", "403", "unauthorized", "forbidden")):
+                    category = "auth_failure"
+                elif (status_code is not None and 500 <= status_code < 600) or any(c in error_str for c in ("500", "502", "503", "504")):
+                    category = "server_error"
+                else:
+                    category = "unknown"
+                logger.warning(f"Provider {provider} fetch failed: {category} - {e}")
                 results[provider] = []
 
         # Cancel any remaining pending tasks
