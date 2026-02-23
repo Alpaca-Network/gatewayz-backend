@@ -265,71 +265,74 @@ class ChatInferenceHandler:
         from fastapi import HTTPException
         from src.utils.error_factory import DetailedErrorFactory
 
+        from src.services.pyroscope_config import tag_wrapper
+
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
-        try:
-            # Route to appropriate provider
-            if provider_name == "openrouter":
-                return make_openrouter_request_openai(messages, model_id, **kwargs)
-            elif provider_name == "cerebras":
-                return make_cerebras_request_openai(messages, model_id, **kwargs)
-            elif provider_name == "groq":
-                return make_groq_request_openai(messages, model_id, **kwargs)
-            else:
-                # Fallback to OpenRouter for unknown providers
+        with tag_wrapper({"provider": provider_name, "model": model_id}):
+            try:
+                # Route to appropriate provider
+                if provider_name == "openrouter":
+                    return make_openrouter_request_openai(messages, model_id, **kwargs)
+                elif provider_name == "cerebras":
+                    return make_cerebras_request_openai(messages, model_id, **kwargs)
+                elif provider_name == "groq":
+                    return make_groq_request_openai(messages, model_id, **kwargs)
+                else:
+                    # Fallback to OpenRouter for unknown providers
+                    logger.warning(
+                        f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
+                    )
+                    return make_openrouter_request_openai(messages, model_id, **kwargs)
+            except HTTPException:
+                # Re-raise HTTP exceptions (already formatted)
+                raise
+            except CircuitBreakerError as e:
+                # Circuit breaker is open - provider temporarily unavailable
                 logger.warning(
-                    f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
+                    f"[ChatHandler] Circuit breaker open: provider={e.provider}, "
+                    f"state={e.state.value}, model={model_id}"
                 )
-                return make_openrouter_request_openai(messages, model_id, **kwargs)
-        except HTTPException:
-            # Re-raise HTTP exceptions (already formatted)
-            raise
-        except CircuitBreakerError as e:
-            # Circuit breaker is open - provider temporarily unavailable
-            logger.warning(
-                f"[ChatHandler] Circuit breaker open: provider={e.provider}, "
-                f"state={e.state.value}, model={model_id}"
-            )
 
-            # Get circuit breaker state for retry_after calculation
-            from src.services.circuit_breaker import get_circuit_breaker
-            breaker = get_circuit_breaker(e.provider)
-            state_info = breaker.get_state()
-            retry_after = state_info.get("seconds_until_retry", 60)
+                # Get circuit breaker state for retry_after calculation
+                from src.services.circuit_breaker import get_circuit_breaker
+                breaker = get_circuit_breaker(e.provider)
+                state_info = breaker.get_state()
+                retry_after = state_info.get("seconds_until_retry", 60)
 
-            # Create detailed circuit breaker error
-            error_response = DetailedErrorFactory.provider_unavailable(
-                provider=e.provider,
-                model=model_id,
-                retry_after=retry_after,
-                circuit_breaker_state=e.state.value,
-                request_id=self.request_id,
-            )
+                # Create detailed circuit breaker error
+                error_response = DetailedErrorFactory.provider_unavailable(
+                    provider=e.provider,
+                    model=model_id,
+                    retry_after=retry_after,
+                    circuit_breaker_state=e.state.value,
+                    request_id=self.request_id,
+                )
 
-            raise HTTPException(
-                status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True)
-            )
-        except Exception as e:
-            # Convert provider exceptions to detailed errors
-            logger.error(
-                f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
-                exc_info=True
-            )
+                raise HTTPException(
+                    status_code=error_response.error.status,
+                    detail=error_response.dict(exclude_none=True)
+                )
+            except Exception as e:
+                # Convert provider exceptions to detailed errors
+                logger.error(
+                    f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
+                    exc_info=True
+                )
 
-            # Create detailed provider error
-            error_response = DetailedErrorFactory.provider_error(
-                provider=provider_name,
-                model=model_id,
-                provider_message=str(e),
-                status_code=502,
-                request_id=self.request_id,
-            )
+                # Create detailed provider error
+                error_response = DetailedErrorFactory.provider_error(
+                    provider=provider_name,
+                    model=model_id,
+                    provider_message=str(e),
+                    status_code=502,
+                    request_id=self.request_id,
+                )
 
-            raise HTTPException(
-                status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True)
-            )
+                raise HTTPException(
+                    status_code=error_response.error.status,
+                    detail=error_response.dict(exclude_none=True)
+                )
 
     async def _call_provider_stream(
         self,
@@ -388,39 +391,41 @@ class ChatInferenceHandler:
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
         from src.utils.error_factory import DetailedErrorFactory
+        from src.services.pyroscope_config import tag_wrapper
 
         try:
-            if provider_name == "openrouter":
-                stream = await make_openrouter_request_openai_stream_async(
-                    messages, model_id, **kwargs
-                )
-                async for chunk in stream:
-                    yield chunk
-            elif provider_name == "onerouter":
-                # OneRouter/Infron.ai uses sync client - use non-blocking iteration
-                stream = make_onerouter_request_openai_stream(messages, model_id, **kwargs)
-                async for chunk in _iterate_sync_stream(stream):
-                    yield chunk
-            elif provider_name == "cerebras":
-                # Cerebras uses sync client - use non-blocking iteration
-                stream = make_cerebras_request_openai_stream(messages, model_id, **kwargs)
-                async for chunk in _iterate_sync_stream(stream):
-                    yield chunk
-            elif provider_name == "groq":
-                # Groq uses sync client - use non-blocking iteration
-                stream = make_groq_request_openai_stream(messages, model_id, **kwargs)
-                async for chunk in _iterate_sync_stream(stream):
-                    yield chunk
-            else:
-                # Fallback to OpenRouter
-                logger.warning(
-                    f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
-                )
-                stream = await make_openrouter_request_openai_stream_async(
-                    messages, model_id, **kwargs
-                )
-                async for chunk in stream:
-                    yield chunk
+            with tag_wrapper({"provider": provider_name, "model": model_id}):
+                if provider_name == "openrouter":
+                    stream = await make_openrouter_request_openai_stream_async(
+                        messages, model_id, **kwargs
+                    )
+                    async for chunk in stream:
+                        yield chunk
+                elif provider_name == "onerouter":
+                    # OneRouter/Infron.ai uses sync client - use non-blocking iteration
+                    stream = make_onerouter_request_openai_stream(messages, model_id, **kwargs)
+                    async for chunk in _iterate_sync_stream(stream):
+                        yield chunk
+                elif provider_name == "cerebras":
+                    # Cerebras uses sync client - use non-blocking iteration
+                    stream = make_cerebras_request_openai_stream(messages, model_id, **kwargs)
+                    async for chunk in _iterate_sync_stream(stream):
+                        yield chunk
+                elif provider_name == "groq":
+                    # Groq uses sync client - use non-blocking iteration
+                    stream = make_groq_request_openai_stream(messages, model_id, **kwargs)
+                    async for chunk in _iterate_sync_stream(stream):
+                        yield chunk
+                else:
+                    # Fallback to OpenRouter
+                    logger.warning(
+                        f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
+                    )
+                    stream = await make_openrouter_request_openai_stream_async(
+                        messages, model_id, **kwargs
+                    )
+                    async for chunk in stream:
+                        yield chunk
         except CircuitBreakerError as e:
             # Circuit breaker is open - provider temporarily unavailable
             logger.warning(
