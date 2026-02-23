@@ -1134,7 +1134,7 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
     from src.services.local_memory_cache import get_local_catalog, set_local_catalog
     from src.utils.step_logger import StepLogger
 
-    step_logger = StepLogger("Cache: Fetch Full Catalog", total_steps=5)
+    step_logger = StepLogger("Cache: Fetch Full Catalog", total_steps=3)
     step_logger.start(cache_type="full_catalog")
 
     cache = get_model_catalog_cache()
@@ -1174,34 +1174,168 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
             step_logger.complete(source="redis_after_lock", models=len(cached))
             return cached
 
-        step_logger.step(3, "Fetching from database", cache_layer="database")
+        # Rebuild full catalog by assembling per-provider catalogs.
+        # Each provider is fetched individually (small, fast queries that never
+        # hit the 120s wall-clock deadline) instead of one giant all-models query.
+        step_logger.step(3, "Rebuilding from per-provider caches", cache_layer="provider_assembly")
         try:
-            from src.db.models_catalog_db import (
-                get_all_models_for_catalog,
-                transform_db_models_batch,
-            )
-
-            db_models = get_all_models_for_catalog(include_inactive=False)
-            step_logger.success(db_models=len(db_models))
-
-            # Step 4: Transform to API format
-            step_logger.step(4, "Transforming models to API format", count=len(db_models))
-            api_models = transform_db_models_batch(db_models)
+            api_models = rebuild_full_catalog_from_providers()
             step_logger.success(api_models=len(api_models))
 
-            # Step 5: Populate caches
-            step_logger.step(5, "Populating caches", targets="redis+local")
-            cache.set_full_catalog(api_models, ttl=ModelCatalogCache.TTL_FULL_CATALOG)
-            set_local_catalog("all", api_models)
-            step_logger.success(redis="updated", local="updated", ttl=ModelCatalogCache.TTL_FULL_CATALOG)
-
-            step_logger.complete(source="database", models=len(api_models), cache_status="populated")
+            step_logger.complete(source="provider_assembly", models=len(api_models), cache_status="populated")
             return api_models
 
         except Exception as e:
-            step_logger.failure(e, source="database")
-            logger.error(f"Error fetching catalog from database: {e}")
+            step_logger.failure(e, source="provider_assembly")
+            logger.error(f"Error rebuilding catalog from providers: {e}")
             return []
+
+
+def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
+    """
+    Build the full catalog by assembling individually-cached per-provider catalogs.
+
+    This avoids the single-giant-query timeout issue in get_all_models_for_catalog()
+    by fetching each provider separately (small, fast queries) and merging.
+
+    Flow:
+    1. Get list of known provider slugs from the database
+    2. Fetch each provider's catalog (from Redis cache or DB on miss via
+       get_cached_provider_catalog which has its own Redis → local → DB fallback)
+    3. Merge all providers into a single list
+    4. Cache the merged result as the full catalog in Redis + local memory
+    5. Return the complete catalog
+
+    Each per-provider query is small (100-5000 rows) and well within the
+    DB_QUERY_TIMEOUT_SECONDS deadline, unlike the monolithic all-models query
+    which times out at ~3600 rows for 17k+ model catalogs.
+
+    Returns:
+        Complete merged catalog (all providers), or empty list on total failure.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from src.services.local_memory_cache import set_local_catalog
+
+    cache = get_model_catalog_cache()
+
+    # --- Step 1: Discover provider slugs ---
+    # Use the database as the authoritative source of active provider slugs.
+    # This avoids hardcoding the list and automatically picks up new providers.
+    # We query ALL active providers — even those without a live API fetch function
+    # may have models synced to the DB via model_catalog_sync.py.
+    # Providers with 0 models simply return empty lists (harmless).
+    provider_slugs: list[str] = []
+
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        supabase = get_client_for_query(read_only=True)
+        response = (
+            supabase.table("providers")
+            .select("slug")
+            .eq("is_active", True)
+            .execute()
+        )
+        provider_slugs = [
+            row["slug"]
+            for row in (response.data or [])
+            if row.get("slug")
+        ]
+        logger.info(
+            f"rebuild_full_catalog_from_providers: discovered {len(provider_slugs)} "
+            f"active provider slugs from database"
+        )
+    except Exception as e:
+        logger.warning(
+            f"rebuild_full_catalog_from_providers: failed to fetch provider slugs "
+            f"from database ({e}), falling back to GATEWAY_REGISTRY keys"
+        )
+        # Fallback: derive slugs from GATEWAY_REGISTRY directly (not PROVIDER_SLUGS
+        # which applies GATEWAY_FETCH_SLUG_OVERRIDES like huggingface→hug, but the
+        # DB stores models under the original slug "huggingface").
+        try:
+            from src.routes.catalog import GATEWAY_REGISTRY
+            provider_slugs = list(GATEWAY_REGISTRY.keys())
+        except Exception:
+            logger.error(
+                "rebuild_full_catalog_from_providers: cannot determine provider slugs, "
+                "aborting rebuild"
+            )
+            return []
+
+    if not provider_slugs:
+        logger.warning("rebuild_full_catalog_from_providers: no provider slugs found")
+        return []
+
+    # --- Step 2: Fetch per-provider catalogs in parallel ---
+    # get_cached_provider_catalog already has Redis → local memory → DB fallback
+    # and per-provider stampede protection, so we just call it for each slug.
+    # With 30+ providers, use 10 workers to complete in ~3 batches while leaving
+    # plenty of headroom in the connection pool (50 max connections). Most providers
+    # will hit Redis cache (sub-ms), so only a few use DB connections simultaneously.
+    MAX_WORKERS = 10
+    all_models: list[dict[str, Any]] = []
+    provider_counts: dict[str, int] = {}
+    empty_providers: list[str] = []
+
+    def _fetch_provider(slug: str) -> tuple[str, list[dict[str, Any]]]:
+        """Fetch a single provider's catalog (runs in thread pool)."""
+        try:
+            models = get_cached_provider_catalog(slug) or []
+            return (slug, models)
+        except Exception as exc:
+            logger.warning(
+                f"rebuild_full_catalog_from_providers: failed to fetch {slug}: {exc}"
+            )
+            return (slug, [])
+
+    fetch_start = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = {
+            executor.submit(_fetch_provider, slug): slug
+            for slug in provider_slugs
+        }
+        for future in as_completed(futures):
+            slug = futures[future]
+            try:
+                _returned_slug, models = future.result(timeout=120)
+                if models:
+                    all_models.extend(models)
+                    provider_counts[slug] = len(models)
+                else:
+                    empty_providers.append(slug)
+            except Exception as exc:
+                logger.warning(
+                    f"rebuild_full_catalog_from_providers: {slug} future failed: {exc}"
+                )
+                empty_providers.append(slug)
+
+    fetch_elapsed = time.monotonic() - fetch_start
+
+    logger.info(
+        f"rebuild_full_catalog_from_providers: assembled {len(all_models)} models "
+        f"from {len(provider_counts)} providers in {fetch_elapsed:.1f}s "
+        f"(empty: {len(empty_providers)})"
+    )
+    if empty_providers:
+        # Some providers legitimately have 0 models (e.g., xai, nebius have no
+        # public model listing). Only log at debug level.
+        logger.debug(
+            f"rebuild_full_catalog_from_providers: providers with 0 models: "
+            f"{empty_providers}"
+        )
+
+    # --- Step 3: Cache the assembled full catalog ---
+    if all_models:
+        cache.set_full_catalog(all_models, ttl=ModelCatalogCache.TTL_FULL_CATALOG)
+        set_local_catalog("all", all_models)
+        logger.info(
+            f"rebuild_full_catalog_from_providers: cached full catalog "
+            f"({len(all_models)} models, TTL={ModelCatalogCache.TTL_FULL_CATALOG}s)"
+        )
+
+    return all_models
 
 
 def invalidate_full_catalog() -> bool:
@@ -3108,6 +3242,7 @@ __all__ = [
     # Full catalog
     "cache_full_catalog",
     "get_cached_full_catalog",
+    "rebuild_full_catalog_from_providers",
     "invalidate_full_catalog",
     # Provider catalog
     "cache_provider_catalog",

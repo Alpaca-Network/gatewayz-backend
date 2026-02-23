@@ -344,12 +344,15 @@ async def update_full_model_catalog_loop() -> None:
     - Prevents cache TTL (15m) from expiring during user requests.
     - Eliminates the "thundering herd" of DB queries when cache is cold.
     - Acts as a DB connection keep-alive during idle periods.
-    - Resource usage is negligible (one efficient query every 14m).
+    - Resource usage is negligible (parallel per-provider fetches every 14m).
+
+    Uses rebuild_full_catalog_from_providers() which assembles the catalog
+    from individually-cached per-provider chunks, avoiding the single-giant-
+    query timeout that truncates results at ~3600 of 17k+ models.
     """
     import time
 
-    from src.db.models_catalog_db import get_all_models_for_catalog, transform_db_models_batch
-    from src.services.model_catalog_cache import cache_full_catalog
+    from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
     logger.info("Starting model catalog background refresh loop (interval: 14m)")
 
@@ -376,44 +379,32 @@ async def update_full_model_catalog_loop() -> None:
             refresh_start = time.monotonic()
             logger.info("🔄 Background Refresh: Updating full model catalog...")
 
-            # 1. Fetch from DB (optimized query)
-            # Use dedicated DB executor to avoid starving the default thread pool
+            # Rebuild full catalog by assembling per-provider catalogs.
+            # Each provider is fetched individually (from Redis cache or small DB
+            # queries) and merged. This avoids the single-giant-query timeout that
+            # truncates results at ~3600 of 17k+ models.
+            # Per-provider caches are populated as a side-effect, so the separate
+            # _split_and_cache_gateway_catalogs step is no longer needed.
             loop = asyncio.get_running_loop()
-            db_models = await loop.run_in_executor(_db_executor, get_all_models_for_catalog, False)
+            api_models = await loop.run_in_executor(
+                _db_executor, rebuild_full_catalog_from_providers
+            )
 
-            if not db_models:
-                logger.warning("Background Refresh: DB returned 0 models - skipping cache update")
+            if not api_models:
+                logger.warning("Background Refresh: rebuild returned 0 models - skipping")
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
                     logger.error(
-                        "Background Refresh: %d consecutive empty results from DB - "
+                        "Background Refresh: %d consecutive empty results - "
                         "cache may go stale!", consecutive_errors
                     )
-                continue
-
-            # 2. Transform to API format (in executor to avoid blocking event loop)
-            # transform_db_models_batch processes 13k+ models with pricing enrichment
-            # which is CPU-intensive. Running on the event loop blocks ALL requests.
-            api_models = await loop.run_in_executor(_db_executor, transform_db_models_batch, db_models)
-
-            # 3. Update full catalog cache
-            # We set TTL to 15m, but we refresh every 14m to ensure overlap
-            cache_full_catalog(api_models, ttl=900)
-
-            # 4. Derive and cache individual gateway catalogs from the full catalog.
-            # This keeps ALL gateway caches warm with ZERO additional DB queries.
-            # Previously, gateway caches went stale and triggered 31 separate DB
-            # queries + pricing enrichment on next access.
-            await loop.run_in_executor(
-                _db_executor, _split_and_cache_gateway_catalogs, api_models
-            )
-
-            elapsed = time.monotonic() - refresh_start
-            consecutive_errors = 0
-            logger.info(
-                f"✅ Background Refresh: Updated catalog with {len(api_models)} models "
-                f"(took {elapsed:.1f}s)"
-            )
+            else:
+                elapsed = time.monotonic() - refresh_start
+                consecutive_errors = 0
+                logger.info(
+                    f"✅ Background Refresh: Updated catalog with {len(api_models)} models "
+                    f"(took {elapsed:.1f}s)"
+                )
 
         except Exception as e:
             consecutive_errors += 1

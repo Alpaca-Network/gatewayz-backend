@@ -394,14 +394,12 @@ for _key, _cfg in GATEWAY_REGISTRY.items():
     for _alias in _cfg.get("aliases", []):
         _GATEWAY_SLUG_RESOLUTION[_alias] = _fetch_slug
 
-# Entries in GATEWAY_REGISTRY that do not yet have a get_cached_models() implementation are
-# excluded so the generic fetch loop does not attempt to call them.
+# Entries in GATEWAY_REGISTRY that do not yet have a fetch function in
+# PROVIDER_FETCH_FUNCTIONS (model_catalog_sync.py) are excluded so the
+# generic fetch loop does not attempt to call them.
 _REGISTRY_KEYS_WITHOUT_FETCH: frozenset[str] = frozenset(
     {
-        "canopywave",
         "notdiamond",
-        "cloudflare-workers-ai",
-        "zai",
         "alpaca",
     }
 )
