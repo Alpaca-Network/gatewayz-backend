@@ -10,7 +10,7 @@ Tests cover:
 
 import importlib
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -59,7 +59,7 @@ def mock_share():
         "session_id": 100,
         "share_token": "abc123def456",
         "created_by_user_id": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "expires_at": None,
         "view_count": 0,
         "last_viewed_at": None,
@@ -74,7 +74,7 @@ def mock_shared_chat_data():
         "session_id": 100,
         "title": "Test Chat Session",
         "model": "openai/gpt-4o",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "messages": [
             {
                 "id": 1,
@@ -83,7 +83,7 @@ def mock_shared_chat_data():
                 "content": "Hello!",
                 "model": None,
                 "tokens": 5,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
             {
                 "id": 2,
@@ -92,7 +92,7 @@ def mock_shared_chat_data():
                 "content": "Hi there! How can I help you?",
                 "model": "openai/gpt-4o",
                 "tokens": 15,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
             },
         ],
     }

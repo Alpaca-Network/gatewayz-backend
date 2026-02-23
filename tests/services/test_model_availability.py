@@ -2,7 +2,7 @@
 Comprehensive tests for Model Availability service
 """
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
 
@@ -56,7 +56,7 @@ class TestIsModelAvailable:
             provider="openai",
             gateway="openrouter",
             status=AvailabilityStatus.AVAILABLE,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=0.99,
             response_time_ms=500.0,
             error_count=0,
@@ -85,7 +85,7 @@ class TestIsModelAvailable:
             provider="some-provider",
             gateway="openrouter",
             status=AvailabilityStatus.AVAILABLE,  # Even if status is available
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=0.5,
             response_time_ms=1000.0,
             error_count=10,
@@ -109,13 +109,13 @@ class TestIsModelAvailable:
         service = ModelAvailabilityService()
 
         # Add a model in maintenance
-        future_time = datetime.now(timezone.utc) + timedelta(hours=2)
+        future_time = datetime.now(UTC) + timedelta(hours=2)
         availability = ModelAvailability(
             model_id="maintained-model",
             provider="some-provider",
             gateway="openrouter",
             status=AvailabilityStatus.MAINTENANCE,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=1.0,
             response_time_ms=100.0,
             error_count=0,
@@ -144,7 +144,7 @@ class TestIsModelAvailable:
             provider="some-provider",
             gateway="openrouter",
             status=AvailabilityStatus.UNAVAILABLE,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             success_rate=0.0,
             response_time_ms=None,
             error_count=50,

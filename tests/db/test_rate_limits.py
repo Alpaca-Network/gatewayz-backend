@@ -1,7 +1,7 @@
 # tests/db/test_rate_limits_store.py
 import types
 import copy
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 import pytest
 
@@ -132,7 +132,7 @@ class SupabaseStub:
 
 # Helpers
 def iso_utc(dt: datetime) -> str:
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 # ----------------------------
@@ -248,7 +248,7 @@ def test_check_rate_limit_blocks_on_request_minute(sb, user_api_key):
     }).execute()
 
     # Seed 2 requests in current minute window so the next (implicit +1) exceeds
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     minute_start = now.replace(second=0, microsecond=0).isoformat()
     sb.table("rate_limit_usage").insert([
         {"api_key": user_api_key, "window_type": "minute", "window_start": minute_start, "requests_count": 2, "tokens_count": 0},
@@ -271,7 +271,7 @@ def test_check_rate_limit_blocks_on_tokens_minute(sb, user_api_key):
         "tokens_per_day": 10000,
     }).execute()
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     minute_start = now.replace(second=0, microsecond=0).isoformat()
     sb.table("rate_limit_usage").insert([
         {"api_key": user_api_key, "window_type": "minute", "window_start": minute_start, "requests_count": 0, "tokens_count": 90},
@@ -361,7 +361,7 @@ def test_bulk_update_rate_limit_configs(sb):
 # Usage stats helpers
 # ----------------------------
 def test_get_rate_limit_usage_stats_minute(sb, user_api_key):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start = now.replace(second=0, microsecond=0)
     end = start + timedelta(minutes=1)
 
@@ -378,7 +378,7 @@ def test_get_rate_limit_usage_stats_minute(sb, user_api_key):
     assert out["total_tokens"] == 25
 
 def test_get_system_rate_limit_stats(sb):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sb.table("usage_records").insert([
         {"api_key": "a", "tokens_used": 5, "created_at": (now - timedelta(seconds=10)).isoformat()},
         {"api_key": "b", "tokens_used": 15, "created_at": (now - timedelta(minutes=10)).isoformat()},

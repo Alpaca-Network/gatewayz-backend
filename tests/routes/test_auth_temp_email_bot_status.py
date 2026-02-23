@@ -7,7 +7,7 @@ their subscription_status should be set to 'bot' instead of 'trial'.
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import patch, MagicMock
 
 
@@ -179,14 +179,14 @@ def client(sb, monkeypatch):
         return result.data[0] if result.data else None
 
     def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"):
-        trial_expires_at = datetime.now(timezone.utc).isoformat()
+        trial_expires_at = datetime.now(UTC).isoformat()
         user_data = {
             'username': username,
             'email': email,
             'credits': credits,
             'privy_user_id': privy_user_id,
             'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
-            'created_at': datetime.now(timezone.utc).isoformat(),
+            'created_at': datetime.now(UTC).isoformat(),
             'subscription_status': subscription_status,
             'trial_expires_at': trial_expires_at,
             'tier': 'basic',

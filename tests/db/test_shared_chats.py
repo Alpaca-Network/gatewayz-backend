@@ -13,7 +13,7 @@ Tests cover:
 
 import importlib
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 from unittest.mock import patch, MagicMock
 
 # Import the module
@@ -65,7 +65,7 @@ def test_create_shared_chat_success(mock_get_client):
         "session_id": 100,
         "share_token": "test_token_123",
         "created_by_user_id": 1,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "expires_at": None,
         "view_count": 0,
         "is_active": True,
@@ -88,7 +88,7 @@ def test_create_shared_chat_with_expiry(mock_get_client):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
 
-    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    expires_at = datetime.now(UTC) + timedelta(days=7)
     expected_share = {
         "id": 1,
         "session_id": 100,
@@ -136,7 +136,7 @@ def test_get_shared_chat_by_token_success(mock_get_client):
         "user_id": 1,
         "title": "Test Session",
         "model": "openai/gpt-4o",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
         "is_active": True,
     }
 
@@ -206,7 +206,7 @@ def test_get_shared_chat_by_token_expired(mock_get_client):
         "id": 1,
         "session_id": 100,
         "share_token": "test_token",
-        "expires_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+        "expires_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
         "is_active": True,
     }
 

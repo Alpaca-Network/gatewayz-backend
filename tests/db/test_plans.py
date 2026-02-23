@@ -2,7 +2,7 @@
 import sys
 import types
 import importlib
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -101,7 +101,7 @@ class _Table:
             if "id" not in r:
                 r["id"] = len(self.store[self.name]) + 1
             if "created_at" not in r and self.name in {"users", "user_plans", "usage_records", "plans", "subscription_plans"}:
-                r["created_at"] = datetime.now(timezone.utc).isoformat()
+                r["created_at"] = datetime.now(UTC).isoformat()
             self.store[self.name].append(r)
         return self
 
@@ -226,7 +226,7 @@ def test_get_user_plan_combines_user_and_plan(mod, fake_supabase):
         "daily_token_limit": 300000, "monthly_token_limit": 9000000,
         "price_per_month": 29, "features": ["basic_models", "advanced_models"], "is_active": True
     }).execute()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fake_supabase.table("user_plans").insert({
         "id": 1001, "user_id": 9, "plan_id": 42,
         "started_at": (now - timedelta(days=1)).isoformat(),
@@ -247,8 +247,8 @@ def test_assign_user_plan_deactivates_existing_and_updates_user(mod, fake_supaba
     # existing plan
     fake_supabase.table("user_plans").insert({
         "id": 1, "user_id": 5, "plan_id": 1,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(days=10)).isoformat(),
+        "started_at": datetime.now(UTC).isoformat(),
+        "expires_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
         "is_active": True
     }).execute()
     # target plan exists
@@ -301,7 +301,7 @@ def test_check_plan_entitlements_expired_plan_marks_inactive_and_user_expired(mo
         "daily_token_limit": 10000, "monthly_token_limit": 200000,
         "price_per_month": 9, "features": ["basic_models"]
     }).execute()
-    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    yesterday = datetime.now(UTC) - timedelta(days=1)
     fake_supabase.table("user_plans").insert({
         "id": 501, "user_id": 77, "plan_id": 55,
         "started_at": (yesterday - timedelta(days=29)).isoformat(),
@@ -331,7 +331,7 @@ def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
         "daily_token_limit": 200000, "monthly_token_limit": 6000000,
         "price_per_month": 29, "features": ["basic_models", "advanced_models"]
     }).execute()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fake_supabase.table("user_plans").insert({
         "id": 700, "user_id": 123, "plan_id": 7,
         "started_at": (now - timedelta(days=1)).isoformat(),
@@ -350,7 +350,7 @@ def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
 def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkeypatch):
     # Create a fixed "now" for testing (day 15 to avoid edge cases)
     # This ensures the function's datetime.now() matches our test data
-    fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=timezone.utc)
+    fixed_now = datetime(2025, 11, 15, 10, 30, 0, tzinfo=UTC)
 
     # Mock datetime.now() in the module to return a fixed value
     # We need to patch the datetime object in the module's namespace
@@ -422,7 +422,7 @@ def test_enforce_plan_limits_checks_and_env_multiplier(mod, fake_supabase):
         "daily_token_limit": 100, "monthly_token_limit": 2000,
         "price_per_month": 1, "features": ["basic_models"]
     }).execute()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fake_supabase.table("user_plans").insert({
         "id": 660, "user_id": 606, "plan_id": 66,
         "started_at": (now - timedelta(days=1)).isoformat(),

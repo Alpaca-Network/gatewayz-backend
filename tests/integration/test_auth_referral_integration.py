@@ -14,7 +14,7 @@ Flow tested:
 """
 import os
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from unittest.mock import patch, Mock, MagicMock, call
 from fastapi.testclient import TestClient
 from fastapi import BackgroundTasks
@@ -61,7 +61,7 @@ def test_auth_users(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Try to add has_made_first_purchase, but don't fail if column doesn't exist

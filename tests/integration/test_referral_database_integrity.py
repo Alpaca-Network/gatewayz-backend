@@ -12,7 +12,7 @@ import os
 import pytest
 import threading
 import time
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from src.config.supabase_config import get_supabase_client
@@ -57,7 +57,7 @@ def test_db_users(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits),  # Database expects integer, not float
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         if referred_by_code is not None:
@@ -85,7 +85,7 @@ def test_db_users(supabase_client, test_prefix):
             "is_active": True,
             "environment_tag": "test",
             "scope_permissions": ["chat", "images"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()

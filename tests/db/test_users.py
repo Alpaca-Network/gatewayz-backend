@@ -1,7 +1,7 @@
 import types
 import uuid
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 # ---- In-memory Supabase stub ------------------------------------------------
 
@@ -180,7 +180,7 @@ class SupabaseStub:
                     total_requests = len(usage)
                     total_tokens = sum(r.get("tokens_used", 0) for r in usage)
                     total_cost = sum(r.get("cost", 0.0) for r in usage)
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
                     today = now.replace(hour=0, minute=0, second=0, microsecond=0)
                     month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -263,7 +263,7 @@ def sb(monkeypatch):
 # ---- Helpers ----------------------------------------------------------------
 
 def iso_now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 # ---- Tests ------------------------------------------------------------------
 
@@ -382,8 +382,8 @@ def test_admin_monitor_data(sb):
         {"id": 2, "credits": 0, "api_key": "b"},
     ]).execute()
     # activity_log (primary source for usage tracking)
-    now = datetime.now(timezone.utc).isoformat()
-    older = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    now = datetime.now(UTC).isoformat()
+    older = (datetime.now(UTC) - timedelta(days=2)).isoformat()
     sb.table("activity_log").insert([
         {"user_id": 1, "model": "m1", "tokens": 100, "cost": 0.5, "timestamp": now},
         {"user_id": 1, "model": "m1", "tokens": 50, "cost": 0.2, "timestamp": older},
@@ -416,7 +416,7 @@ def test_admin_monitor_data_deduplication(sb):
     ]).execute()
 
     # Create timestamps
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Insert activity_log entries (primary source)
     sb.table("activity_log").insert([
@@ -458,7 +458,7 @@ def test_admin_monitor_data_deduplication_api_key_only(sb):
         {"id": 1, "credits": 10, "api_key": "api_key_user_1"},
     ]).execute()
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
 
     # Insert activity_log entry
     sb.table("activity_log").insert([

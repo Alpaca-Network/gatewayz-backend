@@ -14,7 +14,7 @@ Tests cover:
 
 import pytest
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import Mock, patch, AsyncMock
 from typing import List, Dict, Any
 
@@ -52,12 +52,12 @@ def mock_supabase_client():
             if isinstance(data, list):
                 for item in data:
                     item['id'] = len(self.storage[self.table_name]) + 1
-                    item['created_at'] = datetime.now(timezone.utc).isoformat()
+                    item['created_at'] = datetime.now(UTC).isoformat()
                     self.storage[self.table_name].append(item)
                 return MockResult(data=data)
             else:
                 data['id'] = len(self.storage[self.table_name]) + 1
-                data['created_at'] = datetime.now(timezone.utc).isoformat()
+                data['created_at'] = datetime.now(UTC).isoformat()
                 self.storage[self.table_name].append(data)
                 return MockResult(data=[data])
 
@@ -134,8 +134,8 @@ def sample_session(mock_supabase_client, sample_user):
         'title': 'Test Session',
         'model': 'openai/gpt-4',
         'is_active': True,
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'updated_at': datetime.now(timezone.utc).isoformat()
+        'created_at': datetime.now(UTC).isoformat(),
+        'updated_at': datetime.now(UTC).isoformat()
     }
     result = mock_supabase_client.table('chat_sessions').insert(session_data).execute()
     return result.data[0]

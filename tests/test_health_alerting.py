@@ -4,7 +4,7 @@ Tests for the Health Alerting Service
 Tests alert creation, sending, and de-duplication.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -127,7 +127,7 @@ def test_should_send_alert_after_cooldown(alerting_service):
     # Record alert in the past (beyond cooldown)
     alerting_service._record_alert(alert)
     alert_key = f"{alert.alert_type}:{alert.provider}:{alert.model}:{alert.gateway}"
-    alerting_service.alert_history[alert_key] = datetime.now(timezone.utc) - timedelta(
+    alerting_service.alert_history[alert_key] = datetime.now(UTC) - timedelta(
         minutes=alerting_service.alert_cooldown_minutes + 1
     )
 
@@ -164,7 +164,7 @@ def test_record_alert_cleanup_old(alerting_service):
 
     # Add old alert (beyond 24h)
     alert_key = f"{alert.alert_type}:old:model:gateway"
-    alerting_service.alert_history[alert_key] = datetime.now(timezone.utc) - timedelta(hours=25)
+    alerting_service.alert_history[alert_key] = datetime.now(UTC) - timedelta(hours=25)
 
     # Record new alert
     alerting_service._record_alert(alert)

@@ -17,7 +17,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import asyncio
 
 # Mark all tests in this module as fallback tests
@@ -34,7 +34,7 @@ class TestZeroModelDetection:
         config = {
             'cache': {
                 'data': [],
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 5
         }
@@ -52,7 +52,7 @@ class TestZeroModelDetection:
         config = {
             'cache': {
                 'data': None,
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 5
         }
@@ -69,7 +69,7 @@ class TestZeroModelDetection:
         config = {
             'cache': {
                 'data': [{'id': 'model1'}, {'id': 'model2'}],  # Only 2 models
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 10  # But expecting 10
         }
@@ -205,7 +205,7 @@ class TestRetryMechanisms:
         config = {
             'cache': {
                 'data': ['model1', 'model2'],
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             }
         }
 
@@ -284,7 +284,7 @@ class TestZeroModelAlerting:
         config = {
             'cache': {
                 'data': [{'id': f'model-{i}'} for i in range(25)],
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 10
         }
@@ -319,7 +319,7 @@ class TestGatewayRecovery:
 
         # Simulate recovery by populating cache
         config['cache']['data'] = [{'id': f'model-{i}'} for i in range(10)]
-        config['cache']['timestamp'] = datetime.now(timezone.utc)
+        config['cache']['timestamp'] = datetime.now(UTC)
 
         # Verify cache is now populated
         success, message, count, models = test_gateway_cache('test_gateway', config)

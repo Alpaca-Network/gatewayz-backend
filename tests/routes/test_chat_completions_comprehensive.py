@@ -76,7 +76,7 @@ class TestChatCompletionsBasic:
         assert len(data["choices"]) > 0
         assert "message" in data["choices"][0] or "delta" in data["choices"][0]
 
-        print(f"✅ Simple chat completions request successful")
+        print("✅ Simple chat completions request successful")
 
     def test_chat_completions_system_message(self, client, auth_headers):
         """Test chat completions with system message."""
@@ -105,7 +105,7 @@ class TestChatCompletionsBasic:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with system message successful")
+        print("✅ Chat completions with system message successful")
 
     def test_chat_completions_multiple_messages(self, client, auth_headers):
         """Test chat completions with conversation history."""
@@ -138,7 +138,7 @@ class TestChatCompletionsBasic:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with conversation history successful")
+        print("✅ Chat completions with conversation history successful")
 
 
 class TestChatCompletionsParameters:
@@ -168,7 +168,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with temperature parameter successful")
+        print("✅ Chat completions with temperature parameter successful")
 
     def test_chat_completions_with_top_p(self, client, auth_headers):
         """Test chat completions with top_p parameter."""
@@ -194,7 +194,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with top_p parameter successful")
+        print("✅ Chat completions with top_p parameter successful")
 
     def test_chat_completions_with_frequency_penalty(self, client, auth_headers):
         """Test chat completions with frequency penalty."""
@@ -220,7 +220,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with frequency penalty successful")
+        print("✅ Chat completions with frequency penalty successful")
 
     def test_chat_completions_with_presence_penalty(self, client, auth_headers):
         """Test chat completions with presence penalty."""
@@ -246,7 +246,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with presence penalty successful")
+        print("✅ Chat completions with presence penalty successful")
 
     def test_chat_completions_with_seed(self, client, auth_headers):
         """Test chat completions with seed parameter for reproducibility."""
@@ -272,7 +272,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with seed parameter successful")
+        print("✅ Chat completions with seed parameter successful")
 
     def test_chat_completions_with_user_identifier(self, client, auth_headers):
         """Test chat completions with user identifier."""
@@ -298,7 +298,7 @@ class TestChatCompletionsParameters:
         data = response.json()
         assert "choices" in data
 
-        print(f"✅ Chat completions with user identifier successful")
+        print("✅ Chat completions with user identifier successful")
 
 
 class TestChatCompletionsStreaming:
@@ -330,7 +330,7 @@ class TestChatCompletionsStreaming:
         content = response.text
         assert len(content) > 0
 
-        print(f"✅ Chat completions streaming successful")
+        print("✅ Chat completions streaming successful")
         print(f"   Response length: {len(content)} bytes")
 
 
@@ -373,7 +373,7 @@ class TestChatCompletionsResponseStructure:
         assert "index" in choice
         assert ("message" in choice or "delta" in choice)
 
-        print(f"✅ Chat completions response structure valid")
+        print("✅ Chat completions response structure valid")
         print(f"   ID: {data.get('id')}")
         print(f"   Model: {data.get('model')}")
         print(f"   Choices: {len(data['choices'])}")
@@ -405,11 +405,11 @@ class TestChatCompletionsResponseStructure:
             assert "prompt_tokens" in data["usage"]
             assert "completion_tokens" in data["usage"]
             assert "total_tokens" in data["usage"]
-            print(f"✅ Chat completions includes usage information")
+            print("✅ Chat completions includes usage information")
             print(f"   Prompt tokens: {data['usage'].get('prompt_tokens')}")
             print(f"   Completion tokens: {data['usage'].get('completion_tokens')}")
         else:
-            print(f"ℹ️  Usage information not included in response")
+            print("ℹ️  Usage information not included in response")
 
 
 class TestChatCompletionsErrorHandling:

@@ -12,7 +12,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.webhook_events import (
@@ -45,7 +45,7 @@ def mock_event_data():
         "event_type": "invoice.paid",
         "user_id": 123,
         "metadata": {"amount": 2999},
-        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "processed_at": datetime.now(UTC).isoformat(),
     }
 
 

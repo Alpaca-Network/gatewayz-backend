@@ -12,7 +12,7 @@ import sys
 import httpx
 from pathlib import Path
 from typing import Dict, Tuple
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from unittest.mock import Mock, patch
 
 # Add project root to path
@@ -109,7 +109,7 @@ class TestGatewayHealthChecker:
         config = {
             'cache': {
                 'data': ['model1', 'model2', 'model3'],
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 2
         }
@@ -270,7 +270,7 @@ class TestGatewayCache:
     @pytest.mark.unit
     def test_cache_with_expired_timestamp(self):
         """Test cache age calculation for expired cache"""
-        old_timestamp = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        old_timestamp = datetime(2020, 1, 1, tzinfo=UTC)
         config = {
             'cache': {
                 'data': ['model1', 'model2'],
@@ -290,7 +290,7 @@ class TestGatewayCache:
         config = {
             'cache': {
                 'data': ['model1'],  # Only 1 model
-                'timestamp': datetime.now(timezone.utc)
+                'timestamp': datetime.now(UTC)
             },
             'min_expected_models': 5  # But expecting 5
         }

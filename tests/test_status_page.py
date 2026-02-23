@@ -4,7 +4,7 @@ Tests for the Public Status Page API
 Tests the status page endpoints that provide public health information.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -35,7 +35,7 @@ def mock_supabase_data():
                 "avg_uptime_24h": 99.95,
                 "avg_uptime_7d": 99.90,
                 "avg_response_time_ms": 450.0,
-                "last_checked_at": datetime.now(timezone.utc).isoformat(),
+                "last_checked_at": datetime.now(UTC).isoformat(),
                 "total_usage_24h": 1000,
             }
         ],
@@ -50,8 +50,8 @@ def mock_supabase_data():
                 "uptime_percentage_7d": 99.90,
                 "uptime_percentage_30d": 99.85,
                 "average_response_time_ms": 450.0,
-                "last_called_at": datetime.now(timezone.utc).isoformat(),
-                "last_success_at": datetime.now(timezone.utc).isoformat(),
+                "last_called_at": datetime.now(UTC).isoformat(),
+                "last_success_at": datetime.now(UTC).isoformat(),
                 "last_failure_at": None,
                 "circuit_breaker_state": "closed",
                 "consecutive_failures": 0,
@@ -429,7 +429,7 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
             "avg_uptime_24h": 99.95,
             "avg_uptime_7d": 99.90,
             "avg_response_time_ms": 450.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 1000,
         },
         {
@@ -442,7 +442,7 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
             "avg_uptime_24h": 95.0,
             "avg_uptime_7d": 96.0,
             "avg_response_time_ms": 550.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 500,
         },
     ]
@@ -493,7 +493,7 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
             "avg_uptime_24h": 99.95,
             "avg_uptime_7d": 99.90,
             "avg_response_time_ms": 450.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 1000,
         },
         {
@@ -506,7 +506,7 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
             "avg_uptime_24h": 99.0,
             "avg_uptime_7d": 98.0,
             "avg_response_time_ms": 500.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 500,
         },
         {
@@ -519,7 +519,7 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
             "avg_uptime_24h": 90.0,
             "avg_uptime_7d": 92.0,
             "avg_response_time_ms": 800.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 200,
         },
         {
@@ -532,7 +532,7 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
             "avg_uptime_24h": 50.0,
             "avg_uptime_7d": 60.0,
             "avg_response_time_ms": 2000.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 10,
         },
     ]
@@ -597,7 +597,7 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
             "avg_uptime_24h": 0.0,
             "avg_uptime_7d": 0.0,
             "avg_response_time_ms": None,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
             "total_usage_24h": 0,
         }
     ]
@@ -641,7 +641,7 @@ async def test_providers_endpoint_caps_healthy_models(mock_supabase, client):
             "avg_uptime_24h": 99.95,
             "avg_uptime_7d": 99.90,
             "avg_response_time_ms": 450.0,
-            "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "last_checked_at": datetime.now(UTC).isoformat(),
         },
     ]
 

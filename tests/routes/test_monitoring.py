@@ -14,7 +14,7 @@ This module tests the monitoring REST API endpoints that expose:
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
@@ -51,7 +51,7 @@ def mock_redis_metrics():
             {
                 "model": "gpt-4",
                 "error": "Rate limit exceeded",
-                "timestamp": datetime.now(timezone.utc).timestamp(),
+                "timestamp": datetime.now(UTC).timestamp(),
                 "latency_ms": 1500
             }
         ])
@@ -127,8 +127,8 @@ def mock_analytics_service():
 
         # Mock cost analysis
         analytics_instance.get_cost_by_provider = AsyncMock(return_value={
-            "start_date": (datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
-            "end_date": datetime.now(timezone.utc).isoformat(),
+            "start_date": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
+            "end_date": datetime.now(UTC).isoformat(),
             "providers": {
                 "openrouter": {
                     "total_cost": 250.0,
@@ -200,7 +200,7 @@ def mock_availability_service():
             "fireworks:llama-3-70b": Mock(
                 state=open_state,
                 failure_count=5,
-                last_failure_time=datetime.now(timezone.utc).timestamp()
+                last_failure_time=datetime.now(UTC).timestamp()
             )
         }
         mock.is_model_available = Mock(side_effect=lambda model, provider: provider != "fireworks")

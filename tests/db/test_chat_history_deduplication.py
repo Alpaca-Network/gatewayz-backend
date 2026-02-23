@@ -6,7 +6,7 @@ Uses the same in-memory Supabase stub as test_chat_history.py for consistency.
 """
 
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 
 # =========================
 # In-memory Supabase stub (same as test_chat_history.py)
@@ -79,7 +79,7 @@ class _Insert:
                 next_id += 1
             # Ensure created_at is set if not provided
             if "created_at" not in row:
-                row["created_at"] = datetime.now(timezone.utc).isoformat()
+                row["created_at"] = datetime.now(UTC).isoformat()
             self.store[self.table].append(row)
             inserted.append(row.copy())
         return _Result(inserted)

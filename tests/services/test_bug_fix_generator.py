@@ -12,7 +12,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import AsyncMock, Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 import httpx
 
 from src.services.bug_fix_generator import (
@@ -45,7 +45,7 @@ def error_pattern():
         line=123,
         function="make_request",
         stack_trace="Traceback (most recent call last):\n  File ...",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
         count=5,
         fixable=True,
     )
@@ -315,7 +315,7 @@ class TestErrorAnalysis:
             line=1,
             function="test",
             stack_trace="Traceback..." + ("B" * 20000),
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
             count=1,
         )
 
@@ -588,7 +588,7 @@ class TestBugFixDataClass:
             code_changes={"file.py": "code here"},
             files_affected=["file.py"],
             severity="high",
-            generated_at=datetime(2026, 2, 11, 12, 0, 0, tzinfo=timezone.utc),
+            generated_at=datetime(2026, 2, 11, 12, 0, 0, tzinfo=UTC),
             pr_url="https://github.com/org/repo/pull/123",
             status="testing",
         )

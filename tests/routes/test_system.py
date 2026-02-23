@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from fastapi.testclient import TestClient
 import httpx
 
@@ -35,7 +35,7 @@ def mock_cache_info():
     """Sample cache information"""
     return {
         "data": [{"id": "model1"}, {"id": "model2"}, {"id": "model3"}],
-        "timestamp": datetime.now(timezone.utc).timestamp(),
+        "timestamp": datetime.now(UTC).timestamp(),
         "ttl": 3600
     }
 
@@ -117,7 +117,7 @@ class TestCacheStatus:
         # Create stale cache (old timestamp)
         stale_cache = {
             "data": [{"id": "model1"}],
-            "timestamp": datetime.now(timezone.utc).timestamp() - 7200,  # 2 hours old
+            "timestamp": datetime.now(UTC).timestamp() - 7200,  # 2 hours old
             "ttl": 3600  # 1 hour TTL
         }
         mock_get_models.return_value = stale_cache
@@ -168,13 +168,13 @@ class TestCacheRefresh:
         # Old stale cache
         old_cache = {
             "data": [{"id": "old_model"}],
-            "timestamp": datetime.now(timezone.utc).timestamp() - 7200,
+            "timestamp": datetime.now(UTC).timestamp() - 7200,
             "ttl": 3600
         }
         # New cache after refresh
         new_cache = {
             "data": [{"id": "new_model1"}, {"id": "new_model2"}],
-            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "timestamp": datetime.now(UTC).timestamp(),
             "ttl": 3600
         }
 
@@ -224,7 +224,7 @@ class TestCacheRefresh:
         """Test forced cache refresh"""
         new_cache = {
             "data": [{"id": "model1"}],
-            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "timestamp": datetime.now(UTC).timestamp(),
             "ttl": 3600
         }
 
@@ -573,7 +573,7 @@ class TestSystemIntegration:
         # 2. Refresh cache
         new_cache = {
             "data": [{"id": "model1"}],
-            "timestamp": datetime.now(timezone.utc).timestamp(),
+            "timestamp": datetime.now(UTC).timestamp(),
             "ttl": 3600
         }
         mock_get_models.side_effect = [None, new_cache]
@@ -632,7 +632,7 @@ class TestGatewayHealthDashboard:
     ):
         """Test gateway marked healthy when both endpoint and cache pass"""
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 1,
             "healthy": 1,
             "unhealthy": 0,
@@ -671,7 +671,7 @@ class TestGatewayHealthDashboard:
     ):
         """Test gateway marked healthy when endpoint passes but cache fails (OR logic)"""
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 1,
             "healthy": 1,
             "unhealthy": 0,
@@ -711,7 +711,7 @@ class TestGatewayHealthDashboard:
     ):
         """Test gateway marked healthy when cache passes but endpoint fails (cache-only gateway)"""
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 1,
             "healthy": 1,
             "unhealthy": 0,
@@ -751,7 +751,7 @@ class TestGatewayHealthDashboard:
     ):
         """Test gateway marked unhealthy when both endpoint and cache fail"""
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 1,
             "healthy": 0,
             "unhealthy": 1,
@@ -791,7 +791,7 @@ class TestGatewayHealthDashboard:
     ):
         """Test gateway marked unconfigured when no API key is configured"""
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 1,
             "healthy": 0,
             "unhealthy": 0,
@@ -824,7 +824,7 @@ class TestGatewayHealthDashboard:
         """Test HTML dashboard rendering applies OR logic correctly for health status"""
         # Test all three scenarios that validate OR logic
         mock_results = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "total_gateways": 3,
             "healthy": 3,
             "unhealthy": 0,

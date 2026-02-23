@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 import os
+from datetime import UTC
 
 
 @pytest.fixture
@@ -426,7 +427,7 @@ class TestFetchModelsFromOneRouter:
             assert isinstance(_onerouter_models_cache["timestamp"], datetime)
 
             # Verify timestamp is recent (within last 5 seconds)
-            cache_age = (datetime.now(timezone.utc) - _onerouter_models_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - _onerouter_models_cache["timestamp"]).total_seconds()
             assert cache_age < 5
 
     def test_fetch_models_context_length_priority(self, mock_onerouter_api_key):

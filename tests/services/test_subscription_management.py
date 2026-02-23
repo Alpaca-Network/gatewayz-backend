@@ -5,7 +5,7 @@ Tests upgrade, downgrade, cancel, and get subscription functionality
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import MagicMock, patch
 
 from src.schemas.payments import (
@@ -72,8 +72,8 @@ def mock_stripe_subscription_pro():
     mock_sub = MagicMock()
     mock_sub.id = "sub_test123"
     mock_sub.status = "active"
-    mock_sub.current_period_start = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp())
-    mock_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+    mock_sub.current_period_start = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
+    mock_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
     mock_sub.cancel_at_period_end = False
     mock_sub.canceled_at = None
     mock_sub.customer = "cus_test123"
@@ -101,8 +101,8 @@ def mock_stripe_subscription_max():
     mock_sub = MagicMock()
     mock_sub.id = "sub_test456"
     mock_sub.status = "active"
-    mock_sub.current_period_start = int(datetime(2024, 1, 1, tzinfo=timezone.utc).timestamp())
-    mock_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+    mock_sub.current_period_start = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp())
+    mock_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
     mock_sub.cancel_at_period_end = False
     mock_sub.canceled_at = None
     mock_sub.customer = "cus_test456"
@@ -211,7 +211,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
@@ -247,7 +247,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
@@ -292,7 +292,7 @@ class TestUpgradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
@@ -397,7 +397,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_max):
@@ -433,7 +433,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_max):
@@ -478,7 +478,7 @@ class TestDowngradeSubscription:
         mock_updated_sub = MagicMock()
         mock_updated_sub.id = "sub_test456"
         mock_updated_sub.status = "active"
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_max):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_max):
@@ -535,7 +535,7 @@ class TestCancelSubscription:
         mock_updated_sub.id = "sub_test123"
         mock_updated_sub.status = "active"
         mock_updated_sub.cancel_at_period_end = True
-        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=timezone.utc).timestamp())
+        mock_updated_sub.current_period_end = int(datetime(2024, 2, 1, tzinfo=UTC).timestamp())
 
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):

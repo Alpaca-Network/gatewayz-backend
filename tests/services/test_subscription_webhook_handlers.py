@@ -5,7 +5,7 @@ Tests the plan upgrade recognition fix
 
 import pytest
 from unittest.mock import MagicMock, patch
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 import sys
 import types
 import importlib
@@ -154,7 +154,7 @@ class TestSubscriptionCreatedWebhook:
             "product_id": "prod_test"
         }
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Call the handler
         stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
@@ -193,8 +193,8 @@ class TestSubscriptionCreatedWebhook:
             "id": 100,
             "user_id": 42,
             "plan_id": 1,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(),
+            "started_at": datetime.now(UTC).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(days=30)).isoformat(),
             "is_active": True
         }).execute()
 
@@ -203,7 +203,7 @@ class TestSubscriptionCreatedWebhook:
         mock_subscription.id = "sub_test_123"
         mock_subscription.metadata = {"user_id": "42", "tier": "pro", "product_id": "prod_test"}
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Call the handler
         stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
@@ -234,7 +234,7 @@ class TestSubscriptionCreatedWebhook:
         mock_subscription.id = "sub_test_123"
         mock_subscription.metadata = {"user_id": "42", "tier": "unknown_tier", "product_id": "prod_test"}
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Call should not raise even if plan not found
         stripe_service_with_mock_db._handle_subscription_created(mock_subscription)
@@ -274,7 +274,7 @@ class TestSubscriptionUpdatedWebhook:
         mock_subscription.status = "active"
         mock_subscription.metadata = {"user_id": "42", "tier": "max", "product_id": "prod_test"}
         mock_subscription.customer = "cust_test_456"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Call the handler
         stripe_service_with_mock_db._handle_subscription_updated(mock_subscription)
@@ -345,8 +345,8 @@ class TestSubscriptionUpdatedWebhook:
             "id": 100,
             "user_id": 42,
             "plan_id": 1,
-            "started_at": (datetime.now(timezone.utc) - timedelta(days=15)).isoformat(),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(days=15)).isoformat(),
+            "started_at": (datetime.now(UTC) - timedelta(days=15)).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(days=15)).isoformat(),
             "is_active": True
         }).execute()
 
@@ -356,7 +356,7 @@ class TestSubscriptionUpdatedWebhook:
         mock_subscription.status = "active"
         mock_subscription.metadata = {"user_id": "42", "tier": "max"}
         mock_subscription.customer = "cust_test"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Call the handler
         stripe_service_with_mock_db._handle_subscription_updated(mock_subscription)
@@ -476,7 +476,7 @@ class TestTierResolutionFromSubscriptionItems:
             "product_id": "prod_unmapped"
         }
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
         mock_subscription.items = None
 
         # Call the handler
@@ -516,7 +516,7 @@ class TestTierResolutionFromSubscriptionItems:
             "product_id": "prod_unmapped"
         }
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
         mock_subscription.items = None
 
         # Call the handler
@@ -722,7 +722,7 @@ class TestCacheInvalidationOnSubscriptionUpdates:
             "product_id": "prod_test"
         }
         mock_subscription.customer = "cust_test_123"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Mock invalidate_user_cache_by_id
         with patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
@@ -755,7 +755,7 @@ class TestCacheInvalidationOnSubscriptionUpdates:
         mock_subscription.status = "active"
         mock_subscription.metadata = {"user_id": "99", "tier": "max"}
         mock_subscription.customer = "cust_test"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
 
         # Mock invalidate_user_cache_by_id
         with patch('src.db.users.invalidate_user_cache_by_id') as mock_invalidate:
@@ -941,7 +941,7 @@ class TestUserIdExtractionFallback:
             "product_id": "prod_test"
         }
         mock_subscription.customer = "cus_fallback_sub_test"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
         mock_subscription.items = None
 
         # Call the handler - should succeed by looking up user via customer_id
@@ -1000,7 +1000,7 @@ class TestUserIdExtractionFallback:
             "tier": "max"
         }
         mock_subscription.customer = "cus_update_fallback"
-        mock_subscription.current_period_end = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+        mock_subscription.current_period_end = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
         mock_subscription.items = None
 
         # Call the handler - should succeed by looking up user via customer_id

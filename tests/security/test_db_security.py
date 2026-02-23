@@ -18,7 +18,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 from src.db_security import (
     create_secure_api_key,
@@ -92,9 +92,9 @@ def sample_api_key_data():
         'ip_allowlist': [],
         'domain_referrers': [],
         'created_by_user_id': 100,
-        'last_used_at': datetime.now(timezone.utc).isoformat(),
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'updated_at': datetime.now(timezone.utc).isoformat()
+        'last_used_at': datetime.now(UTC).isoformat(),
+        'created_at': datetime.now(UTC).isoformat(),
+        'updated_at': datetime.now(UTC).isoformat()
     }
 
 
@@ -472,7 +472,7 @@ class TestValidateSecureAPIKey:
         mock_get_audit.return_value = mock_audit_logger
 
         # Set expiration to past date
-        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        past_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         sample_api_key_data['expiration_date'] = past_date
 
         table_mock.execute.return_value = Mock(data=[sample_api_key_data])
@@ -843,8 +843,8 @@ class TestGetAuditLogs:
 
         table_mock.execute.return_value = Mock(data=[])
 
-        start = datetime.now(timezone.utc) - timedelta(days=7)
-        end = datetime.now(timezone.utc)
+        start = datetime.now(UTC) - timedelta(days=7)
+        end = datetime.now(UTC)
 
         result = get_audit_logs(start_date=start, end_date=end)
 

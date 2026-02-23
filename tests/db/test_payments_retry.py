@@ -11,7 +11,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.payments import create_payment, update_payment_status
@@ -48,8 +48,8 @@ def mock_payment_data():
         "stripe_checkout_session_id": "cs_def456",
         "stripe_customer_id": "cus_xyz789",
         "metadata": {},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "completed_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
     }
 
 

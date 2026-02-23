@@ -5,7 +5,7 @@ Tests Stripe integration for checkout sessions, payment intents, webhooks
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock, call
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 import stripe
 
 from src.services.payments import StripeService
@@ -103,7 +103,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -169,7 +169,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_discount'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_discount'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -229,7 +229,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_large_discount'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_large_discount'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -271,7 +271,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_456'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_456'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = 'pi_cs_test_456'
         mock_stripe_create.return_value = mock_session
 
@@ -366,7 +366,7 @@ class TestCheckoutSession:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -986,7 +986,7 @@ class TestRefunds:
         mock_refund.currency = 'usd'
         mock_refund.status = 'succeeded'
         mock_refund.reason = 'requested_by_customer'
-        mock_refund.created = int(datetime.now(timezone.utc).timestamp())
+        mock_refund.created = int(datetime.now(UTC).timestamp())
         mock_stripe_refund.return_value = mock_refund
 
         request = CreateRefundRequest(
@@ -1101,7 +1101,7 @@ class TestPaymentIntegration:
         mock_session = Mock()
         mock_session.id = 'cs_test_123'
         mock_session.url = 'https://checkout.stripe.com/pay/cs_test_123'
-        mock_session.expires_at = int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp())
+        mock_session.expires_at = int((datetime.now(UTC) + timedelta(hours=24)).timestamp())
         mock_session.payment_intent = None
         mock_stripe_create.return_value = mock_session
 
@@ -1345,7 +1345,7 @@ class TestCheckoutCompletedSubscriptionStatus:
         # Find the update call that contains subscription_status
         update_calls = mock_client.table.return_value.update.call_args_list
         found_inactive_update = False
-        for call in update_calls:
+        for call in update_calls:  # noqa: F402
             # call is either call((arg,), {}) or call(key=value)
             if call.args:
                 update_data = call.args[0]
@@ -1406,11 +1406,11 @@ class TestCheckoutCompletedSubscriptionStatus:
 
         # Verify that NO update contains subscription_status for Pro/Max users
         # Both users table and api_keys_new should preserve the 'active' status
-        for call in mock_client.table.return_value.update.call_args_list:
+        for call in mock_client.table.return_value.update.call_args_list:  # noqa: F402
             update_data = call[0][0] if call[0] else {}
             if isinstance(update_data, dict) and 'subscription_status' in update_data:
                 assert False, \
-                    f"Should not update subscription_status for pro users, but got: {update_data}"
+                    f"Should not update subscription_status for pro users, but got: {update_data}"  # noqa: B011
 
         # Verify that api_keys_new WAS updated with is_trial=False and trial_converted=True
         # but NOT with subscription_status
@@ -1475,7 +1475,7 @@ class TestCheckoutCompletedSubscriptionStatus:
         # The log confirms: "User 3 subscription_status updated to 'inactive' after credit purchase"
         update_calls = mock_client.table.return_value.update.call_args_list
         found_inactive_update = False
-        for call in update_calls:
+        for call in update_calls:  # noqa: F402
             if call.args:
                 update_data = call.args[0]
             elif call.kwargs:

@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 from src.db.trials import (
     start_trial_for_key,
@@ -509,8 +509,8 @@ class TestTrialAnalytics:
         mock_get_client.return_value = client
 
         # Mock trial data
-        future_date = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
-        past_date = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        future_date = (datetime.now(UTC) + timedelta(days=5)).isoformat()
+        past_date = (datetime.now(UTC) - timedelta(days=5)).isoformat()
 
         trial_data = [
             {
@@ -614,7 +614,7 @@ class TestTrialAnalytics:
         client, table_mock, rpc_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        future_date = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        future_date = (datetime.now(UTC) + timedelta(days=5)).isoformat()
 
         trial_data = [
             {

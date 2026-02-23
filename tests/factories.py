@@ -11,7 +11,7 @@ Provides factory functions to create realistic test data for:
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from typing import Dict, Any, Optional, List
 
 
@@ -57,8 +57,8 @@ class UserFactory:
             "role": role,
             "is_admin": is_admin,
             "subscription_status": subscription_status,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         user.update(kwargs)
@@ -141,9 +141,9 @@ class ApiKeyFactory:
             "max_requests": max_requests,
             "ip_allowlist": ip_allowlist or [],
             "domain_referrers": domain_referrers or [],
-            "last_used_at": datetime.now(timezone.utc).isoformat(),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "last_used_at": datetime.now(UTC).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         key_data.update(kwargs)
@@ -157,7 +157,7 @@ class ApiKeyFactory:
     @staticmethod
     def create_expired(**kwargs) -> dict[str, Any]:
         """Create an expired API key"""
-        expiration = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        expiration = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         return ApiKeyFactory.create(expiration_date=expiration, **kwargs)
 
     @staticmethod
@@ -231,7 +231,7 @@ class ChatCompletionFactory:
         response = {
             "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
             "object": "chat.completion",
-            "created": int(datetime.now(timezone.utc).timestamp()),
+            "created": int(datetime.now(UTC).timestamp()),
             "model": model,
             "choices": [
                 {
@@ -263,7 +263,7 @@ class ChatCompletionFactory:
         chunk = {
             "id": f"chatcmpl-{uuid.uuid4().hex[:16]}",
             "object": "chat.completion.chunk",
-            "created": int(datetime.now(timezone.utc).timestamp()),
+            "created": int(datetime.now(UTC).timestamp()),
             "model": "anthropic/claude-3-opus",
             "choices": [
                 {
@@ -318,7 +318,7 @@ class ModelFactory:
                 "completion": output_cost / 1_000_000,
             },
             "is_available": is_available,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         model.update(kwargs)
@@ -376,7 +376,7 @@ class PaymentFactory:
             "currency": currency,
             "status": status,
             "payment_method": payment_method,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         transaction.update(kwargs)
@@ -421,7 +421,7 @@ class ReferralFactory:
             "referral_code": referral_code or f"REF{uuid.uuid4().hex[:8].upper()}",
             "reward_amount": reward_amount,
             "status": status,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         referral.update(kwargs)

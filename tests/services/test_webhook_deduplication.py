@@ -4,7 +4,7 @@ Tests for Stripe webhook event deduplication
 """
 
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from unittest.mock import Mock, patch, MagicMock
 
 from src.services.payments import StripeService
@@ -157,7 +157,7 @@ class TestWebhookDeduplication:
             "event_id": "evt_test_123",
             "event_type": "invoice.paid",
             "user_id": 1,
-            "processed_at": datetime.now(timezone.utc).isoformat(),
+            "processed_at": datetime.now(UTC).isoformat(),
         }
 
         mock_supabase_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [

@@ -14,7 +14,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 from src.services.notification import NotificationService
 from src.schemas.notification import NotificationPreferences, LowBalanceAlert, TrialExpiryAlert
@@ -57,8 +57,8 @@ def mock_preferences_data():
         'plan_expiry_reminder_days': 7,
         'usage_alerts': True,
         'webhook_url': None,
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'updated_at': datetime.now(timezone.utc).isoformat()
+        'created_at': datetime.now(UTC).isoformat(),
+        'updated_at': datetime.now(UTC).isoformat()
     }
 
 
@@ -259,7 +259,7 @@ class TestLowBalanceAlerts:
         ]
 
         # User is on trial
-        trial_end = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        trial_end = (datetime.now(UTC) + timedelta(days=5)).isoformat()
         mock_validate_trial.return_value = {
             'is_trial': True,
             'trial_end_date': trial_end
@@ -375,7 +375,7 @@ class TestTrialExpiryAlerts:
         ]
 
         # Trial expiring in exactly 1 day (add 25 hours to ensure .days = 1)
-        trial_end = (datetime.now(timezone.utc) + timedelta(hours=25)).isoformat()
+        trial_end = (datetime.now(UTC) + timedelta(hours=25)).isoformat()
         mock_validate_trial.return_value = {
             'is_trial': True,
             'trial_end_date': trial_end
@@ -433,7 +433,7 @@ class TestTrialExpiryAlerts:
         ]
 
         # Trial expiring in 5 days
-        trial_end = (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()
+        trial_end = (datetime.now(UTC) + timedelta(days=5)).isoformat()
         mock_validate_trial.return_value = {
             'is_trial': True,
             'trial_end_date': trial_end
