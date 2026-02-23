@@ -17,7 +17,7 @@ import sys
 import pytest
 from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 # Set test environment
 os.environ['APP_ENV'] = 'testing'
@@ -434,7 +434,7 @@ class TestCreditsTransactions:
                 'description': 'Test',
                 'balance_before': 0.0,
                 'balance_after': 100.0,
-                'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.now(UTC).isoformat(),
                 'payment_id': None,
                 'metadata': {},
                 'created_by': 'admin:1',

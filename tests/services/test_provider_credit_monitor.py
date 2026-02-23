@@ -3,7 +3,7 @@ Tests for provider credit monitoring service.
 """
 
 import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.provider_credit_monitor import (
@@ -188,7 +188,7 @@ class TestCheckAllProviderCredits:
                 "provider": "openrouter",
                 "balance": 100.0,
                 "status": "healthy",
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "cached": False
             }
 
@@ -243,11 +243,11 @@ class TestCreditCacheManagement:
         # Populate cache
         _credit_balance_cache["openrouter"] = {
             "balance": 50.0,
-            "checked_at": datetime.now(timezone.utc)
+            "checked_at": datetime.now(UTC)
         }
         _credit_balance_cache["portkey"] = {
             "balance": 100.0,
-            "checked_at": datetime.now(timezone.utc)
+            "checked_at": datetime.now(UTC)
         }
 
         # Clear specific provider

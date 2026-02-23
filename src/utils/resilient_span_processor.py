@@ -8,7 +8,6 @@ to prevent connection errors from polluting logs and degrading performance.
 import logging
 import threading
 import time
-from typing import Optional
 
 try:
     from opentelemetry.sdk.trace import SpanProcessor
@@ -57,7 +56,7 @@ class ResilientSpanProcessor(SpanProcessor):
         self._failure_count = 0
         self._success_count = 0
         self._circuit_open = False
-        self._last_failure_time: Optional[float] = None
+        self._last_failure_time: float | None = None
         self._total_exports = 0
         self._total_failures = 0
         self._total_drops = 0  # Spans dropped due to open circuit

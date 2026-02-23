@@ -6,7 +6,7 @@ Tests the fix for metadata field naming and webhook processing
 
 import json
 import os
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -45,7 +45,7 @@ class TestCheckoutSessionMetadata:
             mock_session = MagicMock()
             mock_session.id = "cs_test_123"
             mock_session.url = "https://checkout.stripe.com/test"
-            mock_session.expires_at = int((datetime.now(timezone.utc)).timestamp()) + 86400
+            mock_session.expires_at = int((datetime.now(UTC)).timestamp()) + 86400
             mock_session.payment_intent = "pi_test_123"
             mock_create_session.return_value = mock_session
 
@@ -82,7 +82,7 @@ class TestCheckoutSessionMetadata:
             mock_session = MagicMock()
             mock_session.id = "cs_test_123"
             mock_session.url = "https://checkout.stripe.com/test"
-            mock_session.expires_at = int((datetime.now(timezone.utc)).timestamp()) + 86400
+            mock_session.expires_at = int((datetime.now(UTC)).timestamp()) + 86400
             mock_session.payment_intent = "pi_test_123"
             mock_create_session.return_value = mock_session
 
@@ -253,7 +253,7 @@ class TestWebhookHttpStatus:
                 event_type="checkout.session.completed",
                 event_id="evt_123",
                 message="Success",
-                processed_at=datetime.now(timezone.utc)
+                processed_at=datetime.now(UTC)
             )
             mock_handle.return_value = result
 

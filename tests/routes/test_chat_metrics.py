@@ -229,7 +229,7 @@ class TestPrometheusFormat:
         assert "# TYPE gatewayz_tokens_per_second" in text
         assert "gatewayz_tokens_per_second{" in text or "# No data" in text
 
-        print(f"✅ Prometheus format valid")
+        print("✅ Prometheus format valid")
 
     def test_prometheus_format_labels(self, client):
         """Test that metrics include proper labels."""
@@ -250,9 +250,9 @@ class TestPrometheusFormat:
             assert 'provider=' in text
             assert 'requests=' in text
             assert 'total_tokens=' in text
-            print(f"✅ Prometheus labels present")
+            print("✅ Prometheus labels present")
         else:
-            print(f"✅ No data available (metrics format still valid)")
+            print("✅ No data available (metrics format still valid)")
 
     def test_content_type_is_plain_text(self, client):
         """Test that content-type is text/plain."""
@@ -266,7 +266,7 @@ class TestPrometheusFormat:
 
         assert response.status_code == 200
         assert "text/plain" in response.headers["content-type"]
-        print(f"✅ Content-type is text/plain")
+        print("✅ Content-type is text/plain")
 
 
 class TestErrorHandling:

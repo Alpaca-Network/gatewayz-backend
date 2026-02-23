@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from src.db.activity import log_activity as db_log_activity
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
 
     Returns dict mapping model_id -> health info
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     health_data = {}
 
@@ -220,7 +221,7 @@ async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
         provider_health = await get_all_provider_health()
 
         if provider_health:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             for provider, health in provider_health.items():
                 # Create synthetic model IDs based on provider
                 # In production, this should be enhanced to track per-model health
@@ -239,10 +240,10 @@ async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
 
     # If no health data, assume all models are healthy
     if not health_data:
-        from datetime import datetime, timezone
+        from datetime import datetime
         from src.services.health_snapshots import SMALL_TIER_POOL, MEDIUM_TIER_POOL
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         all_models = set(SMALL_TIER_POOL) | set(MEDIUM_TIER_POOL)
 
         for model_id in all_models:
@@ -437,7 +438,7 @@ async def update_full_model_catalog_loop() -> None:
                     await asyncio.wait_for(wait_task, timeout=REFRESH_INTERVAL_SECONDS)
                     # If we get here, the stop event was set
                     break
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Timeout reached, run loop again
                     pass
             else:

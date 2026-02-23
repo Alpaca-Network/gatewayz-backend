@@ -6,7 +6,7 @@ Admin endpoints for managing IP whitelists that bypass rate limiting.
 
 import logging
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, validator
@@ -44,15 +44,15 @@ class CreateWhitelistRequest(BaseModel):
         description="Reason for whitelisting this IP",
         example="Known good client experiencing false positives",
     )
-    user_id: Optional[str] = Field(
+    user_id: str | None = Field(
         None,
         description="Optional user ID to associate with (null = global whitelist)",
     )
-    expires_at: Optional[datetime] = Field(
+    expires_at: datetime | None = Field(
         None,
         description="Optional expiration datetime (null = never expires)",
     )
-    metadata: Optional[dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         default_factory=dict,
         description="Additional context data",
     )
@@ -72,10 +72,10 @@ class CreateWhitelistRequest(BaseModel):
 class UpdateWhitelistRequest(BaseModel):
     """Request to update an IP whitelist entry"""
 
-    enabled: Optional[bool] = Field(None, description="Enable or disable this entry")
-    reason: Optional[str] = Field(None, description="Update the reason")
-    expires_at: Optional[datetime] = Field(None, description="Update expiration datetime")
-    metadata: Optional[dict[str, Any]] = Field(None, description="Update metadata")
+    enabled: bool | None = Field(None, description="Enable or disable this entry")
+    reason: str | None = Field(None, description="Update the reason")
+    expires_at: datetime | None = Field(None, description="Update expiration datetime")
+    metadata: dict[str, Any] | None = Field(None, description="Update metadata")
 
 
 class WhitelistEntryResponse(BaseModel):
@@ -83,11 +83,11 @@ class WhitelistEntryResponse(BaseModel):
 
     id: str
     ip_address: str
-    user_id: Optional[str]
+    user_id: str | None
     reason: str
     created_by: str
     enabled: bool
-    expires_at: Optional[datetime]
+    expires_at: datetime | None
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
@@ -97,7 +97,7 @@ class CheckIPWhitelistRequest(BaseModel):
     """Request to check if an IP is whitelisted"""
 
     ip_address: str = Field(..., description="IP address to check", example="182.160.0.40")
-    user_id: Optional[str] = Field(
+    user_id: str | None = Field(
         None,
         description="Optional user ID to check user-specific whitelists",
     )
@@ -108,7 +108,7 @@ class CheckIPWhitelistResponse(BaseModel):
 
     ip_address: str
     is_whitelisted: bool
-    user_id: Optional[str] = None
+    user_id: str | None = None
 
 
 # --- Helper Functions ---
@@ -192,7 +192,7 @@ async def create_ip_whitelist(
     description="Get all IP whitelist entries",
 )
 async def list_ip_whitelists(
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
     enabled_only: bool = True,
     include_expired: bool = False,
     current_user: dict = Depends(require_admin),

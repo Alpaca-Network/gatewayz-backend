@@ -121,5 +121,5 @@ class TestSimplismartModelsLoading:
 
         # Verify models have source_gateway field
         for model in models:
-            assert "id" in model, f"Model missing 'id'"
+            assert "id" in model, "Model missing 'id'"
             # Note: /v1/models might have different structure, so we just check basic fields

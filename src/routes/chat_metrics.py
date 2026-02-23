@@ -10,7 +10,7 @@ Endpoints:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -47,13 +47,13 @@ def _format_tokens_per_second_metric(data: list[dict]) -> str:
     ]
 
     # Add timestamp comment
-    lines.append(f"# Generated: {datetime.now(timezone.utc).isoformat()}")
+    lines.append(f"# Generated: {datetime.now(UTC).isoformat()}")
 
     if data and len(data) > 0:
         # Add time range info
         time_range = data[0].get('time_range', 'all')
         lines.append(f"# Time range: {time_range}")
-        lines.append(f"# Filtered to: top 3 models + minimum 1 per provider")
+        lines.append("# Filtered to: top 3 models + minimum 1 per provider")
         lines.append("")
 
         # Sort by tokens per second (descending)

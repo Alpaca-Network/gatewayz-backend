@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any, TypeVar
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-def _execute_with_connection_retry(
+def _execute_with_connection_retry(  # noqa: UP047
     operation: Callable[[], T],
     operation_name: str,
     max_retries: int = 3,
@@ -87,14 +87,14 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
 
         # Generate title if not provided
         if not title:
-            title = f"Chat {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+            title = f"Chat {datetime.now(UTC).strftime('%Y-%m-%d %H:%M')}"
 
         session_data = {
             "user_id": user_id,
             "title": title,
             "model": model or "openai/gpt-3.5-turbo",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "is_active": True,
         }
 
@@ -161,7 +161,7 @@ def save_chat_message(
         # Duplicate detection: Check if identical message was saved recently
         if not skip_duplicate_check and content:
             try:
-                five_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+                five_minutes_ago = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
 
                 def check_duplicate():
                     return (
@@ -203,7 +203,7 @@ def save_chat_message(
             "content": content,
             "model": model,
             "tokens": tokens,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         # Insert message with retry logic for connection errors
@@ -221,7 +221,7 @@ def save_chat_message(
         message = result.data[0]
 
         # Update session's updated_at timestamp to reflect latest activity
-        update_time = datetime.now(timezone.utc).isoformat()
+        update_time = datetime.now(UTC).isoformat()
         update_data = {"updated_at": update_time}
 
         # If model is provided, also update session model
@@ -356,7 +356,7 @@ def update_chat_session(
     try:
         client = get_supabase_client()
 
-        update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {"updated_at": datetime.now(UTC).isoformat()}
 
         if title:
             update_data["title"] = title
@@ -408,7 +408,7 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
         def soft_delete_session():
             return (
                 client.table("chat_sessions")
-                .update({"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()})
+                .update({"is_active": False, "updated_at": datetime.now(UTC).isoformat()})
                 .eq("id", session_id)
                 .eq("user_id", user_id)
                 .execute()

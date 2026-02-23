@@ -16,7 +16,7 @@ import os
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 # Set test environment
 os.environ['APP_ENV'] = 'testing'
@@ -66,7 +66,7 @@ def mock_system_health():
         degraded_models=3,
         unhealthy_models=2,
         system_uptime=99.5,
-        last_updated=datetime.now(timezone.utc)
+        last_updated=datetime.now(UTC)
     )
 
 
@@ -86,7 +86,7 @@ def mock_provider_health():
             unhealthy_models=0,
             overall_uptime=99.9,
             avg_response_time_ms=150.0,
-            last_checked=datetime.now(timezone.utc)
+            last_checked=datetime.now(UTC)
         ),
         ProviderHealthResponse(
             provider="anthropic",
@@ -98,7 +98,7 @@ def mock_provider_health():
             unhealthy_models=0,
             overall_uptime=98.5,
             avg_response_time_ms=250.0,
-            last_checked=datetime.now(timezone.utc)
+            last_checked=datetime.now(UTC)
         )
     ]
 
@@ -118,7 +118,7 @@ def mock_model_health():
             uptime_percentage=99.8,
             error_count=2,
             total_requests=1000,
-            last_checked=datetime.now(timezone.utc),
+            last_checked=datetime.now(UTC),
             last_error=None,
             avg_response_time_ms=125.0
         )
@@ -403,7 +403,7 @@ class TestHealthSummary:
             'system': mock_system_health,
             'providers': [],
             'models': [],
-            'last_check': datetime.now(timezone.utc)
+            'last_check': datetime.now(UTC)
         }
         mock_get_summary.return_value = mock_summary
 
@@ -721,7 +721,7 @@ class TestModelHealthMonitorScheduling:
                 gateway=model["gateway"],
                 status=HealthStatus.HEALTHY,
                 response_time_ms=100.0,
-                last_checked=datetime.now(timezone.utc),
+                last_checked=datetime.now(UTC),
             )
 
         monkeypatch.setattr(monitor, "_check_model_health", fake_check_model_health)

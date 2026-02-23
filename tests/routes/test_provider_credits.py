@@ -3,7 +3,7 @@ Tests for provider credit balance API endpoints.
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
@@ -56,7 +56,7 @@ class TestGetProviderCreditBalances:
                     "provider": "openrouter",
                     "balance": 123.45,
                     "status": "healthy",
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "cached": False
                 }
             }
@@ -85,7 +85,7 @@ class TestGetProviderCreditBalances:
                     "provider": "openrouter",
                     "balance": 15.0,
                     "status": "warning",
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "cached": False
                 }
             }
@@ -131,7 +131,7 @@ class TestGetSpecificProviderBalance:
                 "provider": "openrouter",
                 "balance": 50.0,
                 "status": "info",
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "cached": True
             }
 
@@ -170,7 +170,7 @@ class TestGetSpecificProviderBalance:
                 "provider": "openrouter",
                 "balance": None,
                 "status": "unknown",
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "cached": False,
                 "error": "API key not configured"
             }

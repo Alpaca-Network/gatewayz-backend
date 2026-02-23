@@ -75,9 +75,9 @@ DATACENTER_ASNS = {
     12876: "Scaleway",
     51167: "Scaleway",
     # Contabo
-    51167: "Contabo",
+    51167: "Contabo",  # noqa: F601
     # Data centers / hosting providers
-    63949: "Linode",
+    63949: "Linode",  # noqa: F601
     46475: "Corero / Limestone Networks",
     # VPN / Proxy providers
     30722: "VPN",
@@ -89,7 +89,7 @@ DATACENTER_ASNS = {
     60068: "Railway CDN",
     # Vercel
     64272: "Vercel Edge Network",
-    13335: "Vercel (via Cloudflare)",
+    13335: "Vercel (via Cloudflare)",  # noqa: F601
     # Heroku (Salesforce)
     33517: "Heroku",
     # Fly.io

@@ -86,7 +86,7 @@ class RequestTimeoutMiddleware:
                 self.app(scope, receive, send),
                 timeout=self.timeout_seconds,
             )
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             # Request exceeded timeout - log and return 504
             method = scope.get("method", "UNKNOWN")
             logger.error(

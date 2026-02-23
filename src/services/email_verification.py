@@ -30,7 +30,6 @@ import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 import httpx
 
@@ -52,7 +51,7 @@ def _get_redis_client():
         return None
 
 
-class EmailState(str, Enum):
+class EmailState(str, Enum):  # noqa: UP042
     """Email verification states from Emailable API."""
 
     DELIVERABLE = "deliverable"
@@ -61,7 +60,7 @@ class EmailState(str, Enum):
     UNKNOWN = "unknown"
 
 
-class EmailReason(str, Enum):
+class EmailReason(str, Enum):  # noqa: UP042
     """Detailed reasons for email verification results."""
 
     # Deliverable reasons
@@ -102,7 +101,7 @@ class EmailVerificationResult:
     is_free: bool
     is_role: bool  # e.g., info@, support@, admin@
     domain: str
-    did_you_mean: Optional[str] = None  # Suggested correction
+    did_you_mean: str | None = None  # Suggested correction
 
     @property
     def is_bot(self) -> bool:
@@ -182,9 +181,9 @@ class EmailVerificationService:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        enabled: Optional[bool] = None,
-        timeout: Optional[int] = None,
+        api_key: str | None = None,
+        enabled: bool | None = None,
+        timeout: int | None = None,
     ):
         """
         Initialize the email verification service.
@@ -379,7 +378,7 @@ class EmailVerificationService:
 
 
 # Singleton instance for convenience
-_service: Optional[EmailVerificationService] = None
+_service: EmailVerificationService | None = None
 
 
 def get_email_verification_service() -> EmailVerificationService:

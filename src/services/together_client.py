@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 import httpx
 
@@ -9,7 +8,6 @@ from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
 from src.services.connection_pool import get_together_pooled_client
 from src.utils.model_name_validator import clean_model_name
-from src.utils.security_validators import sanitize_for_logging
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging

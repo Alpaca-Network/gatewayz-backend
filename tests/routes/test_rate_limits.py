@@ -14,7 +14,7 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 # Set test environment
 os.environ['APP_ENV'] = 'testing'
@@ -268,7 +268,7 @@ class TestAdminRateLimitsUsers:
                 'user_id': 2,
                 'rate_limit_config': {'requests_per_minute': 100},
                 'environment_tag': 'production',
-                'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.now(UTC).isoformat(),
             }
         ]
 
@@ -319,7 +319,7 @@ class TestAdminRateLimitsAlerts:
                 'api_key': 'gw_test_key',
                 'alert_type': 'rate_exceeded',
                 'details': {'requests': 1000},
-                'created_at': datetime.now(timezone.utc).isoformat(),
+                'created_at': datetime.now(UTC).isoformat(),
                 'resolved': False,
             }
         ]
@@ -345,7 +345,7 @@ class TestAdminRateLimitsSystem:
         app.dependency_overrides[require_admin] = mock_require_admin
 
         mock_get_stats.return_value = {
-            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'timestamp': datetime.now(UTC).isoformat(),
             'minute': {'requests': 100, 'tokens': 10000},
             'hour': {'requests': 1000, 'tokens': 100000},
             'day': {'requests': 10000, 'tokens': 1000000},

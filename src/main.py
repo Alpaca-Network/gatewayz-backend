@@ -350,7 +350,7 @@ def create_app() -> FastAPI:
                 asyncio.to_thread(prometheus_metrics.collect_redis_info),
                 timeout=5.0,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass  # Serve stale Redis gauges rather than miss the scrape window
 
         # Content negotiation: serve OpenMetrics when requested (carries exemplars),

@@ -12,7 +12,7 @@ Designed to run as a background task or cron job.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -240,7 +240,7 @@ class MetricsAggregator:
             hours: Keep data newer than this many hours
         """
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             cutoff_time = now - timedelta(hours=hours)
             cutoff_hour = cutoff_time.replace(minute=0, second=0, microsecond=0)
             cutoff_key = cutoff_hour.strftime("%Y-%m-%d:%H")
@@ -270,7 +270,7 @@ class MetricsAggregator:
             Aggregation result dictionary
         """
         # Get last completed hour (current time - 1 hour, rounded)
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         last_hour = (now - timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
 
         return await self.aggregate_hour(last_hour)

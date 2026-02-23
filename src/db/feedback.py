@@ -8,7 +8,7 @@ on assistant responses.
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any, TypeVar
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError
@@ -119,8 +119,8 @@ def save_message_feedback(
         feedback_data = {
             "user_id": user_id,
             "feedback_type": feedback_type,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         # Add optional fields if provided
@@ -329,7 +329,7 @@ def update_feedback(
     try:
         client = get_supabase_client()
 
-        update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+        update_data = {"updated_at": datetime.now(UTC).isoformat()}
 
         if feedback_type is not None:
             update_data["feedback_type"] = feedback_type
@@ -430,7 +430,7 @@ def get_feedback_stats(
         client = get_supabase_client()
 
         # Calculate date filter
-        from_date = datetime.now(timezone.utc) - timedelta(days=days)
+        from_date = datetime.now(UTC) - timedelta(days=days)
         from_date = from_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
         def query_all_feedback():

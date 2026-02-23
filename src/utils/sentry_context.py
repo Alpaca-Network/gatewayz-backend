@@ -22,7 +22,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Context variables for request-scoped Sentry context
-sentry_context: ContextVar[dict[str, Any]] = ContextVar('sentry_context', default={})
+sentry_context: ContextVar[dict[str, Any]] = ContextVar('sentry_context', default={})  # noqa: B039
 
 F = TypeVar('F', bound=Callable[..., Any])
 

@@ -25,7 +25,7 @@ class QueryTimeoutError(Exception):
     pass
 
 
-def execute_with_timeout(
+def execute_with_timeout(  # noqa: UP047
     func: Callable[..., T],
     timeout_seconds: float = DEFAULT_QUERY_TIMEOUT,
     operation_name: str = "database operation",

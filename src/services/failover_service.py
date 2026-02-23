@@ -6,7 +6,7 @@ Uses database to track model availability across providers and provider health.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from src.db.failover_db import get_providers_for_model
 from src.db.model_health import record_model_call
@@ -98,7 +98,7 @@ async def route_with_failover(
                        f"Trying '{model}' on {provider_slug} (as '{provider_model_id}')")
 
             # Track attempt start time
-            start_time = datetime.now(timezone.utc)
+            start_time = datetime.now(UTC)
 
             # Make the actual provider request
             response = await _call_provider(
@@ -108,7 +108,7 @@ async def route_with_failover(
             )
 
             # Track success
-            end_time = datetime.now(timezone.utc)
+            end_time = datetime.now(UTC)
             response_time_ms = int((end_time - start_time).total_seconds() * 1000)
 
             await record_model_call(
@@ -153,7 +153,7 @@ async def route_with_failover(
                 "provider": provider_slug,
                 "provider_model_id": provider_model_id,
                 "error": str(e),
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             })
 
             last_error = e

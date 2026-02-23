@@ -8,7 +8,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from unittest.mock import MagicMock, patch, call
 import httpx
 
@@ -68,7 +68,7 @@ class TestAIMOStaleWhileRevalidate:
         """Fresh cache within TTL should be returned."""
         test_data = [{"id": "model-1", "name": "Test Model"}]
         _aimo_models_cache["data"] = test_data
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
         _aimo_models_cache["ttl"] = 3600
 
         result = _fresh_cached_models(_aimo_models_cache, "aimo")
@@ -81,7 +81,7 @@ class TestAIMOStaleWhileRevalidate:
         test_data = [{"id": "model-1"}]
         _aimo_models_cache["data"] = test_data
         _aimo_models_cache["ttl"] = 0.1  # Very short TTL
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         time.sleep(0.2)  # Wait for cache to expire
 
@@ -92,7 +92,7 @@ class TestAIMOStaleWhileRevalidate:
         """Should return data within fresh TTL."""
         test_data = [{"id": "model-1"}]
         _aimo_models_cache["data"] = test_data
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
         _aimo_models_cache["ttl"] = 3600
         _aimo_models_cache["stale_ttl"] = 7200
 
@@ -107,7 +107,7 @@ class TestAIMOStaleWhileRevalidate:
         _aimo_models_cache["data"] = test_data
         _aimo_models_cache["ttl"] = 0.1  # Very short TTL
         _aimo_models_cache["stale_ttl"] = 10.0  # Long stale TTL
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         time.sleep(0.2)  # Expire fresh cache but within stale window
 
@@ -122,7 +122,7 @@ class TestAIMOStaleWhileRevalidate:
         _aimo_models_cache["data"] = test_data
         _aimo_models_cache["ttl"] = 0.1
         _aimo_models_cache["stale_ttl"] = 0.2
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
 
         time.sleep(0.3)  # Wait for both to expire
 
@@ -222,7 +222,7 @@ class TestAIMORetryLogic:
         # Set up stale cached data
         stale_data = [{"id": "stale-model-1"}]
         _aimo_models_cache["data"] = stale_data
-        _aimo_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _aimo_models_cache["timestamp"] = datetime.now(UTC)
         _aimo_models_cache["ttl"] = 1
         _aimo_models_cache["stale_ttl"] = 100000
 

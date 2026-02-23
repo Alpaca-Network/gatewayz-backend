@@ -1,7 +1,7 @@
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from urllib.parse import urlparse
 
 import httpx
@@ -82,7 +82,7 @@ def get_cached_providers():
     try:
         with _provider_cache_lock:
             if _provider_cache["data"] and _provider_cache["timestamp"]:
-                cache_age = (datetime.now(timezone.utc) - _provider_cache["timestamp"]).total_seconds()
+                cache_age = (datetime.now(UTC) - _provider_cache["timestamp"]).total_seconds()
                 if cache_age < _provider_cache["ttl"]:
                     return _provider_cache["data"]
 
@@ -120,7 +120,7 @@ def fetch_providers_from_openrouter():
 
         with _provider_cache_lock:
             _provider_cache["data"] = providers_data.get("data", [])
-            _provider_cache["timestamp"] = datetime.now(timezone.utc)
+            _provider_cache["timestamp"] = datetime.now(UTC)
 
         return _provider_cache["data"]
     except Exception as e:

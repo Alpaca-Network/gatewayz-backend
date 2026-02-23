@@ -12,7 +12,7 @@ Tests cover:
 
 import importlib
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -66,8 +66,8 @@ def mock_feedback():
         "rating": 5,
         "comment": "Great response!",
         "metadata": {"response_time_ms": 450},
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -118,7 +118,7 @@ def test_submit_thumbs_down_with_comment(
         "feedback_type": "thumbs_down",
         "comment": "Not helpful",
         "rating": 2,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     response = client.post(
@@ -150,7 +150,7 @@ def test_submit_regenerate_feedback(
         "user_id": 1,
         "feedback_type": "regenerate",
         "metadata": {"original_response": "Some text"},
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     response = client.post(

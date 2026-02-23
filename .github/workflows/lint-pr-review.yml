@@ -29,15 +29,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff black isort
 
-      # Ruff with reviewdog (inline comments)
+      # Ruff with GitHub native annotations (inline comments via --output-format=github)
       - name: Run Ruff with ReviewDog
-        uses: reviewdog/action-ruff@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          reporter: github-pr-review
-          level: warning
-          fail_on_error: false
-          filter_mode: added
+        run: |
+          ruff check src/ tests/ --output-format=github || true
 
       # Black formatting check
       - name: Run Black Check

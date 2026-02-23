@@ -24,7 +24,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class CodeRouterMode(str, Enum):
+class CodeRouterMode(str, Enum):  # noqa: UP042
     """
     Code router optimization modes.
 

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -89,7 +89,7 @@ async def set_user_rate_limits(api_key: str, rate_limits: dict[str, int]) -> Non
                 "burst_limit": rate_limits.get("burst_limit", 100),
                 "concurrency_limit": rate_limits.get("concurrency_limit", 50),
                 "window_size": 3600,  # 1 hour in seconds
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             # Check if config already exists
@@ -132,7 +132,7 @@ def check_rate_limit(api_key: str, tokens_used: int = 0) -> dict[str, Any]:
 
         # Check if rate_limit_usage table exists
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             minute_start = now.replace(second=0, microsecond=0)
             hour_start = now.replace(minute=0, second=0, microsecond=0)
             day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -240,19 +240,19 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
             return
 
         user_id = user["id"]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         # Timestamp is already timezone-aware
         timestamp = now.isoformat()
 
         # Calculate window starts
-        minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=timezone.utc).isoformat()
+        minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
         hour_start = (
-            now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=timezone.utc).isoformat()
+            now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
         )
         day_start = (
             now.replace(hour=0, minute=0, second=0, microsecond=0)
-            .replace(tzinfo=timezone.utc)
+            .replace(tzinfo=UTC)
             .isoformat()
         )
 
@@ -471,7 +471,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                 .update(
                     {
                         "rate_limit_config": config,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 )
                 .eq("api_key", api_key)
@@ -505,7 +505,7 @@ def update_rate_limit_config(api_key: str, config: dict[str, Any]) -> bool:
                             "burst_limit": config.get("burst_limit", 100),
                             "concurrency_limit": config.get("concurrency_limit", 50),
                             "window_size": config.get("window_size_seconds", 60),
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                            "updated_at": datetime.now(UTC).isoformat(),
                         }
                     ).eq("api_key_id", api_key_id).execute()
                 else:
@@ -622,7 +622,7 @@ def bulk_update_rate_limit_configs(user_id: int, config: dict[str, Any]) -> int:
             .update(
                 {
                     "rate_limit_config": config,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             )
             .eq("user_id", user_id)
@@ -641,7 +641,7 @@ def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> dic
     try:
         client = get_supabase_client()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         if time_window == "minute":
             start_time = now.replace(second=0, microsecond=0)
@@ -696,7 +696,7 @@ def get_system_rate_limit_stats() -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         minute_ago = now - timedelta(minutes=1)
         hour_ago = now - timedelta(hours=1)
         day_ago = now - timedelta(days=1)
@@ -761,7 +761,7 @@ def get_system_rate_limit_stats() -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting system rate limit stats: {e}")
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "minute": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_second": 0},
             "hour": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_minute": 0},
             "day": {"requests": 0, "tokens": 0, "active_keys": 0, "requests_per_hour": 0},
@@ -786,7 +786,7 @@ def create_rate_limit_alert(api_key: str, alert_type: str, details: dict[str, An
             "api_key": api_key,
             "alert_type": alert_type,
             "details": details,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "resolved": False,
         }
 

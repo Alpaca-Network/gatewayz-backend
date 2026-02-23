@@ -16,7 +16,7 @@ Tests cover:
 import pytest
 import json
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -64,7 +64,7 @@ def mock_trial_user():
         'api_key': 'sk-trial-key-12345',
         'subscription_status': 'trial',
         'tier': 'basic',
-        'trial_end_date': (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+        'trial_end_date': (datetime.now(UTC) + timedelta(days=3)).isoformat(),
         'subscription_end_date': None
     }
 

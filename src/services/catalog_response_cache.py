@@ -31,7 +31,7 @@ import json
 import hashlib
 import logging
 from typing import Any
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 import redis as redis_module
 
@@ -221,7 +221,7 @@ async def cache_catalog_response(
         # Add cache metadata to response
         response_with_meta = {
             **response,
-            "_cached_at": datetime.now(timezone.utc).isoformat(),
+            "_cached_at": datetime.now(UTC).isoformat(),
             "_cache_ttl": ttl,
             "_cache_key": cache_key,
         }
@@ -432,7 +432,7 @@ def _update_cache_metadata(redis, gateway: str | None, size_bytes: int):
         pipe = redis.pipeline()
         pipe.hincrby(metadata_key, "total_cached", 1)
         pipe.hincrby(metadata_key, "total_size_bytes", size_bytes)
-        pipe.hset(metadata_key, "last_cached_at", datetime.now(timezone.utc).isoformat())
+        pipe.hset(metadata_key, "last_cached_at", datetime.now(UTC).isoformat())
         pipe.expire(metadata_key, METADATA_CACHE_TTL)  # Metadata expires after 24 hours
         pipe.execute()
 

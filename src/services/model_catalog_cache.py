@@ -248,7 +248,7 @@ class ModelCatalogCache:
         Returns:
             CacheErrorType enum value
         """
-        error_name = type(error).__name__
+        error_name = type(error).__name__  # noqa: F841
 
         # Redis connection errors
         if isinstance(error, redis.ConnectionError):
@@ -717,7 +717,6 @@ class ModelCatalogCache:
                 "duration_ms": 0
             }
 
-        import time
         start_time = time.time()
 
         try:

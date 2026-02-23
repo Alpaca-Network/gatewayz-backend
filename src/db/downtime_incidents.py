@@ -5,7 +5,7 @@ Handles storage and retrieval of application downtime incidents with associated 
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 from uuid import UUID
 
@@ -71,7 +71,7 @@ def create_incident(
                 .insert(
                     {
                         "started_at": started_at.isoformat(),
-                        "detected_at": datetime.now(timezone.utc).isoformat(),
+                        "detected_at": datetime.now(UTC).isoformat(),
                         "health_endpoint": health_endpoint,
                         "error_message": error_message,
                         "http_status_code": http_status_code,
@@ -325,7 +325,7 @@ def resolve_incident(
     """
     return update_incident(
         incident_id=incident_id,
-        ended_at=datetime.now(timezone.utc),
+        ended_at=datetime.now(UTC),
         status="resolved",
         resolved_by=resolved_by,
         notes=notes,
@@ -343,11 +343,11 @@ def get_incident_statistics(days: int = 30) -> dict[str, Any]:
         Dictionary with incident statistics
     """
     try:
-        cutoff = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc)
+        cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
+        cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC)
 
         incidents = get_incidents_by_date_range(
-            cutoff_dt, datetime.now(timezone.utc)
+            cutoff_dt, datetime.now(UTC)
         )
 
         if not incidents:
@@ -406,8 +406,8 @@ def cleanup_old_incidents(days: int = 90, keep_critical: bool = True) -> int:
         Number of incidents deleted
     """
     try:
-        cutoff = datetime.now(timezone.utc).timestamp() - (days * 24 * 60 * 60)
-        cutoff_dt = datetime.fromtimestamp(cutoff, tz=timezone.utc).isoformat()
+        cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
+        cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
 
         def _cleanup_incidents(client):
             query = client.table("downtime_incidents").delete().lt("started_at", cutoff_dt)

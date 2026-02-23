@@ -8,7 +8,7 @@ from enum import Enum
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(str, Enum):  # noqa: UP042
     """Health status enumeration"""
 
     HEALTHY = "healthy"
@@ -18,7 +18,7 @@ class HealthStatus(str, Enum):
     MAINTENANCE = "maintenance"
 
 
-class ProviderStatus(str, Enum):
+class ProviderStatus(str, Enum):  # noqa: UP042
     """Provider status enumeration"""
 
     ONLINE = "online"

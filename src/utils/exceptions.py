@@ -23,7 +23,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -52,7 +52,7 @@ class APIExceptions:
         return HTTPException(status_code=401, detail="Invalid API key")
 
     @staticmethod
-    def payment_required(detail: str = "Insufficient credits", credits: Optional[float] = None) -> HTTPException:
+    def payment_required(detail: str = "Insufficient credits", credits: float | None = None) -> HTTPException:
         """
         402 Payment Required - User has insufficient credits.
 
@@ -81,7 +81,7 @@ class APIExceptions:
         return HTTPException(status_code=403, detail=detail)
 
     @staticmethod
-    def not_found(resource: str = "Resource", resource_id: Optional[Any] = None) -> HTTPException:
+    def not_found(resource: str = "Resource", resource_id: Any | None = None) -> HTTPException:
         """
         404 Not Found - Resource doesn't exist.
 
@@ -99,9 +99,9 @@ class APIExceptions:
 
     @staticmethod
     def rate_limited(
-        retry_after: Optional[int] = None,
+        retry_after: int | None = None,
         detail: str = "Rate limit exceeded",
-        reason: Optional[str] = None
+        reason: str | None = None
     ) -> HTTPException:
         """
         429 Too Many Requests - Rate limit exceeded.
@@ -137,7 +137,7 @@ class APIExceptions:
         )
 
     @staticmethod
-    def bad_request(detail: str = "Bad request", errors: Optional[Dict[str, Any]] = None) -> HTTPException:
+    def bad_request(detail: str = "Bad request", errors: dict[str, Any] | None = None) -> HTTPException:
         """
         400 Bad Request - Invalid request data.
 
@@ -158,7 +158,7 @@ class APIExceptions:
     @staticmethod
     def internal_error(
         operation: str = "operation",
-        error: Optional[Exception] = None,
+        error: Exception | None = None,
         include_details: bool = False
     ) -> HTTPException:
         """
@@ -184,7 +184,7 @@ class APIExceptions:
         return HTTPException(status_code=500, detail=detail)
 
     @staticmethod
-    def database_error(operation: str = "database operation", error: Optional[Exception] = None) -> HTTPException:
+    def database_error(operation: str = "database operation", error: Exception | None = None) -> HTTPException:
         """
         500 Internal Server Error - Database operation failed.
 
@@ -205,7 +205,7 @@ class APIExceptions:
     def provider_error(
         provider: str,
         model: str,
-        error: Optional[Exception] = None,
+        error: Exception | None = None,
         status_code: int = 502
     ) -> HTTPException:
         """
@@ -228,7 +228,7 @@ class APIExceptions:
         return HTTPException(status_code=status_code, detail=detail)
 
     @staticmethod
-    def service_unavailable(service: str = "service", retry_after: Optional[int] = None) -> HTTPException:
+    def service_unavailable(service: str = "service", retry_after: int | None = None) -> HTTPException:
         """
         503 Service Unavailable - Service temporarily unavailable.
 
@@ -272,9 +272,9 @@ class APIExceptions:
     @staticmethod
     def model_not_found_detailed(
         model_id: str,
-        provider: Optional[str] = None,
-        suggested_models: Optional[List[str]] = None,
-        request_id: Optional[str] = None,
+        provider: str | None = None,
+        suggested_models: list[str] | None = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         404 Model Not Found - Detailed version with suggestions.
@@ -309,7 +309,7 @@ class APIExceptions:
     def insufficient_credits_detailed(
         current_credits: float,
         required_credits: float,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         402 Insufficient Credits - Detailed version with amounts.
@@ -344,8 +344,8 @@ class APIExceptions:
         max_cost: float,
         model_id: str,
         max_tokens: int,
-        input_tokens: Optional[int] = None,
-        request_id: Optional[str] = None,
+        input_tokens: int | None = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         402 Insufficient Credits - Pre-flight check version with max cost details.
@@ -399,9 +399,9 @@ class APIExceptions:
 
     @staticmethod
     def invalid_api_key_detailed(
-        reason: Optional[str] = None,
-        key_prefix: Optional[str] = None,
-        request_id: Optional[str] = None,
+        reason: str | None = None,
+        key_prefix: str | None = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         401 Invalid API Key - Detailed version.
@@ -433,10 +433,10 @@ class APIExceptions:
     @staticmethod
     def rate_limit_exceeded_detailed(
         limit_type: str,
-        retry_after: Optional[int] = None,
-        limit_value: Optional[int] = None,
-        current_usage: Optional[int] = None,
-        request_id: Optional[str] = None,
+        retry_after: int | None = None,
+        limit_value: int | None = None,
+        current_usage: int | None = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         429 Rate Limit Exceeded - Detailed version with retry info.
@@ -473,9 +473,9 @@ class APIExceptions:
     def provider_error_detailed(
         provider: str,
         model: str,
-        provider_message: Optional[str] = None,
+        provider_message: str | None = None,
         status_code: int = 502,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         502 Provider Error - Detailed version.
@@ -512,11 +512,11 @@ class APIExceptions:
     def invalid_parameter_detailed(
         parameter_name: str,
         parameter_value: Any,
-        expected_type: Optional[str] = None,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
-        allowed_values: Optional[List[Any]] = None,
-        request_id: Optional[str] = None,
+        expected_type: str | None = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
+        allowed_values: list[Any] | None = None,
+        request_id: str | None = None,
     ) -> HTTPException:
         """
         400 Invalid Parameter - Detailed version.

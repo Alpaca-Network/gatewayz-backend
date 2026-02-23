@@ -9,7 +9,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 
 # =========================
@@ -195,7 +195,7 @@ def sb(monkeypatch):
 
 
 def iso_now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # =========================
@@ -498,7 +498,7 @@ def test_get_feedback_stats_basic(sb):
     import src.db.feedback as fb
 
     # Create feedback records with recent timestamps
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     # Insert directly with controlled timestamps
     for i, ftype in enumerate(["thumbs_up", "thumbs_up", "thumbs_down", "regenerate"]):
@@ -522,7 +522,7 @@ def test_get_feedback_stats_basic(sb):
 def test_get_feedback_stats_with_ratings(sb):
     import src.db.feedback as fb
 
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     # Insert with ratings
     for i, rating in enumerate([5, 4, 3]):
@@ -542,7 +542,7 @@ def test_get_feedback_stats_with_ratings(sb):
 def test_get_feedback_stats_by_model(sb):
     import src.db.feedback as fb
 
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     # Insert feedback for different models
     models = ["gpt-4", "gpt-4", "claude-3", "gpt-4"]
@@ -568,7 +568,7 @@ def test_get_feedback_stats_by_model(sb):
 def test_get_feedback_stats_filter_by_model(sb):
     import src.db.feedback as fb
 
-    base_time = datetime.now(timezone.utc)
+    base_time = datetime.now(UTC)
 
     # Insert feedback for different models
     for i, model in enumerate(["gpt-4", "claude-3"]):

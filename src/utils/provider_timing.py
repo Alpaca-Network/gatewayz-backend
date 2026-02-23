@@ -15,7 +15,7 @@ import asyncio
 import logging
 import time
 from functools import wraps
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -253,8 +253,8 @@ class ProviderTimingContext:
         self.provider_name = provider_name
         self.model_name = model_name
         self.operation = operation
-        self.start_time: Optional[float] = None
-        self.duration: Optional[float] = None
+        self.start_time: float | None = None
+        self.duration: float | None = None
 
     async def __aenter__(self):
         self.start_time = time.monotonic()

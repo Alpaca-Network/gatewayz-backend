@@ -1,6 +1,5 @@
 import csv
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -55,7 +54,7 @@ def _sanitize_messages_for_featherless(messages: list[dict]) -> list[dict]:
 
         # Remove null tool_calls (Featherless rejects null, expects array or omitted)
         if 'tool_calls' in clean_msg and clean_msg['tool_calls'] is None:
-            logger.debug(f"Removing null tool_calls from message")
+            logger.debug("Removing null tool_calls from message")
             del clean_msg['tool_calls']
 
         # Ensure tool_calls is array if present

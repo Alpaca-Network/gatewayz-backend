@@ -17,7 +17,7 @@ Usage:
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 from src.utils.security_validators import sanitize_for_logging
 
@@ -40,7 +40,7 @@ class SafeLogger:
         self.logger = logging.getLogger(name)
         self._name = name
 
-    def _sanitize_kwargs(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         """
         Sanitize all keyword arguments for safe logging.
 
@@ -88,7 +88,7 @@ class SafeLogger:
         safe_kwargs = self._sanitize_kwargs(kwargs)
         self.logger.warning(message, extra=safe_kwargs)
 
-    def error(self, message: str, exc: Optional[Exception] = None, **kwargs):
+    def error(self, message: str, exc: Exception | None = None, **kwargs):
         """
         Log error message with auto-sanitized kwargs.
 
@@ -100,7 +100,7 @@ class SafeLogger:
         safe_kwargs = self._sanitize_kwargs(kwargs)
         self.logger.error(message, exc_info=exc, extra=safe_kwargs)
 
-    def critical(self, message: str, exc: Optional[Exception] = None, **kwargs):
+    def critical(self, message: str, exc: Exception | None = None, **kwargs):
         """
         Log critical message with auto-sanitized kwargs.
 
@@ -125,7 +125,7 @@ class SafeLogger:
         """Alias for warning() - explicitly shows sanitization."""
         return self.warning(message, **kwargs)
 
-    def error_safe(self, message: str, exc: Optional[Exception] = None, **kwargs):
+    def error_safe(self, message: str, exc: Exception | None = None, **kwargs):
         """Alias for error() - explicitly shows sanitization."""
         return self.error(message, exc=exc, **kwargs)
 

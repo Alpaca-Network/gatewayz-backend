@@ -5,7 +5,7 @@ Tests the tiered monitoring, scheduling, and health check functionality.
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -200,7 +200,7 @@ async def test_check_model_health_timeout(health_monitor):
                 response_time_ms=5000.0,
                 error_message="Request timeout after 5s",
                 http_status_code=None,
-                checked_at=datetime.now(timezone.utc),
+                checked_at=datetime.now(UTC),
             )
 
     health_monitor._check_model_health = timeout_wrapper
@@ -253,7 +253,7 @@ async def test_check_model_health_unauthorized(mock_client, health_monitor):
 @pytest.mark.asyncio
 async def test_health_check_result_creation():
     """Test HealthCheckResult dataclass creation"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     result = HealthCheckResult(
         provider="openai",
         model="gpt-4",
@@ -482,7 +482,7 @@ async def test_create_or_update_incident_handles_none_response(mock_supabase, mo
         response_time_ms=150.5,
         error_message="Test error",
         http_status_code=500,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     # Should not raise an exception
@@ -518,7 +518,7 @@ async def test_process_health_check_result_handles_none_response(mock_supabase, 
         response_time_ms=150.5,
         error_message=None,
         http_status_code=200,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     # Should not raise an exception
@@ -566,7 +566,7 @@ async def test_process_health_check_result_retries_on_query_failure(mock_supabas
         response_time_ms=150.5,
         error_message=None,
         http_status_code=200,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     # Should not raise an exception - retry should succeed
@@ -616,7 +616,7 @@ async def test_create_or_update_incident_retries_on_query_failure(mock_supabase,
         response_time_ms=150.5,
         error_message="Test error",
         http_status_code=500,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     # Should not raise an exception - retry should succeed
@@ -653,7 +653,7 @@ async def test_process_health_check_result_logs_debug_after_max_retries(mock_sup
         response_time_ms=150.5,
         error_message=None,
         http_status_code=200,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     # Should not raise an exception - gracefully handle failure
@@ -712,7 +712,7 @@ async def test_process_health_check_result_preserves_uptime_percentages(mock_sup
         response_time_ms=150.0,
         error_message=None,
         http_status_code=200,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     await health_monitor._process_health_check_result(result)
@@ -771,7 +771,7 @@ async def test_process_health_check_result_defaults_uptime_for_new_models(mock_s
         response_time_ms=150.0,
         error_message=None,
         http_status_code=200,
-        checked_at=datetime.now(timezone.utc),
+        checked_at=datetime.now(UTC),
     )
 
     await health_monitor._process_health_check_result(result)

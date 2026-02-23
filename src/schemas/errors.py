@@ -20,7 +20,7 @@ Usage:
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,58 +33,58 @@ class ErrorContext(BaseModel):
     """
 
     # Model-related context
-    requested_model: Optional[str] = Field(None, description="Model ID that was requested")
-    suggested_models: Optional[List[str]] = Field(None, description="Similar or alternative models")
-    available_models: Optional[List[str]] = Field(None, description="List of available models")
-    provider: Optional[str] = Field(None, description="Provider name")
-    provider_status: Optional[str] = Field(None, description="Provider availability status")
+    requested_model: str | None = Field(None, description="Model ID that was requested")
+    suggested_models: list[str] | None = Field(None, description="Similar or alternative models")
+    available_models: list[str] | None = Field(None, description="List of available models")
+    provider: str | None = Field(None, description="Provider name")
+    provider_status: str | None = Field(None, description="Provider availability status")
 
     # Endpoint/Request context
-    endpoint: Optional[str] = Field(None, description="API endpoint that was called")
-    method: Optional[str] = Field(None, description="HTTP method used")
+    endpoint: str | None = Field(None, description="API endpoint that was called")
+    method: str | None = Field(None, description="HTTP method used")
 
     # Parameter validation context
-    parameter_name: Optional[str] = Field(None, description="Name of invalid parameter")
-    parameter_value: Optional[Any] = Field(None, description="Value that was provided")
-    expected_type: Optional[str] = Field(None, description="Expected parameter type")
-    min_value: Optional[float] = Field(None, description="Minimum allowed value")
-    max_value: Optional[float] = Field(None, description="Maximum allowed value")
-    allowed_values: Optional[List[Any]] = Field(None, description="List of allowed values")
+    parameter_name: str | None = Field(None, description="Name of invalid parameter")
+    parameter_value: Any | None = Field(None, description="Value that was provided")
+    expected_type: str | None = Field(None, description="Expected parameter type")
+    min_value: float | None = Field(None, description="Minimum allowed value")
+    max_value: float | None = Field(None, description="Maximum allowed value")
+    allowed_values: list[Any] | None = Field(None, description="List of allowed values")
 
     # Credit/Payment context
-    current_credits: Optional[float] = Field(None, description="User's current credit balance")
-    required_credits: Optional[float] = Field(None, description="Credits required for request")
-    credit_deficit: Optional[float] = Field(None, description="Amount of credits needed")
+    current_credits: float | None = Field(None, description="User's current credit balance")
+    required_credits: float | None = Field(None, description="Credits required for request")
+    credit_deficit: float | None = Field(None, description="Amount of credits needed")
 
     # Rate limiting context
-    limit_type: Optional[str] = Field(None, description="Type of rate limit hit")
-    limit_value: Optional[int] = Field(None, description="Rate limit threshold")
-    current_usage: Optional[int] = Field(None, description="Current usage count")
-    retry_after: Optional[int] = Field(None, description="Seconds until retry is allowed")
-    reset_time: Optional[str] = Field(None, description="When the limit resets (ISO 8601)")
+    limit_type: str | None = Field(None, description="Type of rate limit hit")
+    limit_value: int | None = Field(None, description="Rate limit threshold")
+    current_usage: int | None = Field(None, description="Current usage count")
+    retry_after: int | None = Field(None, description="Seconds until retry is allowed")
+    reset_time: str | None = Field(None, description="When the limit resets (ISO 8601)")
 
     # Trial/Plan context
-    trial_status: Optional[str] = Field(None, description="Trial account status")
-    plan_name: Optional[str] = Field(None, description="Subscription plan name")
-    plan_limit: Optional[int] = Field(None, description="Plan usage limit")
+    trial_status: str | None = Field(None, description="Trial account status")
+    plan_name: str | None = Field(None, description="Subscription plan name")
+    plan_limit: int | None = Field(None, description="Plan usage limit")
 
     # Authentication context
-    key_prefix: Optional[str] = Field(None, description="First few characters of API key")
-    ip_address: Optional[str] = Field(None, description="Request IP address")
-    allowed_ips: Optional[List[str]] = Field(None, description="List of allowed IPs")
+    key_prefix: str | None = Field(None, description="First few characters of API key")
+    ip_address: str | None = Field(None, description="Request IP address")
+    allowed_ips: list[str] | None = Field(None, description="List of allowed IPs")
 
     # Provider error context
-    provider_error_message: Optional[str] = Field(None, description="Original provider error message")
-    provider_status_code: Optional[int] = Field(None, description="Provider HTTP status code")
-    failed_providers: Optional[List[str]] = Field(None, description="List of providers that failed")
+    provider_error_message: str | None = Field(None, description="Original provider error message")
+    provider_status_code: int | None = Field(None, description="Provider HTTP status code")
+    failed_providers: list[str] | None = Field(None, description="List of providers that failed")
 
     # Token/Context length errors
-    input_tokens: Optional[int] = Field(None, description="Number of input tokens")
-    max_context_length: Optional[int] = Field(None, description="Model's maximum context length")
-    requested_max_tokens: Optional[int] = Field(None, description="Requested max output tokens")
+    input_tokens: int | None = Field(None, description="Number of input tokens")
+    max_context_length: int | None = Field(None, description="Model's maximum context length")
+    requested_max_tokens: int | None = Field(None, description="Requested max output tokens")
 
     # Additional context (flexible)
-    additional_info: Optional[Dict[str, Any]] = Field(None, description="Additional error-specific context")
+    additional_info: dict[str, Any] | None = Field(None, description="Additional error-specific context")
 
     class Config:
         json_schema_extra = {
@@ -118,7 +118,7 @@ class ErrorDetail(BaseModel):
         examples=["Model 'gpt-5-ultra' not found"]
     )
 
-    detail: Optional[str] = Field(
+    detail: str | None = Field(
         None,
         description="Additional explanation and context about the error",
         examples=["The requested model is not available in our catalog. Please check the model name and try again."]
@@ -150,7 +150,7 @@ class ErrorDetail(BaseModel):
         examples=["2025-01-21T12:00:00Z"]
     )
 
-    suggestions: Optional[List[str]] = Field(
+    suggestions: list[str] | None = Field(
         None,
         description="Actionable suggestions to resolve the error",
         examples=[
@@ -161,18 +161,18 @@ class ErrorDetail(BaseModel):
         ]
     )
 
-    context: Optional[ErrorContext] = Field(
+    context: ErrorContext | None = Field(
         None,
         description="Additional context for debugging"
     )
 
-    docs_url: Optional[str] = Field(
+    docs_url: str | None = Field(
         None,
         description="Link to relevant documentation",
         examples=["https://docs.gatewayz.ai/errors/model-not-found"]
     )
 
-    support_url: Optional[str] = Field(
+    support_url: str | None = Field(
         None,
         description="Link to support or contact page",
         examples=["https://gatewayz.ai/support"]
@@ -248,9 +248,9 @@ def create_simple_error(
     message: str,
     status: int,
     code: str,
-    request_id: Optional[str] = None,
-    detail: Optional[str] = None,
-    suggestions: Optional[List[str]] = None
+    request_id: str | None = None,
+    detail: str | None = None,
+    suggestions: list[str] | None = None
 ) -> ErrorResponse:
     """
     Create a simple error response without extensive context.

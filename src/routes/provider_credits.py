@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.security.deps import require_admin
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ async def get_provider_credit_balances(
     Returns:
         ProviderCreditsResponse with balance information for each provider
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.services.provider_credit_monitor import check_all_provider_credits
 
@@ -75,7 +76,7 @@ async def get_provider_credit_balances(
             )
 
         return ProviderCreditsResponse(
-            providers=providers, timestamp=datetime.now(timezone.utc).isoformat()
+            providers=providers, timestamp=datetime.now(UTC).isoformat()
         )
 
     except Exception as e:

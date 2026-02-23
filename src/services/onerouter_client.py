@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 import httpx
 
@@ -7,7 +6,7 @@ from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
-from src.services.pricing_lookup import enrich_model_with_pricing, get_model_pricing
+from src.services.pricing_lookup import get_model_pricing
 from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging

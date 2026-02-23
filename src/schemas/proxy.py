@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Discriminator, Field, field_validator, model_validator
 
@@ -232,7 +232,7 @@ class ProxyRequest(BaseModel):
         raise ValueError("stop must be a string or list of strings")
 
 
-class ResponseFormatType(str, Enum):
+class ResponseFormatType(str, Enum):  # noqa: UP042
     text = "text"
     json_object = "json_object"
     json_schema = "json_schema"
@@ -519,7 +519,7 @@ class ToolChoiceTool(BaseModel):
 # Discriminated union for tool_choice - Pydantic uses the 'type' field to determine which model to use
 # This ensures proper serialization/deserialization across different clients
 ToolChoice = Annotated[
-    Union[ToolChoiceAuto, ToolChoiceAny, ToolChoiceNone, ToolChoiceTool],
+    ToolChoiceAuto | ToolChoiceAny | ToolChoiceNone | ToolChoiceTool,
     Discriminator("type"),
 ]
 

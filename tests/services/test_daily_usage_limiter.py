@@ -3,7 +3,7 @@ Tests for Daily Usage Limiter Service
 """
 
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest.mock import Mock, patch, MagicMock
 
 from src.services.daily_usage_limiter import (
@@ -22,7 +22,7 @@ class TestDailyResetTime:
     def test_get_daily_reset_time_future(self):
         """Test that reset time is always in the future"""
         reset_time = get_daily_reset_time()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         assert reset_time > now
         assert reset_time.hour == 0
@@ -33,7 +33,7 @@ class TestDailyResetTime:
         """Test that reset time is tomorrow if we're past midnight"""
         with patch('src.services.daily_usage_limiter.datetime') as mock_datetime:
             # Mock current time as 1 AM UTC
-            mock_now = datetime(2026, 1, 5, 1, 0, 0, tzinfo=timezone.utc)
+            mock_now = datetime(2026, 1, 5, 1, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = mock_now
             mock_datetime.side_effect = datetime
 
@@ -163,7 +163,7 @@ class TestEnforceDailyUsageLimit:
             "used": 0.50,
             "remaining": 0.50,
             "limit": 1.0,
-            "reset_time": datetime.now(timezone.utc),
+            "reset_time": datetime.now(UTC),
             "warning_level": "ok",
         }
 
@@ -173,7 +173,7 @@ class TestEnforceDailyUsageLimit:
     @patch('src.services.daily_usage_limiter.check_daily_usage_limit')
     def test_enforce_daily_usage_limit_exceeded_raises_exception(self, mock_check):
         """Test that enforcement raises exception when limit exceeded"""
-        reset_time = datetime.now(timezone.utc) + timedelta(hours=5)
+        reset_time = datetime.now(UTC) + timedelta(hours=5)
         mock_check.return_value = {
             "allowed": False,
             "used": 0.95,

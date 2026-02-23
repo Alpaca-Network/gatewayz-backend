@@ -14,7 +14,7 @@ Tests cover:
 """
 
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from pydantic import ValidationError
 
 # ==================================================
@@ -251,7 +251,7 @@ class TestPrivyAuthResponse:
             is_new_user=False,
             email="test@example.com",
             credits=100.0,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
         assert response.success is True
@@ -359,7 +359,7 @@ class TestUserRegistrationResponse:
             auth_method=AuthMethod.EMAIL,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
         assert response.user_id == 1
@@ -572,7 +572,7 @@ class TestDeleteAccountResponse:
             status="success",
             message="Account deleted successfully",
             user_id=123,
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
         assert response.status == "success"
@@ -729,7 +729,7 @@ class TestEdgeCasesAndValidation:
             auth_method=AuthMethod.EMAIL,
             subscription_status=SubscriptionStatus.ACTIVE,
             message="Test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
         assert response.credits == -100
@@ -813,7 +813,7 @@ class TestEnumCoercion:
             auth_method=AuthMethod.EMAIL,
             subscription_status="trial",  # String instead of enum
             message="Test",
-            timestamp=datetime.now(timezone.utc)
+            timestamp=datetime.now(UTC)
         )
 
         assert response.subscription_status.value == "trial"

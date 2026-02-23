@@ -8,7 +8,6 @@ Falls back to OpenAI SDK with custom base URL if the official SDK is not availab
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from src.services.model_catalog_cache import cache_gateway_catalog

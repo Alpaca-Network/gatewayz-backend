@@ -3,15 +3,13 @@ Notification service for managing admin dashboard notifications
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from datetime import datetime, timedelta, UTC
 
 from ..config.redis_config import get_redis_client
 from ..config.supabase_config import get_supabase_client
 from ..models.notification_models import (
     NotificationCreate,
     NotificationResponse,
-    NotificationUpdate,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,7 +23,7 @@ class NotificationService:
 
     async def create_notification(
         self, notification: NotificationCreate
-    ) -> Optional[NotificationResponse]:
+    ) -> NotificationResponse | None:
         """
         Create a new notification
 
@@ -41,7 +39,7 @@ class NotificationService:
             # Calculate expiration timestamp
             expires_at = None
             if notification.expires_in_days:
-                expires_at = datetime.now(timezone.utc) + timedelta(
+                expires_at = datetime.now(UTC) + timedelta(
                     days=notification.expires_in_days
                 )
 
@@ -81,9 +79,9 @@ class NotificationService:
         user_id: int,
         limit: int = 20,
         offset: int = 0,
-        is_read: Optional[bool] = None,
-        category: Optional[str] = None,
-    ) -> List[NotificationResponse]:
+        is_read: bool | None = None,
+        category: str | None = None,
+    ) -> list[NotificationResponse]:
         """
         Get notifications for a user with optional filtering
 
@@ -185,7 +183,7 @@ class NotificationService:
             response = (
                 supabase.table("admin_notifications")
                 .update(
-                    {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}
+                    {"is_read": True, "read_at": datetime.now(UTC).isoformat()}
                 )
                 .eq("id", notification_id)
                 .eq("user_id", user_id)  # Ensure user owns this notification
@@ -221,10 +219,10 @@ class NotificationService:
         try:
             supabase = get_supabase_client()
 
-            response = (
+            response = (  # noqa: F841
                 supabase.table("admin_notifications")
                 .update(
-                    {"is_read": True, "read_at": datetime.now(timezone.utc).isoformat()}
+                    {"is_read": True, "read_at": datetime.now(UTC).isoformat()}
                 )
                 .eq("user_id", user_id)
                 .eq("is_read", False)

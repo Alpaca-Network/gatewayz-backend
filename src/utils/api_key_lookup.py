@@ -5,7 +5,6 @@ Provides robust API key lookup with retry logic and error handling.
 
 import asyncio
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +13,7 @@ async def get_api_key_id_with_retry(
     api_key: str,
     max_retries: int = 3,
     retry_delay: float = 0.1,
-) -> Optional[int]:
+) -> int | None:
     """
     Get API key ID with retry logic for transient failures.
 
@@ -105,7 +104,7 @@ async def get_api_key_id_with_retry(
     return None
 
 
-def mask_api_key_for_logging(api_key: Optional[str]) -> str:
+def mask_api_key_for_logging(api_key: str | None) -> str:
     """
     Mask API key for safe logging.
 

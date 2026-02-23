@@ -13,7 +13,6 @@ import hashlib
 import logging
 import time
 from collections import Counter, deque
-from typing import Optional
 
 try:
     from redis.exceptions import RedisError as _RedisError
@@ -25,7 +24,6 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp
 
-from src.config import Config
 from src.services.prometheus_metrics import rate_limited_requests
 
 logger = logging.getLogger(__name__)
@@ -218,7 +216,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             return "basic"
 
-        except (asyncio.TimeoutError, RuntimeError, OSError) as e:
+        except (TimeoutError, RuntimeError, OSError) as e:
             # Don't fail the request if tier lookup fails (connection/timeout errors)
             logger.warning(f"Failed to get user tier from request: {e}")
             return "basic"
@@ -449,7 +447,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    def _validate_content_type(self, request: Request) -> Optional[JSONResponse]:
+    def _validate_content_type(self, request: Request) -> Optional[JSONResponse]:  # noqa: F821
         """
         Validate the Content-Type header for mutating requests on /v1/* endpoints.
 

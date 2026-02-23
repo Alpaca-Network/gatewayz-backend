@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from enum import Enum
 from typing import Any
 
@@ -30,7 +30,7 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
-class MonitoringTier(str, Enum):
+class MonitoringTier(str, Enum):  # noqa: UP042
     """Model monitoring tiers"""
 
     CRITICAL = "critical"  # Top 5% - every 5 minutes
@@ -39,7 +39,7 @@ class MonitoringTier(str, Enum):
     ON_DEMAND = "on_demand"  # Only when requested
 
 
-class HealthCheckStatus(str, Enum):
+class HealthCheckStatus(str, Enum):  # noqa: UP042
     """Health check result status"""
 
     SUCCESS = "success"
@@ -50,7 +50,7 @@ class HealthCheckStatus(str, Enum):
     NOT_FOUND = "not_found"
 
 
-class CircuitBreakerState(str, Enum):
+class CircuitBreakerState(str, Enum):  # noqa: UP042
     """Circuit breaker states"""
 
     CLOSED = "closed"  # Normal operation
@@ -58,7 +58,7 @@ class CircuitBreakerState(str, Enum):
     HALF_OPEN = "half_open"  # Testing recovery
 
 
-class IncidentSeverity(str, Enum):
+class IncidentSeverity(str, Enum):  # noqa: UP042
     """Incident severity levels"""
 
     CRITICAL = "critical"  # Complete outage
@@ -251,7 +251,7 @@ class IntelligentHealthMonitor:
                 supabase.table("model_health_tracking")
                 .select("*")
                 .eq("is_enabled", True)
-                .lte("next_check_at", datetime.now(timezone.utc).isoformat())
+                .lte("next_check_at", datetime.now(UTC).isoformat())
                 .order("priority_score", desc=True)
                 .order("next_check_at", desc=False)
                 .limit(self.batch_size * 2)  # Get more than we need for filtering
@@ -426,7 +426,7 @@ class IntelligentHealthMonitor:
             response_time_ms=response_time_ms,
             error_message=error_message,
             http_status_code=http_status_code,
-            checked_at=datetime.now(timezone.utc),
+            checked_at=datetime.now(UTC),
         )
 
     def _get_gateway_endpoint(self, gateway: str) -> str | None:
@@ -582,7 +582,7 @@ class IntelligentHealthMonitor:
             if not is_success and consecutive_failures > 1:
                 interval = min(interval, 300)  # Max 5 minutes for failing models
 
-            next_check_at = datetime.now(timezone.utc) + timedelta(seconds=interval)
+            next_check_at = datetime.now(UTC) + timedelta(seconds=interval)
 
             # Preserve existing uptime percentages - they are calculated from actual history
             # by the _aggregate_hourly_metrics background task. Only set initial defaults
@@ -615,7 +615,7 @@ class IntelligentHealthMonitor:
                 "uptime_percentage_24h": existing_uptime_24h if existing_uptime_24h is not None else 100.0,
                 "uptime_percentage_7d": existing_uptime_7d if existing_uptime_7d is not None else 100.0,
                 "uptime_percentage_30d": existing_uptime_30d if existing_uptime_30d is not None else 100.0,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             # Upsert to database
@@ -786,7 +786,7 @@ class IntelligentHealthMonitor:
                     {
                         "error_count": active.data["error_count"] + 1,
                         "error_message": result.error_message,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("id", incident_id).execute()
             else:
@@ -815,7 +815,7 @@ class IntelligentHealthMonitor:
         try:
             from src.config.supabase_config import supabase
 
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
 
             supabase.table("model_health_incidents").update(
                 {
@@ -1090,7 +1090,7 @@ class IntelligentHealthMonitor:
                             "status": status,
                             "latency_ms": None,
                             "available": is_healthy,
-                            "last_check": datetime.now(timezone.utc).isoformat(),
+                            "last_check": datetime.now(UTC).isoformat(),
                             "error": error_msg,
                             "total_models": model_count,
                             "configured": has_api_key or not needs_api_key,
@@ -1115,7 +1115,7 @@ class IntelligentHealthMonitor:
                 "tracked_models": tracked_models,
                 "tracked_providers": tracked_providers,
                 "system_uptime": system_uptime,
-                "last_updated": datetime.now(timezone.utc).isoformat(),
+                "last_updated": datetime.now(UTC).isoformat(),
             }
 
             simple_health_cache.cache_system_health(system_data)
@@ -1301,7 +1301,7 @@ class IntelligentHealthMonitor:
 
             # Calculate 24h uptime from model_health_history for all models
             # This uses actual success/failure counts from the last 24 hours
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             twenty_four_hours_ago = now - timedelta(hours=24)
             seven_days_ago = now - timedelta(days=7)
             thirty_days_ago = now - timedelta(days=30)

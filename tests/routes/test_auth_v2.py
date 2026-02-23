@@ -9,7 +9,7 @@ This test file uses proper mocking strategies for FastAPI route testing:
 """
 
 import pytest
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 # Note: Do NOT import 'from src.main import app' here!
 # The app must be imported AFTER mocking in the fixture to ensure mocks are applied
 
@@ -194,14 +194,14 @@ def client(sb, monkeypatch):
 
     def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"):
         # Create user (let stub auto-assign ID)
-        trial_expires_at = datetime.now(timezone.utc).isoformat()
+        trial_expires_at = datetime.now(UTC).isoformat()
         user_data = {
             'username': username,
             'email': email,
             'credits': credits,
             'privy_user_id': privy_user_id,
             'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
-            'created_at': datetime.now(timezone.utc).isoformat(),
+            'created_at': datetime.now(UTC).isoformat(),
             'subscription_status': subscription_status,
             'trial_expires_at': trial_expires_at,
             'tier': 'basic',
@@ -1107,7 +1107,7 @@ def test_request_password_reset_user_not_found(client, sb):
 def test_reset_password_with_valid_token(client, sb):
     """Test resetting password with valid token"""
     # Create valid token
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    expires_at = datetime.now(UTC).replace(hour=23, minute=59)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'valid_token_123',
@@ -1137,7 +1137,7 @@ def test_reset_password_with_invalid_token(client, sb):
 def test_reset_password_with_expired_token(client, sb):
     """Test resetting password with expired token"""
     # Create expired token
-    expires_at = datetime.now(timezone.utc).replace(year=2020)
+    expires_at = datetime.now(UTC).replace(year=2020)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'expired_token_123',
@@ -1154,7 +1154,7 @@ def test_reset_password_with_expired_token(client, sb):
 
 def test_reset_password_with_used_token(client, sb):
     """Test resetting password with already used token"""
-    expires_at = datetime.now(timezone.utc).replace(hour=23, minute=59)
+    expires_at = datetime.now(UTC).replace(hour=23, minute=59)
     sb.table('password_reset_tokens').insert({
         'id': '1',
         'token': 'used_token_123',

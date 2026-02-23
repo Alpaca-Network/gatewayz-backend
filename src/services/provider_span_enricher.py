@@ -35,7 +35,7 @@ from urllib.parse import urlparse
 
 try:
     from opentelemetry.sdk.trace import ReadableSpan
-    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+    from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult  # noqa: F401
     from opentelemetry.trace import SpanKind
 
     OPENTELEMETRY_AVAILABLE = True

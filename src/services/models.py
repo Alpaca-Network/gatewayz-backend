@@ -1,9 +1,8 @@
 import csv
-import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -13,35 +12,19 @@ from fastapi import APIRouter
 
 from src.cache import (
     # Cache helper functions
-    clear_gateway_error,
     get_gateway_error_message,
-    is_cache_fresh,
     is_gateway_in_error_state,
-    set_gateway_error,
-    should_revalidate_in_background,
 )
 from src.config import Config
 from src.config.redis_config import get_redis_manager
-from src.services.cerebras_client import fetch_models_from_cerebras
-from src.services.clarifai_client import fetch_models_from_clarifai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.google_models_config import register_google_models_in_canonical_registry
-from src.services.google_vertex_client import fetch_models_from_google_vertex
-from src.services.huggingface_models import fetch_models_from_hug, get_huggingface_model_info
+from src.services.huggingface_models import get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
-from src.services.morpheus_client import fetch_models_from_morpheus
-from src.services.nebius_client import fetch_models_from_nebius
-from src.services.novita_client import fetch_models_from_novita
-from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.pricing_lookup import enrich_model_with_pricing
-from src.services.canopywave_client import fetch_models_from_canopywave
-from src.services.simplismart_client import fetch_models_from_simplismart
-from src.services.sybil_client import fetch_models_from_sybil
-from src.services.xai_client import fetch_models_from_xai
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -229,7 +212,7 @@ def apply_database_fallback(
         if normalized_models:
             log_provider_fetch_warning(
                 provider_slug=provider_slug,
-                message=f"Database fallback successful",
+                message="Database fallback successful",
                 context={
                     "raw_count": len(raw_models),
                     "normalized_count": len(normalized_models),
@@ -375,7 +358,7 @@ def _register_canonical_records(provider_slug: str, models: list | None) -> None
 
 def _fresh_cached_models(cache: dict, provider_slug: str):
     if cache.get("data") and cache.get("timestamp"):
-        cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+        cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
         if cache_age < cache.get("ttl", 0):
             _register_canonical_records(provider_slug, cache["data"])
             return cache["data"]
@@ -402,7 +385,7 @@ def _get_fresh_or_stale_cached_models(cache: dict, provider_slug: str):
     if cache.get("data") is None or not cache.get("timestamp"):
         return None
 
-    cache_age = (datetime.now(timezone.utc) - cache["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cache["timestamp"]).total_seconds()
     ttl = cache.get("ttl", 3600)
     stale_ttl = cache.get("stale_ttl", 7200)
 
@@ -834,7 +817,7 @@ def _refresh_multi_provider_catalog_cache() -> AggregatedCatalog:
             ttl=3600,
         )
         redis_manager.set(
-            "multi_provider_catalog:timestamp", datetime.now(timezone.utc).isoformat(), ttl=3600
+            "multi_provider_catalog:timestamp", datetime.now(UTC).isoformat(), ttl=3600
         )
     except Exception as e:
         logger.warning(f"Failed to cache multi-provider catalog in Redis: {e}")
@@ -1435,7 +1418,7 @@ def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
                     return model
 
         # If not in cache, try to fetch fresh data
-        fresh_models = fetch_models_from_openrouter()
+        fresh_models = fetch_models_from_openrouter()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id_lower:
@@ -1975,7 +1958,7 @@ def get_vercel_model_pricing(model_id: str) -> dict:
     except Exception as e:
         logger.debug(
             "Failed to fetch Vercel pricing for %s: %s",
-            sanitize_for_logging(provider_model_id),
+            sanitize_for_logging(provider_model_id),  # noqa: F821
             sanitize_for_logging(str(e)),
         )
 
@@ -1999,7 +1982,7 @@ def fetch_specific_model_from_together(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
-        fresh_models = fetch_models_from_together()
+        fresh_models = fetch_models_from_together()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id.lower():
@@ -2033,7 +2016,7 @@ def fetch_specific_model_from_featherless(provider_name: str, model_name: str):
                     return model
 
         # If not in cache, try to fetch fresh data
-        fresh_models = fetch_models_from_featherless()
+        fresh_models = fetch_models_from_featherless()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id.lower():
@@ -2229,7 +2212,7 @@ def fetch_specific_model_from_chutes(provider_name: str, model_name: str):
                     return model
 
         # If not in cache, try to fetch fresh data
-        fresh_models = fetch_models_from_chutes()
+        fresh_models = fetch_models_from_chutes()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id.lower():
@@ -2260,7 +2243,7 @@ def fetch_specific_model_from_groq(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
-        fresh_models = fetch_models_from_groq()
+        fresh_models = fetch_models_from_groq()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id.lower():
@@ -2291,7 +2274,7 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
                 if model.get("id", "").lower() == provider_model_id.lower():
                     return model
 
-        fresh_models = fetch_models_from_fireworks()
+        fresh_models = fetch_models_from_fireworks()  # noqa: F821
         if fresh_models:
             for model in fresh_models:
                 if model.get("id", "").lower() == provider_model_id.lower():
@@ -3133,7 +3116,7 @@ def get_helicone_model_pricing(model_id: str) -> dict:
     except Exception as e:
         logger.debug(
             "Failed to fetch Helicone pricing for %s: %s",
-            sanitize_for_logging(provider_model_id),
+            sanitize_for_logging(provider_model_id),  # noqa: F821
             sanitize_for_logging(str(e)),
         )
 

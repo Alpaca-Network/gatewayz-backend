@@ -18,12 +18,11 @@ Usage:
 import asyncio
 import logging
 from difflib import get_close_matches
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 
-async def get_available_models() -> List[str]:
+async def get_available_models() -> list[str]:
     """
     Get list of all available model IDs.
 
@@ -53,10 +52,10 @@ async def get_available_models() -> List[str]:
 
 async def find_similar_models(
     requested_model: str,
-    available_models: Optional[List[str]] = None,
+    available_models: list[str] | None = None,
     max_suggestions: int = 5,
     cutoff: float = 0.6,
-) -> List[str]:
+) -> list[str]:
     """
     Find similar model names using fuzzy matching.
 
@@ -121,7 +120,7 @@ async def find_similar_models_by_provider(
     provider: str,
     max_suggestions: int = 5,
     cutoff: float = 0.6,
-) -> List[str]:
+) -> list[str]:
     """
     Find similar models from a specific provider.
 
@@ -197,7 +196,7 @@ def extract_model_family(model_id: str) -> str:
 async def find_models_in_same_family(
     model_id: str,
     max_suggestions: int = 5,
-) -> List[str]:
+) -> list[str]:
     """
     Find other models in the same family.
 
@@ -240,11 +239,11 @@ async def find_models_in_same_family(
 
 async def suggest_alternatives(
     requested_model: str,
-    provider: Optional[str] = None,
+    provider: str | None = None,
     include_family: bool = True,
     include_fuzzy: bool = True,
     max_total: int = 5,
-) -> List[str]:
+) -> list[str]:
     """
     Comprehensive model suggestion function.
 

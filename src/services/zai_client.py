@@ -8,7 +8,6 @@ API Documentation: https://docs.z.ai
 """
 
 import logging
-from datetime import datetime, timezone
 
 import httpx
 

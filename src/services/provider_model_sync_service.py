@@ -18,11 +18,9 @@ Usage:
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, UTC
 from typing import Any
 
-from src.config import Config
-from src.db.providers_db import get_provider_by_slug
 from src.routes.catalog import GATEWAY_REGISTRY
 from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS, sync_provider_models
 
@@ -189,7 +187,7 @@ async def sync_models_from_providers(
             if i + batch_size < len(provider_slugs):
                 await asyncio.sleep(1)
 
-        _last_model_sync = datetime.now(timezone.utc)
+        _last_model_sync = datetime.now(UTC)
 
         logger.info(
             f"✅ Model sync complete: {providers_synced}/{len(provider_slugs)} providers, "

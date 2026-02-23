@@ -1,8 +1,7 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 # Cache management functions migrated to model_catalog_cache
@@ -13,7 +12,6 @@ from src.services.model_catalog_cache import (
     invalidate_gateway_catalog,
     invalidate_provider_catalog,
 )
-from src.config import Config
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
@@ -34,11 +32,10 @@ from src.schemas import (
 )
 from src.security.deps import require_admin
 from src.services.models import (
-    enhance_model_with_provider_info,
     fetch_huggingface_model,
     get_cached_models,
 )
-from src.services.providers import fetch_providers_from_openrouter, get_cached_providers
+from src.services.providers import get_cached_providers
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -88,7 +85,7 @@ async def create_api_key(request: UserRegistrationRequest):
             auth_method=request.auth_method,
             subscription_status="trial",
             message="API key created successfully!",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
     except ValueError as e:
@@ -174,14 +171,14 @@ async def admin_monitor(admin_user: dict = Depends(require_admin)):
             # Still return the data but log the error
             return {
                 "status": "success",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "data": monitor_data,
                 "warning": "Data retrieved with errors, some information may be incomplete",
             }
 
         return {
             "status": "success",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "data": monitor_data,
         }
 
@@ -237,7 +234,7 @@ async def admin_refresh_providers(admin_user: dict = Depends(require_admin)):
             "status": "success",
             "message": "Provider cache refreshed successfully",
             "total_providers": len(providers) if providers else 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -251,7 +248,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
         provider_cache = get_provider_cache_metadata()
         cache_age = None
         if provider_cache.get("timestamp"):
-            cache_age = (datetime.now(timezone.utc) - provider_cache["timestamp"]).total_seconds()
+            cache_age = (datetime.now(UTC) - provider_cache["timestamp"]).total_seconds()
 
         return {
             "status": "success",
@@ -264,7 +261,7 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
                     len(provider_cache["data"]) if provider_cache.get("data") else 0
                 ),
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -280,7 +277,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
         cache_age = None
         if hf_cache.get("timestamp"):
             cache_age = (
-                datetime.now(timezone.utc) - hf_cache["timestamp"]
+                datetime.now(UTC) - hf_cache["timestamp"]
             ).total_seconds()
 
         hf_data = hf_cache.get("data") or []
@@ -293,7 +290,7 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
                 "total_cached_models": len(hf_data),
                 "cached_model_ids": cached_ids,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -311,7 +308,7 @@ async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_adm
 
         return {
             "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -361,7 +358,7 @@ async def admin_test_huggingface(
                     ),
                 },
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -421,7 +418,7 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_models": sample_models,
                 "cache_timestamp": models_cache_meta.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - models_cache_meta["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - models_cache_meta["timestamp"]).total_seconds()
                     if models_cache_meta.get("timestamp")
                     else None
                 ),
@@ -431,13 +428,13 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 "sample_providers": sample_providers,
                 "cache_timestamp": providers_cache_meta.get("timestamp"),
                 "cache_age_seconds": (
-                    (datetime.now(timezone.utc) - providers_cache_meta["timestamp"]).total_seconds()
+                    (datetime.now(UTC) - providers_cache_meta["timestamp"]).total_seconds()
                     if providers_cache_meta.get("timestamp")
                     else None
                 ),
             },
             "provider_matching_test": provider_matching_test,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -463,7 +460,7 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         return {
             "status": "success",
             "message": "Rate limit cache cleared successfully. New requests will reload configuration.",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -510,7 +507,7 @@ async def get_user_growth(
         client = get_supabase_client()
 
         # Calculate date range
-        end_date = datetime.now(timezone.utc).date()
+        end_date = datetime.now(UTC).date()
         start_date = end_date - timedelta(days=days - 1)
 
         # Get user registration data grouped by day
@@ -561,7 +558,7 @@ async def get_user_growth(
                     "data": [],
                     "total": 0,
                     "growth_rate": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
         # Initialize daily data structure
@@ -644,7 +641,7 @@ async def get_user_growth(
             "data": cumulative_data,
             "total": cumulative_total,
             "growth_rate": round(growth_rate, 2),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -681,7 +678,7 @@ async def get_users_count(admin_user: dict = Depends(require_admin)):
 
         return {
             "count": total_count,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -887,7 +884,7 @@ async def get_users_stats(
                 "average_credits": avg_credits,
                 "subscription_breakdown": subscription_stats,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except Exception as e:
@@ -980,7 +977,7 @@ async def get_all_users_info(
                         "is_active": is_active,
                     },
                     "users": users,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
             except Exception as rpc_err:
                 logger.error(f"RPC function failed for email search: {rpc_err}", exc_info=True)
@@ -1084,7 +1081,7 @@ async def get_all_users_info(
                 "is_active": is_active,
             },
             "users": users,  # Current page of users
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1323,7 +1320,7 @@ async def get_user_by_api_key(
         return {
             "status": "success",
             "user": user,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1450,7 +1447,7 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
         return {
             "status": "success",
             "api_key": response_data,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1516,7 +1513,7 @@ async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_a
             "api_keys": api_keys,
             "recent_usage": recent_usage,
             "recent_activity": recent_activity,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1592,7 +1589,7 @@ async def delete_users_by_domain(
                 "dry_run": dry_run,
                 "count": 0,
                 "users": [],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Prepare user summary
@@ -1618,7 +1615,7 @@ async def delete_users_by_domain(
                 "dry_run": True,
                 "count": len(users_to_delete),
                 "users": user_summary,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Actually delete users
@@ -1644,7 +1641,7 @@ async def delete_users_by_domain(
             "count": deleted_count,
             "failed": failed_deletions,
             "users": user_summary,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     except HTTPException:
@@ -1800,7 +1797,7 @@ async def get_chat_completion_requests_by_api_key_admin(
                 "next_offset": offset + limit if has_more else None,
                 "prev_offset": max(0, offset - limit) if offset > 0 else None,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         # Add summary only if requested (backward compatibility - DEPRECATED)
@@ -1849,7 +1846,7 @@ async def get_providers_with_requests_admin(admin_user: dict = Depends(require_a
                     "data": rpc_result.data,
                     "metadata": {
                         "total_providers": len(rpc_result.data),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "method": "rpc",
                     },
                 }
@@ -1869,7 +1866,7 @@ async def get_providers_with_requests_admin(admin_user: dict = Depends(require_a
                 "data": [],
                 "metadata": {
                     "total_providers": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             }
 
@@ -1914,7 +1911,7 @@ async def get_providers_with_requests_admin(admin_user: dict = Depends(require_a
             "data": providers_list,
             "metadata": {
                 "total_providers": len(providers_list),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -1951,7 +1948,7 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
                 "metadata": {
                     "total_models": 0,
                     "total_requests": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             }
 
@@ -1980,7 +1977,7 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
             "metadata": {
                 "total_models": len(counts_list),
                 "total_requests": sum(m["request_count"] for m in counts_list),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -2020,7 +2017,7 @@ async def get_models_with_requests_admin(
                     "data": rpc_result.data,
                     "metadata": {
                         "total_models": len(rpc_result.data),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "method": "rpc",
                     },
                 }
@@ -2041,7 +2038,7 @@ async def get_models_with_requests_admin(
                 "data": [],
                 "metadata": {
                     "total_models": 0,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 },
             }
 
@@ -2106,7 +2103,7 @@ async def get_models_with_requests_admin(
             "data": models_data,
             "metadata": {
                 "total_models": len(models_data),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -2189,7 +2186,7 @@ async def get_chat_completion_requests_admin(
                     "start_date": start_date,
                     "end_date": end_date,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
             },
         }
 
@@ -2283,7 +2280,7 @@ async def get_chat_requests_summary_admin(
                     logger.info(f"Cache HIT for chat summary: filter_hash={filter_hash}")
                     result = json.loads(cached_data)
                     result["cached"] = True
-                    result["timestamp"] = datetime.now(timezone.utc).isoformat()
+                    result["timestamp"] = datetime.now(UTC).isoformat()
                     return result
             except Exception as cache_error:
                 logger.warning(f"Redis cache read failed: {cache_error}")
@@ -2308,7 +2305,7 @@ async def get_chat_requests_summary_admin(
                 "start_date": start_date,
                 "end_date": end_date,
             },
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "cached": cached,
         }
 
@@ -2421,7 +2418,7 @@ async def get_chat_requests_plot_data_admin(
             "metadata": {
                 "recent_count": len(recent_requests[:10]),
                 "total_count": len(all_requests),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "compression": "arrays",
                 "format_version": "1.0",
             },
@@ -2528,7 +2525,7 @@ async def get_model_usage_analytics(
             },
             "filters": {"model_name": model_name, "sort_by": sort_by, "sort_order": sort_order},
             "metadata": {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "items_in_page": len(result.data or []),
             },
         }

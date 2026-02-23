@@ -9,7 +9,7 @@ ensure seamless failover before providers run out of credits.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config import Config
@@ -49,7 +49,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
     # Check cache first
     if provider in _credit_balance_cache:
         cached = _credit_balance_cache[provider]
-        cache_age = datetime.now(timezone.utc) - cached["checked_at"]
+        cache_age = datetime.now(UTC) - cached["checked_at"]
         if cache_age < timedelta(minutes=CACHE_DURATION_MINUTES):
             logger.debug(f"Using cached credit balance for {provider}: ${cached['balance']:.2f}")
             return {**cached, "cached": True}
@@ -64,7 +64,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
                 "provider": provider,
                 "balance": None,
                 "status": "unknown",
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "cached": False,
                 "error": "API key not configured"
             }
@@ -87,7 +87,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
                     "provider": provider,
                     "balance": None,
                     "status": "unknown",
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "cached": False,
                     "error": "Could not parse balance"
                 }
@@ -99,7 +99,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
                 "provider": provider,
                 "balance": balance,
                 "status": status,
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "cached": False
             }
 
@@ -122,7 +122,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
             "provider": provider,
             "balance": None,
             "status": "unknown",
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "cached": False,
             "error": f"HTTP {e.response.status_code}"
         }
@@ -132,7 +132,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
             "provider": provider,
             "balance": None,
             "status": "unknown",
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "cached": False,
             "error": str(e)
         }

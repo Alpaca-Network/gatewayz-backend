@@ -16,7 +16,7 @@ Features:
 import json
 import logging
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from pathlib import Path
 from typing import Any
 
@@ -76,7 +76,7 @@ class LogBuffer:
         if not self._buffer:
             return
 
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.max_minutes)
+        cutoff = datetime.now(UTC) - timedelta(minutes=self.max_minutes)
 
         # Remove old entries from the left
         while self._buffer:
@@ -129,8 +129,8 @@ class LogBuffer:
         Returns:
             List of recent log entries
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
-        now = datetime.now(timezone.utc)
+        cutoff = datetime.now(UTC) - timedelta(minutes=minutes)
+        now = datetime.now(UTC)
         return self.get_logs_in_range(cutoff, now)
 
 
@@ -202,7 +202,7 @@ def query_loki_logs(
 
                     # Convert timestamp to datetime
                     timestamp = datetime.fromtimestamp(
-                        int(timestamp_ns) / 1_000_000_000, tz=timezone.utc
+                        int(timestamp_ns) / 1_000_000_000, tz=UTC
                     )
 
                     # Try to parse JSON log line
@@ -267,7 +267,7 @@ def capture_downtime_logs(
             end_time = downtime_end + timedelta(minutes=POST_DOWNTIME_MINUTES)
         else:
             # Still ongoing - capture up to now
-            end_time = datetime.now(timezone.utc)
+            end_time = datetime.now(UTC)
 
         logger.info(
             f"Capturing logs for incident {incident_id} from "
@@ -357,7 +357,7 @@ def _save_logs_to_file(
         Path(directory).mkdir(parents=True, exist_ok=True)
 
         # Generate filename with timestamp
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         filename = f"incident_{incident_id}_{timestamp}.json"
         file_path = Path(directory) / filename
 
@@ -366,7 +366,7 @@ def _save_logs_to_file(
             json.dump(
                 {
                     "incident_id": incident_id,
-                    "captured_at": datetime.now(timezone.utc).isoformat(),
+                    "captured_at": datetime.now(UTC).isoformat(),
                     "log_count": len(logs),
                     "logs": logs,
                 },

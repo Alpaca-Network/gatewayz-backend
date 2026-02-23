@@ -4,7 +4,7 @@ Tests all coupon endpoints with real database interactions
 """
 import os
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -34,7 +34,7 @@ def test_api_keys(supabase_client, test_prefix):
             "email": email,
             "credits": int(credits) if isinstance(credits, float) else credits,
             "api_key": api_key,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         user_result = supabase_client.table("users").insert(user_data).execute()
@@ -54,7 +54,7 @@ def test_api_keys(supabase_client, test_prefix):
             "is_active": True,
             "environment_tag": "test",
             "scope_permissions": ["chat", "images"],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
         }
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
@@ -100,7 +100,7 @@ def admin_api_key(supabase_client, test_prefix):
         "credits": 1000,
         "api_key": admin_api_key_value,
         "is_admin": True,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     try:
@@ -126,7 +126,7 @@ def admin_api_key(supabase_client, test_prefix):
         "is_active": True,
         "environment_tag": "test",
         "scope_permissions": ["chat", "images", "admin"],
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     admin_key_result = supabase_client.table("api_keys_new").insert(admin_key_data).execute()
@@ -174,7 +174,7 @@ class TestCouponAdminEndpoints:
     def test_create_global_coupon(self, client, admin_api_key, test_prefix, cleanup_coupons):
         """Test creating a global promotional coupon"""
         code = f"GLOBAL{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         response = client.post(
             "/admin/coupons",
@@ -207,7 +207,7 @@ class TestCouponAdminEndpoints:
         """Test creating a user-specific coupon"""
         user = test_api_keys(credits=50.0, username_suffix="coupon_user")
         code = f"USER{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         response = client.post(
             "/admin/coupons",
@@ -237,7 +237,7 @@ class TestCouponAdminEndpoints:
     def test_create_coupon_invalid_negative_value(self, client, admin_api_key, test_prefix):
         """Test that negative coupon values are rejected"""
         code = f"INVALID{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         response = client.post(
             "/admin/coupons",
@@ -257,7 +257,7 @@ class TestCouponAdminEndpoints:
     def test_create_user_specific_without_assigned_user(self, client, admin_api_key, test_prefix):
         """Test that user-specific coupons require assigned_to_user_id"""
         code = f"INVALID{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         response = client.post(
             "/admin/coupons",
@@ -278,7 +278,7 @@ class TestCouponAdminEndpoints:
         """Test listing all coupons"""
         # Create a coupon first
         code = f"LIST{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -330,7 +330,7 @@ class TestCouponAdminEndpoints:
         """Test getting a specific coupon by ID"""
         # Create a coupon
         code = f"GETID{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -374,7 +374,7 @@ class TestCouponAdminEndpoints:
         """Test updating coupon fields"""
         # Create a coupon
         code = f"UPDATE{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -409,7 +409,7 @@ class TestCouponAdminEndpoints:
         """Test deactivating a coupon"""
         # Create a coupon
         code = f"DEACT{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -456,7 +456,7 @@ class TestCouponUserEndpoints:
 
         # Create a global coupon
         global_code = f"AVAIL{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         global_response = client.post(
             "/admin/coupons",
@@ -517,7 +517,7 @@ class TestCouponUserEndpoints:
 
         # Create a global coupon
         code = f"REDEEM{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -555,7 +555,7 @@ class TestCouponUserEndpoints:
 
         # Create a user-specific coupon
         code = f"SPECIFIC{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -592,7 +592,7 @@ class TestCouponUserEndpoints:
 
         # Create a global coupon
         code = f"TWICE{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -653,7 +653,7 @@ class TestCouponUserEndpoints:
 
         # Create an expired coupon
         code = f"EXPIRED{test_prefix}"
-        expired_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        expired_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -687,7 +687,7 @@ class TestCouponUserEndpoints:
 
         # Create a coupon
         code = f"DEACTIVATE{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -729,7 +729,7 @@ class TestCouponUserEndpoints:
 
         # Create and redeem a coupon
         code = f"HISTORY{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -792,7 +792,7 @@ class TestCouponAnalytics:
 
         # Create a coupon
         code = f"ANALYTICS{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",
@@ -864,7 +864,7 @@ class TestCouponEdgeCases:
     def test_create_coupon_without_admin_key(self, client, test_prefix):
         """Test that creating coupons requires admin API key"""
         code = f"NOAUTH{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         response = client.post(
             "/admin/coupons",
@@ -899,7 +899,7 @@ class TestCouponEdgeCases:
 
         # Create coupon for user1
         code = f"USER1ONLY{test_prefix}"
-        valid_until = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        valid_until = (datetime.now(UTC) + timedelta(days=30)).isoformat()
 
         create_response = client.post(
             "/admin/coupons",

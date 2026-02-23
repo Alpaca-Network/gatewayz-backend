@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ async def validate_model_availability(
     cache_key = f"{provider}:{model_id}"
     if cache_key in _validation_cache:
         cached = _validation_cache[cache_key]
-        cache_age = datetime.now(timezone.utc) - cached["checked_at"]
+        cache_age = datetime.now(UTC) - cached["checked_at"]
         if cache_age < VALIDATION_CACHE_DURATION:
             logger.debug(f"Using cached validation for {cache_key}: available={cached['available']}")
             return cached
@@ -56,7 +56,7 @@ async def validate_model_availability(
         "model_id": model_id,
         "provider": provider,
         "available": False,
-        "checked_at": datetime.now(timezone.utc),
+        "checked_at": datetime.now(UTC),
         "error": None,
     }
 
@@ -124,8 +124,8 @@ async def _validate_cerebras_model(model_id: str) -> dict[str, Any]:
                 "model_id": model_id,
                 "provider": "cerebras",
                 "available": is_available,
-                "checked_at": datetime.now(timezone.utc),
-                "error": None if is_available else f"Model not found in Cerebras catalog",
+                "checked_at": datetime.now(UTC),
+                "error": None if is_available else "Model not found in Cerebras catalog",
             }
 
         except Exception as list_err:
@@ -139,7 +139,7 @@ async def _validate_cerebras_model(model_id: str) -> dict[str, Any]:
             "model_id": model_id,
             "provider": "cerebras",
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": str(e),
         }
 
@@ -174,7 +174,7 @@ async def _validate_huggingface_model(model_id: str) -> dict[str, Any]:
                     "model_id": model_id,
                     "provider": "huggingface",
                     "available": False,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": "Model not found on HuggingFace Hub",
                 }
             else:
@@ -183,7 +183,7 @@ async def _validate_huggingface_model(model_id: str) -> dict[str, Any]:
                     "model_id": model_id,
                     "provider": "huggingface",
                     "available": False,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": f"HTTP {response.status_code}",
                 }
 
@@ -193,7 +193,7 @@ async def _validate_huggingface_model(model_id: str) -> dict[str, Any]:
             "model_id": model_id,
             "provider": "huggingface",
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": str(e),
         }
 
@@ -211,7 +211,7 @@ async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
                 "model_id": model_id,
                 "provider": "huggingface",
                 "available": True,
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "error": None,
             }
 
@@ -237,7 +237,7 @@ async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
                     "model_id": model_id,
                     "provider": "huggingface",
                     "available": True,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": None,
                 }
             elif response.status_code in (400, 404):
@@ -248,7 +248,7 @@ async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
                     "model_id": model_id,
                     "provider": "huggingface",
                     "available": False,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": "Model not available on HF Inference Router",
                 }
             else:
@@ -257,7 +257,7 @@ async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
                     "model_id": model_id,
                     "provider": "huggingface",
                     "available": False,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": f"HTTP {response.status_code}",
                 }
 
@@ -267,7 +267,7 @@ async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
             "model_id": model_id,
             "provider": "huggingface",
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": str(e),
         }
 
@@ -285,7 +285,7 @@ async def _validate_openrouter_model(model_id: str) -> dict[str, Any]:
                 "model_id": model_id,
                 "provider": "openrouter",
                 "available": False,
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "error": "API key not configured",
             }
 
@@ -311,7 +311,7 @@ async def _validate_openrouter_model(model_id: str) -> dict[str, Any]:
                 "model_id": model_id,
                 "provider": "openrouter",
                 "available": is_available,
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "error": None if is_available else "Model not found in OpenRouter catalog",
             }
 
@@ -321,7 +321,7 @@ async def _validate_openrouter_model(model_id: str) -> dict[str, Any]:
             "model_id": model_id,
             "provider": "openrouter",
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": str(e),
         }
 
@@ -348,7 +348,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
                     "model_id": model_id,
                     "provider": provider,
                     "available": True,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": None,
                 }
             except Exception as e:
@@ -358,7 +358,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
                         "model_id": model_id,
                         "provider": provider,
                         "available": False,
-                        "checked_at": datetime.now(timezone.utc),
+                        "checked_at": datetime.now(UTC),
                         "error": "Model not found via test request",
                     }
                 # Other errors don't necessarily mean unavailable
@@ -370,7 +370,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
             "model_id": model_id,
             "provider": provider,
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": "Test request validation not implemented",
         }
 
@@ -380,7 +380,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
             "model_id": model_id,
             "provider": provider,
             "available": False,
-            "checked_at": datetime.now(timezone.utc),
+            "checked_at": datetime.now(UTC),
             "error": str(e),
         }
 
@@ -414,7 +414,7 @@ async def validate_models_batch(
 
     # Filter out unavailable models
     validated_models = []
-    for model, result in zip(models, validation_results):
+    for model, result in zip(models, validation_results):  # noqa: B905
         if isinstance(result, Exception):
             logger.error(f"Validation failed for model {model['id']}: {result}")
             continue

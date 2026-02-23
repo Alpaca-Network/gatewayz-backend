@@ -16,10 +16,9 @@ Compatible with:
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Request, Response
-from fastapi.responses import JSONResponse
 
 from src.services.grafana_metrics_service import grafana_metrics_service
 
@@ -141,7 +140,7 @@ async def test_metrics(request: Request):
         if tracer:
             with tracer.start_as_current_span("test_metrics_generation") as span:
                 span.set_attribute("test", True)
-                span.set_attribute("timestamp", datetime.now(timezone.utc).isoformat())
+                span.set_attribute("timestamp", datetime.now(UTC).isoformat())
 
                 # Generate test metrics within span
                 _generate_test_metrics(
@@ -178,7 +177,7 @@ async def test_metrics(request: Request):
         "trace_id": trace_id or "none",
         "span_id": span_id or "none",
         "duration_ms": duration_ms,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "verification": {
             "prometheus": "Check /metrics endpoint for fastapi_* metrics",
             "loki": "Query: {service=\"gatewayz-api\", test=\"true\"}",
@@ -327,7 +326,7 @@ async def metrics_health():
     """
     health = {
         "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "components": {}
     }
 

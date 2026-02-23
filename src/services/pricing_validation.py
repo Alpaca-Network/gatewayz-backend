@@ -16,7 +16,7 @@ Part of pricing system audit improvements (Issue #1038)
 
 import logging
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -400,8 +400,8 @@ def get_validation_stats() -> dict[str, Any]:
     """
     try:
         from src.services.prometheus_metrics import (
-            pricing_validation_total,
-            pricing_validation_failures
+            pricing_validation_total,  # noqa: F401
+            pricing_validation_failures  # noqa: F401
         )
         # This would require collecting metrics - simplified for now
         return {

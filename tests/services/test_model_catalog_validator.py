@@ -3,7 +3,7 @@ Tests for model catalog validation service.
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.services.model_catalog_validator import (
@@ -234,7 +234,7 @@ class TestValidateModelsBatch:
                 "available": True,
                 "model_id": "test",
                 "provider": "cerebras",
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "error": None
             }
 
@@ -265,7 +265,7 @@ class TestValidateModelsBatch:
                     "available": True,
                     "model_id": model_id,
                     "provider": provider,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": None
                 }
             else:
@@ -273,7 +273,7 @@ class TestValidateModelsBatch:
                     "available": False,
                     "model_id": model_id,
                     "provider": provider,
-                    "checked_at": datetime.now(timezone.utc),
+                    "checked_at": datetime.now(UTC),
                     "error": "Model not found"
                 }
 
@@ -313,7 +313,7 @@ class TestValidateModelsBatch:
                 "available": True,
                 "model_id": model_id,
                 "provider": provider,
-                "checked_at": datetime.now(timezone.utc),
+                "checked_at": datetime.now(UTC),
                 "error": None
             }
 

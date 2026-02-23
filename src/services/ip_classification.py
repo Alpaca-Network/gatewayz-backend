@@ -10,10 +10,8 @@ This service provides IP address classification capabilities including:
 
 import asyncio
 import logging
-from typing import Optional
 
 from src.config.datacenter_ips import (
-    get_datacenter_name,
     is_datacenter_asn,
     is_datacenter_ip,
 )
@@ -31,8 +29,8 @@ class IPClassificationResult:
         self,
         ip: str,
         is_datacenter: bool = False,
-        provider_name: Optional[str] = None,
-        asn: Optional[int] = None,
+        provider_name: str | None = None,
+        asn: int | None = None,
         classification_method: str = "cidr",
     ):
         self.ip = ip
@@ -164,7 +162,7 @@ class IPClassificationService:
             classification_method="cidr" if not check_asn else "asn",
         )
 
-    async def _lookup_asn(self, ip: str) -> Optional[tuple[int, str]]:
+    async def _lookup_asn(self, ip: str) -> tuple[int, str] | None:
         """
         Look up the ASN for an IP address.
 
@@ -191,7 +189,7 @@ class IPClassificationService:
         logger.debug(f"ASN lookup not implemented for {ip}, skipping")
         return None
 
-    async def _get_cached_result(self, ip: str) -> Optional[IPClassificationResult]:
+    async def _get_cached_result(self, ip: str) -> IPClassificationResult | None:
         """Get cached classification result from Redis or local cache"""
         cache_key = f"ip_classification:{ip}"
 
@@ -313,7 +311,7 @@ class IPClassificationService:
 
         return is_dc
 
-    async def clear_cache(self, ip: Optional[str] = None):
+    async def clear_cache(self, ip: str | None = None):
         """
         Clear IP classification cache.
 

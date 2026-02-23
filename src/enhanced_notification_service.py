@@ -10,7 +10,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 try:
@@ -183,7 +183,7 @@ class EnhancedNotificationService:
             reset_token = secrets.token_urlsafe(32)
 
             # Store token in database with expiration
-            expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            expires_at = datetime.now(UTC) + timedelta(hours=1)
             client = self.supabase or supabase_config.get_supabase_client()
             client.table("password_reset_tokens").insert(
                 {
@@ -357,7 +357,7 @@ The {self.app_name} Team
                         </div>
                         <div class="info-item">
                             <div class="label">Created</div>
-                            <div class="value">{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M timezone.utc')}</div>
+                            <div class="value">{datetime.now(UTC).strftime('%Y-%m-%d %H:%M timezone.utc')}</div>
                         </div>
                     </div>
                     <p style="margin-bottom: 12px; margin-top: 16px;">Your new API key:</p>
@@ -394,7 +394,7 @@ Hi {username},
 A new API key has been created for your account.
 
 Key Name: {key_name}
-Created: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M timezone.utc')}
+Created: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M timezone.utc')}
 
 API Key: {api_key}
 

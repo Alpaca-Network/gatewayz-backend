@@ -6,7 +6,7 @@ Handles all Stripe payment operations
 
 import logging
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from typing import Any
 
@@ -462,7 +462,7 @@ class StripeService:
                 client_reference_id=str(user_id),
                 metadata=checkout_metadata,
                 payment_intent_data={"metadata": checkout_metadata.copy()},
-                expires_at=int((datetime.now(timezone.utc) + timedelta(hours=24)).timestamp()),
+                expires_at=int((datetime.now(UTC) + timedelta(hours=24)).timestamp()),
             )
 
             # Update payment with identifiers known at session creation
@@ -486,7 +486,7 @@ class StripeService:
                 status=PaymentStatus.PENDING,
                 amount=request.amount,
                 currency=request.currency.value,
-                expires_at=datetime.fromtimestamp(session.expires_at, tz=timezone.utc),
+                expires_at=datetime.fromtimestamp(session.expires_at, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -642,7 +642,7 @@ class StripeService:
                     event_type=event["type"],
                     event_id=event["id"],
                     message=f"Event {event['id']} already processed (duplicate)",
-                    processed_at=datetime.now(timezone.utc),
+                    processed_at=datetime.now(UTC),
                 )
 
             # Extract user_id from event metadata if available
@@ -691,7 +691,7 @@ class StripeService:
                 event_type=event["type"],
                 event_id=event["id"],
                 message=f"Event {event['type']} processed successfully",
-                processed_at=datetime.now(timezone.utc),
+                processed_at=datetime.now(UTC),
             )
 
         except ValueError as e:
@@ -891,7 +891,7 @@ class StripeService:
                     client.table("users").update(
                         {
                             "subscription_status": "inactive",
-                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                            "updated_at": datetime.now(UTC).isoformat(),
                         }
                     ).eq("id", user_id).execute()
 
@@ -1052,7 +1052,7 @@ class StripeService:
                 currency=refund.currency,
                 status=refund.status,
                 reason=refund.reason,
-                created_at=datetime.fromtimestamp(refund.created, tz=timezone.utc),
+                created_at=datetime.fromtimestamp(refund.created, tz=UTC),
             )
 
         except stripe.StripeError as e:
@@ -1120,7 +1120,7 @@ class StripeService:
                 client.table("users").update(
                     {
                         "stripe_customer_id": stripe_customer_id,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
@@ -1289,7 +1289,7 @@ class StripeService:
                 "stripe_subscription_id": subscription.id,
                 "stripe_product_id": product_id,
                 "stripe_customer_id": subscription.customer,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             # Add subscription end date if available
@@ -1305,10 +1305,10 @@ class StripeService:
                 client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
 
                 # Create new plan assignment for the subscription period
-                start_date = datetime.now(timezone.utc)
+                start_date = datetime.now(UTC)
                 # Use subscription period end if available, otherwise 1 month
                 if subscription.current_period_end:
-                    end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                    end_date = datetime.fromtimestamp(subscription.current_period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -1407,7 +1407,7 @@ class StripeService:
             update_data = {
                 "subscription_status": status,
                 "tier": tier,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
             if subscription.current_period_end:
@@ -1430,10 +1430,10 @@ class StripeService:
                     client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
 
                     # Create new plan assignment for the updated subscription period
-                    start_date = datetime.now(timezone.utc)
+                    start_date = datetime.now(UTC)
                     # Use subscription period end if available, otherwise 1 month
                     if subscription.current_period_end:
-                        end_date = datetime.fromtimestamp(subscription.current_period_end, tz=timezone.utc)
+                        end_date = datetime.fromtimestamp(subscription.current_period_end, tz=UTC)
                     else:
                         end_date = start_date + timedelta(days=30)
 
@@ -1535,7 +1535,7 @@ class StripeService:
                     "subscription_status": "canceled",
                     "tier": "basic",
                     "stripe_subscription_id": None,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -1642,7 +1642,7 @@ class StripeService:
                 {
                     "subscription_status": "past_due",
                     "tier": "basic",  # Downgrade tier on payment failure
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -1722,14 +1722,14 @@ class StripeService:
                 status=subscription.status,
                 tier=tier,
                 current_period_start=datetime.fromtimestamp(
-                    subscription.current_period_start, tz=timezone.utc
+                    subscription.current_period_start, tz=UTC
                 ) if subscription.current_period_start else None,
                 current_period_end=datetime.fromtimestamp(
-                    subscription.current_period_end, tz=timezone.utc
+                    subscription.current_period_end, tz=UTC
                 ) if subscription.current_period_end else None,
                 cancel_at_period_end=subscription.cancel_at_period_end,
                 canceled_at=datetime.fromtimestamp(
-                    subscription.canceled_at, tz=timezone.utc
+                    subscription.canceled_at, tz=UTC
                 ) if subscription.canceled_at else None,
                 product_id=product_id,
                 price_id=price_id,
@@ -1831,7 +1831,7 @@ class StripeService:
                 {
                     "tier": new_tier,
                     "stripe_product_id": request.new_product_id,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -1842,9 +1842,9 @@ class StripeService:
                 client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
 
                 # Create new plan assignment
-                start_date = datetime.now(timezone.utc)
+                start_date = datetime.now(UTC)
                 if updated_subscription.current_period_end:
-                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=timezone.utc)
+                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -2023,7 +2023,7 @@ class StripeService:
                 {
                     "tier": new_tier,
                     "stripe_product_id": request.new_product_id,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(UTC).isoformat(),
                 }
             ).eq("id", user_id).execute()
 
@@ -2034,9 +2034,9 @@ class StripeService:
                 client.table("user_plans").update({"is_active": False}).eq("user_id", user_id).execute()
 
                 # Create new plan assignment
-                start_date = datetime.now(timezone.utc)
+                start_date = datetime.now(UTC)
                 if updated_subscription.current_period_end:
-                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=timezone.utc)
+                    end_date = datetime.fromtimestamp(updated_subscription.current_period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -2174,7 +2174,7 @@ class StripeService:
                 )
 
                 effective_date = datetime.fromtimestamp(
-                    updated_subscription.current_period_end, tz=timezone.utc
+                    updated_subscription.current_period_end, tz=UTC
                 ) if updated_subscription.current_period_end else None
 
                 # Update user's subscription status to indicate pending cancellation
@@ -2186,7 +2186,7 @@ class StripeService:
                 # The actual downgrade will happen when subscription.deleted webhook fires
                 client.table("users").update(
                     {
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
@@ -2229,7 +2229,7 @@ class StripeService:
                         "subscription_status": "canceled",
                         "tier": "basic",
                         "stripe_subscription_id": None,
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "updated_at": datetime.now(UTC).isoformat(),
                     }
                 ).eq("id", user_id).execute()
 
@@ -2256,7 +2256,7 @@ class StripeService:
                     status="canceled",
                     current_tier="basic",
                     message="Subscription canceled immediately. You have been downgraded to the free tier.",
-                    effective_date=datetime.now(timezone.utc),
+                    effective_date=datetime.now(UTC),
                 )
 
         except stripe.StripeError as e:

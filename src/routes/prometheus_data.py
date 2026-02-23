@@ -28,7 +28,7 @@ See src/routes/monitoring.py for the full list of monitoring endpoints.
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -95,7 +95,7 @@ async def invalidate_cache(
         "success": True,
         "invalidated_count": count,
         "pattern": pattern,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
 
 
@@ -112,7 +112,7 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
             return {
                 "status": "unavailable",
                 "message": "Redis not connected",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
         # Get all prometheus data cache keys
@@ -132,13 +132,13 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
             "cache_prefix": CACHE_PREFIX,
             "cached_entries": cache_entries,
             "entry_count": len(cache_entries),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
     except Exception as e:
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
 
@@ -274,7 +274,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
         import httpx
 
         health_status = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "status": "healthy",
             "components": {}
         }
@@ -345,7 +345,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
     except Exception as e:
         logger.error(f"Failed to get instrumentation health: {e}", exc_info=True)
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "status": "error",
             "error": str(e)
         }
@@ -360,7 +360,7 @@ async def get_loki_status(api_key: str | None = Depends(get_optional_api_key)):
         return {
             "status": "not_configured",
             "message": "LOKI_URL environment variable not set",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     try:
@@ -372,14 +372,14 @@ async def get_loki_status(api_key: str | None = Depends(get_optional_api_key)):
                 "status": "healthy" if ready_response.status_code == 200 else "unhealthy",
                 "url": loki_url,
                 "ready": ready_response.status_code == 200,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
     except Exception as e:
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
 
@@ -392,7 +392,7 @@ async def get_tempo_status(api_key: str | None = Depends(get_optional_api_key)):
         return {
             "status": "not_configured",
             "message": "TEMPO_URL environment variable not set",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
     try:
@@ -404,14 +404,14 @@ async def get_tempo_status(api_key: str | None = Depends(get_optional_api_key)):
                 "status": "healthy" if ready_response.status_code == 200 else "unhealthy",
                 "url": tempo_url,
                 "ready": ready_response.status_code == 200,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
     except Exception as e:
         return {
             "status": "error",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }
 
 
@@ -436,7 +436,7 @@ async def test_log_ingestion(
         "message": f"Test log sent at level '{level}'",
         "trace_id": trace_id,
         "log_message": message,
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(UTC).isoformat()
     }
 
 
@@ -469,7 +469,7 @@ async def test_trace_ingestion(
                 "span_id": span_id,
                 "operation": operation,
                 "method": "opentelemetry",
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(UTC).isoformat()
             }
 
     except ImportError:
@@ -480,5 +480,5 @@ async def test_trace_ingestion(
             "span_id": span_id,
             "operation": operation,
             "method": "simulated",
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat()
         }

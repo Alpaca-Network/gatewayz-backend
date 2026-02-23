@@ -14,7 +14,7 @@ from pydantic import AliasChoices, BaseModel, Field, field_validator
 # ==================== Enums ====================
 
 
-class PaymentMethod(str, Enum):
+class PaymentMethod(str, Enum):  # noqa: UP042
     """Payment method types"""
 
     STRIPE = "stripe"
@@ -23,7 +23,7 @@ class PaymentMethod(str, Enum):
     BANK_TRANSFER = "bank_transfer"
 
 
-class PaymentStatus(str, Enum):
+class PaymentStatus(str, Enum):  # noqa: UP042
     """Universal payment status"""
 
     PENDING = "pending"
@@ -38,7 +38,7 @@ class PaymentStatus(str, Enum):
     PARTIALLY_REFUNDED = "partially_refunded"
 
 
-class SubscriptionStatus(str, Enum):
+class SubscriptionStatus(str, Enum):  # noqa: UP042
     """Subscription status"""
 
     ACTIVE = "active"
@@ -49,7 +49,7 @@ class SubscriptionStatus(str, Enum):
     PAUSED = "paused"
 
 
-class StripeCurrency(str, Enum):
+class StripeCurrency(str, Enum):  # noqa: UP042
     """Supported currencies"""
 
     USD = "usd"
@@ -59,7 +59,7 @@ class StripeCurrency(str, Enum):
     AUD = "aud"
 
 
-class StripePaymentMethodType(str, Enum):
+class StripePaymentMethodType(str, Enum):  # noqa: UP042
     """Stripe payment method types"""
 
     CARD = "card"
@@ -70,7 +70,7 @@ class StripePaymentMethodType(str, Enum):
     SEPA_DEBIT = "sepa_debit"
 
 
-class StripeWebhookEventType(str, Enum):
+class StripeWebhookEventType(str, Enum):  # noqa: UP042
     """Stripe webhook event types"""
 
     CHECKOUT_SESSION_COMPLETED = "checkout.session.completed"

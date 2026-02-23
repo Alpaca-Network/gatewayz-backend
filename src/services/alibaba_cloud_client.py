@@ -1,7 +1,7 @@
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from threading import Lock
 from typing import TypeVar
 
@@ -174,7 +174,7 @@ class QuotaExceededError(Exception):
     pass
 
 
-def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:
+def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:  # noqa: UP047
     attempts = _region_attempt_order()
     if not attempts:
         raise ValueError(
@@ -422,7 +422,7 @@ def _is_alibaba_quota_error_cached() -> bool:
 
         timestamp = datetime.fromisoformat(timestamp_str)
         backoff = int(redis_manager.get("alibaba:quota_error_backoff") or "900")  # Default 15 min
-        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
+        age = (datetime.now(UTC) - timestamp).total_seconds()
         return age < backoff
     except Exception as e:
         logger.debug(f"Failed to check alibaba quota error cache: {e}")
@@ -441,7 +441,7 @@ def _set_alibaba_quota_error():
     try:
         redis_manager = get_redis_manager()
         redis_manager.set_json("alibaba:quota_error", True, ttl=900)  # 15 min TTL
-        redis_manager.set("alibaba:quota_error_timestamp", datetime.now(timezone.utc).isoformat(), ttl=900)
+        redis_manager.set("alibaba:quota_error_timestamp", datetime.now(UTC).isoformat(), ttl=900)
         redis_manager.set("alibaba:quota_error_backoff", "900", ttl=900)  # 15 min backoff
         # Clear the model cache
         cache_gateway_catalog("alibaba", [])

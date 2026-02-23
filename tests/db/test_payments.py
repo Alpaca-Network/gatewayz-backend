@@ -15,7 +15,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 from src.db.payments import (
     create_payment,
@@ -62,8 +62,8 @@ def mock_payment_data():
         'stripe_checkout_session_id': 'cs_def456',
         'stripe_customer_id': 'cus_xyz789',
         'metadata': {},
-        'created_at': datetime.now(timezone.utc).isoformat(),
-        'completed_at': datetime.now(timezone.utc).isoformat()
+        'created_at': datetime.now(UTC).isoformat(),
+        'completed_at': datetime.now(UTC).isoformat()
     }
 
 
@@ -585,8 +585,8 @@ class TestPaymentStatistics:
         lte_mock.eq.return_value = eq_mock
         eq_mock.execute.return_value = result_mock
 
-        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
-        end = datetime(2024, 12, 31, tzinfo=timezone.utc)
+        start = datetime(2024, 1, 1, tzinfo=UTC)
+        end = datetime(2024, 12, 31, tzinfo=UTC)
 
         revenue = get_total_revenue(start_date=start, end_date=end)
 
@@ -600,8 +600,8 @@ class TestPaymentStatistics:
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        today = datetime.now(timezone.utc).date().isoformat()
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date().isoformat()
+        today = datetime.now(UTC).date().isoformat()
+        yesterday = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
 
         payments = [
             {

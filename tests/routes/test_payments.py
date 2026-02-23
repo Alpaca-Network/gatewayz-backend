@@ -15,7 +15,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timezone, timezone
+from datetime import datetime, timezone, timezone, UTC
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -61,7 +61,7 @@ def mock_webhook_result():
         event_type='checkout.session.completed',
         event_id='evt_123456',
         message='Credits added successfully',
-        processed_at=datetime.now(timezone.utc)
+        processed_at=datetime.now(UTC)
     )
 
 
@@ -75,7 +75,7 @@ def mock_checkout_session():
         status=Mock(value='pending'),
         amount=1000,
         currency='usd',
-        expires_at=datetime.now(timezone.utc)
+        expires_at=datetime.now(UTC)
     )
 
 
@@ -419,7 +419,7 @@ class TestRefunds:
             currency='usd',
             status='succeeded',
             reason='requested_by_customer',
-            created_at=datetime.now(timezone.utc)
+            created_at=datetime.now(UTC)
         )
         mock_stripe_service.create_refund.return_value = mock_refund
 

@@ -174,7 +174,7 @@ def init_tempo_otlp_fastapi(app: Optional["FastAPI"] = None):
         return
 
     try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: F811
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # noqa: F811, F401
 
         # FastAPI server-side instrumentation (traces all inbound requests)
         try:

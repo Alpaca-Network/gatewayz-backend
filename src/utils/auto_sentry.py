@@ -46,12 +46,12 @@ from src.utils.sentry_context import (
 logger = logging.getLogger(__name__)
 
 # Context variable to track current request context
-request_context: ContextVar[dict[str, Any]] = ContextVar("request_context", default={})
+request_context: ContextVar[dict[str, Any]] = ContextVar("request_context", default={})  # noqa: B039
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-def auto_capture_errors(
+def auto_capture_errors(  # noqa: UP047
     func: F | None = None,
     *,
     context_type: str | None = None,

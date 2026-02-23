@@ -6,7 +6,7 @@ import secrets
 import time
 import uuid
 from contextvars import ContextVar
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
@@ -312,136 +312,136 @@ for provider_name, function_names in PROVIDER_FUNCTIONS.items():
 # This eliminates the need for massive if-elif chains (~750 lines reduced to ~50 lines)
 PROVIDER_ROUTING = {
     "featherless": {
-        "request": make_featherless_request_openai,
-        "process": process_featherless_response,
-        "stream": make_featherless_request_openai_stream,
+        "request": make_featherless_request_openai,  # noqa: F821
+        "process": process_featherless_response,  # noqa: F821
+        "stream": make_featherless_request_openai_stream,  # noqa: F821
     },
     "fireworks": {
-        "request": make_fireworks_request_openai,
-        "process": process_fireworks_response,
-        "stream": make_fireworks_request_openai_stream,
+        "request": make_fireworks_request_openai,  # noqa: F821
+        "process": process_fireworks_response,  # noqa: F821
+        "stream": make_fireworks_request_openai_stream,  # noqa: F821
     },
     "together": {
-        "request": make_together_request_openai,
-        "process": process_together_response,
-        "stream": make_together_request_openai_stream,
+        "request": make_together_request_openai,  # noqa: F821
+        "process": process_together_response,  # noqa: F821
+        "stream": make_together_request_openai_stream,  # noqa: F821
     },
     "huggingface": {
-        "request": make_huggingface_request_openai,
-        "process": process_huggingface_response,
-        "stream": make_huggingface_request_openai_stream,
+        "request": make_huggingface_request_openai,  # noqa: F821
+        "process": process_huggingface_response,  # noqa: F821
+        "stream": make_huggingface_request_openai_stream,  # noqa: F821
     },
     "aimo": {
-        "request": make_aimo_request_openai,
-        "process": process_aimo_response,
-        "stream": make_aimo_request_openai_stream,
+        "request": make_aimo_request_openai,  # noqa: F821
+        "process": process_aimo_response,  # noqa: F821
+        "stream": make_aimo_request_openai_stream,  # noqa: F821
     },
     "xai": {
-        "request": make_xai_request_openai,
-        "process": process_xai_response,
-        "stream": make_xai_request_openai_stream,
+        "request": make_xai_request_openai,  # noqa: F821
+        "process": process_xai_response,  # noqa: F821
+        "stream": make_xai_request_openai_stream,  # noqa: F821
     },
     "cerebras": {
-        "request": make_cerebras_request_openai,
-        "process": process_cerebras_response,
-        "stream": make_cerebras_request_openai_stream,
+        "request": make_cerebras_request_openai,  # noqa: F821
+        "process": process_cerebras_response,  # noqa: F821
+        "stream": make_cerebras_request_openai_stream,  # noqa: F821
     },
     "chutes": {
-        "request": make_chutes_request_openai,
-        "process": process_chutes_response,
-        "stream": make_chutes_request_openai_stream,
+        "request": make_chutes_request_openai,  # noqa: F821
+        "process": process_chutes_response,  # noqa: F821
+        "stream": make_chutes_request_openai_stream,  # noqa: F821
     },
     "near": {
-        "request": make_near_request_openai,
-        "process": process_near_response,
-        "stream": make_near_request_openai_stream,
+        "request": make_near_request_openai,  # noqa: F821
+        "process": process_near_response,  # noqa: F821
+        "stream": make_near_request_openai_stream,  # noqa: F821
     },
     "google-vertex": {
-        "request": make_google_vertex_request_openai,
-        "process": process_google_vertex_response,
-        "stream": make_google_vertex_request_openai_stream,
+        "request": make_google_vertex_request_openai,  # noqa: F821
+        "process": process_google_vertex_response,  # noqa: F821
+        "stream": make_google_vertex_request_openai_stream,  # noqa: F821
     },
     "vercel-ai-gateway": {
-        "request": make_vercel_ai_gateway_request_openai,
-        "process": process_vercel_ai_gateway_response,
-        "stream": make_vercel_ai_gateway_request_openai_stream,
+        "request": make_vercel_ai_gateway_request_openai,  # noqa: F821
+        "process": process_vercel_ai_gateway_response,  # noqa: F821
+        "stream": make_vercel_ai_gateway_request_openai_stream,  # noqa: F821
     },
     "helicone": {
-        "request": make_helicone_request_openai,
-        "process": process_helicone_response,
-        "stream": make_helicone_request_openai_stream,
+        "request": make_helicone_request_openai,  # noqa: F821
+        "process": process_helicone_response,  # noqa: F821
+        "stream": make_helicone_request_openai_stream,  # noqa: F821
     },
     "aihubmix": {
-        "request": make_aihubmix_request_openai,
-        "process": process_aihubmix_response,
-        "stream": make_aihubmix_request_openai_stream,
+        "request": make_aihubmix_request_openai,  # noqa: F821
+        "process": process_aihubmix_response,  # noqa: F821
+        "stream": make_aihubmix_request_openai_stream,  # noqa: F821
     },
     "anannas": {
-        "request": make_anannas_request_openai,
-        "process": process_anannas_response,
-        "stream": make_anannas_request_openai_stream,
+        "request": make_anannas_request_openai,  # noqa: F821
+        "process": process_anannas_response,  # noqa: F821
+        "stream": make_anannas_request_openai_stream,  # noqa: F821
     },
     "alpaca-network": {
-        "request": make_alpaca_network_request_openai,
-        "process": process_alpaca_network_response,
-        "stream": make_alpaca_network_request_openai_stream,
+        "request": make_alpaca_network_request_openai,  # noqa: F821
+        "process": process_alpaca_network_response,  # noqa: F821
+        "stream": make_alpaca_network_request_openai_stream,  # noqa: F821
     },
     "alibaba-cloud": {
-        "request": make_alibaba_cloud_request_openai,
-        "process": process_alibaba_cloud_response,
-        "stream": make_alibaba_cloud_request_openai_stream,
+        "request": make_alibaba_cloud_request_openai,  # noqa: F821
+        "process": process_alibaba_cloud_response,  # noqa: F821
+        "stream": make_alibaba_cloud_request_openai_stream,  # noqa: F821
     },
     "clarifai": {
-        "request": make_clarifai_request_openai,
-        "process": process_clarifai_response,
-        "stream": make_clarifai_request_openai_stream,
+        "request": make_clarifai_request_openai,  # noqa: F821
+        "process": process_clarifai_response,  # noqa: F821
+        "stream": make_clarifai_request_openai_stream,  # noqa: F821
     },
     "groq": {
-        "request": make_groq_request_openai,
-        "process": process_groq_response,
-        "stream": make_groq_request_openai_stream,
+        "request": make_groq_request_openai,  # noqa: F821
+        "process": process_groq_response,  # noqa: F821
+        "stream": make_groq_request_openai_stream,  # noqa: F821
     },
     "cloudflare-workers-ai": {
-        "request": make_cloudflare_workers_ai_request_openai,
-        "process": process_cloudflare_workers_ai_response,
-        "stream": make_cloudflare_workers_ai_request_openai_stream,
+        "request": make_cloudflare_workers_ai_request_openai,  # noqa: F821
+        "process": process_cloudflare_workers_ai_response,  # noqa: F821
+        "stream": make_cloudflare_workers_ai_request_openai_stream,  # noqa: F821
     },
     "morpheus": {
-        "request": make_morpheus_request_openai,
-        "process": process_morpheus_response,
-        "stream": make_morpheus_request_openai_stream,
+        "request": make_morpheus_request_openai,  # noqa: F821
+        "process": process_morpheus_response,  # noqa: F821
+        "stream": make_morpheus_request_openai_stream,  # noqa: F821
     },
     "onerouter": {
-        "request": make_onerouter_request_openai,
-        "process": process_onerouter_response,
-        "stream": make_onerouter_request_openai_stream,
+        "request": make_onerouter_request_openai,  # noqa: F821
+        "process": process_onerouter_response,  # noqa: F821
+        "stream": make_onerouter_request_openai_stream,  # noqa: F821
     },
     "simplismart": {
-        "request": make_simplismart_request_openai,
-        "process": process_simplismart_response,
-        "stream": make_simplismart_request_openai_stream,
+        "request": make_simplismart_request_openai,  # noqa: F821
+        "process": process_simplismart_response,  # noqa: F821
+        "stream": make_simplismart_request_openai_stream,  # noqa: F821
     },
     "sybil": {
-        "request": make_sybil_request_openai,
-        "process": process_sybil_response,
-        "stream": make_sybil_request_openai_stream,
+        "request": make_sybil_request_openai,  # noqa: F821
+        "process": process_sybil_response,  # noqa: F821
+        "stream": make_sybil_request_openai_stream,  # noqa: F821
     },
     "nosana": {
-        "request": make_nosana_request_openai,
-        "process": process_nosana_response,
-        "stream": make_nosana_request_openai_stream,
+        "request": make_nosana_request_openai,  # noqa: F821
+        "process": process_nosana_response,  # noqa: F821
+        "stream": make_nosana_request_openai_stream,  # noqa: F821
     },
     "zai": {
-        "request": make_zai_request_openai,
-        "process": process_zai_response,
-        "stream": make_zai_request_openai_stream,
+        "request": make_zai_request_openai,  # noqa: F821
+        "process": process_zai_response,  # noqa: F821
+        "stream": make_zai_request_openai_stream,  # noqa: F821
     },
 }
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.pricing import calculate_cost, calculate_cost_async
+from src.services.pricing import calculate_cost_async
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
@@ -1354,7 +1354,7 @@ async def stream_generator(
     request_id=None,
     api_key_id=None,
     client_ip=None,
-    request: Optional[Request] = None,
+    request: Request | None = None,
 ):
     """Generate SSE stream from OpenAI stream response (OPTIMIZED: background post-processing)
 
@@ -2147,7 +2147,6 @@ async def chat_completions(
                     from src.services.general_router import (
                         parse_router_model_string as parse_general_router,
                         route_general_prompt,
-                        get_routing_metadata as get_general_routing_metadata,
                     )
 
                     # Parse mode from model string
@@ -2636,7 +2635,7 @@ async def chat_completions(
                         else:
                             # Default to OpenRouter with async streaming for performance
                             try:
-                                stream = await make_openrouter_request_openai_stream_async(
+                                stream = await make_openrouter_request_openai_stream_async(  # noqa: F821
                                     messages, request_model, **optional
                                 )
                                 is_async_stream = True
@@ -2649,7 +2648,7 @@ async def chat_completions(
                                     f"Async streaming failed, falling back to sync: {async_err}"
                                 )
                                 stream = await _to_thread(
-                                    make_openrouter_request_openai_stream,
+                                    make_openrouter_request_openai_stream,  # noqa: F821
                                     messages,
                                     request_model,
                                     **optional,
@@ -2948,14 +2947,14 @@ async def chat_completions(
                             # Default to OpenRouter
                             resp_raw = await asyncio.wait_for(
                                 _to_thread(
-                                    make_openrouter_request_openai,
+                                    make_openrouter_request_openai,  # noqa: F821
                                     messages,
                                     request_model,
                                     **optional,
                                 ),
                                 timeout=request_timeout,
                             )
-                            processed = await _to_thread(process_openrouter_response, resp_raw)
+                            processed = await _to_thread(process_openrouter_response, resp_raw)  # noqa: F821
 
                         # Extract token usage from response for tracing
                         usage = processed.get("usage", {}) or {}
@@ -3874,7 +3873,7 @@ async def unified_responses(
                         stream = await _to_thread(stream_func, messages, request_model, **optional)
                     else:
                         stream = await _to_thread(
-                            make_openrouter_request_openai_stream,
+                            make_openrouter_request_openai_stream,  # noqa: F821
                             messages,
                             request_model,
                             **optional,

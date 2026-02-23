@@ -5,7 +5,6 @@ even in development environments.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +14,7 @@ DEV_USER_EMAIL = "dev@localhost"
 DEV_USER_USERNAME = "dev_user"
 
 
-def get_or_create_dev_api_key() -> Optional[str]:
+def get_or_create_dev_api_key() -> str | None:
     """
     Get or create a development API key in the database.
 
@@ -27,7 +26,7 @@ def get_or_create_dev_api_key() -> Optional[str]:
     """
     try:
         from src.config.supabase_config import get_supabase_client
-        from src.security.security import encrypt_api_key, generate_api_key
+        from src.security.security import encrypt_api_key
 
         client = get_supabase_client()
 

@@ -6,7 +6,7 @@ circuit breakers, and reliability features.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -289,7 +289,7 @@ async def start_availability_monitoring(api_key: str = Depends(get_api_key)):
         await availability_service.start_monitoring()
         return {
             "message": "Availability monitoring started",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to start availability monitoring: {e}")
@@ -311,7 +311,7 @@ async def stop_availability_monitoring(api_key: str = Depends(get_api_key)):
         await availability_service.stop_monitoring()
         return {
             "message": "Availability monitoring stopped",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
         logger.error(f"Failed to stop availability monitoring: {e}")
@@ -341,5 +341,5 @@ async def get_availability_status(api_key: str = Depends(get_api_key)):
         return {
             "status": "error",
             "message": "Failed to retrieve availability status",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }

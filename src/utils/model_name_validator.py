@@ -10,12 +10,11 @@ Ensures model names follow standardized format:
 """
 import logging
 import re
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
-def validate_model_name(name: str) -> Tuple[bool, Optional[str]]:
+def validate_model_name(name: str) -> tuple[bool, str | None]:
     """
     Validate model name follows standardized format.
 

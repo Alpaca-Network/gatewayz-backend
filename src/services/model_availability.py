@@ -21,7 +21,7 @@ from src.utils.sentry_context import capture_model_health_error
 logger = logging.getLogger(__name__)
 
 
-class AvailabilityStatus(str, Enum):
+class AvailabilityStatus(str, Enum):  # noqa: UP042
     """Model availability status"""
 
     AVAILABLE = "available"
@@ -31,7 +31,7 @@ class AvailabilityStatus(str, Enum):
     UNKNOWN = "unknown"
 
 
-class CircuitBreakerState(str, Enum):
+class CircuitBreakerState(str, Enum):  # noqa: UP042
     """Circuit breaker states"""
 
     CLOSED = "closed"  # Normal operation

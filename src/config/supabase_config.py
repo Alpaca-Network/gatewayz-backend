@@ -567,7 +567,7 @@ def get_read_replica_client() -> Client | None:
             return _read_replica_client
 
         try:
-            logger.info(f"Initializing read replica client...")
+            logger.info("Initializing read replica client...")
 
             # Validate replica URL
             if not read_replica_url.startswith(("http://", "https://")):

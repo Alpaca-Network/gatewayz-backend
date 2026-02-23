@@ -17,7 +17,7 @@ import json
 import asyncio
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, UTC
 
 import src.config.supabase_config
 import src.db.users as users_module
@@ -490,7 +490,7 @@ def client(sb, monkeypatch):
             if trial_end:
                 if isinstance(trial_end, str):
                     trial_end = datetime.fromisoformat(trial_end.replace('Z', '+00:00'))
-                is_expired = datetime.now(timezone.utc) > trial_end
+                is_expired = datetime.now(UTC) > trial_end
             else:
                 is_expired = False
 
@@ -772,7 +772,7 @@ def test_chat_completions_trial_user_success(client, sb):
         "api_key": "test-trial-key",
         "credits": 0.0,
         "is_trial": True,
-        "trial_expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        "trial_expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat()
     }).execute()
 
     response = client.post(
@@ -795,7 +795,7 @@ def test_chat_completions_trial_expired(client, sb):
         "api_key": "test-expired-trial",
         "credits": 0.0,
         "is_trial": True,
-        "trial_expires_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        "trial_expires_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()
     }).execute()
 
     response = client.post(

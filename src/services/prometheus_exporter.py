@@ -8,7 +8,7 @@ This format is compatible with Prometheus scraping and includes:
 - Histograms (latency distributions)
 """
 
-from typing import Any, Dict
+from typing import Any
 
 from src.services.metrics_instrumentation import get_metrics_collector
 
@@ -64,7 +64,7 @@ class PrometheusExporter:
 
         return "\n".join(lines) + "\n"
 
-    def _export_latency_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_latency_metrics(self, metrics: dict[str, Any]) -> list:
         """Export request latency histogram metrics."""
         lines = [
             "# HELP http_request_latency_seconds HTTP request latency in seconds",
@@ -93,7 +93,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_request_count_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_request_count_metrics(self, metrics: dict[str, Any]) -> list:
         """Export request count metrics."""
         lines = [
             "# HELP http_requests_total Total HTTP requests",
@@ -109,7 +109,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_error_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_error_metrics(self, metrics: dict[str, Any]) -> list:
         """Export error count metrics."""
         lines = [
             "# HELP http_request_errors_total Total HTTP request errors",
@@ -125,7 +125,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_status_code_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_status_code_metrics(self, metrics: dict[str, Any]) -> list:
         """Export HTTP status code metrics."""
         lines = [
             "# HELP http_response_status_total Total HTTP responses by status code",
@@ -141,7 +141,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_provider_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_provider_metrics(self, metrics: dict[str, Any]) -> list:
         """Export provider-specific metrics."""
         lines = [
             "# HELP provider_requests_total Total requests to provider",
@@ -182,7 +182,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_model_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_model_metrics(self, metrics: dict[str, Any]) -> list:
         """Export model-specific metrics."""
         lines = [
             "# HELP model_requests_total Total requests for model",
@@ -212,7 +212,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_cache_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_cache_metrics(self, metrics: dict[str, Any]) -> list:
         """Export cache performance metrics."""
         lines = [
             "# HELP cache_hits_total Total cache hits",
@@ -230,7 +230,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_database_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_database_metrics(self, metrics: dict[str, Any]) -> list:
         """Export database query metrics."""
         lines = [
             "# HELP db_queries_total Total database queries",
@@ -245,7 +245,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_external_api_metrics(self, metrics: Dict[str, Any]) -> list:
+    def _export_external_api_metrics(self, metrics: dict[str, Any]) -> list:
         """Export external API call metrics."""
         lines = [
             "# HELP external_api_calls_total Total external API calls",
@@ -266,7 +266,7 @@ class PrometheusExporter:
 
         return lines
 
-    def _export_uptime_metric(self, metrics: Dict[str, Any]) -> list:
+    def _export_uptime_metric(self, metrics: dict[str, Any]) -> list:
         """Export application uptime metric."""
         lines = [
             "# HELP gatewayz_uptime_seconds GatewayZ API uptime in seconds",

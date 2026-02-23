@@ -24,16 +24,13 @@ import src.db.chat_completion_requests as chat_completion_requests_module
 from src.db.users import deduct_credits, get_user, record_usage
 from src.security.deps import get_api_key
 from src.services.ai_sdk_client import (
-    make_ai_sdk_request_openai,
     make_ai_sdk_request_openai_stream_async,
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
 )
 from src.services.openrouter_client import (
     get_openrouter_client,
-    make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
-    process_openrouter_response,
 )
 from src.services.pricing import calculate_cost
 from src.services.trial_validation import track_trial_usage, validate_trial_access
@@ -42,7 +39,6 @@ from src.utils.sentry_context import capture_payment_error
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.adapters.chat import AISDKChatAdapter
-from src.schemas.internal.chat import InternalChatRequest
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -362,7 +358,7 @@ async def ai_sdk_chat_completion(
         )
 
         return processed
-        processed = await asyncio.to_thread(process_ai_sdk_response, response)
+        processed = await asyncio.to_thread(process_ai_sdk_response, response)  # noqa: F821
 
         # Calculate processing time and extract usage
         elapsed_ms = int((time.monotonic() - start_time) * 1000)

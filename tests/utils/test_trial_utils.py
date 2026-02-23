@@ -2,7 +2,7 @@
 Comprehensive tests for Trial Utils
 """
 import pytest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from unittest.mock import Mock, patch, MagicMock
 from fastapi import HTTPException
 
@@ -48,7 +48,7 @@ class TestValidateTrialExpiration:
 
     def test_trial_user_with_future_expiry_passes(self):
         """Test that trial users with future expiry date pass"""
-        future_date = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+        future_date = (datetime.now(UTC) + timedelta(days=2)).isoformat()
         user = {
             "id": 3,
             "subscription_status": "trial",
@@ -59,7 +59,7 @@ class TestValidateTrialExpiration:
 
     def test_trial_user_with_past_expiry_raises_402(self):
         """Test that expired trial users get 402 error"""
-        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        past_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         user = {
             "id": 4,
             "subscription_status": "trial",
@@ -73,7 +73,7 @@ class TestValidateTrialExpiration:
 
     def test_trial_expiry_with_z_suffix(self):
         """Test handling of ISO format with Z suffix"""
-        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        past_date = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         user = {
             "id": 5,
             "subscription_status": "trial",
@@ -86,7 +86,7 @@ class TestValidateTrialExpiration:
 
     def test_trial_expiry_with_timezone(self):
         """Test handling of ISO format with timezone"""
-        past_date = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        past_date = (datetime.now(UTC) - timedelta(days=1)).isoformat()
         user = {
             "id": 6,
             "subscription_status": "trial",
@@ -99,7 +99,7 @@ class TestValidateTrialExpiration:
 
     def test_trial_expiry_as_datetime_object(self):
         """Test handling of datetime object"""
-        past_date = datetime.now(timezone.utc) - timedelta(days=1)
+        past_date = datetime.now(UTC) - timedelta(days=1)
         user = {
             "id": 7,
             "subscription_status": "trial",
@@ -160,7 +160,7 @@ class TestValidateTrialExpiration:
     def test_edge_case_exactly_at_expiry(self):
         """Test behavior when current time is exactly at expiry"""
         # This is an edge case - typically would be treated as expired
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
         user = {
             "id": 12,
             "subscription_status": "trial",

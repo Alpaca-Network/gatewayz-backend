@@ -97,7 +97,7 @@ class ConcurrencyMiddleware:
         # Fast path: try non-blocking acquire with zero timeout
         try:
             await asyncio.wait_for(self.semaphore.acquire(), timeout=0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass  # Semaphore full, fall through to queued path
         else:
             # Successfully acquired without waiting
@@ -142,7 +142,7 @@ class ConcurrencyMiddleware:
                 self.semaphore.acquire(),
                 timeout=self.queue_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             with self._lock:
                 self._waiting -= 1
             concurrency_queued.dec()

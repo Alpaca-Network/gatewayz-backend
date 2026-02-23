@@ -4,7 +4,6 @@ Integrates with various system events to create notifications
 """
 
 import logging
-from typing import List
 
 from ..models.notification_models import NotificationCategory, NotificationCreate, NotificationType
 from ..services.notification_service import notification_service
@@ -17,7 +16,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_new_user_signup(
-        user_email: str, user_id: int, admin_user_ids: List[int]
+        user_email: str, user_id: int, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins when a new user signs up
@@ -46,7 +45,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_payment_failure(
-        user_id: int, user_email: str, amount: float, admin_user_ids: List[int]
+        user_id: int, user_email: str, amount: float, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins of payment failures
@@ -76,7 +75,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_model_outage(
-        model_name: str, provider: str, gateway: str, admin_user_ids: List[int]
+        model_name: str, provider: str, gateway: str, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins when a model goes down
@@ -106,7 +105,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_high_error_rate(
-        error_rate: float, threshold: float, admin_user_ids: List[int]
+        error_rate: float, threshold: float, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins when error rate exceeds threshold
@@ -138,7 +137,7 @@ class NotificationTriggers:
         user_id: int,
         user_email: str,
         remaining_credits: float,
-        admin_user_ids: List[int],
+        admin_user_ids: list[int],
     ) -> None:
         """
         Notify admins when a user's credits are low
@@ -172,7 +171,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_api_key_breach_attempt(
-        api_key_id: int, ip_address: str, admin_user_ids: List[int]
+        api_key_id: int, ip_address: str, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins of potential API key security breach
@@ -201,7 +200,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_trial_expiring_soon(
-        user_id: int, user_email: str, days_remaining: int, admin_user_ids: List[int]
+        user_id: int, user_email: str, days_remaining: int, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins when a user's trial is expiring soon
@@ -235,7 +234,7 @@ class NotificationTriggers:
 
     @staticmethod
     async def notify_subscription_payment_success(
-        user_id: int, user_email: str, amount: float, plan_name: str, admin_user_ids: List[int]
+        user_id: int, user_email: str, amount: float, plan_name: str, admin_user_ids: list[int]
     ) -> None:
         """
         Notify admins of successful subscription payment

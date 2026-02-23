@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from decimal import Decimal
 from typing import Any
 
@@ -55,7 +55,7 @@ DB_QUERY_TIMEOUT_SECONDS: float = 120.0
 
 # Retry config for catalog DB reads: up to 2 retries (3 total attempts),
 # 0.5s -> 1.0s exponential backoff on transient connection/timeout errors.
-_CATALOG_DB_RETRY = dict(
+_CATALOG_DB_RETRY = dict(  # noqa: C408
     max_attempts=3,
     initial_delay=0.5,
     max_delay=2.0,
@@ -391,7 +391,7 @@ def update_model_health(
         # Update model health
         update_data = {
             "health_status": health_status,
-            "last_health_check_at": datetime.now(timezone.utc).isoformat(),
+            "last_health_check_at": datetime.now(UTC).isoformat(),
         }
 
         if response_time_ms is not None:
@@ -900,7 +900,7 @@ def flush_models_table() -> dict[str, Any]:
 
         # Delete all models
         # Using neq (not equal) with a value that doesn't exist ensures we delete all rows
-        delete_response = supabase.table("models").delete().neq("id", -1).execute()
+        delete_response = supabase.table("models").delete().neq("id", -1).execute()  # noqa: F841
 
         logger.info(f"✅ Flushed models table - deleted {models_count} models")
 
@@ -945,7 +945,7 @@ def flush_providers_table() -> dict[str, Any]:
         )
 
         # Delete all providers (CASCADE will delete all models)
-        delete_response = supabase.table("providers").delete().neq("id", -1).execute()
+        delete_response = supabase.table("providers").delete().neq("id", -1).execute()  # noqa: F841
 
         logger.info(
             f"✅ Flushed providers table - deleted {providers_count} providers "

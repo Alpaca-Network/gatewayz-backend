@@ -6,7 +6,6 @@ Provides endpoints for creating and managing shareable chat links.
 
 import logging
 from datetime import datetime
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 

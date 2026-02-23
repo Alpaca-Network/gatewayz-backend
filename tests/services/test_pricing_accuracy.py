@@ -297,7 +297,7 @@ class TestEndToEndPricing:
             f"got ${cost:.6f}"
         )
 
-        print(f"✓ GPT-4o-mini end-to-end pricing verified")
+        print("✓ GPT-4o-mini end-to-end pricing verified")
         print(f"  Prompt: ${prompt_price}")
         print(f"  Completion: ${completion_price}")
         print(f"  Cost for 1000/500 tokens: ${cost:.6f}")

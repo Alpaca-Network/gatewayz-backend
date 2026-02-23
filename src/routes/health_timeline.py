@@ -3,8 +3,8 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional
+from datetime import datetime, timedelta, UTC
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -40,7 +40,7 @@ def get_cache_key(endpoint: str, **params) -> str:
     return hashlib.md5(f"{endpoint}:{param_str}".encode()).hexdigest()
 
 
-def get_cached_response(cache_type: str, cache_key: str) -> Optional[dict]:
+def get_cached_response(cache_type: str, cache_key: str) -> dict | None:
     """Retrieve cached response if still valid"""
     cache = _health_timeline_cache.get(cache_type, {})
     cached_entry = cache.get(cache_key)
@@ -49,7 +49,7 @@ def get_cached_response(cache_type: str, cache_key: str) -> Optional[dict]:
         return None
 
     # Check if cache is still fresh
-    cache_age = (datetime.now(timezone.utc) - cached_entry["timestamp"]).total_seconds()
+    cache_age = (datetime.now(UTC) - cached_entry["timestamp"]).total_seconds()
     if cache_age >= _health_timeline_cache["ttl"]:
         # Cache expired
         return None
@@ -65,7 +65,7 @@ def set_cached_response(cache_type: str, cache_key: str, data: dict):
 
     _health_timeline_cache[cache_type][cache_key] = {
         "data": data,
-        "timestamp": datetime.now(timezone.utc)
+        "timestamp": datetime.now(UTC)
     }
     logger.debug(f"Cached {cache_type}:{cache_key}")
 
@@ -114,8 +114,8 @@ def calculate_status(success_rate: float) -> Literal["operational", "degraded", 
 
 
 def detect_incident(
-    error_rate: float, avg_response_time: Optional[float], status: str
-) -> Optional[IncidentMetadata]:
+    error_rate: float, avg_response_time: float | None, status: str
+) -> IncidentMetadata | None:
     """Detect if an incident occurred in a time bucket"""
     if status == "downtime":
         return IncidentMetadata(
@@ -183,7 +183,7 @@ async def get_providers_uptime(
         return ProviderUptimeResponse(**cached)
 
     supabase = get_supabase_client()
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
 
     # Parse parameters
     time_delta = parse_period(period)
@@ -351,7 +351,7 @@ async def get_models_uptime(
         return ModelUptimeResponse(**cached)
 
     supabase = get_supabase_client()
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
 
     # Parse parameters
     time_delta = parse_period(period)
@@ -524,7 +524,7 @@ async def get_gateways_uptime(
         return GatewayUptimeResponse(**cached)
 
     supabase = get_supabase_client()
-    current_time = datetime.now(timezone.utc)
+    current_time = datetime.now(UTC)
 
     # Parse parameters
     time_delta = parse_period(period)

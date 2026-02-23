@@ -5,7 +5,7 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from src.config.supabase_config import (
@@ -78,7 +78,7 @@ def log_credit_transaction(
         "payment_id": payment_id,
         "metadata": metadata or {},
         "created_by": created_by,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
     }
 
     def do_insert(client):

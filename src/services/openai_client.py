@@ -9,7 +9,6 @@ API Documentation: https://platform.openai.com/docs/api-reference
 """
 
 import logging
-from datetime import datetime, timezone
 
 import httpx
 

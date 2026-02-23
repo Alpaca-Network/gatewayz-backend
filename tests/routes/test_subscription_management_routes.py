@@ -5,7 +5,7 @@ Tests upgrade, downgrade, cancel, and get subscription endpoints
 """
 
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -44,8 +44,8 @@ def mock_current_subscription_response():
         subscription_id="sub_test123",
         status="active",
         tier="pro",
-        current_period_start=datetime(2024, 1, 1, tzinfo=timezone.utc),
-        current_period_end=datetime(2024, 2, 1, tzinfo=timezone.utc),
+        current_period_start=datetime(2024, 1, 1, tzinfo=UTC),
+        current_period_end=datetime(2024, 2, 1, tzinfo=UTC),
         cancel_at_period_end=False,
         canceled_at=None,
         product_id="prod_TKOqQPhVRxNp4Q",
@@ -244,7 +244,7 @@ class TestCancelSubscriptionEndpoint:
             status="cancel_scheduled",
             current_tier="pro",
             message="Subscription will be canceled at the end of the billing period.",
-            effective_date=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            effective_date=datetime(2024, 2, 1, tzinfo=UTC),
         )
 
         with patch("src.routes.payments.get_current_user", return_value=mock_current_user):
@@ -276,7 +276,7 @@ class TestCancelSubscriptionEndpoint:
             status="canceled",
             current_tier="basic",
             message="Subscription canceled immediately.",
-            effective_date=datetime.now(timezone.utc),
+            effective_date=datetime.now(UTC),
         )
 
         with patch("src.routes.payments.get_current_user", return_value=mock_current_user):
@@ -304,7 +304,7 @@ class TestCancelSubscriptionEndpoint:
             status="cancel_scheduled",
             current_tier="pro",
             message="Subscription will be canceled at the end of the billing period.",
-            effective_date=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            effective_date=datetime(2024, 2, 1, tzinfo=UTC),
         )
 
         with patch("src.routes.payments.get_current_user", return_value=mock_current_user):

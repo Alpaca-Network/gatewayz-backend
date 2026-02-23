@@ -23,7 +23,8 @@ from src.services.prometheus_remote_write import (
     shutdown_prometheus_remote_write,
 )
 from src.services.response_cache import get_cache
-from src.services.tempo_otlp import init_tempo_otlp, init_tempo_otlp_fastapi
+from src.services.tempo_otlp import init_tempo_otlp_fastapi
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -301,7 +302,7 @@ async def lifespan(app):
                 # model catalog cache and write the serialised response into catalog_response_cache.
                 try:
                     logger.info("🔥 [5/5] Warming catalog response cache (gateway=all, default params)...")
-                    from datetime import datetime, timezone
+                    from datetime import datetime
                     from src.services.models import get_cached_models
                     from src.services.catalog_response_cache import cache_catalog_response
 
@@ -330,7 +331,7 @@ async def lifespan(app):
                             "note": (
                                 "Combined catalog (all gateways)"
                             ),
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": datetime.now(UTC).isoformat(),
                         }
                         await cache_catalog_response("all", default_cache_params, response_payload)
                         logger.info(

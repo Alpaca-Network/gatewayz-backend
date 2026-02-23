@@ -3,7 +3,7 @@
 import logging
 import secrets
 import time
-from datetime import datetime, timezone
+from datetime import datetime, UTC
 from typing import Any
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError
@@ -88,7 +88,7 @@ def create_shared_chat(
             "session_id": session_id,
             "share_token": share_token,
             "created_by_user_id": user_id,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "expires_at": expires_at.isoformat() if expires_at else None,
             "view_count": 0,
             "is_active": True,
@@ -147,7 +147,7 @@ def get_shared_chat_by_token(token: str) -> dict[str, Any] | None:
         # Check if expired
         if share.get("expires_at"):
             expires_at = datetime.fromisoformat(share["expires_at"].replace("Z", "+00:00"))
-            if expires_at < datetime.now(timezone.utc):
+            if expires_at < datetime.now(UTC):
                 logger.warning(f"Shared chat {share['id']} has expired")
                 return None
 
@@ -194,7 +194,7 @@ def get_shared_chat_by_token(token: str) -> dict[str, Any] | None:
                     client.table("shared_chats")
                     .update({
                         "view_count": share["view_count"] + 1,
-                        "last_viewed_at": datetime.now(timezone.utc).isoformat(),
+                        "last_viewed_at": datetime.now(UTC).isoformat(),
                     })
                     .eq("id", share["id"])
                     .execute()
@@ -332,7 +332,7 @@ def check_share_rate_limit(user_id: int, max_shares_per_hour: int = 10) -> bool:
     """
     try:
         client = get_supabase_client()
-        one_hour_ago = datetime.now(timezone.utc).replace(
+        one_hour_ago = datetime.now(UTC).replace(
             minute=0, second=0, microsecond=0
         ).isoformat()
 

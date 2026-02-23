@@ -2,7 +2,7 @@
 import sys
 import types
 import importlib
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 import pytest
 
 MODULE_PATH = "src.db.api_keys"  # <-- change if your file lives elsewhere
@@ -71,7 +71,7 @@ class _Table:
             if "id" not in r:
                 r["id"] = len(self.store[self.name]) + 1
             if "created_at" not in r:
-                r["created_at"] = datetime.now(timezone.utc).isoformat()
+                r["created_at"] = datetime.now(UTC).isoformat()
             self.store[self.name].append(r)
         return self
 
@@ -322,7 +322,7 @@ def test_create_api_key_schema_cache_error_fallback(monkeypatch, mod, fake_supab
 
 def test_get_user_api_keys_builds_fields(mod, fake_supabase):
     # load 2 keys
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fake_supabase.table("api_keys_new").insert([
         {
             "user_id": 7,
@@ -380,7 +380,7 @@ def test_delete_api_key_new_and_legacy(mod, fake_supabase):
 
 def test_validate_api_key_prefers_api_keys_then_fallback(monkeypatch, mod, fake_supabase):
     # 1) Found in api_keys_new table and active with not-expired
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     fake_supabase.table("api_keys_new").insert({
         "id": 11,
         "user_id": 777,
@@ -497,7 +497,7 @@ def test_validate_api_key_permissions(mod, fake_supabase):
 
 
 def test_get_api_key_by_id(mod, fake_supabase):
-    exp = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    exp = (datetime.now(UTC) + timedelta(days=3)).isoformat()
     fake_supabase.table("api_keys_new").insert({
         "id": 123, "user_id": 4, "key_name": "K",
         "api_key": "gw_live_K", "is_active": True, "max_requests": 100,

@@ -1,7 +1,7 @@
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -147,8 +147,8 @@ def _migrate_legacy_api_key(client, user: dict[str, Any], api_key: str) -> bool:
             "scope_permissions": {"read": ["*"], "write": ["*"], "admin": ["*"]},
             "ip_allowlist": [],
             "domain_referrers": [],
-            "created_at": user.get("created_at", datetime.now(timezone.utc).isoformat()),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": user.get("created_at", datetime.now(UTC).isoformat()),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
 
         # Insert the migrated key
@@ -201,7 +201,7 @@ def create_enhanced_user(
         client = get_supabase_client()
 
         # Prepare user data with trial setup
-        trial_start = datetime.now(timezone.utc)
+        trial_start = datetime.now(UTC)
         trial_end = trial_start + timedelta(days=3)
 
         user_data = {
@@ -555,7 +555,7 @@ def add_credits_to_user(
             allowance_after = allowance_before
             update_data = {
                 "purchased_credits": purchased_after,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(UTC).isoformat()
             }
         else:
             # Other types (admin_credit, trial, etc.) - add to purchased for simplicity
@@ -564,7 +564,7 @@ def add_credits_to_user(
             allowance_after = allowance_before
             update_data = {
                 "purchased_credits": purchased_after,
-                "updated_at": datetime.now(timezone.utc).isoformat()
+                "updated_at": datetime.now(UTC).isoformat()
             }
 
         balance_after = allowance_after + purchased_after
@@ -750,7 +750,7 @@ def deduct_credits(
                 ).eq("api_key", api_key).execute()
 
         if not user_lookup.data:
-            raise ValueError(f"User with API key not found")
+            raise ValueError("User with API key not found")
 
         user_id = user_lookup.data[0]["id"]
 
@@ -811,7 +811,7 @@ def deduct_credits(
                 .update({
                     "subscription_allowance": allowance_after,
                     "purchased_credits": purchased_after,
-                    "updated_at": datetime.now(timezone.utc).isoformat()
+                    "updated_at": datetime.now(UTC).isoformat()
                 })
                 .eq("id", user_id)
                 .eq("subscription_allowance", allowance_before)  # Optimistic lock
@@ -915,7 +915,7 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         client = get_supabase_client()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Get current allowance (will be forfeited)
         user_result = client.table("users").select(
@@ -993,7 +993,7 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
         from src.db.credit_transactions import TransactionType, log_credit_transaction
 
         client = get_supabase_client()
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Get current balances
         user_result = client.table("users").select(
@@ -1110,7 +1110,7 @@ def record_usage(
         client = get_supabase_client()
 
         # Ensure timestamp is timezone-aware
-        timestamp = datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat()
+        timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
 
         # Only include columns that exist in the schema
         usage_data = {
@@ -1223,7 +1223,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
         client = get_supabase_client()
 
         # Calculate time boundaries for filtering
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         day_ago = now - timedelta(days=1)
         month_ago = now - timedelta(days=30)
 
@@ -1602,7 +1602,7 @@ def update_user_profile(api_key: str, profile_data: dict[str, Any]) -> dict[str,
         if not update_data:
             raise ValueError("No valid profile fields to update")
 
-        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        update_data["updated_at"] = datetime.now(UTC).isoformat()
 
         # Update user profile
         result = client.table("users").update(update_data).eq("api_key", api_key).execute()
@@ -1699,7 +1699,7 @@ def mark_welcome_email_sent(user_id: int) -> bool:
         result = (
             client.table("users")
             .update(
-                {"welcome_email_sent": True, "updated_at": datetime.now(timezone.utc).isoformat()}
+                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
             )
             .eq("id", user_id)
             .execute()

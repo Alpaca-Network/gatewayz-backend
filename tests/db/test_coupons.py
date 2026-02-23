@@ -13,7 +13,7 @@ Tests cover:
 
 import pytest
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 from src.db.coupons import (
     create_coupon,
@@ -122,7 +122,7 @@ class TestCreateCoupon:
         # Mock insert response
         table_mock.execute.return_value = Mock(data=[mock_coupon_data])
 
-        valid_until = datetime(2024, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        valid_until = datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC)
 
         result = create_coupon(
             code='WELCOME2024',
@@ -157,7 +157,7 @@ class TestCreateCoupon:
 
         table_mock.execute.return_value = Mock(data=[mock_user_specific_coupon])
 
-        valid_until = datetime(2024, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        valid_until = datetime(2024, 12, 31, 23, 59, 59, tzinfo=UTC)
 
         result = create_coupon(
             code='user123',  # lowercase input
@@ -182,7 +182,7 @@ class TestCreateCoupon:
         client, table_mock, rpc_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        valid_until = datetime(2024, 12, 31, tzinfo=timezone.utc)
+        valid_until = datetime(2024, 12, 31, tzinfo=UTC)
 
         with pytest.raises(ValueError, match="must have assigned_to_user_id"):
             create_coupon(
@@ -203,7 +203,7 @@ class TestCreateCoupon:
         client, table_mock, rpc_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        valid_until = datetime(2024, 12, 31, tzinfo=timezone.utc)
+        valid_until = datetime(2024, 12, 31, tzinfo=UTC)
 
         with pytest.raises(ValueError, match="cannot have assigned_to_user_id"):
             create_coupon(
@@ -225,7 +225,7 @@ class TestCreateCoupon:
         client, table_mock, rpc_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        valid_until = datetime(2024, 12, 31, tzinfo=timezone.utc)
+        valid_until = datetime(2024, 12, 31, tzinfo=UTC)
 
         with pytest.raises(ValueError, match="must have max_uses = 1"):
             create_coupon(

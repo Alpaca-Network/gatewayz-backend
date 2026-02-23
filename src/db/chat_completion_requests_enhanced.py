@@ -4,12 +4,11 @@ Extends chat_completion_requests with cost tracking functionality
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.db.chat_completion_requests import (
     get_model_id_by_name,
-    save_chat_completion_request as save_base_request,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,14 +25,14 @@ def save_chat_completion_request_with_cost(
     output_cost_usd: float,
     pricing_source: str = "calculated",
     status: str = "completed",
-    error_message: Optional[str] = None,
-    user_id: Optional[int] = None,
-    provider_name: Optional[str] = None,
-    model_id: Optional[int] = None,
-    api_key_id: Optional[int] = None,
+    error_message: str | None = None,
+    user_id: int | None = None,
+    provider_name: str | None = None,
+    model_id: int | None = None,
+    api_key_id: int | None = None,
     is_anonymous: bool = False,
-    metadata: Optional[dict[str, Any]] = None,
-) -> Optional[dict[str, Any]]:
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """
     Save a chat completion request with cost tracking
 
@@ -256,11 +255,11 @@ def backfill_request_costs(
 
 
 def get_requests_with_cost(
-    model_id: Optional[int] = None,
-    user_id: Optional[int] = None,
-    provider_slug: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    model_id: int | None = None,
+    user_id: int | None = None,
+    provider_slug: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
     limit: int = 100,
     offset: int = 0
 ) -> dict[str, Any]:

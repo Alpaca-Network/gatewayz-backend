@@ -338,7 +338,7 @@ async def fetch_all_providers_parallel(
         if pending:
             logger.warning(f"{len(pending)} provider fetches did not complete within timeout")
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(f"Overall timeout ({overall_timeout}s) exceeded for parallel fetch")
         # Return whatever we have
         for provider, _ in tasks:

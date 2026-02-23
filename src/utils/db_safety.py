@@ -6,7 +6,7 @@ Prevents common errors like IndexError, KeyError, and type mismatches.
 """
 
 import logging
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,7 @@ class DatabaseResultError(Exception):
 def safe_get_first(
     result: Any,
     error_message: str = "No data returned from database",
-    validate_keys: Optional[list[str]] = None,
+    validate_keys: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Safely get the first item from a Supabase query result.
@@ -68,11 +68,11 @@ def safe_get_first(
     return first_item
 
 
-def safe_get_value(
+def safe_get_value(  # noqa: UP047
     data: dict[str, Any],
     key: str,
     default: T = None,
-    expected_type: Optional[type] = None,
+    expected_type: type | None = None,
     allow_none: bool = True,
 ) -> T:
     """
@@ -126,10 +126,10 @@ def safe_get_value(
     return value
 
 
-def safe_execute_query(
+def safe_execute_query(  # noqa: UP047
     query_fn: Callable[[], Any],
     operation_name: str,
-    fallback_value: Optional[T] = None,
+    fallback_value: T | None = None,
     raise_on_error: bool = True,
 ) -> T:
     """
@@ -170,7 +170,7 @@ def safe_get_list(
     result: Any,
     error_message: str = "No data returned from database",
     min_items: int = 0,
-    max_items: Optional[int] = None,
+    max_items: int | None = None,
 ) -> list[dict[str, Any]]:
     """
     Safely get a list from a Supabase query result with validation.

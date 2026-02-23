@@ -15,8 +15,7 @@ Key features:
 """
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -35,7 +34,7 @@ router = APIRouter()
 @router.get("/health/gateways/optimized", tags=["health"])
 async def get_optimized_gateways_health(
     include_live_tests: bool = Query(
-        False, 
+        False,
         description="Include live latency tests (slower but more accurate). Default: False (cached data only)"
     ),
     auto_fix: bool = Query(
@@ -146,9 +145,9 @@ async def get_optimized_providers_health(
 
 @router.get("/health/models/optimized", tags=["health"])
 async def get_optimized_models_health(
-    gateway: Optional[str] = Query(None, description="Filter by specific gateway"),
-    provider: Optional[str] = Query(None, description="Filter by specific provider"),
-    status: Optional[str] = Query(None, description="Filter by health status"),
+    gateway: str | None = Query(None, description="Filter by specific gateway"),
+    provider: str | None = Query(None, description="Filter by specific provider"),
+    status: str | None = Query(None, description="Filter by health status"),
     limit: int = Query(1000, ge=1, le=5000, description="Number of models to return"),
     offset: int = Query(0, ge=0, description="Number of models to skip"),
     api_key: str = Depends(get_api_key)
@@ -163,7 +162,7 @@ async def get_optimized_models_health(
     
     **Parameters:**
     - gateway: Filter by gateway name
-    - provider: Filter by provider name  
+    - provider: Filter by provider name  # noqa: W291
     - status: Filter by health status
     - limit: Max 5000 models per request
     - offset: For pagination

@@ -5,6 +5,7 @@ import pytest
 
 from src.config import Config
 from src.services import alibaba_cloud_client as acc
+from datetime import UTC
 
 
 def _reset_region_state(monkeypatch):
@@ -269,9 +270,9 @@ class TestAlibabaQuotaErrorCaching:
 
         # Set up quota error state (recently occurred)
         _alibaba_models_cache["quota_error"] = True
-        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(UTC)
         _alibaba_models_cache["data"] = []
-        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["timestamp"] = datetime.now(UTC)
 
         call_count = 0
 
@@ -299,11 +300,11 @@ class TestAlibabaQuotaErrorCaching:
         # Set up quota error state that has expired (more than 15 minutes ago)
         backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
         _alibaba_models_cache["quota_error"] = True
-        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc) - timedelta(
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(UTC) - timedelta(
             seconds=backoff_seconds + 60
         )
         _alibaba_models_cache["data"] = []
-        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["timestamp"] = datetime.now(UTC)
 
         call_count = 0
 
@@ -330,11 +331,11 @@ class TestAlibabaQuotaErrorCaching:
         # Set up expired quota error state
         backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
         _alibaba_models_cache["quota_error"] = True
-        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(timezone.utc) - timedelta(
+        _alibaba_models_cache["quota_error_timestamp"] = datetime.now(UTC) - timedelta(
             seconds=backoff_seconds + 60
         )
         _alibaba_models_cache["data"] = []
-        _alibaba_models_cache["timestamp"] = datetime.now(timezone.utc)
+        _alibaba_models_cache["timestamp"] = datetime.now(UTC)
 
         def fake_list_alibaba_models():
             return types.SimpleNamespace(data=[types.SimpleNamespace(id="qwen-max")])
@@ -363,7 +364,7 @@ class TestAlibabaQuotaErrorCaching:
 
         # Simulate a quota error that occurred 20 minutes ago (backoff should have expired)
         backoff_seconds = _alibaba_models_cache.get("quota_error_backoff", 900)
-        twenty_mins_ago = datetime.now(timezone.utc) - timedelta(seconds=1200)
+        twenty_mins_ago = datetime.now(UTC) - timedelta(seconds=1200)
 
         _alibaba_models_cache["quota_error"] = True
         _alibaba_models_cache["quota_error_timestamp"] = twenty_mins_ago
