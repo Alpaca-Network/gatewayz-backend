@@ -447,7 +447,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         return False
 
-    def _validate_content_type(self, request: Request) -> Optional[JSONResponse]:  # noqa: F821
+    def _validate_content_type(self, request: Request) -> JSONResponse | None:
         """
         Validate the Content-Type header for mutating requests on /v1/* endpoints.
 

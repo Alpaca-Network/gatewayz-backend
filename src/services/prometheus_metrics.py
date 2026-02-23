@@ -66,9 +66,11 @@ except Exception as e:
 try:
     from prometheus_client import GCCollector, PlatformCollector, ProcessCollector
 
-    REGISTRY.register(ProcessCollector())
-    REGISTRY.register(PlatformCollector())
-    REGISTRY.register(GCCollector())
+    for collector_cls in (ProcessCollector, PlatformCollector, GCCollector):
+        try:
+            REGISTRY.register(collector_cls())
+        except ValueError:
+            pass  # Already registered (e.g. uvicorn --reload skipped unregister)
     logger.debug("Re-registered default process/platform/gc collectors")
 except Exception as e:
     logger.warning(f"Could not re-register default collectors: {e}")
