@@ -1261,8 +1261,10 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     # --- Step 2: Fetch per-provider catalogs in parallel ---
     # get_cached_provider_catalog already has Redis → local memory → DB fallback
     # and per-provider stampede protection, so we just call it for each slug.
-    # Cap concurrency to avoid exhausting the connection pool (50 max connections).
-    MAX_WORKERS = 5
+    # With 30+ providers, use 10 workers to complete in ~3 batches while leaving
+    # plenty of headroom in the connection pool (50 max connections). Most providers
+    # will hit Redis cache (sub-ms), so only a few use DB connections simultaneously.
+    MAX_WORKERS = 10
     all_models: list[dict[str, Any]] = []
     provider_counts: dict[str, int] = {}
     failed_providers: list[str] = []
