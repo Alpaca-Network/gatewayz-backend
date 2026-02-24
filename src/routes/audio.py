@@ -18,7 +18,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
 from src.config import Config
@@ -251,7 +251,6 @@ async def create_transcription(
         le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic.",
     ),
-    background_tasks: BackgroundTasks = None,
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -321,7 +320,7 @@ async def create_transcription(
 
     # Get event loop and thread pool for async DB operations
     loop = asyncio.get_running_loop()
-    executor = ThreadPoolExecutor()
+    executor = ThreadPoolExecutor(max_workers=4)
 
     # Create temporary file for the API
     tmp_file_path = None
@@ -499,7 +498,8 @@ async def create_transcription(
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
         # Clean up executor
-        executor.shutdown(wait=False)
+        if 'executor' in locals():
+            executor.shutdown(wait=False)
 
 
 @router.post("/transcriptions/base64")
@@ -513,7 +513,6 @@ async def create_transcription_base64(
     prompt: str | None = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0, ge=0.0, le=1.0),
-    background_tasks: BackgroundTasks = None,
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -578,7 +577,7 @@ async def create_transcription_base64(
 
     # Get event loop and thread pool for async DB operations
     loop = asyncio.get_running_loop()
-    executor = ThreadPoolExecutor()
+    executor = ThreadPoolExecutor(max_workers=4)
 
     # Create temporary file and transcribe
     tmp_file_path = None
@@ -724,4 +723,5 @@ async def create_transcription_base64(
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
         # Clean up executor
-        executor.shutdown(wait=False)
+        if 'executor' in locals():
+            executor.shutdown(wait=False)
