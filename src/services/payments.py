@@ -2328,8 +2328,12 @@ class StripeService:
                 from src.db.users import get_user_by_id as get_user_fresh
 
                 user_fresh = get_user_fresh(user_id)
-                current_allowance = float(user_fresh.get("subscription_allowance") or 0) if user_fresh else 0.0
-                purchased_credits = float(user_fresh.get("purchased_credits") or 0) if user_fresh else 0.0
+                current_allowance = (
+                    float(user_fresh.get("subscription_allowance") or 0) if user_fresh else 0.0
+                )
+                purchased_credits = (
+                    float(user_fresh.get("purchased_credits") or 0) if user_fresh else 0.0
+                )
 
                 # Log pending cancellation in credit transactions for audit trail
                 # Note: Allowance is NOT zeroed yet - it will be zeroed when the

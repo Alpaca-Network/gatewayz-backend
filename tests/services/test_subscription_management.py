@@ -656,7 +656,13 @@ class TestCancelSubscription:
         with patch("src.services.payments.get_user_by_id", return_value=mock_user_pro):
             with patch("stripe.Subscription.retrieve", return_value=mock_stripe_subscription_pro):
                 with patch("stripe.Subscription.cancel", return_value=mock_canceled_sub):
-                    with patch("src.db.users.forfeit_subscription_allowance", return_value={"forfeited_allowance": 10.0, "retained_purchased_credits": 0.0}):
+                    with patch(
+                        "src.db.users.forfeit_subscription_allowance",
+                        return_value={
+                            "forfeited_allowance": 10.0,
+                            "retained_purchased_credits": 0.0,
+                        },
+                    ):
                         with patch("src.config.supabase_config.get_supabase_client") as mock_client:
                             mock_table = MagicMock()
                             mock_client.return_value.table.return_value = mock_table
