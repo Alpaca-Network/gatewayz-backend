@@ -57,10 +57,30 @@ def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
                     "error": "Trial already started or subscription active",
                 }
 
-        # Call database function
-        result = client.rpc(
-            "start_trial", {"api_key_id": api_key_id, "trial_days": trial_days}
-        ).execute()
+        # Call database function.
+        # If start_trial fails after record_trial_grant succeeded, clean up
+        # the grant so the user can retry.
+        try:
+            result = client.rpc(
+                "start_trial", {"api_key_id": api_key_id, "trial_days": trial_days}
+            ).execute()
+        except Exception as start_err:
+            if user_id is not None:
+                try:
+                    client.table("trial_grants").delete().eq("user_id", user_id).execute()
+                    logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial failure")
+                except Exception as cleanup_err:
+                    logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
+            raise start_err
+
+        if result.data and not result.data.get("success", True):
+            # start_trial returned a logical failure — clean up the grant
+            if user_id is not None:
+                try:
+                    client.table("trial_grants").delete().eq("user_id", user_id).execute()
+                    logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial logical failure")
+                except Exception as cleanup_err:
+                    logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
 
         return result.data if result.data else {"success": False, "error": "Database error"}
 

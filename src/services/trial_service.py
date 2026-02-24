@@ -103,10 +103,21 @@ class TrialService:
                         message="Trial already started or subscription active",
                     )
 
-            # Call database function to start trial
-            result = self.supabase.rpc(
-                "start_trial", {"api_key_id": api_key_id, "trial_days": request.trial_days}
-            ).execute()
+            # Call database function to start trial.
+            # If start_trial fails after record_trial_grant succeeded, clean up
+            # the grant so the user can retry.
+            try:
+                result = self.supabase.rpc(
+                    "start_trial", {"api_key_id": api_key_id, "trial_days": request.trial_days}
+                ).execute()
+            except Exception as start_err:
+                if user_id is not None:
+                    try:
+                        self.supabase.table("trial_grants").delete().eq("user_id", user_id).execute()
+                        logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial failure")
+                    except Exception as cleanup_err:
+                        logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
+                raise start_err
 
             if result.data and result.data.get("success"):
                 trial_data = result.data
@@ -128,6 +139,13 @@ class TrialService:
                 error_msg = (
                     result.data.get("error", "Unknown error") if result.data else "Database error"
                 )
+                # Clean up the grant so the user can retry
+                if user_id is not None:
+                    try:
+                        self.supabase.table("trial_grants").delete().eq("user_id", user_id).execute()
+                        logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial logical failure")
+                    except Exception as cleanup_err:
+                        logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
                 return StartTrialResponse(
                     success=False,
                     trial_start_date=datetime.now(),

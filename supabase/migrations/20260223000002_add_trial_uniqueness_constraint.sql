@@ -83,6 +83,11 @@ COMMENT ON FUNCTION record_trial_grant IS
 
 -- 3. Backfill existing trials so the constraint is accurate going forward.
 --    We pick the earliest trial_start_date per user from api_keys_new.
+--
+--    NOTE: The WHERE clause intentionally includes `trial_converted = TRUE`.
+--    Converted users have already used their trial (and upgraded to a paid plan),
+--    so they must be recorded in trial_grants to prevent them from re-claiming
+--    a second free trial.
 INSERT INTO trial_grants (user_id, api_key_id, grant_type, trial_credits, trial_duration_days, granted_at)
 SELECT DISTINCT ON (ak.user_id)
     ak.user_id,
