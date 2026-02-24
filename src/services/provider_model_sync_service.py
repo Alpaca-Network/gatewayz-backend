@@ -18,7 +18,7 @@ Usage:
 
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.routes.catalog import GATEWAY_REGISTRY
@@ -88,8 +88,7 @@ async def sync_providers_to_database() -> dict[str, Any]:
                 "slug": gateway_id,
                 "description": f"{gateway_config['name']} - {gateway_config.get('priority', 'standard')} priority gateway",
                 "api_key_env_var": PROVIDER_ENV_VAR_MAP.get(
-                    gateway_id,
-                    f"{gateway_id.upper().replace('-', '_')}_API_KEY"
+                    gateway_id, f"{gateway_id.upper().replace('-', '_')}_API_KEY"
                 ),
                 "supports_streaming": True,
                 "is_active": True,
@@ -99,15 +98,12 @@ async def sync_providers_to_database() -> dict[str, Any]:
                     "priority": gateway_config.get("priority", "slow"),
                     "icon": gateway_config.get("icon"),
                     "aliases": gateway_config.get("aliases", []),
-                }
+                },
             }
             providers_to_upsert.append(provider)
 
         # Upsert all providers (insert or update on conflict)
-        result = client.table("providers").upsert(
-            providers_to_upsert,
-            on_conflict="slug"
-        ).execute()
+        result = client.table("providers").upsert(providers_to_upsert, on_conflict="slug").execute()
 
         synced_count = len(result.data) if result.data else 0
         logger.info(f"✅ Synced {synced_count} providers to database")
@@ -115,21 +111,16 @@ async def sync_providers_to_database() -> dict[str, Any]:
         return {
             "success": True,
             "providers_synced": synced_count,
-            "providers": [p["slug"] for p in providers_to_upsert]
+            "providers": [p["slug"] for p in providers_to_upsert],
         }
 
     except Exception as e:
         logger.error(f"❌ Failed to sync providers: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e),
-            "providers_synced": 0
-        }
+        return {"success": False, "error": str(e), "providers_synced": 0}
 
 
 async def sync_models_from_providers(
-    provider_slugs: list[str] | None = None,
-    batch_size: int = 5
+    provider_slugs: list[str] | None = None, batch_size: int = 5
 ) -> dict[str, Any]:
     """
     Sync models from provider APIs to database
@@ -156,7 +147,7 @@ async def sync_models_from_providers(
 
         # Process providers in batches to avoid overwhelming the system
         for i in range(0, len(provider_slugs), batch_size):
-            batch = provider_slugs[i:i + batch_size]
+            batch = provider_slugs[i : i + batch_size]
             logger.info(f"Processing batch {i // batch_size + 1}: {', '.join(batch)}")
 
             # Sync each provider in the batch sequentially
@@ -164,9 +155,7 @@ async def sync_models_from_providers(
             for provider_slug in batch:
                 try:
                     result = await asyncio.to_thread(
-                        sync_provider_models,
-                        provider_slug,
-                        dry_run=False
+                        sync_provider_models, provider_slug, dry_run=False
                     )
 
                     if result["success"]:
@@ -200,17 +189,12 @@ async def sync_models_from_providers(
             "total_providers": len(provider_slugs),
             "total_models_synced": total_models_synced,
             "errors": errors,
-            "synced_at": _last_model_sync.isoformat()
+            "synced_at": _last_model_sync.isoformat(),
         }
 
     except Exception as e:
         logger.error(f"❌ Model sync failed: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e),
-            "providers_synced": 0,
-            "total_models_synced": 0
-        }
+        return {"success": False, "error": str(e), "providers_synced": 0, "total_models_synced": 0}
 
 
 async def sync_providers_on_startup() -> dict[str, Any]:
@@ -235,7 +219,7 @@ async def sync_providers_on_startup() -> dict[str, Any]:
 
 
 async def sync_initial_models_on_startup(
-    high_priority_providers: list[str] | None = None
+    high_priority_providers: list[str] | None = None,
 ) -> dict[str, Any]:
     """
     Sync critical models on startup (optional, can be heavy)
@@ -253,16 +237,17 @@ async def sync_initial_models_on_startup(
         # Default high-priority providers (fast, commonly used)
         high_priority_providers = [
             "openrouter",  # Aggregator with many models
-            "openai",      # GPT models
-            "anthropic",   # Claude models
-            "groq",        # Fast inference
+            "openai",  # GPT models
+            "anthropic",  # Claude models
+            "groq",  # Fast inference
         ]
 
-    logger.info(f"🚀 Starting initial model sync for {len(high_priority_providers)} high-priority providers")
+    logger.info(
+        f"🚀 Starting initial model sync for {len(high_priority_providers)} high-priority providers"
+    )
 
     result = await sync_models_from_providers(
-        provider_slugs=high_priority_providers,
-        batch_size=2  # Smaller batch for startup
+        provider_slugs=high_priority_providers, batch_size=2  # Smaller batch for startup
     )
 
     if result["success"]:
@@ -323,8 +308,7 @@ async def start_background_model_sync(interval_hours: int = 6):
         return
 
     _background_sync_task = asyncio.create_task(
-        periodic_model_sync_task(interval_hours),
-        name="periodic_model_sync"
+        periodic_model_sync_task(interval_hours), name="periodic_model_sync"
     )
 
     logger.info(f"✅ Background model sync task started (interval: {interval_hours}h)")
@@ -362,7 +346,7 @@ async def trigger_full_sync() -> dict[str, Any]:
     return {
         "success": provider_result["success"] and model_result["success"],
         "providers": provider_result,
-        "models": model_result
+        "models": model_result,
     }
 
 

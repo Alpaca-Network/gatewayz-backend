@@ -195,7 +195,9 @@ class CreateCheckoutSessionRequest(BaseModel):
             # Credit value must be at least equal to payment amount (100% minimum)
             # This prevents discount packages that give less value than paid
             if v < amount_dollars:
-                raise ValueError("Credit value cannot be less than payment amount (minimum 100% value)")
+                raise ValueError(
+                    "Credit value cannot be less than payment amount (minimum 100% value)"
+                )
             # Credit value shouldn't exceed 3x payment (prevents abuse while allowing promotional packages)
             if v > amount_dollars * 3:
                 raise ValueError("Credit value cannot exceed 3x the payment amount")
@@ -376,7 +378,9 @@ class AddCreditsRequest(BaseModel):
 
     api_key: str
     credits: int = Field(validation_alias=AliasChoices("credits", "amount"))
-    reason: str | None = Field(default=None, description="Optional reason for the credit adjustment")
+    reason: str | None = Field(
+        default=None, description="Optional reason for the credit adjustment"
+    )
 
 
 # ==================== Subscription Models ====================
@@ -433,9 +437,7 @@ class CreateSubscriptionCheckoutRequest(BaseModel):
     mode: str = Field(
         default="subscription", description="Checkout mode (subscription, payment, or setup)"
     )
-    metadata: dict[str, Any] | None = Field(
-        default_factory=dict, description="Additional metadata"
-    )
+    metadata: dict[str, Any] | None = Field(default_factory=dict, description="Additional metadata")
 
     @field_validator("mode")
     @classmethod

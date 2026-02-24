@@ -1,15 +1,17 @@
 # tests/db/test_plans.py
+import importlib
 import sys
 import types
-import importlib
-from datetime import datetime, timezone, timedelta, UTC
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 MODULE_PATH = "src.db.plans"  # change if your file lives elsewhere
 
 
 # ------------------------ Minimal in-memory Supabase double ------------------------
+
 
 class _Result:
     def __init__(self, data):
@@ -32,7 +34,7 @@ class _Table:
     def __init__(self, store, name):
         self.store = store
         self.name = name
-        self._filters = []   # list of (field, op, value)
+        self._filters = []  # list of (field, op, value)
         self._order = None
         self._desc = False
         self._limit = None
@@ -100,7 +102,13 @@ class _Table:
         for r in rows:
             if "id" not in r:
                 r["id"] = len(self.store[self.name]) + 1
-            if "created_at" not in r and self.name in {"users", "user_plans", "usage_records", "plans", "subscription_plans"}:
+            if "created_at" not in r and self.name in {
+                "users",
+                "user_plans",
+                "usage_records",
+                "plans",
+                "subscription_plans",
+            }:
                 r["created_at"] = datetime.now(UTC).isoformat()
             self.store[self.name].append(r)
         return self
@@ -129,7 +137,7 @@ class _Table:
         if self._order:
             rows.sort(key=lambda r: r.get(self._order), reverse=self._desc)
         if self._limit:
-            rows = rows[:self._limit]
+            rows = rows[: self._limit]
         return _Result(rows)
 
 
@@ -156,6 +164,7 @@ class FakeSupabase:
 
 # ------------------------ Fixtures ------------------------
 
+
 @pytest.fixture
 def fake_supabase():
     sb = FakeSupabase()
@@ -178,15 +187,18 @@ def mod(fake_supabase, monkeypatch):
 
 # ------------------------ Tests ------------------------
 
+
 def test_get_all_plans_returns_active_sorted(mod, fake_supabase):
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert([
-        {"id": 1, "name": "Basic", "price_per_month": 10, "is_active": True},
-        {"id": 2, "name": "Pro", "price_per_month": 25, "is_active": True},
-        {"id": 3, "name": "Old", "price_per_month": 5, "is_active": False},
-    ]).execute()
+    fake_supabase.table("plans").insert(
+        [
+            {"id": 1, "name": "Basic", "price_per_month": 10, "is_active": True},
+            {"id": 2, "name": "Pro", "price_per_month": 25, "is_active": True},
+            {"id": 3, "name": "Old", "price_per_month": 5, "is_active": False},
+        ]
+    ).execute()
 
     out = mod.get_all_plans()
     assert [p["id"] for p in out] == [1, 2]  # only active
@@ -197,18 +209,20 @@ def test_get_plan_by_id_converts_features_dict_to_list(mod, fake_supabase):
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert({
-        "id": 7,
-        "name": "Team",
-        "description": "Team plan",
-        "daily_request_limit": 1000,
-        "monthly_request_limit": 30000,
-        "daily_token_limit": 200000,
-        "monthly_token_limit": 6000000,
-        "price_per_month": 99,
-        "features": {"basic_models": True, "priority_support": True},
-        "is_active": True,
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 7,
+            "name": "Team",
+            "description": "Team plan",
+            "daily_request_limit": 1000,
+            "monthly_request_limit": 30000,
+            "daily_token_limit": 200000,
+            "monthly_token_limit": 6000000,
+            "price_per_month": 99,
+            "features": {"basic_models": True, "priority_support": True},
+            "is_active": True,
+        }
+    ).execute()
 
     plan = mod.get_plan_by_id(7)
     assert plan is not None
@@ -220,19 +234,31 @@ def test_get_user_plan_combines_user_and_plan(mod, fake_supabase):
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert({
-        "id": 42, "name": "Pro", "description": "Pro plan",
-        "daily_request_limit": 2000, "monthly_request_limit": 50000,
-        "daily_token_limit": 300000, "monthly_token_limit": 9000000,
-        "price_per_month": 29, "features": ["basic_models", "advanced_models"], "is_active": True
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 42,
+            "name": "Pro",
+            "description": "Pro plan",
+            "daily_request_limit": 2000,
+            "monthly_request_limit": 50000,
+            "daily_token_limit": 300000,
+            "monthly_token_limit": 9000000,
+            "price_per_month": 29,
+            "features": ["basic_models", "advanced_models"],
+            "is_active": True,
+        }
+    ).execute()
     now = datetime.now(UTC)
-    fake_supabase.table("user_plans").insert({
-        "id": 1001, "user_id": 9, "plan_id": 42,
-        "started_at": (now - timedelta(days=1)).isoformat(),
-        "expires_at": (now + timedelta(days=29)).isoformat(),
-        "is_active": True
-    }).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 1001,
+            "user_id": 9,
+            "plan_id": 42,
+            "started_at": (now - timedelta(days=1)).isoformat(),
+            "expires_at": (now + timedelta(days=29)).isoformat(),
+            "is_active": True,
+        }
+    ).execute()
 
     out = mod.get_user_plan(9)
     assert out["user_plan_id"] == 1001
@@ -245,19 +271,30 @@ def test_assign_user_plan_deactivates_existing_and_updates_user(mod, fake_supaba
     fake_supabase.clear_all()
 
     # existing plan
-    fake_supabase.table("user_plans").insert({
-        "id": 1, "user_id": 5, "plan_id": 1,
-        "started_at": datetime.now(UTC).isoformat(),
-        "expires_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
-        "is_active": True
-    }).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 1,
+            "user_id": 5,
+            "plan_id": 1,
+            "started_at": datetime.now(UTC).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(days=10)).isoformat(),
+            "is_active": True,
+        }
+    ).execute()
     # target plan exists
-    fake_supabase.table("plans").insert({
-        "id": 2, "name": "Business", "is_active": True,
-        "daily_request_limit": 3000, "monthly_request_limit": 70000,
-        "daily_token_limit": 500000, "monthly_token_limit": 15000000,
-        "price_per_month": 49, "features": ["basic_models", "priority_support"]
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 2,
+            "name": "Business",
+            "is_active": True,
+            "daily_request_limit": 3000,
+            "monthly_request_limit": 70000,
+            "daily_token_limit": 500000,
+            "monthly_token_limit": 15000000,
+            "price_per_month": 49,
+            "features": ["basic_models", "priority_support"],
+        }
+    ).execute()
     # user row
     fake_supabase.table("users").insert({"id": 5, "subscription_status": "inactive"}).execute()
 
@@ -295,19 +332,30 @@ def test_check_plan_entitlements_expired_plan_marks_inactive_and_user_expired(mo
     fake_supabase.clear_all()
 
     # plan + expired user_plan
-    fake_supabase.table("plans").insert({
-        "id": 55, "name": "Basic", "is_active": True,
-        "daily_request_limit": 100, "monthly_request_limit": 2000,
-        "daily_token_limit": 10000, "monthly_token_limit": 200000,
-        "price_per_month": 9, "features": ["basic_models"]
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 55,
+            "name": "Basic",
+            "is_active": True,
+            "daily_request_limit": 100,
+            "monthly_request_limit": 2000,
+            "daily_token_limit": 10000,
+            "monthly_token_limit": 200000,
+            "price_per_month": 9,
+            "features": ["basic_models"],
+        }
+    ).execute()
     yesterday = datetime.now(UTC) - timedelta(days=1)
-    fake_supabase.table("user_plans").insert({
-        "id": 501, "user_id": 77, "plan_id": 55,
-        "started_at": (yesterday - timedelta(days=29)).isoformat(),
-        "expires_at": yesterday.isoformat(),
-        "is_active": True,
-    }).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 501,
+            "user_id": 77,
+            "plan_id": 55,
+            "started_at": (yesterday - timedelta(days=29)).isoformat(),
+            "expires_at": yesterday.isoformat(),
+            "is_active": True,
+        }
+    ).execute()
     fake_supabase.table("users").insert({"id": 77, "subscription_status": "active"}).execute()
 
     out = mod.check_plan_entitlements(77)
@@ -325,19 +373,30 @@ def test_check_plan_entitlements_active_plan_allows_feature(mod, fake_supabase):
     # Ensure database is clean (no leftover data from other tests)
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert({
-        "id": 7, "name": "Pro", "is_active": True,
-        "daily_request_limit": 1000, "monthly_request_limit": 30000,
-        "daily_token_limit": 200000, "monthly_token_limit": 6000000,
-        "price_per_month": 29, "features": ["basic_models", "advanced_models"]
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 7,
+            "name": "Pro",
+            "is_active": True,
+            "daily_request_limit": 1000,
+            "monthly_request_limit": 30000,
+            "daily_token_limit": 200000,
+            "monthly_token_limit": 6000000,
+            "price_per_month": 29,
+            "features": ["basic_models", "advanced_models"],
+        }
+    ).execute()
     now = datetime.now(UTC)
-    fake_supabase.table("user_plans").insert({
-        "id": 700, "user_id": 123, "plan_id": 7,
-        "started_at": (now - timedelta(days=1)).isoformat(),
-        "expires_at": (now + timedelta(days=10)).isoformat(),
-        "is_active": True
-    }).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 700,
+            "user_id": 123,
+            "plan_id": 7,
+            "started_at": (now - timedelta(days=1)).isoformat(),
+            "expires_at": (now + timedelta(days=10)).isoformat(),
+            "is_active": True,
+        }
+    ).execute()
 
     out = mod.check_plan_entitlements(123, required_feature="advanced_models")
     assert out["has_plan"] is True
@@ -368,32 +427,55 @@ def test_get_user_usage_within_plan_limits_aggregates(mod, fake_supabase, monkey
     fake_supabase.clear_all()
 
     # plan + user_plan
-    fake_supabase.table("plans").insert({
-        "id": 9, "name": "Team", "is_active": True,
-        "daily_request_limit": 10, "monthly_request_limit": 100,
-        "daily_token_limit": 1000, "monthly_token_limit": 10000,
-        "price_per_month": 19, "features": ["basic_models"]
-    }).execute()
-    fake_supabase.table("user_plans").insert({
-        "id": 900, "user_id": 9, "plan_id": 9,
-        "started_at": (fixed_now - timedelta(days=1)).isoformat(),
-        "expires_at": (fixed_now + timedelta(days=5)).isoformat(),
-        "is_active": True
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 9,
+            "name": "Team",
+            "is_active": True,
+            "daily_request_limit": 10,
+            "monthly_request_limit": 100,
+            "daily_token_limit": 1000,
+            "monthly_token_limit": 10000,
+            "price_per_month": 19,
+            "features": ["basic_models"],
+        }
+    ).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 900,
+            "user_id": 9,
+            "plan_id": 9,
+            "started_at": (fixed_now - timedelta(days=1)).isoformat(),
+            "expires_at": (fixed_now + timedelta(days=5)).isoformat(),
+            "is_active": True,
+        }
+    ).execute()
 
     # usage: today (day 15) -> 3 records (100 + 200 + 50 tokens)
     today = fixed_now.replace(hour=1, minute=0, second=0, microsecond=0)
-    fake_supabase.table("usage_records").insert([
-        {"user_id": 9, "timestamp": today.isoformat(), "tokens_used": 100},
-        {"user_id": 9, "timestamp": (today + timedelta(hours=1)).isoformat(), "tokens_used": 200},
-        {"user_id": 9, "timestamp": (today + timedelta(hours=2)).isoformat(), "tokens_used": 50},
-    ]).execute()
+    fake_supabase.table("usage_records").insert(
+        [
+            {"user_id": 9, "timestamp": today.isoformat(), "tokens_used": 100},
+            {
+                "user_id": 9,
+                "timestamp": (today + timedelta(hours=1)).isoformat(),
+                "tokens_used": 200,
+            },
+            {
+                "user_id": 9,
+                "timestamp": (today + timedelta(hours=2)).isoformat(),
+                "tokens_used": 50,
+            },
+        ]
+    ).execute()
 
     # earlier this month (day 1) (should count toward monthly but not daily)
     earlier = fixed_now.replace(day=1, hour=2, minute=0, second=0, microsecond=0)
-    fake_supabase.table("usage_records").insert([
-        {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
-    ]).execute()
+    fake_supabase.table("usage_records").insert(
+        [
+            {"user_id": 9, "timestamp": earlier.isoformat(), "tokens_used": 300},
+        ]
+    ).execute()
 
     out = mod.get_user_usage_within_plan_limits(9)
     assert out["usage"]["daily_requests"] == 3
@@ -416,26 +498,43 @@ def test_enforce_plan_limits_checks_and_env_multiplier(mod, fake_supabase):
     assert out_ok["allowed"] is True
 
     # Create a real plan with low limits, and record usage right at the edge
-    fake_supabase.table("plans").insert({
-        "id": 66, "name": "Low", "is_active": True,
-        "daily_request_limit": 10, "monthly_request_limit": 50,
-        "daily_token_limit": 100, "monthly_token_limit": 2000,
-        "price_per_month": 1, "features": ["basic_models"]
-    }).execute()
+    fake_supabase.table("plans").insert(
+        {
+            "id": 66,
+            "name": "Low",
+            "is_active": True,
+            "daily_request_limit": 10,
+            "monthly_request_limit": 50,
+            "daily_token_limit": 100,
+            "monthly_token_limit": 2000,
+            "price_per_month": 1,
+            "features": ["basic_models"],
+        }
+    ).execute()
     now = datetime.now(UTC)
-    fake_supabase.table("user_plans").insert({
-        "id": 660, "user_id": 606, "plan_id": 66,
-        "started_at": (now - timedelta(days=1)).isoformat(),
-        "expires_at": (now + timedelta(days=10)).isoformat(),
-        "is_active": True
-    }).execute()
+    fake_supabase.table("user_plans").insert(
+        {
+            "id": 660,
+            "user_id": 606,
+            "plan_id": 66,
+            "started_at": (now - timedelta(days=1)).isoformat(),
+            "expires_at": (now + timedelta(days=10)).isoformat(),
+            "is_active": True,
+        }
+    ).execute()
 
     # Current usage: 2 requests today, tokens 90 today (request limit not exceeded, token limit will be)
     today = now.replace(hour=3, minute=0, second=0, microsecond=0)
-    fake_supabase.table("usage_records").insert([
-        {"user_id": 606, "timestamp": today.isoformat(), "tokens_used": 40},
-        {"user_id": 606, "timestamp": (today + timedelta(hours=1)).isoformat(), "tokens_used": 50},
-    ]).execute()
+    fake_supabase.table("usage_records").insert(
+        [
+            {"user_id": 606, "timestamp": today.isoformat(), "tokens_used": 40},
+            {
+                "user_id": 606,
+                "timestamp": (today + timedelta(hours=1)).isoformat(),
+                "tokens_used": 50,
+            },
+        ]
+    ).execute()
 
     # test env: plan daily_token_limit is 100, multiplier 0.5 -> effective 50; we have 90 used, adding 15 would exceed
     not_ok = mod.enforce_plan_limits(606, tokens_requested=15, environment_tag="test")
@@ -445,9 +544,13 @@ def test_enforce_plan_limits_checks_and_env_multiplier(mod, fake_supabase):
     # test env halves limits -> 10 req/day -> effective 5; we already have 2 -> should still be OK
     # But let's add 4 more requests to hit the limit
     for i in range(4):
-        fake_supabase.table("usage_records").insert({
-            "user_id": 606, "timestamp": (today + timedelta(hours=2+i)).isoformat(), "tokens_used": 1
-        }).execute()
+        fake_supabase.table("usage_records").insert(
+            {
+                "user_id": 606,
+                "timestamp": (today + timedelta(hours=2 + i)).isoformat(),
+                "tokens_used": 1,
+            }
+        ).execute()
     # Now we have 6 requests, test env limit is 5 (10/2), so next request should fail
     not_ok2 = mod.enforce_plan_limits(606, tokens_requested=1, environment_tag="test")
     assert not_ok2["allowed"] is False
@@ -459,11 +562,13 @@ def test_get_subscription_plans_active_only(mod, fake_supabase):
     fake_supabase.clear_all()
     fake_supabase.store["subscription_plans"].clear()
 
-    fake_supabase.table("subscription_plans").insert([
-        {"id": 1, "name": "SubA", "is_active": True},
-        {"id": 2, "name": "SubB", "is_active": False},
-        {"id": 3, "name": "SubC", "is_active": True},
-    ]).execute()
+    fake_supabase.table("subscription_plans").insert(
+        [
+            {"id": 1, "name": "SubA", "is_active": True},
+            {"id": 2, "name": "SubB", "is_active": False},
+            {"id": 3, "name": "SubC", "is_active": True},
+        ]
+    ).execute()
     out = mod.get_subscription_plans()
     assert [p["id"] for p in out] == [1, 3]
 
@@ -472,6 +577,7 @@ def test_get_all_plans_error_returns_empty(monkeypatch):
     # Force get_supabase_client to raise
     def raise_error():
         raise RuntimeError("boom")
+
     bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
 
@@ -486,12 +592,14 @@ def test_get_plan_id_by_tier_finds_matching_plan(mod, fake_supabase):
     # Ensure database is clean
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert([
-        {"id": 1, "name": "Basic", "is_active": True},
-        {"id": 2, "name": "Pro", "is_active": True},
-        {"id": 3, "name": "Max", "is_active": True},
-        {"id": 4, "name": "Legacy Pro", "is_active": False},
-    ]).execute()
+    fake_supabase.table("plans").insert(
+        [
+            {"id": 1, "name": "Basic", "is_active": True},
+            {"id": 2, "name": "Pro", "is_active": True},
+            {"id": 3, "name": "Max", "is_active": True},
+            {"id": 4, "name": "Legacy Pro", "is_active": False},
+        ]
+    ).execute()
 
     # Test exact match
     plan_id = mod.get_plan_id_by_tier("pro")
@@ -513,10 +621,12 @@ def test_get_plan_id_by_tier_returns_none_when_not_found(mod, fake_supabase):
     # Ensure database is clean
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert([
-        {"id": 1, "name": "Basic", "is_active": True},
-        {"id": 2, "name": "Pro", "is_active": True},
-    ]).execute()
+    fake_supabase.table("plans").insert(
+        [
+            {"id": 1, "name": "Basic", "is_active": True},
+            {"id": 2, "name": "Pro", "is_active": True},
+        ]
+    ).execute()
 
     plan_id = mod.get_plan_id_by_tier("nonexistent")
     assert plan_id is None
@@ -526,10 +636,12 @@ def test_get_plan_id_by_tier_only_returns_active_plans(mod, fake_supabase):
     # Ensure database is clean
     fake_supabase.clear_all()
 
-    fake_supabase.table("plans").insert([
-        {"id": 1, "name": "Pro", "is_active": False},
-        {"id": 2, "name": "Pro Plus", "is_active": True},
-    ]).execute()
+    fake_supabase.table("plans").insert(
+        [
+            {"id": 1, "name": "Pro", "is_active": False},
+            {"id": 2, "name": "Pro Plus", "is_active": True},
+        ]
+    ).execute()
 
     # Should only find the active Pro Plus, not the inactive Pro
     plan_id = mod.get_plan_id_by_tier("pro")
@@ -540,6 +652,7 @@ def test_get_plan_id_by_tier_error_returns_none(monkeypatch):
     # Force get_supabase_client to raise
     def raise_error():
         raise RuntimeError("boom")
+
     bad_supabase_mod = types.SimpleNamespace(get_supabase_client=raise_error)
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", bad_supabase_mod)
 
@@ -551,6 +664,7 @@ def test_get_plan_id_by_tier_error_returns_none(monkeypatch):
 
 
 # ----------------------------- tests: usage cache -----------------------------
+
 
 def test_usage_cache_hit_skips_database(supabase_module, monkeypatch):
     """Second call with same user_id should use cache (not hit database)"""

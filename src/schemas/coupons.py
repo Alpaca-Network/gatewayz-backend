@@ -45,9 +45,7 @@ class CreateCouponRequest(BaseModel):
     max_uses: int = Field(..., gt=0, description="Maximum number of redemptions")
     valid_until: datetime = Field(..., description="Expiration date")
     coupon_type: CouponType = Field(CouponType.PROMOTIONAL, description="Type of coupon")
-    assigned_to_user_id: int | None = Field(
-        None, description="User ID for user-specific coupons"
-    )
+    assigned_to_user_id: int | None = Field(None, description="User ID for user-specific coupons")
     description: str | None = Field(None, max_length=500, description="Internal description")
     valid_from: datetime | None = Field(None, description="Start date (defaults to now)")
 

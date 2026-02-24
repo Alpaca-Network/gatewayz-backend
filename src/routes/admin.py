@@ -1,17 +1,9 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-# Cache management functions migrated to model_catalog_cache
-# Old direct cache dict access replaced with new API calls
-from src.services.model_catalog_cache import (
-    get_gateway_cache_metadata,
-    get_provider_cache_metadata,
-    invalidate_gateway_catalog,
-    invalidate_provider_catalog,
-)
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import get_all_transactions, get_transaction_summary
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
@@ -31,6 +23,15 @@ from src.schemas import (
     UserRegistrationResponse,
 )
 from src.security.deps import require_admin
+
+# Cache management functions migrated to model_catalog_cache
+# Old direct cache dict access replaced with new API calls
+from src.services.model_catalog_cache import (
+    get_gateway_cache_metadata,
+    get_provider_cache_metadata,
+    invalidate_gateway_catalog,
+    invalidate_provider_catalog,
+)
 from src.services.models import (
     fetch_huggingface_model,
     get_cached_models,
@@ -276,12 +277,12 @@ async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admi
         hf_cache = get_gateway_cache_metadata("huggingface")
         cache_age = None
         if hf_cache.get("timestamp"):
-            cache_age = (
-                datetime.now(UTC) - hf_cache["timestamp"]
-            ).total_seconds()
+            cache_age = (datetime.now(UTC) - hf_cache["timestamp"]).total_seconds()
 
         hf_data = hf_cache.get("data") or []
-        cached_ids = [model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")]
+        cached_ids = [
+            model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")
+        ]
 
         return {
             "huggingface_cache": {
@@ -409,7 +410,9 @@ async def admin_debug_models(admin_user: dict = Depends(require_admin)):
                 )
 
         # Get cache metadata for debugging
-        models_cache_meta = get_gateway_cache_metadata("openrouter")  # Using openrouter as main models cache
+        models_cache_meta = get_gateway_cache_metadata(
+            "openrouter"
+        )  # Using openrouter as main models cache
         providers_cache_meta = get_provider_cache_metadata()
 
         return {
@@ -1663,7 +1666,9 @@ async def get_chat_completion_requests_by_api_key_admin(
     api_key: str = Query(..., description="API key to search for (exact match)"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of requests to return"),
     offset: int = Query(0, ge=0, description="Number of requests to skip for pagination"),
-    include_summary: bool = Query(False, description="Include summary statistics (DEPRECATED - use /summary endpoint)"),
+    include_summary: bool = Query(
+        False, description="Include summary statistics (DEPRECATED - use /summary endpoint)"
+    ),
     admin_user: dict = Depends(require_admin),
 ):
     """
@@ -1937,7 +1942,9 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
 
         result = (
             client.table("chat_completion_requests")
-            .select("model_id, models!inner(id, model_name, provider_model_id, providers!inner(name, slug))")
+            .select(
+                "model_id, models!inner(id, model_name, provider_model_id, providers!inner(name, slug))"
+            )
             .execute()
         )
 
@@ -2259,10 +2266,11 @@ async def get_chat_requests_summary_admin(
     **For browsing requests, use:** `/admin/monitoring/chat-requests?model_id=4&...`
     """
     try:
-        from src.db.chat_completion_requests import get_chat_completion_summary_by_filters
-        from src.config.redis_config import get_redis_client
-        import json
         import hashlib
+        import json
+
+        from src.config.redis_config import get_redis_client
+        from src.db.chat_completion_requests import get_chat_completion_summary_by_filters
 
         # Create cache key based on filters
         filter_str = f"{model_id}:{provider_id}:{model_name}:{start_date}:{end_date}"
@@ -2286,7 +2294,9 @@ async def get_chat_requests_summary_admin(
                 logger.warning(f"Redis cache read failed: {cache_error}")
 
         # Cache miss - fetch from database
-        logger.info(f"Cache MISS for chat summary: filter_hash={filter_hash}, fetching from database")
+        logger.info(
+            f"Cache MISS for chat summary: filter_hash={filter_hash}, fetching from database"
+        )
         summary = get_chat_completion_summary_by_filters(
             model_id=model_id,
             provider_id=provider_id,
@@ -2313,9 +2323,7 @@ async def get_chat_requests_summary_admin(
         if redis_client:
             try:
                 redis_client.setex(
-                    cache_key,
-                    60,  # 60 second TTL
-                    json.dumps(response, default=str)
+                    cache_key, 60, json.dumps(response, default=str)  # 60 second TTL
                 )
                 logger.info(f"Cached chat summary for filter_hash={filter_hash} (TTL: 60s)")
             except Exception as cache_error:
@@ -2325,10 +2333,7 @@ async def get_chat_requests_summary_admin(
 
     except Exception as e:
         logger.error(f"Error fetching summary: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch chat request summary"
-        ) from e
+        raise HTTPException(status_code=500, detail="Failed to fetch chat request summary") from e
 
 
 @router.get("/admin/monitoring/chat-requests/plot-data", tags=["admin", "monitoring"])

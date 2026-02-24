@@ -145,7 +145,9 @@ class IPClassificationService:
                 is_dc_asn = is_datacenter_asn(asn)
 
                 if is_dc_asn:
-                    logger.debug(f"IP {ip} classified as datacenter via ASN {asn} ({provider_name})")
+                    logger.debug(
+                        f"IP {ip} classified as datacenter via ASN {asn} ({provider_name})"
+                    )
                     return IPClassificationResult(
                         ip=ip,
                         is_datacenter=True,

@@ -7,7 +7,7 @@ See: https://platform.openai.com/docs/api-reference/chat/create
 import pytest
 from pydantic import ValidationError
 
-from src.schemas.proxy import ProxyRequest, ResponseRequest, Message, StreamOptions
+from src.schemas.proxy import Message, ProxyRequest, ResponseRequest, StreamOptions
 
 
 class TestMessageSchema:
@@ -122,9 +122,7 @@ class TestProxyRequestOpenAIAlignment:
 
     def test_minimal_request(self):
         """Test minimal valid request"""
-        request = ProxyRequest(
-            model="gpt-4", messages=[{"role": "user", "content": "Hello"}]
-        )
+        request = ProxyRequest(model="gpt-4", messages=[{"role": "user", "content": "Hello"}])
         assert request.model == "gpt-4"
         assert len(request.messages) == 1
 
@@ -658,7 +656,9 @@ class TestMessageContentValidation:
 
     def test_assistant_message_rejects_empty_without_tool_calls(self):
         """Test that assistant messages reject empty content without tool_calls"""
-        with pytest.raises(ValidationError, match="must have either non-empty content or tool_calls"):
+        with pytest.raises(
+            ValidationError, match="must have either non-empty content or tool_calls"
+        ):
             Message(role="assistant", content="")
 
     def test_assistant_message_allows_null_with_tool_calls(self):
@@ -666,7 +666,13 @@ class TestMessageContentValidation:
         msg = Message(
             role="assistant",
             content=None,
-            tool_calls=[{"id": "call_123", "type": "function", "function": {"name": "test", "arguments": "{}"}}]
+            tool_calls=[
+                {
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "test", "arguments": "{}"},
+                }
+            ],
         )
         assert msg.content is None
         assert len(msg.tool_calls) == 1

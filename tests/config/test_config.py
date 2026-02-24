@@ -1,7 +1,9 @@
 """
 Comprehensive tests for src/config/config.py
 """
+
 import os
+
 import pytest
 
 
@@ -15,6 +17,7 @@ class TestConfigEnvironmentDetection:
         monkeypatch.setenv("APP_ENV", "production")
         # Reload module to pick up new env var
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.APP_ENV == "production"
@@ -28,6 +31,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("APP_ENV", "staging")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.APP_ENV == "staging"
@@ -41,6 +45,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("APP_ENV", "development")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.APP_ENV == "development"
@@ -54,6 +59,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("APP_ENV", "testing")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.IS_TESTING is True
@@ -64,6 +70,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("APP_ENV", "test")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.IS_TESTING is True
@@ -74,6 +81,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("TESTING", "true")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.IS_TESTING is True
@@ -84,6 +92,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("TESTING", "1")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.IS_TESTING is True
@@ -94,6 +103,7 @@ class TestConfigEnvironmentDetection:
 
         monkeypatch.setenv("TESTING", "yes")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.IS_TESTING is True
@@ -110,6 +120,7 @@ class TestConfigProviderKeys:
         monkeypatch.setenv("OPENROUTER_SITE_URL", "https://test-site.com")
         monkeypatch.setenv("OPENROUTER_SITE_NAME", "Test Site")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.OPENROUTER_API_KEY == "test_openrouter_key"
@@ -123,6 +134,7 @@ class TestConfigProviderKeys:
         monkeypatch.delenv("OPENROUTER_SITE_URL", raising=False)
         monkeypatch.delenv("OPENROUTER_SITE_NAME", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.OPENROUTER_SITE_URL == "https://your-site.com"
@@ -134,6 +146,7 @@ class TestConfigProviderKeys:
 
         monkeypatch.setenv("OPENROUTER_API_KEY", "  sk-or-abc123  \n")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.OPENROUTER_API_KEY == "sk-or-abc123"
@@ -173,6 +186,7 @@ class TestConfigProviderKeys:
             monkeypatch.setenv(key, value)
 
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.DEEPINFRA_API_KEY == "deepinfra_key"
@@ -195,6 +209,7 @@ class TestConfigGoogleVertex:
         monkeypatch.delenv("GOOGLE_VERTEX_LOCATION", raising=False)
         monkeypatch.delenv("GOOGLE_VERTEX_ENDPOINT_ID", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.GOOGLE_PROJECT_ID == "gatewayz-468519"
@@ -210,6 +225,7 @@ class TestConfigGoogleVertex:
         monkeypatch.setenv("GOOGLE_VERTEX_ENDPOINT_ID", "123456")
         monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/path/to/creds.json")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.GOOGLE_PROJECT_ID == "my-project"
@@ -227,6 +243,7 @@ class TestConfigMonitoring:
 
         monkeypatch.delenv("PROMETHEUS_ENABLED", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.PROMETHEUS_ENABLED is True
@@ -238,6 +255,7 @@ class TestConfigMonitoring:
         for value in ["true", "1", "yes", "True", "YES"]:
             monkeypatch.setenv("PROMETHEUS_ENABLED", value)
             import importlib
+
             importlib.reload(config)
             assert config.Config.PROMETHEUS_ENABLED is True
 
@@ -247,6 +265,7 @@ class TestConfigMonitoring:
 
         monkeypatch.setenv("PROMETHEUS_ENABLED", "false")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.PROMETHEUS_ENABLED is False
@@ -257,6 +276,7 @@ class TestConfigMonitoring:
 
         monkeypatch.delenv("PROMETHEUS_SCRAPE_ENABLED", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.PROMETHEUS_SCRAPE_ENABLED is True
@@ -267,6 +287,7 @@ class TestConfigMonitoring:
 
         monkeypatch.delenv("TEMPO_ENABLED", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.TEMPO_ENABLED is False
@@ -278,6 +299,7 @@ class TestConfigMonitoring:
         for value in ["true", "1", "yes"]:
             monkeypatch.setenv("TEMPO_ENABLED", value)
             import importlib
+
             importlib.reload(config)
             assert config.Config.TEMPO_ENABLED is True
 
@@ -287,6 +309,7 @@ class TestConfigMonitoring:
 
         monkeypatch.delenv("LOKI_ENABLED", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.LOKI_ENABLED is False
@@ -297,6 +320,7 @@ class TestConfigMonitoring:
 
         monkeypatch.setenv("LOKI_ENABLED", "true")
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.LOKI_ENABLED is True
@@ -307,6 +331,7 @@ class TestConfigMonitoring:
 
         monkeypatch.delenv("OTEL_SERVICE_NAME", raising=False)
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.OTEL_SERVICE_NAME == "gatewayz-api"
@@ -325,7 +350,9 @@ class TestConfigValidation:
         monkeypatch.delenv("VERCEL", raising=False)
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         result = config_mod.Config.validate()
@@ -340,7 +367,9 @@ class TestConfigValidation:
         monkeypatch.delenv("SUPABASE_KEY", raising=False)
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         result = config_mod.Config.validate()
@@ -356,7 +385,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         with pytest.raises(RuntimeError, match="Missing required environment variables"):
@@ -372,7 +403,9 @@ class TestConfigValidation:
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -393,7 +426,9 @@ class TestConfigValidation:
         monkeypatch.delenv("VERCEL", raising=False)
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         is_valid, missing = config_mod.Config.validate_critical_env_vars()
@@ -410,7 +445,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         is_valid, missing = config_mod.Config.validate_critical_env_vars()
@@ -427,7 +464,9 @@ class TestConfigValidation:
         monkeypatch.delenv("SUPABASE_KEY", raising=False)
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         is_valid, missing = config_mod.Config.validate_critical_env_vars()
@@ -442,7 +481,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -459,7 +500,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         result = config_mod.Config.validate()
@@ -473,7 +516,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         result = config_mod.Config.validate()
@@ -487,7 +532,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         is_valid, issues = config_mod.Config.validate_critical_env_vars()
@@ -502,7 +549,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         with pytest.raises(RuntimeError) as exc_info:
@@ -519,7 +568,9 @@ class TestConfigValidation:
         monkeypatch.setenv("OPENROUTER_API_KEY", "test_openrouter")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         is_valid, issues = config_mod.Config.validate_critical_env_vars()
@@ -530,11 +581,15 @@ class TestConfigValidation:
         """Test validate skips checking presence of keys in Vercel env (but validates URL format)"""
         monkeypatch.setenv("VERCEL", "1")
         monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")  # Valid protocol
-        monkeypatch.delenv("SUPABASE_KEY", raising=False)  # Missing key - should be skipped in Vercel
+        monkeypatch.delenv(
+            "SUPABASE_KEY", raising=False
+        )  # Missing key - should be skipped in Vercel
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)  # Missing key
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         result = config_mod.Config.validate()
@@ -552,7 +607,9 @@ class TestConfigGetSupabaseConfig:
         monkeypatch.setenv("SUPABASE_KEY", "test_key_123")
 
         import importlib
+
         import src.config.config as config_mod
+
         importlib.reload(config_mod)
 
         url, key = config_mod.Config.get_supabase_config()
@@ -572,6 +629,7 @@ class TestConfigClarifai:
         monkeypatch.setenv("CLARIFAI_APP_ID", "test_app_id")
 
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.CLARIFAI_API_KEY == "test_clarifai_key"
@@ -590,6 +648,7 @@ class TestConfigAiHubMix:
         monkeypatch.setenv("AIHUBMIX_APP_CODE", "test_app_code")
 
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.AIHUBMIX_API_KEY == "test_aihubmix_key"
@@ -606,6 +665,7 @@ class TestConfigAdminAndAnalytics:
         monkeypatch.setenv("ADMIN_EMAIL", "admin@example.com")
 
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.ADMIN_EMAIL == "admin@example.com"
@@ -617,6 +677,7 @@ class TestConfigAdminAndAnalytics:
         monkeypatch.setenv("OPENROUTER_COOKIE", "test_cookie_value")
 
         import importlib
+
         importlib.reload(config)
 
         assert config.Config.OPENROUTER_COOKIE == "test_cookie_value"

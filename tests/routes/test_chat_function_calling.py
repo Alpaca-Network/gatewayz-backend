@@ -1,8 +1,8 @@
 """Route tests for function calling support"""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -101,9 +101,7 @@ class TestChatCompletionsFunctionCalling:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         mock_process.return_value = {
@@ -240,9 +238,7 @@ class TestChatCompletionsFunctionCalling:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         mock_process.return_value = {
@@ -299,4 +295,3 @@ class TestChatCompletionsFunctionCalling:
             call_kwargs = {}
         assert "tools" in call_kwargs
         assert len(call_kwargs["tools"]) == 2
-

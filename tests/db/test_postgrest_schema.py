@@ -1,4 +1,5 @@
 import importlib
+
 import pytest
 
 MODULE_PATH = "src.db.postgrest_schema"

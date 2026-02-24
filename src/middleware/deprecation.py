@@ -91,22 +91,21 @@ class DeprecationMiddleware:
                 headers = list(message.get("headers", []))
 
                 # Add RFC 8594 deprecation headers
-                headers.extend([
-                    (b"deprecation", b"true"),
-                    (b"sunset", deprecation_info["sunset_date"].encode()),
-                    (
-                        b"link",
-                        f'<{deprecation_info["replacement"]}>; rel="alternate"'.encode()
-                    ),
-                    (
-                        b"x-deprecation-migration-url",
-                        deprecation_info["migration_url"].encode()
-                    ),
-                    (
-                        b"x-api-warn",
-                        f"Endpoint deprecated. {deprecation_info['reason']}. Sunset: {deprecation_info['sunset_date']}".encode()
-                    ),
-                ])
+                headers.extend(
+                    [
+                        (b"deprecation", b"true"),
+                        (b"sunset", deprecation_info["sunset_date"].encode()),
+                        (b"link", f'<{deprecation_info["replacement"]}>; rel="alternate"'.encode()),
+                        (
+                            b"x-deprecation-migration-url",
+                            deprecation_info["migration_url"].encode(),
+                        ),
+                        (
+                            b"x-api-warn",
+                            f"Endpoint deprecated. {deprecation_info['reason']}. Sunset: {deprecation_info['sunset_date']}".encode(),
+                        ),
+                    ]
+                )
 
                 # Create new message with updated headers
                 message = {**message, "headers": headers}

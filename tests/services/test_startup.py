@@ -1,8 +1,10 @@
 """
 Comprehensive tests for Startup service
 """
+
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
 
 class TestStartup:
@@ -11,12 +13,14 @@ class TestStartup:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.startup
+
         assert src.services.startup is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import startup
-        assert hasattr(startup, '__name__')
+
+        assert hasattr(startup, "__name__")
 
     @pytest.mark.asyncio
     async def test_lifespan_startup_success(self):
@@ -25,20 +29,24 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.config.Config') as mock_config, \
-             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
-             patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
-             patch('src.services.startup.init_tempo_otlp') as mock_tempo, \
-             patch('src.services.startup.init_tempo_otlp_fastapi') as mock_tempo_fastapi, \
-             patch('src.services.startup.init_prometheus_remote_write') as mock_prometheus_init, \
-             patch('src.services.startup.get_pool_stats') as mock_pool_stats, \
-             patch('src.services.startup.get_cache') as mock_cache, \
-             patch('src.services.startup.initialize_autonomous_monitor') as mock_auto_monitor, \
-             patch('src.services.startup.get_autonomous_monitor') as mock_get_auto_monitor, \
-             patch('src.services.startup.shutdown_prometheus_remote_write') as mock_prometheus_shutdown, \
-             patch('src.services.startup.clear_connection_pools') as mock_clear_pools, \
-             patch('src.services.startup.warmup_provider_connections_async') as mock_warmup, \
-             patch('src.services.startup.os.environ.get') as mock_env_get:
+        with (
+            patch("src.config.Config") as mock_config,
+            patch("src.config.supabase_config.get_supabase_client") as mock_get_supabase,
+            patch("src.services.startup.initialize_fal_cache_from_catalog") as mock_fal_cache,
+            patch("src.services.startup.init_tempo_otlp") as mock_tempo,
+            patch("src.services.startup.init_tempo_otlp_fastapi") as mock_tempo_fastapi,
+            patch("src.services.startup.init_prometheus_remote_write") as mock_prometheus_init,
+            patch("src.services.startup.get_pool_stats") as mock_pool_stats,
+            patch("src.services.startup.get_cache") as mock_cache,
+            patch("src.services.startup.initialize_autonomous_monitor") as mock_auto_monitor,
+            patch("src.services.startup.get_autonomous_monitor") as mock_get_auto_monitor,
+            patch(
+                "src.services.startup.shutdown_prometheus_remote_write"
+            ) as mock_prometheus_shutdown,
+            patch("src.services.startup.clear_connection_pools") as mock_clear_pools,
+            patch("src.services.startup.warmup_provider_connections_async") as mock_warmup,
+            patch("src.services.startup.os.environ.get") as mock_env_get,
+        ):
 
             # Setup mocks
             mock_config.validate_critical_env_vars.return_value = (True, [])
@@ -74,8 +82,11 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.config.Config') as mock_config:
-            mock_config.validate_critical_env_vars.return_value = (False, ["SUPABASE_URL", "SUPABASE_KEY"])
+        with patch("src.config.Config") as mock_config:
+            mock_config.validate_critical_env_vars.return_value = (
+                False,
+                ["SUPABASE_URL", "SUPABASE_KEY"],
+            )
 
             # Should raise RuntimeError
             with pytest.raises(RuntimeError, match="Missing required environment variables"):
@@ -85,29 +96,32 @@ class TestStartup:
     @pytest.mark.asyncio
     async def test_lifespan_startup_supabase_init_fails(self):
         """Test lifespan startup continues in degraded mode when Supabase init fails"""
-        from src.services.startup import lifespan
         import sys
+
+        from src.services.startup import lifespan
 
         mock_app = MagicMock()
 
         # Create a mock sentry_sdk module
         mock_sentry = MagicMock()
-        sys.modules['sentry_sdk'] = mock_sentry
+        sys.modules["sentry_sdk"] = mock_sentry
 
         try:
-            with patch('src.config.Config') as mock_config, \
-                 patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
-                 patch('src.services.startup.get_pool_stats'), \
-                 patch('src.services.startup.get_cache'), \
-                 patch('src.services.startup.initialize_fal_cache_from_catalog'), \
-                 patch('src.services.startup.init_tempo_otlp'), \
-                 patch('src.services.startup.init_tempo_otlp_fastapi'), \
-                 patch('src.services.startup.init_prometheus_remote_write'), \
-                 patch('src.services.startup.warmup_provider_connections_async'), \
-                 patch('src.services.startup.initialize_autonomous_monitor'), \
-                 patch('src.services.startup.get_autonomous_monitor'), \
-                 patch('src.services.startup.shutdown_prometheus_remote_write'), \
-                 patch('src.services.startup.clear_connection_pools'):
+            with (
+                patch("src.config.Config") as mock_config,
+                patch("src.config.supabase_config.get_supabase_client") as mock_get_supabase,
+                patch("src.services.startup.get_pool_stats"),
+                patch("src.services.startup.get_cache"),
+                patch("src.services.startup.initialize_fal_cache_from_catalog"),
+                patch("src.services.startup.init_tempo_otlp"),
+                patch("src.services.startup.init_tempo_otlp_fastapi"),
+                patch("src.services.startup.init_prometheus_remote_write"),
+                patch("src.services.startup.warmup_provider_connections_async"),
+                patch("src.services.startup.initialize_autonomous_monitor"),
+                patch("src.services.startup.get_autonomous_monitor"),
+                patch("src.services.startup.shutdown_prometheus_remote_write"),
+                patch("src.services.startup.clear_connection_pools"),
+            ):
 
                 mock_config.validate_critical_env_vars.return_value = (True, [])
                 mock_get_supabase.side_effect = Exception("Connection refused")
@@ -122,8 +136,8 @@ class TestStartup:
                 assert mock_sentry.capture_exception.called
         finally:
             # Clean up
-            if 'sentry_sdk' in sys.modules:
-                del sys.modules['sentry_sdk']
+            if "sentry_sdk" in sys.modules:
+                del sys.modules["sentry_sdk"]
 
     @pytest.mark.asyncio
     async def test_lifespan_startup_continues_if_fal_cache_fails(self):
@@ -132,19 +146,21 @@ class TestStartup:
 
         mock_app = MagicMock()
 
-        with patch('src.config.Config') as mock_config, \
-             patch('src.config.supabase_config.get_supabase_client') as mock_get_supabase, \
-             patch('src.services.startup.initialize_fal_cache_from_catalog') as mock_fal_cache, \
-             patch('src.services.startup.get_pool_stats') as mock_pool_stats, \
-             patch('src.services.startup.get_cache') as mock_cache, \
-             patch('src.services.startup.init_tempo_otlp_fastapi'), \
-             patch('src.services.startup.init_tempo_otlp'), \
-             patch('src.services.startup.init_prometheus_remote_write'), \
-             patch('src.services.startup.warmup_provider_connections_async'), \
-             patch('src.services.startup.initialize_autonomous_monitor'), \
-             patch('src.services.startup.get_autonomous_monitor') as mock_get_auto_monitor, \
-             patch('src.services.startup.shutdown_prometheus_remote_write'), \
-             patch('src.services.startup.clear_connection_pools') as mock_clear_pools:
+        with (
+            patch("src.config.Config") as mock_config,
+            patch("src.config.supabase_config.get_supabase_client") as mock_get_supabase,
+            patch("src.services.startup.initialize_fal_cache_from_catalog") as mock_fal_cache,
+            patch("src.services.startup.get_pool_stats") as mock_pool_stats,
+            patch("src.services.startup.get_cache") as mock_cache,
+            patch("src.services.startup.init_tempo_otlp_fastapi"),
+            patch("src.services.startup.init_tempo_otlp"),
+            patch("src.services.startup.init_prometheus_remote_write"),
+            patch("src.services.startup.warmup_provider_connections_async"),
+            patch("src.services.startup.initialize_autonomous_monitor"),
+            patch("src.services.startup.get_autonomous_monitor") as mock_get_auto_monitor,
+            patch("src.services.startup.shutdown_prometheus_remote_write"),
+            patch("src.services.startup.clear_connection_pools") as mock_clear_pools,
+        ):
 
             mock_config.validate_critical_env_vars.return_value = (True, [])
             mock_fal_cache.side_effect = Exception("Fal cache failed")

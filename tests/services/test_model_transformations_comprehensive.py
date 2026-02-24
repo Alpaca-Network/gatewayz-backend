@@ -8,20 +8,20 @@ Tests cover:
 - Edge cases and error handling
 """
 
-from unittest.mock import patch
 import os
+from unittest.mock import patch
 
-os.environ['APP_ENV'] = 'testing'
-os.environ['TESTING'] = 'true'
+os.environ["APP_ENV"] = "testing"
+os.environ["TESTING"] = "true"
 
 from src.services.model_transformations import (
-    transform_model_id,
-    detect_provider_from_model_id,
-    apply_model_alias,
-    normalize_model_name,
-    get_model_id_mapping,
-    OPENROUTER_AUTO_FALLBACKS,
     MODEL_PROVIDER_OVERRIDES,
+    OPENROUTER_AUTO_FALLBACKS,
+    apply_model_alias,
+    detect_provider_from_model_id,
+    get_model_id_mapping,
+    normalize_model_name,
+    transform_model_id,
 )
 
 
@@ -317,7 +317,7 @@ class TestProviderDetection:
         result = detect_provider_from_model_id("groq/llama-3.3-70b-versatile")
         assert result == "groq"
 
-    @patch.dict(os.environ, {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
+    @patch.dict(os.environ, {"GOOGLE_VERTEX_CREDENTIALS_JSON": '{"type":"service_account"}'})
     def test_detect_google_vertex_models(self):
         """Test Google Vertex AI model detection"""
         result = detect_provider_from_model_id("gemini-2.5-flash")

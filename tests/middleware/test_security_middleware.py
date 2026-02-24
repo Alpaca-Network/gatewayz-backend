@@ -386,7 +386,9 @@ class TestRequestOutcomeRecording:
 
         # Old entries should be removed
         assert len(security_middleware._request_log) == 2
-        assert all(ts >= now - VELOCITY_WINDOW_SECONDS for ts, _, _ in security_middleware._request_log)
+        assert all(
+            ts >= now - VELOCITY_WINDOW_SECONDS for ts, _, _ in security_middleware._request_log
+        )
 
 
 class TestRateLimitHeaders:
@@ -461,5 +463,6 @@ class TestEdgeCases:
 
         # Should extract first IP from X-Forwarded-For
         import asyncio
+
         ip = asyncio.run(security_middleware._get_client_ip(mock_request))
         assert ip == "1.2.3.4"

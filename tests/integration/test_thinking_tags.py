@@ -1,7 +1,9 @@
 """Test script to debug DeepSeek R1 thinking tags in streaming"""
+
 import asyncio
 import json
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
 
 def test_thinking_tags_in_stream():
     """Test that thinking tags are properly passed through in streaming responses"""
@@ -20,10 +22,10 @@ def test_thinking_tags_in_stream():
                     Mock(
                         index=0,
                         delta=Mock(role="assistant", content="<thinking>\n"),
-                        finish_reason=None
+                        finish_reason=None,
                     )
                 ],
-                usage=None
+                usage=None,
             ),
             # Middle chunk with thinking content
             Mock(
@@ -35,10 +37,10 @@ def test_thinking_tags_in_stream():
                     Mock(
                         index=0,
                         delta=Mock(role=None, content="The capital of France is Paris.\n"),
-                        finish_reason=None
+                        finish_reason=None,
                     )
                 ],
-                usage=None
+                usage=None,
             ),
             # Thinking close tag
             Mock(
@@ -48,12 +50,10 @@ def test_thinking_tags_in_stream():
                 model="deepseek-r1-distill-qwen-7b",
                 choices=[
                     Mock(
-                        index=0,
-                        delta=Mock(role=None, content="</thinking>\n"),
-                        finish_reason=None
+                        index=0, delta=Mock(role=None, content="</thinking>\n"), finish_reason=None
                     )
                 ],
-                usage=None
+                usage=None,
             ),
             # Final chunk with usage
             Mock(
@@ -61,19 +61,9 @@ def test_thinking_tags_in_stream():
                 object="text_completion.chunk",
                 created=1234567890,
                 model="deepseek-r1-distill-qwen-7b",
-                choices=[
-                    Mock(
-                        index=0,
-                        delta=Mock(role=None, content=None),
-                        finish_reason="stop"
-                    )
-                ],
-                usage=Mock(
-                    prompt_tokens=15,
-                    completion_tokens=50,
-                    total_tokens=65
-                )
-            )
+                choices=[Mock(index=0, delta=Mock(role=None, content=None), finish_reason="stop")],
+                usage=Mock(prompt_tokens=15, completion_tokens=50, total_tokens=65),
+            ),
         ]
         for chunk in chunks:
             yield chunk
@@ -87,6 +77,7 @@ def test_thinking_tags_in_stream():
     trial = {"is_trial": False, "is_expired": False}
 
     stream_output = []
+
     async def collect_stream():
         async for chunk in stream_generator(
             mock_stream_with_thinking(),
@@ -98,7 +89,7 @@ def test_thinking_tags_in_stream():
             None,
             [{"role": "user", "content": "What is the capital of France?"}],
             None,
-            "openrouter"
+            "openrouter",
         ):
             stream_output.append(chunk)
 
@@ -118,7 +109,11 @@ def test_thinking_tags_in_stream():
                     for choice in data["choices"]:
                         if "delta" in choice and choice["delta"].get("content"):
                             content = choice["delta"]["content"]
-                            if "<thinking>" in content or "</thinking>" in content or "thinking" in content.lower():
+                            if (
+                                "<thinking>" in content
+                                or "</thinking>" in content
+                                or "thinking" in content.lower()
+                            ):
                                 thinking_found = True
                                 print(f"[CHUNK {i}] FOUND THINKING TAG:")
                                 print(f"  Content: {repr(content[:100])}")

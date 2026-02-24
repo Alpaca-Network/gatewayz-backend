@@ -1,8 +1,10 @@
 """
 Comprehensive tests for Helicone Client service
 """
-import pytest
+
 from unittest.mock import Mock, patch
+
+import pytest
 
 
 class TestHeliconeClient:
@@ -326,9 +328,7 @@ class TestFetchModelPricing:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "gpt-4o-mini": {"prompt": "0.15", "completion": "0.60"}
-        }
+        mock_response.json.return_value = {"gpt-4o-mini": {"prompt": "0.15", "completion": "0.60"}}
         mock_get.return_value = mock_response
 
         result = fetch_model_pricing_from_helicone("gpt-4o-mini")

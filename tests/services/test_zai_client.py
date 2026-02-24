@@ -1,7 +1,8 @@
 """Tests for Z.AI client"""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.zai_client import (
     get_zai_client,
@@ -59,9 +60,7 @@ class TestZaiClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        response = make_zai_request_openai(
-            messages, "glm-4.7", max_tokens=100, temperature=0.7
-        )
+        response = make_zai_request_openai(messages, "glm-4.7", max_tokens=100, temperature=0.7)
 
         assert response is not None
         mock_client.chat.completions.create.assert_called_once_with(
@@ -108,9 +107,7 @@ class TestZaiClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_zai_request_openai_stream(
-            messages, "glm-4.5-air", max_tokens=500
-        )
+        stream = make_zai_request_openai_stream(messages, "glm-4.5-air", max_tokens=500)
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

@@ -42,9 +42,7 @@ class SessionStartEvent(BaseModel):
 
 
 @router.post("/events")
-async def log_event(
-    event: AnalyticsEvent, current_user: dict | None = Depends(get_current_user)
-):
+async def log_event(event: AnalyticsEvent, current_user: dict | None = Depends(get_current_user)):
     """
     Log an analytics event to both Statsig and PostHog via backend
 
@@ -180,6 +178,4 @@ async def log_session_start(
 
     except Exception as e:
         logger.error(f"Failed to log session start: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to log session start: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to log session start: {str(e)}") from e

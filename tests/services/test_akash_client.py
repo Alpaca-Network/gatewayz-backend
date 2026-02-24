@@ -1,7 +1,8 @@
 """Tests for Akash ML client"""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.akash_client import (
     get_akash_client,
@@ -55,9 +56,7 @@ class TestAkashClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_akash_request_openai_stream(
-            messages, "meta-llama/Llama-3.3-70B-Instruct"
-        )
+        stream = make_akash_request_openai_stream(messages, "meta-llama/Llama-3.3-70B-Instruct")
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

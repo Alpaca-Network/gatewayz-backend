@@ -84,7 +84,9 @@ def make_sybil_request_openai_stream(messages, model, **kwargs):
     """
     try:
         client = get_sybil_client()
-        stream = client.chat.completions.create(model=model, messages=messages, stream=True, **kwargs)
+        stream = client.chat.completions.create(
+            model=model, messages=messages, stream=True, **kwargs
+        )
         return stream
     except Exception as e:
         logger.error(f"Sybil streaming request failed: {e}")
@@ -219,7 +221,9 @@ def fetch_models_from_sybil():
         logger.info(f"Fetched {len(models)} models from Sybil")
         return models
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching models from Sybil: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"HTTP error fetching models from Sybil: {e.response.status_code} - {e.response.text}"
+        )
         return []
     except Exception as e:
         logger.error(f"Failed to fetch models from Sybil: {e}")

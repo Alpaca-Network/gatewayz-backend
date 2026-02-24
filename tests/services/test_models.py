@@ -5,18 +5,20 @@ Tests for models service functions
 These integration tests execute code to increase coverage
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 from src.services.models import (
-    sanitize_pricing,
-    load_featherless_catalog_export,
-    get_cached_models,
-    enhance_model_with_provider_info,
+    detect_model_gateway,
     enhance_model_with_huggingface_data,
-    get_model_count_by_provider,
+    enhance_model_with_provider_info,
     fetch_specific_model,
     fetch_specific_model_from_fal,
-    detect_model_gateway,
+    get_cached_models,
+    get_model_count_by_provider,
+    load_featherless_catalog_export,
+    sanitize_pricing,
 )
 
 
@@ -40,11 +42,7 @@ class TestSanitizePricing:
 
     def test_sanitize_positive_values(self):
         """Test that positive values are preserved"""
-        pricing = {
-            "prompt": "0.001",
-            "completion": "0.002",
-            "request": "0.0001"
-        }
+        pricing = {"prompt": "0.001", "completion": "0.002", "request": "0.0001"}
         result = sanitize_pricing(pricing)
         assert result["prompt"] == "0.001"
         assert result["completion"] == "0.002"
@@ -52,11 +50,7 @@ class TestSanitizePricing:
 
     def test_sanitize_negative_values_returns_none(self):
         """Test that negative values (dynamic pricing) return None to filter model"""
-        pricing = {
-            "prompt": "-1",
-            "completion": "-0.5",
-            "request": "0.001"
-        }
+        pricing = {"prompt": "-1", "completion": "-0.5", "request": "0.001"}
         result = sanitize_pricing(pricing)
         # Models with dynamic pricing should be filtered out
         assert result is None
@@ -68,7 +62,7 @@ class TestSanitizePricing:
             "completion": "-1",
             "image": "-1",
             "web_search": "0.002",
-            "internal_reasoning": "-2"
+            "internal_reasoning": "-2",
         }
         result = sanitize_pricing(pricing)
         # Any negative value should cause filtering
@@ -76,21 +70,14 @@ class TestSanitizePricing:
 
     def test_sanitize_numeric_negative_values_returns_none(self):
         """Test with numeric negative values returns None"""
-        pricing = {
-            "prompt": -1.0,
-            "completion": 0.002,
-            "request": -0.5
-        }
+        pricing = {"prompt": -1.0, "completion": 0.002, "request": -0.5}
         result = sanitize_pricing(pricing)
         # Models with dynamic pricing should be filtered out
         assert result is None
 
     def test_sanitize_invalid_values(self):
         """Test with invalid numeric values"""
-        pricing = {
-            "prompt": "invalid",
-            "completion": "0.002"
-        }
+        pricing = {"prompt": "invalid", "completion": "0.002"}
         result = sanitize_pricing(pricing)
         # Invalid values should be preserved
         assert result["prompt"] == "invalid"
@@ -98,11 +85,7 @@ class TestSanitizePricing:
 
     def test_sanitize_zero_values(self):
         """Test that zero values are preserved"""
-        pricing = {
-            "prompt": "0",
-            "completion": 0,
-            "request": "0.0"
-        }
+        pricing = {"prompt": "0", "completion": 0, "request": "0.0"}
         result = sanitize_pricing(pricing)
         assert result["prompt"] == "0"
         assert result["completion"] == 0
@@ -110,22 +93,14 @@ class TestSanitizePricing:
 
     def test_sanitize_with_negative_prompt_returns_none(self):
         """Test that negative pricing in prompt returns None (filters model)"""
-        pricing = {
-            "prompt": "-1",
-            "custom_field": "value",
-            "another": 123
-        }
+        pricing = {"prompt": "-1", "custom_field": "value", "another": 123}
         result = sanitize_pricing(pricing)
         # Models with dynamic pricing should be filtered out
         assert result is None
 
     def test_sanitize_preserves_other_fields_with_valid_pricing(self):
         """Test that non-pricing fields are preserved when pricing is valid"""
-        pricing = {
-            "prompt": "0.001",
-            "custom_field": "value",
-            "another": 123
-        }
+        pricing = {"prompt": "0.001", "custom_field": "value", "another": 123}
         result = sanitize_pricing(pricing)
         assert result["prompt"] == "0.001"
         assert result["custom_field"] == "value"
@@ -141,7 +116,7 @@ class TestLoadFeatherlessCatalogExport:
         # Should return list (empty or None)
         assert result is None or isinstance(result, list)
 
-    @patch('pathlib.Path.exists')
+    @patch("pathlib.Path.exists")
     def test_load_file_not_found(self, mock_exists):
         """Test when file is not found"""
         mock_exists.return_value = False
@@ -204,13 +179,8 @@ class TestEnhanceModelWithProviderInfo:
 
     def test_enhance_model_basic(self):
         """Test basic model enhancement"""
-        model = {
-            "id": "openai/gpt-4",
-            "name": "GPT-4"
-        }
-        providers = [
-            {"id": "openai", "name": "OpenAI"}
-        ]
+        model = {"id": "openai/gpt-4", "name": "GPT-4"}
+        providers = [{"id": "openai", "name": "OpenAI"}]
         result = enhance_model_with_provider_info(model, providers)
         assert isinstance(result, dict)
 
@@ -222,11 +192,7 @@ class TestEnhanceModelWithProviderInfo:
 
     def test_enhance_preserves_existing_fields(self):
         """Test that existing fields are preserved"""
-        model = {
-            "id": "test-model",
-            "name": "Test",
-            "custom_field": "value"
-        }
+        model = {"id": "test-model", "name": "Test", "custom_field": "value"}
         result = enhance_model_with_provider_info(model, [])
         assert "custom_field" in result
         assert result["custom_field"] == "value"
@@ -235,21 +201,17 @@ class TestEnhanceModelWithProviderInfo:
 class TestEnhanceModelWithHuggingFaceData:
     """Test Hugging Face data enhancement"""
 
-    @patch('src.services.models.get_huggingface_model_info')
+    @patch("src.services.models.get_huggingface_model_info")
     def test_enhance_with_hf_data_success(self, mock_get_info):
         """Test successful HF enhancement"""
-        mock_get_info.return_value = {
-            "downloads": 1000,
-            "likes": 50,
-            "tags": ["text-generation"]
-        }
+        mock_get_info.return_value = {"downloads": 1000, "likes": 50, "tags": ["text-generation"]}
 
         model = {"id": "model-1", "name": "Test"}
         result = enhance_model_with_huggingface_data(model)
 
         assert isinstance(result, dict)
 
-    @patch('src.services.models.get_huggingface_model_info')
+    @patch("src.services.models.get_huggingface_model_info")
     def test_enhance_with_hf_data_none(self, mock_get_info):
         """Test when HF returns None"""
         mock_get_info.return_value = None
@@ -276,23 +238,14 @@ class TestGetModelCountByProvider:
 
     def test_count_no_providers(self):
         """Test with no providers"""
-        models = [
-            {"id": "model-1", "provider": "openai"}
-        ]
+        models = [{"id": "model-1", "provider": "openai"}]
         result = get_model_count_by_provider(models, [])
         assert isinstance(result, dict)
 
     def test_count_basic(self):
         """Test basic counting"""
-        models = [
-            {"id": "openai/gpt-4"},
-            {"id": "openai/gpt-3.5"},
-            {"id": "anthropic/claude-3"}
-        ]
-        providers = [
-            {"id": "openai"},
-            {"id": "anthropic"}
-        ]
+        models = [{"id": "openai/gpt-4"}, {"id": "openai/gpt-3.5"}, {"id": "anthropic/claude-3"}]
+        providers = [{"id": "openai"}, {"id": "anthropic"}]
         result = get_model_count_by_provider(models, providers)
         assert isinstance(result, dict)
 
@@ -341,13 +294,13 @@ class TestFetchSpecificModel:
 class TestFalAiIntegration:
     """Test Fal.ai model integration"""
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_fetch_specific_model_from_fal_success(self, mock_get_cached_models):
         """Test successful fetch from Fal.ai cache"""
         # Mock cached Fal models
         mock_fal_models = [
             {"id": "fal-ai/stable-diffusion-v15", "name": "Stable Diffusion v1.5"},
-            {"id": "minimax/video-01", "name": "Video Generation Model"}
+            {"id": "minimax/video-01", "name": "Video Generation Model"},
         ]
         mock_get_cached_models.return_value = mock_fal_models
 
@@ -358,12 +311,10 @@ class TestFalAiIntegration:
         assert result["name"] == "Stable Diffusion v1.5"
         mock_get_cached_models.assert_called_once_with("fal")
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_fetch_specific_model_from_fal_case_insensitive(self, mock_get_cached_models):
         """Test case-insensitive matching"""
-        mock_fal_models = [
-            {"id": "Fal-AI/Stable-Diffusion-V15", "name": "Stable Diffusion v1.5"}
-        ]
+        mock_fal_models = [{"id": "Fal-AI/Stable-Diffusion-V15", "name": "Stable Diffusion v1.5"}]
         mock_get_cached_models.return_value = mock_fal_models
 
         result = fetch_specific_model_from_fal("fal-ai", "stable-diffusion-v15")
@@ -371,19 +322,17 @@ class TestFalAiIntegration:
         assert result is not None
         assert result["id"] == "Fal-AI/Stable-Diffusion-V15"
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_fetch_specific_model_from_fal_not_found(self, mock_get_cached_models):
         """Test model not found in cache"""
-        mock_fal_models = [
-            {"id": "fal-ai/other-model", "name": "Other Model"}
-        ]
+        mock_fal_models = [{"id": "fal-ai/other-model", "name": "Other Model"}]
         mock_get_cached_models.return_value = mock_fal_models
 
         result = fetch_specific_model_from_fal("fal-ai", "nonexistent-model")
 
         assert result is None
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_fetch_specific_model_from_fal_empty_cache(self, mock_get_cached_models):
         """Test with empty cache"""
         mock_get_cached_models.return_value = []
@@ -392,7 +341,7 @@ class TestFalAiIntegration:
 
         assert result is None
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_fetch_specific_model_from_fal_exception(self, mock_get_cached_models):
         """Test exception handling"""
         mock_get_cached_models.side_effect = Exception("Cache error")
@@ -401,9 +350,10 @@ class TestFalAiIntegration:
 
         assert result is None
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_detect_model_gateway_fal(self, mock_get_cached_models):
         """Test that Fal models are detected in gateway detection"""
+
         def mock_cache_side_effect(gateway):
             if gateway == "fal":
                 return [{"id": "fal-ai/stable-diffusion-v15", "name": "Stable Diffusion v1.5"}]
@@ -415,7 +365,7 @@ class TestFalAiIntegration:
 
         assert result == "fal"
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_detect_model_gateway_fallback_to_openrouter(self, mock_get_cached_models):
         """Test fallback to openrouter when model not found"""
         mock_get_cached_models.return_value = []
@@ -428,8 +378,8 @@ class TestFalAiIntegration:
 class TestOpenRouterIsFreeField:
     """Test that OpenRouter models correctly set the is_free field"""
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.services.models.Config')
+    @patch("src.services.models.httpx.get")
+    @patch("src.services.models.Config")
     def test_openrouter_free_model_sets_is_free_true(self, mock_config, mock_httpx_get):
         """OpenRouter models with :free suffix should have is_free=True"""
         from src.services.models import fetch_models_from_openrouter
@@ -454,8 +404,8 @@ class TestOpenRouterIsFreeField:
         assert len(result) == 1
         assert result[0]["is_free"] is True
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.services.models.Config')
+    @patch("src.services.models.httpx.get")
+    @patch("src.services.models.Config")
     def test_openrouter_paid_model_sets_is_free_false(self, mock_config, mock_httpx_get):
         """OpenRouter models without :free suffix should have is_free=False"""
         from src.services.models import fetch_models_from_openrouter
@@ -468,7 +418,12 @@ class TestOpenRouterIsFreeField:
                 {
                     "id": "openai/gpt-4o",
                     "name": "GPT-4o",
-                    "pricing": {"prompt": "2.50", "completion": "10.00", "request": "0", "image": "0"},
+                    "pricing": {
+                        "prompt": "2.50",
+                        "completion": "10.00",
+                        "request": "0",
+                        "image": "0",
+                    },
                 }
             ]
         }
@@ -480,8 +435,8 @@ class TestOpenRouterIsFreeField:
         assert len(result) == 1
         assert result[0]["is_free"] is False
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.services.models.Config')
+    @patch("src.services.models.httpx.get")
+    @patch("src.services.models.Config")
     def test_openrouter_mixed_models_correct_is_free(self, mock_config, mock_httpx_get):
         """Test that mixed models (free and paid) are correctly marked"""
         from src.services.models import fetch_models_from_openrouter
@@ -533,8 +488,8 @@ class TestOpenRouterIsFreeField:
         paid_model_2 = next(m for m in result if m["id"] == "anthropic/claude-3-opus")
         assert paid_model_2["is_free"] is False
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.services.models.Config')
+    @patch("src.services.models.httpx.get")
+    @patch("src.services.models.Config")
     def test_openrouter_exacto_and_extended_suffixes_not_free(self, mock_config, mock_httpx_get):
         """Models with :exacto or :extended suffixes should NOT be marked as free"""
         from src.services.models import fetch_models_from_openrouter
@@ -570,8 +525,8 @@ class TestOpenRouterIsFreeField:
         extended_model = next(m for m in result if m["id"] == "anthropic/claude-3-opus:extended")
         assert extended_model["is_free"] is False
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.services.models.Config')
+    @patch("src.services.models.httpx.get")
+    @patch("src.services.models.Config")
     def test_openrouter_null_model_id_does_not_crash(self, mock_config, mock_httpx_get):
         """Models with null id should not crash and should have is_free=False"""
         from src.services.models import fetch_models_from_openrouter

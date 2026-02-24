@@ -4,9 +4,10 @@ Tests for Partner Trials API Routes
 Tests the partner trial endpoints used for Redbeard and other partner integrations.
 """
 
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -276,9 +277,7 @@ class TestPartnerTrialsAdminEndpoints:
 
     @patch("src.routes.partner_trials.get_api_key")
     @patch("src.routes.partner_trials.PartnerTrialService.expire_partner_trial")
-    def test_force_expire_trial(
-        self, mock_expire, mock_get_api_key, client, mock_api_key
-    ):
+    def test_force_expire_trial(self, mock_expire, mock_get_api_key, client, mock_api_key):
         """Test force expiring a trial"""
         mock_get_api_key.return_value = mock_api_key
         mock_expire.return_value = {

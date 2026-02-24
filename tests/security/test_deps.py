@@ -1,5 +1,6 @@
 # tests/security/test_deps.py
 import importlib
+
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
@@ -16,7 +17,10 @@ def mod():
 
 # ---- helpers ----
 
-def make_request(path="/v1/test", referer="https://example.com", user_agent="UA/1.0", client_ip="1.2.3.4"):
+
+def make_request(
+    path="/v1/test", referer="https://example.com", user_agent="UA/1.0", client_ip="1.2.3.4"
+):
     scope = {
         "type": "http",
         "http_version": "1.1",
@@ -48,6 +52,7 @@ class FakeAuditLogger:
 
 # ---------------- get_api_key ----------------
 
+
 @pytest.mark.anyio
 async def test_get_api_key_missing_credentials(mod):
     with pytest.raises(HTTPException) as ei:
@@ -72,11 +77,18 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
     # validate -> returns same key
-    monkeypatch.setattr(mod, "validate_api_key_security", lambda api_key, client_ip=None, referer=None: api_key)
+    monkeypatch.setattr(
+        mod, "validate_api_key_security", lambda api_key, client_ip=None, referer=None: api_key
+    )
     # user lookup
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 42, "key_id": 7, "credits": 1.23})
 
-    req = make_request(path="/v1/completions", referer="https://app.example", user_agent="TestUA", client_ip="9.9.9.9")
+    req = make_request(
+        path="/v1/completions",
+        referer="https://app.example",
+        user_agent="TestUA",
+        client_ip="9.9.9.9",
+    )
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-valid-123")
 
     # act
@@ -108,9 +120,11 @@ async def test_get_api_key_valid_logs_usage(monkeypatch, mod):
 async def test_get_api_key_valueerror_mapped(monkeypatch, mod, msg, expected):
     fake_audit = FakeAuditLogger()
     monkeypatch.setattr(mod, "audit_logger", fake_audit)
+
     # make validator raise value error with our message
     def _raise(*a, **k):
         raise ValueError(msg)
+
     monkeypatch.setattr(mod, "validate_api_key_security", _raise)
     # user lookup not used in this path
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
@@ -133,6 +147,7 @@ async def test_get_api_key_valueerror_mapped(monkeypatch, mod, msg, expected):
 async def test_get_api_key_unexpected(monkeypatch, mod):
     def boom(*a, **k):
         raise RuntimeError("boom")
+
     monkeypatch.setattr(mod, "validate_api_key_security", boom)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-any")
@@ -151,6 +166,7 @@ async def test_get_api_key_no_violation_log_when_disabled(monkeypatch, mod):
     # Make validator raise value error
     def _raise(*a, **k):
         raise ValueError("Invalid API key")
+
     monkeypatch.setattr(mod, "validate_api_key_security", _raise)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
 
@@ -175,6 +191,7 @@ async def test_get_api_key_logs_violation_by_default(monkeypatch, mod):
     # Make validator raise value error
     def _raise(*a, **k):
         raise ValueError("Invalid API key")
+
     monkeypatch.setattr(mod, "validate_api_key_security", _raise)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
 
@@ -192,6 +209,7 @@ async def test_get_api_key_logs_violation_by_default(monkeypatch, mod):
 
 # ---------------- get_current_user ----------------
 
+
 @pytest.mark.anyio
 async def test_get_current_user_happy(monkeypatch, mod):
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 99, "is_admin": False})
@@ -208,6 +226,7 @@ async def test_get_current_user_404(monkeypatch, mod):
 
 
 # ---------------- require_admin ----------------
+
 
 @pytest.mark.anyio
 async def test_require_admin_via_flag(monkeypatch, mod):
@@ -242,6 +261,7 @@ async def test_require_admin_denied_logs_violation(monkeypatch, mod):
 
 # ---------------- get_optional_api_key ----------------
 
+
 @pytest.mark.anyio
 async def test_get_optional_api_key_no_credentials_returns_none(mod):
     out = await mod.get_optional_api_key(credentials=None, request=None)
@@ -253,6 +273,7 @@ async def test_get_optional_api_key_invalid_returns_none(monkeypatch, mod):
     # Make inner get_api_key raise HTTPException
     async def _raise(creds, request=None, *, log_security_violations=True):
         raise HTTPException(status_code=401, detail="bad key")
+
     monkeypatch.setattr(mod, "get_api_key", _raise)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
@@ -265,6 +286,7 @@ async def test_get_optional_api_key_valid_returns_key(monkeypatch, mod):
     # normal flow
     async def _ok(creds, request=None, *, log_security_violations=True):
         return creds.credentials
+
     monkeypatch.setattr(mod, "get_api_key", _ok)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-good")
@@ -285,6 +307,7 @@ async def test_get_optional_api_key_does_not_log_violations(monkeypatch, mod):
     # Make validator raise value error (simulating invalid API key)
     def _raise(*a, **k):
         raise ValueError("Invalid API key")
+
     monkeypatch.setattr(mod, "validate_api_key_security", _raise)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
 
@@ -296,11 +319,13 @@ async def test_get_optional_api_key_does_not_log_violations(monkeypatch, mod):
 
     assert out is None
     # Critically: no security violation should be logged for optional auth
-    assert len(fake_audit.violation_calls) == 0, \
-        "get_optional_api_key should NOT log security violations for invalid credentials"
+    assert (
+        len(fake_audit.violation_calls) == 0
+    ), "get_optional_api_key should NOT log security violations for invalid credentials"
 
 
 # ---------------- get_optional_user ----------------
+
 
 @pytest.mark.anyio
 async def test_get_optional_user_no_credentials_returns_none(mod):
@@ -313,6 +338,7 @@ async def test_get_optional_user_invalid_returns_none(monkeypatch, mod):
     # Make inner get_api_key raise HTTPException
     async def _raise(creds, request=None, *, log_security_violations=True):
         raise HTTPException(status_code=401, detail="bad key")
+
     monkeypatch.setattr(mod, "get_api_key", _raise)
 
     creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="sk-bad")
@@ -325,6 +351,7 @@ async def test_get_optional_user_valid_returns_user(monkeypatch, mod):
     # normal flow
     async def _ok(creds, request=None, *, log_security_violations=True):
         return creds.credentials
+
     monkeypatch.setattr(mod, "get_api_key", _ok)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 11, "credits": 3.14})
 
@@ -346,6 +373,7 @@ async def test_get_optional_user_does_not_log_violations(monkeypatch, mod):
     # Make validator raise value error (simulating invalid API key)
     def _raise(*a, **k):
         raise ValueError("Invalid API key")
+
     monkeypatch.setattr(mod, "validate_api_key_security", _raise)
     monkeypatch.setattr(mod, "get_user", lambda key: {"id": 1})
 
@@ -357,11 +385,13 @@ async def test_get_optional_user_does_not_log_violations(monkeypatch, mod):
 
     assert out is None
     # Critically: no security violation should be logged for optional auth
-    assert len(fake_audit.violation_calls) == 0, \
-        "get_optional_user should NOT log security violations for invalid credentials"
+    assert (
+        len(fake_audit.violation_calls) == 0
+    ), "get_optional_user should NOT log security violations for invalid credentials"
 
 
 # ---------------- require_active_subscription ----------------
+
 
 @pytest.mark.anyio
 @pytest.mark.parametrize("status", ["active", "trial"])
@@ -381,6 +411,7 @@ async def test_require_active_subscription_forbidden(mod):
 
 # ---------------- check_credits ----------------
 
+
 @pytest.mark.anyio
 async def test_check_credits_ok(mod):
     user = {"id": 1, "credits": 1.5}
@@ -398,6 +429,7 @@ async def test_check_credits_402(mod):
 
 # ---------------- get_user_id ----------------
 
+
 @pytest.mark.anyio
 async def test_get_user_id(mod):
     uid = await mod.get_user_id(user={"id": 77})
@@ -405,6 +437,7 @@ async def test_get_user_id(mod):
 
 
 # ---------------- verify_key_permissions ----------------
+
 
 @pytest.mark.anyio
 async def test_verify_key_permissions_none_required_returns_key(mod):
@@ -431,7 +464,9 @@ async def test_verify_key_permissions_user_missing(monkeypatch, mod):
 @pytest.mark.anyio
 async def test_verify_key_permissions_forbidden(monkeypatch, mod):
     # has some specific resource but not '*' or same-name permission
-    monkeypatch.setattr(mod, "get_user", lambda k: {"id": 3, "scope_permissions": {"write": ["dataset1"]}})
+    monkeypatch.setattr(
+        mod, "get_user", lambda k: {"id": 3, "scope_permissions": {"write": ["dataset1"]}}
+    )
     with pytest.raises(HTTPException) as ei:
         await mod.verify_key_permissions(api_key="sk-3", required_permissions=["write"])
     assert ei.value.status_code == 403

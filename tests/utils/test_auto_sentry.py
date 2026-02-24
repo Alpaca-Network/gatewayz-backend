@@ -5,20 +5,21 @@ This test suite verifies the intelligent auto-capture decorator and
 context detection functionality.
 """
 
-import pytest
-from unittest.mock import Mock, patch, call
 import asyncio
+from unittest.mock import Mock, call, patch
+
+import pytest
 
 from src.utils.auto_sentry import (
-    auto_capture_errors,
+    _contains_sensitive_data,
     _detect_context_type,
     _extract_context_data,
     _extract_provider_from_module,
-    _infer_db_operation,
-    _infer_payment_operation,
     _infer_auth_operation,
     _infer_cache_operation,
-    _contains_sensitive_data,
+    _infer_db_operation,
+    _infer_payment_operation,
+    auto_capture_errors,
 )
 
 
@@ -133,20 +134,11 @@ class TestContextDetection:
     def test_detect_provider_context(self):
         """Test provider context detection"""
         # Function name detection
-        assert (
-            _detect_context_type("make_provider_request", "src.services.test", {})
-            == "provider"
-        )
-        assert (
-            _detect_context_type("openrouter_client", "src.services.test", {})
-            == "provider"
-        )
+        assert _detect_context_type("make_provider_request", "src.services.test", {}) == "provider"
+        assert _detect_context_type("openrouter_client", "src.services.test", {}) == "provider"
 
         # Module detection
-        assert (
-            _detect_context_type("test_func", "src.services.openrouter_client", {})
-            == "provider"
-        )
+        assert _detect_context_type("test_func", "src.services.openrouter_client", {}) == "provider"
 
     def test_detect_database_context(self):
         """Test database context detection"""
@@ -155,29 +147,15 @@ class TestContextDetection:
         assert _detect_context_type("test_func", "src\\db\\users", {}) == "database"
 
         # Function name detection
-        assert (
-            _detect_context_type("insert_user", "src.services.test", {}) == "database"
-        )
-        assert (
-            _detect_context_type("query_data", "src.services.test", {}) == "database"
-        )
-        assert (
-            _detect_context_type("supabase_query", "src.services.test", {})
-            == "database"
-        )
+        assert _detect_context_type("insert_user", "src.services.test", {}) == "database"
+        assert _detect_context_type("query_data", "src.services.test", {}) == "database"
+        assert _detect_context_type("supabase_query", "src.services.test", {}) == "database"
 
     def test_detect_payment_context(self):
         """Test payment context detection"""
-        assert (
-            _detect_context_type("process_payment", "src.services.test", {})
-            == "payment"
-        )
-        assert (
-            _detect_context_type("stripe_webhook", "src.services.test", {}) == "payment"
-        )
-        assert (
-            _detect_context_type("deduct_credits", "src.services.test", {}) == "payment"
-        )
+        assert _detect_context_type("process_payment", "src.services.test", {}) == "payment"
+        assert _detect_context_type("stripe_webhook", "src.services.test", {}) == "payment"
+        assert _detect_context_type("deduct_credits", "src.services.test", {}) == "payment"
 
     def test_detect_auth_context(self):
         """Test auth context detection"""
@@ -220,9 +198,7 @@ class TestContextExtraction:
         """Test database context extraction"""
         params = {"table": "users", "id": "user-123"}
 
-        context = _extract_context_data(
-            "database", params, "create_user", "src.db.users"
-        )
+        context = _extract_context_data("database", params, "create_user", "src.db.users")
 
         assert context["operation"] == "insert"  # Inferred from "create_user"
         assert context["table"] == "users"

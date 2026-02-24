@@ -14,8 +14,10 @@ would normally return None from normalize_deepinfra_model. The mock ensures we
 test the normalization structure without triggering the pricing filter.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from src.services.models import normalize_deepinfra_model
 
 
@@ -43,15 +45,12 @@ class TestDeepInfraNormalization:
             "description": "Most widely used version of Stable Diffusion. Trained on 512x512 images",
             "cover_img_url": "https://shared.deepinfra.com/models/runwayml/stable-diffusion-v1-5/cover_image.jpg",
             "tags": [],
-            "pricing": {
-                "type": "time",
-                "cents_per_sec": 0.05
-            },
+            "pricing": {"type": "time", "cents_per_sec": 0.05},
             "max_tokens": None,
             "replaced_by": "stabilityai/sdxl-turbo",
             "deprecated": 1727456682,
             "quantization": None,
-            "private": 0
+            "private": 0,
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -82,11 +81,7 @@ class TestDeepInfraNormalization:
             "type": "text-generation",
             "reported_type": "text-generation",
             "description": "Llama 3 8B instruction-tuned model",
-            "pricing": {
-                "type": "token",
-                "input_per_million": 0.06,
-                "output_per_million": 0.06
-            }
+            "pricing": {"type": "token", "input_per_million": 0.06, "output_per_million": 0.06},
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -98,10 +93,7 @@ class TestDeepInfraNormalization:
 
     def test_normalize_model_without_type(self):
         """Test normalizing a model without explicit type (defaults to text->text)"""
-        deepinfra_model = {
-            "model_name": "some-provider/some-model",
-            "description": "A test model"
-        }
+        deepinfra_model = {"model_name": "some-provider/some-model", "description": "A test model"}
 
         normalized = normalize_deepinfra_model(deepinfra_model)
 
@@ -115,7 +107,7 @@ class TestDeepInfraNormalization:
         deepinfra_model = {
             "id": "provider/model",
             "type": "text-to-image",
-            "description": "Test model"
+            "description": "Test model",
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -128,7 +120,7 @@ class TestDeepInfraNormalization:
         deepinfra_model = {
             "model_name": "test/model",
             "type": "text-to-image",
-            "description": "Test model"
+            "description": "Test model",
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -144,7 +136,7 @@ class TestDeepInfraNormalization:
             "model_name": "old/model",
             "type": "text-generation",
             "description": "An old model",
-            "deprecated": 1700000000
+            "deprecated": 1700000000,
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -158,7 +150,7 @@ class TestDeepInfraNormalization:
         deepinfra_model = {
             "model_name": "provider/multimodal-model",
             "type": "multimodal",
-            "description": "A multimodal model"
+            "description": "A multimodal model",
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -173,7 +165,7 @@ class TestDeepInfraNormalization:
         deepinfra_model = {
             "model_name": "provider/tts-model",
             "type": "text-to-speech",
-            "description": "A TTS model"
+            "description": "A TTS model",
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)
@@ -187,7 +179,7 @@ class TestDeepInfraNormalization:
         deepinfra_model = {
             "model_name": "provider/stt-model",
             "type": "speech-to-text",
-            "description": "An STT model"
+            "description": "An STT model",
         }
 
         normalized = normalize_deepinfra_model(deepinfra_model)

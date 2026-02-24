@@ -279,7 +279,10 @@ def add(a, b):
 
         assert score.overall_score >= 85.0
         assert score.passed is True
-        assert "tests passed" in score.feedback.lower() or score.criteria_scores.get("tests_passed", 0) > 0
+        assert (
+            "tests passed" in score.feedback.lower()
+            or score.criteria_scores.get("tests_passed", 0) > 0
+        )
 
     @pytest.mark.asyncio
     async def test_evaluate_code_gen_no_code(self):
@@ -344,9 +347,7 @@ class TestIntegration:
         )
 
         score = await evaluator._evaluate_with_judge(
-            test_case,
-            "Fixed code here",
-            "I noticed the bug was..."
+            test_case, "Fixed code here", "I noticed the bug was..."
         )
 
         assert score.overall_score == pytest.approx(87.5, rel=0.1)

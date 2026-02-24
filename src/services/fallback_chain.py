@@ -169,17 +169,13 @@ def _is_compatible_fallback(
         # If primary has high tool adherence, fallback should too
         if primary_caps.tool_schema_adherence == "high":
             if candidate_caps.tool_schema_adherence != "high":
-                logger.debug(
-                    f"Excluding {candidate} from fallback: tool adherence mismatch"
-                )
+                logger.debug(f"Excluding {candidate} from fallback: tool adherence mismatch")
                 return False
 
         # If primary supports JSON schema, prefer fallbacks that do too
         if primary_caps.json_schema and not candidate_caps.json_schema:
             # Allow but log - JSON mode might still work
-            logger.debug(
-                f"Fallback {candidate} lacks json_schema support (primary has it)"
-            )
+            logger.debug(f"Fallback {candidate} lacks json_schema support (primary has it)")
 
     return True
 

@@ -64,17 +64,11 @@ async def get_metrics_health():
 
         # Calculate overall health
         total_requests = sum(
-            sum(methods.values())
-            for methods in metrics.get("requests", {}).values()
+            sum(methods.values()) for methods in metrics.get("requests", {}).values()
         )
-        total_errors = sum(
-            sum(methods.values())
-            for methods in metrics.get("errors", {}).values()
-        )
+        total_errors = sum(sum(methods.values()) for methods in metrics.get("errors", {}).values())
 
-        error_rate = (
-            total_errors / total_requests if total_requests > 0 else 0
-        )
+        error_rate = total_errors / total_requests if total_requests > 0 else 0
 
         # Determine health status
         if error_rate > 0.1:  # > 10% error rate

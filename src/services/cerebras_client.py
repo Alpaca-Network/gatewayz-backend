@@ -262,7 +262,9 @@ def _fallback_cerebras_models(reason: str) -> list[dict[str, Any]] | None:
         db_fallback = get_fallback_models_from_db("cerebras")
         if db_fallback:
             normalized = [
-                model for model in (_normalize_cerebras_model(entry) for entry in db_fallback) if model
+                model
+                for model in (_normalize_cerebras_model(entry) for entry in db_fallback)
+                if model
             ]
             if normalized:
                 logger.info(f"Using {len(normalized)} Cerebras models from database fallback")
@@ -273,7 +275,9 @@ def _fallback_cerebras_models(reason: str) -> list[dict[str, Any]] | None:
     # Static fallback as last resort
     logger.warning("Database fallback empty, using static fallback for Cerebras")
     normalized = [
-        model for model in (_normalize_cerebras_model(entry) for entry in DEFAULT_CEREBRAS_MODELS) if model
+        model
+        for model in (_normalize_cerebras_model(entry) for entry in DEFAULT_CEREBRAS_MODELS)
+        if model
     ]
     return normalized or None
 
@@ -386,7 +390,9 @@ def _normalize_cerebras_model(model: Any) -> dict[str, Any] | None:
         or 0
     )
 
-    architecture = payload.get("architecture") if isinstance(payload.get("architecture"), dict) else {}
+    architecture = (
+        payload.get("architecture") if isinstance(payload.get("architecture"), dict) else {}
+    )
     normalized_architecture = {
         "modality": architecture.get("modality") or "text->text",
         "input_modalities": architecture.get("input_modalities") or ["text"],

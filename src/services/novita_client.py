@@ -26,9 +26,12 @@ logger = logging.getLogger(__name__)
 # Optional: Import Novita SDK for image generation features
 try:
     from novita_client import NovitaClient
+
     NOVITA_SDK_AVAILABLE = True
 except ImportError:
-    logger.debug("Novita SDK (novita-client) not available. Install with: pip install novita-client")
+    logger.debug(
+        "Novita SDK (novita-client) not available. Install with: pip install novita-client"
+    )
     NOVITA_SDK_AVAILABLE = False
     NovitaClient = None
 
@@ -157,7 +160,9 @@ def _fallback_novita_models(reason: str) -> list[dict[str, Any]] | None:
         db_fallback = get_fallback_models_from_db("novita")
         if db_fallback:
             normalized = [
-                model for model in (_normalize_novita_model(entry) for entry in db_fallback) if model
+                model
+                for model in (_normalize_novita_model(entry) for entry in db_fallback)
+                if model
             ]
             if normalized:
                 logger.info(f"Using {len(normalized)} Novita models from database fallback")
@@ -168,7 +173,9 @@ def _fallback_novita_models(reason: str) -> list[dict[str, Any]] | None:
     # Static fallback as last resort
     logger.warning("Database fallback empty, using static fallback for Novita")
     normalized = [
-        model for model in (_normalize_novita_model(entry) for entry in DEFAULT_NOVITA_MODELS) if model
+        model
+        for model in (_normalize_novita_model(entry) for entry in DEFAULT_NOVITA_MODELS)
+        if model
     ]
     return normalized or None
 
@@ -281,7 +288,9 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
         or 0
     )
 
-    architecture = payload.get("architecture") if isinstance(payload.get("architecture"), dict) else {}
+    architecture = (
+        payload.get("architecture") if isinstance(payload.get("architecture"), dict) else {}
+    )
     normalized_architecture = {
         "modality": architecture.get("modality") or "text->text",
         "input_modalities": architecture.get("input_modalities") or ["text"],
@@ -425,9 +434,7 @@ def fetch_image_models_from_novita_sdk():
 
 
 def generate_image_with_novita_sdk(
-    prompt: str,
-    model_name: str = "dreamshaper_8_93211.safetensors",
-    **kwargs
+    prompt: str, model_name: str = "dreamshaper_8_93211.safetensors", **kwargs
 ):
     """Generate an image using the Novita SDK.
 

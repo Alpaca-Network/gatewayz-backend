@@ -2,13 +2,15 @@
 Tests for background tasks service
 """
 
-import pytest
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
+
 from src.services.background_tasks import (
+    get_pending_tasks_count,
     log_activity_async,
     log_activity_background,
-    get_pending_tasks_count,
 )
 
 

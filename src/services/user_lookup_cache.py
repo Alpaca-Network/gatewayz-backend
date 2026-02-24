@@ -60,5 +60,6 @@ def set_cache_ttl(ttl_seconds: int) -> None:
     Note: This now modifies the TTL in db.users module.
     """
     from src.db import users as users_module
+
     users_module._user_cache_ttl = ttl_seconds
     logger.info(f"Set cache TTL to {ttl_seconds} seconds")

@@ -344,7 +344,9 @@ class AITracer:
                 },
             ) as span:
                 ctx = AISpanContext(span=span, provider=provider, model=model)
-                logger.debug(f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}")
+                logger.debug(
+                    f"AITracer: Span created, span_id={span.get_span_context().span_id if span.get_span_context().is_valid else 'invalid'}"
+                )
                 try:
                     yield ctx
                     # Set success status if no error
@@ -352,7 +354,9 @@ class AITracer:
                     # Record total duration
                     duration_ms = (time.time() - ctx.start_time) * 1000
                     span.set_attribute("ai.duration_ms", duration_ms)
-                    logger.debug(f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms")
+                    logger.debug(
+                        f"AITracer: Span completed successfully, duration={duration_ms:.2f}ms"
+                    )
                 except Exception as e:
                     ctx.set_error(e)
                     raise

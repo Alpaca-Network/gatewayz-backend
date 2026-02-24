@@ -33,7 +33,9 @@ class TestButterCompatibleProviders:
         ]
 
         for provider in compatible:
-            assert is_provider_butter_compatible(provider) is True, f"{provider} should be compatible"
+            assert (
+                is_provider_butter_compatible(provider) is True
+            ), f"{provider} should be compatible"
 
     def test_excluded_providers_return_false(self):
         """Test that excluded providers are identified correctly."""
@@ -42,7 +44,9 @@ class TestButterCompatibleProviders:
         excluded = ["google", "google-vertex", "anthropic", "fal", "stability"]
 
         for provider in excluded:
-            assert is_provider_butter_compatible(provider) is False, f"{provider} should be excluded"
+            assert (
+                is_provider_butter_compatible(provider) is False
+            ), f"{provider} should be excluded"
 
     def test_unknown_provider_returns_false(self):
         """Test that unknown providers default to not compatible."""
@@ -189,7 +193,7 @@ class TestButterCacheTimer:
 
         # Allow timing variance for CI environments (sleep may be imprecise)
         assert timer.elapsed_seconds >= 0.08  # Allow some variance below
-        assert timer.elapsed_seconds < 0.3    # Allow generous upper bound
+        assert timer.elapsed_seconds < 0.3  # Allow generous upper bound
         assert timer.elapsed_ms >= 80
         assert timer.elapsed_ms < 300
 

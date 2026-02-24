@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class CacheEntry:
     """Single cache entry with expiration tracking."""
+
     value: Any
     expires_at: float  # When entry becomes stale
     stale_expires_at: float  # When entry is removed entirely
@@ -188,8 +189,7 @@ class LocalMemoryCache:
         with self._lock:
             # Create list of keys to remove (can't modify during iteration)
             expired_keys = [
-                key for key, entry in self._cache.items()
-                if now > entry.stale_expires_at
+                key for key, entry in self._cache.items() if now > entry.stale_expires_at
             ]
 
             for key in expired_keys:
@@ -205,14 +205,11 @@ class LocalMemoryCache:
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics."""
         with self._lock:
-            total_requests = (
-                self._stats["hits"] +
-                self._stats["stale_hits"] +
-                self._stats["misses"]
-            )
+            total_requests = self._stats["hits"] + self._stats["stale_hits"] + self._stats["misses"]
             hit_rate = (
                 (self._stats["hits"] + self._stats["stale_hits"]) / total_requests
-                if total_requests > 0 else 0
+                if total_requests > 0
+                else 0
             )
 
             return {
@@ -258,6 +255,7 @@ def get_local_cache() -> LocalMemoryCache:
 
 
 # Convenience functions for catalog caching
+
 
 def get_local_catalog(provider: str) -> tuple[list[dict] | None, bool]:
     """

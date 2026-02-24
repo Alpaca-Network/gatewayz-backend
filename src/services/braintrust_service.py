@@ -95,8 +95,7 @@ def initialize_braintrust(project: str = "Gatewayz Backend") -> bool:
 
     except Exception as e:
         logger.warning(
-            f"[Braintrust] Initialization failed: {e}. "
-            "Braintrust tracing will be disabled."
+            f"[Braintrust] Initialization failed: {e}. " "Braintrust tracing will be disabled."
         )
         _braintrust_available = False
         return False
@@ -151,9 +150,7 @@ def create_span(name: str, span_type: str = "llm", **kwargs) -> Any:
     global _braintrust_logger, _braintrust_available
 
     if not _braintrust_available or _braintrust_logger is None:
-        logger.debug(
-            f"[Braintrust] Returning NoopSpan for '{name}' - Braintrust not available"
-        )
+        logger.debug(f"[Braintrust] Returning NoopSpan for '{name}' - Braintrust not available")
         return NoopSpan()
 
     try:
@@ -163,10 +160,7 @@ def create_span(name: str, span_type: str = "llm", **kwargs) -> Any:
         logger.debug(f"[Braintrust] Created span: {name} (type={span_type})")
         return span
     except Exception as e:
-        logger.warning(
-            f"[Braintrust] Failed to create span '{name}': {e}. "
-            "Returning NoopSpan."
-        )
+        logger.warning(f"[Braintrust] Failed to create span '{name}': {e}. " "Returning NoopSpan.")
         return NoopSpan()
 
 

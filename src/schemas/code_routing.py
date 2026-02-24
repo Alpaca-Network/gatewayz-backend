@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # Router mode type
 RouterModeType = Literal["auto", "price", "quality", "agentic"]
 
@@ -75,7 +74,9 @@ class SavingsDetail(BaseModel):
 class SavingsEstimate(BaseModel):
     """Estimated savings against multiple baselines."""
 
-    claude_3_5_sonnet: SavingsDetail | None = Field(None, description="Savings vs Claude 3.5 Sonnet")
+    claude_3_5_sonnet: SavingsDetail | None = Field(
+        None, description="Savings vs Claude 3.5 Sonnet"
+    )
     gpt_4o: SavingsDetail | None = Field(None, description="Savings vs GPT-4o")
     user_default: SavingsDetail | None = Field(None, description="Savings vs user's default model")
 

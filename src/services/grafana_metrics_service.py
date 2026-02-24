@@ -16,7 +16,7 @@ import logging
 import os
 import random
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from prometheus_client import (
@@ -148,9 +148,7 @@ class GrafanaMetricsService:
             try:
                 duration = random.uniform(0.01, 2.0)
                 fastapi_requests_duration_seconds.labels(
-                    app_name=APP_NAME,
-                    method=method,
-                    path=path
+                    app_name=APP_NAME, method=method, path=path
                 ).observe(duration)
             except Exception:
                 pass
@@ -158,9 +156,7 @@ class GrafanaMetricsService:
         # Synthetic in-progress requests
         try:
             fastapi_requests_in_progress.labels(
-                app_name=APP_NAME,
-                method="POST",
-                path="/v1/chat/completions"
+                app_name=APP_NAME, method="POST", path="/v1/chat/completions"
             ).set(random.randint(0, 5))
         except Exception:
             pass
@@ -174,28 +170,21 @@ class GrafanaMetricsService:
                 try:
                     # Inference requests
                     model_inference_requests.labels(
-                        provider=provider,
-                        model=model,
-                        status="success"
+                        provider=provider, model=model, status="success"
                     ).inc(random.randint(0, 5))
 
                     # Inference duration
-                    model_inference_duration.labels(
-                        provider=provider,
-                        model=model
-                    ).observe(random.uniform(0.5, 10.0))
+                    model_inference_duration.labels(provider=provider, model=model).observe(
+                        random.uniform(0.5, 10.0)
+                    )
 
                     # Token usage
-                    tokens_used.labels(
-                        provider=provider,
-                        model=model,
-                        token_type="input"
-                    ).inc(random.randint(100, 2000))
-                    tokens_used.labels(
-                        provider=provider,
-                        model=model,
-                        token_type="output"
-                    ).inc(random.randint(50, 1000))
+                    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+                        random.randint(100, 2000)
+                    )
+                    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+                        random.randint(50, 1000)
+                    )
                 except Exception:
                     pass
 
@@ -205,9 +194,7 @@ class GrafanaMetricsService:
                 provider_availability.labels(provider=provider).set(
                     1 if random.random() > 0.1 else 0
                 )
-                provider_error_rate.labels(provider=provider).set(
-                    random.uniform(0, 0.1)
-                )
+                provider_error_rate.labels(provider=provider).set(random.uniform(0, 0.1))
             except Exception:
                 pass
 

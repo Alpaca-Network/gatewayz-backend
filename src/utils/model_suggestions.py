@@ -108,9 +108,7 @@ async def find_similar_models(
     # Convert back to original casing
     matches = [model_mapping[match] for match in matches_lower]
 
-    logger.debug(
-        f"Found {len(matches)} similar models for '{requested_model}': {matches[:3]}"
-    )
+    logger.debug(f"Found {len(matches)} similar models for '{requested_model}': {matches[:3]}")
 
     return matches
 
@@ -145,10 +143,7 @@ async def find_similar_models_by_provider(
             model.get("id", "")
             for model in all_models
             if model.get("id")
-            and (
-                model.get("provider_slug") == provider
-                or model.get("source_gateway") == provider
-            )
+            and (model.get("provider_slug") == provider or model.get("source_gateway") == provider)
         ]
 
         # Find similar models within this provider
@@ -267,9 +262,7 @@ async def suggest_alternatives(
     try:
         # 1. Try to find models in the same family first
         if include_family:
-            family_models = await find_models_in_same_family(
-                requested_model, max_suggestions=3
-            )
+            family_models = await find_models_in_same_family(requested_model, max_suggestions=3)
             suggestions.extend(family_models)
 
         # 2. Add fuzzy matches
@@ -281,9 +274,7 @@ async def suggest_alternatives(
                 )
             else:
                 # Global fuzzy matching
-                fuzzy_matches = await find_similar_models(
-                    requested_model, max_suggestions=5
-                )
+                fuzzy_matches = await find_similar_models(requested_model, max_suggestions=5)
 
             suggestions.extend(fuzzy_matches)
 

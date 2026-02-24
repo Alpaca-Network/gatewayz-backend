@@ -10,7 +10,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -338,7 +338,9 @@ class ModelHealthMonitor:
                 try:
                     logger.debug(f"Fetching models from {gateway}...")
                     gateway_models = get_cached_models(gateway)
-                    logger.debug(f"Got {len(gateway_models) if gateway_models else 0} models from {gateway}")
+                    logger.debug(
+                        f"Got {len(gateway_models) if gateway_models else 0} models from {gateway}"
+                    )
                     if gateway_models:
                         for chunk in self._chunk_list(gateway_models, self.fetch_chunk_size):
                             for model in chunk:
@@ -358,7 +360,6 @@ class ModelHealthMonitor:
 
         logger.info(f"Total models collected for health checking: {len(models)}")
         return models
-
 
     @staticmethod
     def _chunk_list(items: list[dict[str, Any]], size: int):
@@ -403,13 +404,13 @@ class ModelHealthMonitor:
                         model_id=model_id,
                         provider=provider,
                         gateway=gateway,
-                        operation='health_check',
-                        status='unhealthy',
+                        operation="health_check",
+                        status="unhealthy",
                         response_time_ms=health_check_result.get("response_time"),
                         details={
-                            'status_code': status_code,
-                            'error_message': error_message,
-                        }
+                            "status_code": status_code,
+                            "error_message": error_message,
+                        },
                     )
 
         except Exception as e:
@@ -423,11 +424,11 @@ class ModelHealthMonitor:
                 model_id=model_id,
                 provider=provider,
                 gateway=gateway,
-                operation='health_check',
-                status='unhealthy',
+                operation="health_check",
+                status="unhealthy",
                 details={
-                    'error_message': error_message,
-                }
+                    "error_message": error_message,
+                },
             )
 
         # Create health metrics
@@ -470,8 +471,9 @@ class ModelHealthMonitor:
                 return False
             # Model access permission errors - only filter specific access/permission patterns
             # Don't filter generic "not found" errors which could be genuine issues
-            if ("does not exist" in lower_msg and ("team" in lower_msg or "access" in lower_msg)) or \
-               ("no access" in lower_msg and "model" in lower_msg):
+            if (
+                "does not exist" in lower_msg and ("team" in lower_msg or "access" in lower_msg)
+            ) or ("no access" in lower_msg and "model" in lower_msg):
                 return False
 
         # Don't capture temporary service unavailability
@@ -803,7 +805,9 @@ class ModelHealthMonitor:
             # Debug log to check Redis connection
             redis_config = get_redis_config()
             redis_host = redis_config.redis_host
-            logger.info(f"Attempting to publish health data to Redis from simple monitor (host: {redis_host})")
+            logger.info(
+                f"Attempting to publish health data to Redis from simple monitor (host: {redis_host})"
+            )
 
             # Cache system health
             if self.system_data:
@@ -834,7 +838,7 @@ class ModelHealthMonitor:
                         "latency_ms": 0,
                         "available": False,
                         "last_check": None,
-                        "error": None
+                        "error": None,
                     }
 
                 if provider_data.status == "online":
@@ -842,20 +846,28 @@ class ModelHealthMonitor:
                     gateway_health[gateway_name]["status"] = "online"
                     gateway_health[gateway_name]["available"] = True
                     # Extract latency from avg_response_time (format: "123ms")
-                    avg_response = provider_data.avg_response_time.replace("ms", "") if provider_data.avg_response_time else "0"
+                    avg_response = (
+                        provider_data.avg_response_time.replace("ms", "")
+                        if provider_data.avg_response_time
+                        else "0"
+                    )
                     try:
                         gateway_health[gateway_name]["latency_ms"] = int(avg_response)
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Failed to parse latency for {gateway_name}: {e}")
                         gateway_health[gateway_name]["latency_ms"] = 0
                     gateway_health[gateway_name]["last_check"] = provider_data.last_checked
-                elif provider_data.status == "degraded" and gateway_health[gateway_name]["status"] == "offline":
+                elif (
+                    provider_data.status == "degraded"
+                    and gateway_health[gateway_name]["status"] == "offline"
+                ):
                     gateway_health[gateway_name]["status"] = "degraded"
 
             # Add all gateways from GATEWAY_CONFIG that aren't tracked
             # Check cache and API key status to determine appropriate status
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
+
                 for gateway_name, gateway_config in GATEWAY_CONFIG.items():
                     if gateway_name not in gateway_health:
                         # Check if API key is configured (static_catalog is valid for some gateways)
@@ -863,12 +875,16 @@ class ModelHealthMonitor:
                         url = gateway_config.get("url")
                         # Gateway is considered configured if it has an API key OR doesn't need one (url is None)
                         has_api_key = api_key is not None and api_key != ""
-                        needs_api_key = url is not None  # Gateways with url=None use static catalogs
+                        needs_api_key = (
+                            url is not None
+                        )  # Gateways with url=None use static catalogs
 
                         # Check if cache has models
                         cache = gateway_config.get("cache", {})
                         cache_data = cache.get("data") if cache else None
-                        has_cached_models = cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        has_cached_models = (
+                            cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        )
                         model_count = len(cache_data) if has_cached_models else 0
 
                         # Determine status and error based on configuration state
@@ -889,7 +905,9 @@ class ModelHealthMonitor:
                         else:
                             # Has API key but no models in cache - needs sync
                             status = "pending"
-                            error_msg = "Models not yet synced. They will appear when first accessed."
+                            error_msg = (
+                                "Models not yet synced. They will appear when first accessed."
+                            )
                             is_healthy = False
 
                         gateway_health[gateway_name] = {

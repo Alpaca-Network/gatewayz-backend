@@ -37,6 +37,7 @@ def get_redis_client():
     """Get Redis client instance with error handling."""
     try:
         from src.config.redis_config import get_redis_client as get_client
+
         return get_client()
     except Exception as e:
         logger.warning(f"Failed to get Redis client: {e}")
@@ -59,9 +60,7 @@ def cache_user_by_privy_id(privy_id: str, user_data: dict[str, Any]) -> bool:
             return False
 
         cache_key = f"{PRIVY_ID_CACHE_PREFIX}{privy_id}"
-        redis_client.setex(
-            cache_key, AUTH_CACHE_TTL, json.dumps(user_data)
-        )
+        redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for Privy ID: {privy_id}")
         return True
     except Exception as e:
@@ -113,9 +112,7 @@ def cache_user_by_username(username: str, user_data: dict[str, Any]) -> bool:
             return False
 
         cache_key = f"{USERNAME_CACHE_PREFIX}{username}"
-        redis_client.setex(
-            cache_key, AUTH_CACHE_TTL, json.dumps(user_data)
-        )
+        redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for username: {username}")
         return True
     except Exception as e:
@@ -206,11 +203,7 @@ def cache_user_by_api_key(api_key: str, user_data: dict[str, Any], ttl: int | No
             return False
 
         cache_key = f"{API_KEY_USER_PREFIX}{api_key}"
-        redis_client.setex(
-            cache_key,
-            ttl or USER_CACHE_TTL,
-            json.dumps(user_data)
-        )
+        redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for API key: {api_key[:15]}...")
         return True
     except Exception as e:
@@ -278,7 +271,9 @@ def invalidate_api_key_cache(api_key: str) -> bool:
         return False
 
 
-def cache_api_key_validation(api_key: str, is_valid: bool, reason: str | None = None, ttl: int | None = None) -> bool:
+def cache_api_key_validation(
+    api_key: str, is_valid: bool, reason: str | None = None, ttl: int | None = None
+) -> bool:
     """Cache API key validation result.
 
     Caches whether an API key is valid/invalid to avoid repeated validation.
@@ -302,14 +297,10 @@ def cache_api_key_validation(api_key: str, is_valid: bool, reason: str | None = 
         validation_data = {
             "is_valid": is_valid,
             "reason": reason,
-            "cached_at": json.dumps(None)  # Placeholder for timestamp
+            "cached_at": json.dumps(None),  # Placeholder for timestamp
         }
 
-        redis_client.setex(
-            cache_key,
-            ttl or API_KEY_CACHE_TTL,
-            json.dumps(validation_data)
-        )
+        redis_client.setex(cache_key, ttl or API_KEY_CACHE_TTL, json.dumps(validation_data))
         logger.debug(f"Cached API key validation: {api_key[:15]}... (valid: {is_valid})")
         return True
     except Exception as e:
@@ -362,11 +353,7 @@ def cache_user_by_id(user_id: int, user_data: dict[str, Any], ttl: int | None = 
             return False
 
         cache_key = f"{USER_ID_CACHE_PREFIX}{user_id}"
-        redis_client.setex(
-            cache_key,
-            ttl or USER_CACHE_TTL,
-            json.dumps(user_data)
-        )
+        redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for user ID: {user_id}")
         return True
     except Exception as e:
@@ -432,7 +419,12 @@ def invalidate_user_by_id(user_id: int) -> bool:
         return False
 
 
-def invalidate_all_user_caches(user_id: int, api_key: str | None = None, username: str | None = None, privy_id: str | None = None) -> bool:
+def invalidate_all_user_caches(
+    user_id: int,
+    api_key: str | None = None,
+    username: str | None = None,
+    privy_id: str | None = None,
+) -> bool:
     """Invalidate all cached data for a user across all lookup methods.
 
     This is the comprehensive cache invalidation function to use when user data changes.
@@ -543,7 +535,7 @@ def get_auth_cache_stats() -> dict[str, Any]:
             "user_id_count": len(redis_client.keys(f"{USER_ID_CACHE_PREFIX}*")),
             "privy_id_count": len(redis_client.keys(f"{PRIVY_ID_CACHE_PREFIX}*")),
             "username_count": len(redis_client.keys(f"{USERNAME_CACHE_PREFIX}*")),
-            "redis_available": True
+            "redis_available": True,
         }
 
         return stats
@@ -571,7 +563,7 @@ def clear_all_auth_caches() -> bool:
             API_KEY_CACHE_PREFIX,
             USER_ID_CACHE_PREFIX,
             PRIVY_ID_CACHE_PREFIX,
-            USERNAME_CACHE_PREFIX
+            USERNAME_CACHE_PREFIX,
         ]
 
         total_deleted = 0

@@ -10,17 +10,18 @@ Tests cover:
 - Timeout handling
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import httpx
+import pytest
 
 from src.services.tools import (
     AVAILABLE_TOOLS,
-    get_tool_by_name,
     execute_tool,
+    get_tool_by_name,
 )
-from src.services.tools.web_search import WebSearchTool
 from src.services.tools.base import ToolResult
+from src.services.tools.web_search import WebSearchTool
 
 
 class TestWebSearchToolDefinition:
@@ -231,7 +232,12 @@ class TestWebSearchToolExecution:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "results": [
-                {"title": "Result", "url": "https://example.com", "content": "Content", "score": 0.9}
+                {
+                    "title": "Result",
+                    "url": "https://example.com",
+                    "content": "Content",
+                    "score": 0.9,
+                }
             ],
             "answer": "Answer",
         }
@@ -331,7 +337,9 @@ class TestWebSearchToolIntegration:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "results": [{"title": "Test", "url": "https://test.com", "content": "Content", "score": 0.9}],
+            "results": [
+                {"title": "Test", "url": "https://test.com", "content": "Content", "score": 0.9}
+            ],
             "answer": "Answer",
         }
 

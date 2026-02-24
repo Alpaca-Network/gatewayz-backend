@@ -12,7 +12,7 @@ Designed to run as a background task or cron job.
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -88,9 +88,7 @@ class MetricsAggregator:
                     total_cost = float(metrics_data.get("total_cost", 0.0))
 
                     # Calculate error rate
-                    error_rate = (
-                        failed_requests / total_requests if total_requests > 0 else 0.0
-                    )
+                    error_rate = failed_requests / total_requests if total_requests > 0 else 0.0
 
                     # Get model-specific metrics (we aggregate by provider for now)
                     # In a more detailed version, you could track per-model metrics

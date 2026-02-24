@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RequestMetrics:
     """Metrics for a single request"""
+
     provider: str
     model: str
     latency_ms: int
@@ -42,6 +43,7 @@ class RequestMetrics:
 @dataclass
 class ProviderStats:
     """Aggregated statistics for a provider"""
+
     provider: str
     total_requests: int
     successful_requests: int
@@ -83,7 +85,7 @@ class RedisMetrics:
         cost: float,
         tokens_input: int = 0,
         tokens_output: int = 0,
-        error_message: str | None = None
+        error_message: str | None = None,
     ):
         """
         Record a single request metrics to Redis.
@@ -140,12 +142,14 @@ class RedisMetrics:
             # 6. Track errors
             if not success and error_message:
                 error_key = f"errors:{provider}"
-                error_data = json.dumps({
-                    "model": model,
-                    "error": error_message[:500],  # Limit error message length
-                    "timestamp": timestamp,
-                    "latency_ms": latency_ms
-                })
+                error_data = json.dumps(
+                    {
+                        "model": model,
+                        "error": error_message[:500],  # Limit error message length
+                        "timestamp": timestamp,
+                        "latency_ms": latency_ms,
+                    }
+                )
                 pipe.lpush(error_key, error_data)
                 pipe.ltrim(error_key, 0, 99)  # Keep last 100 errors
                 pipe.expire(error_key, 3600)  # 1 hour TTL
@@ -245,9 +249,7 @@ class RedisMetrics:
 
             for hour_offset in range(hours):
                 hour_time = (now - timedelta(hours=hour_offset)).replace(
-                    minute=0,
-                    second=0,
-                    microsecond=0
+                    minute=0, second=0, microsecond=0
                 )
                 hour_key = hour_time.strftime("%Y-%m-%d:%H")
                 metrics_key = f"metrics:{provider}:{hour_key}"
@@ -269,10 +271,7 @@ class RedisMetrics:
             return {}
 
     async def get_latency_percentiles(
-        self,
-        provider: str,
-        model: str,
-        percentiles: list[int] = [50, 95, 99]
+        self, provider: str, model: str, percentiles: list[int] = [50, 95, 99]
     ) -> dict[str, float]:
         """
         Calculate latency percentiles from recent data.
@@ -315,11 +314,7 @@ class RedisMetrics:
             return {}
 
     async def update_circuit_breaker(
-        self,
-        provider: str,
-        model: str,
-        state: str,
-        failure_count: int = 0
+        self, provider: str, model: str, state: str, failure_count: int = 0
     ):
         """
         Update circuit breaker state in Redis.
@@ -335,11 +330,9 @@ class RedisMetrics:
 
         try:
             circuit_key = f"circuit:{provider}:{model}"
-            circuit_data = json.dumps({
-                "state": state,
-                "failure_count": failure_count,
-                "updated_at": time.time()
-            })
+            circuit_data = json.dumps(
+                {"state": state, "failure_count": failure_count, "updated_at": time.time()}
+            )
 
             self.redis.setex(circuit_key, 300, circuit_data)  # 5 min TTL
 
@@ -385,11 +378,7 @@ class RedisMetrics:
         try:
             # Calculate cutoff time
             now = datetime.now(UTC)
-            cutoff_time = (now - timedelta(hours=hours)).replace(
-                minute=0,
-                second=0,
-                microsecond=0
-            )
+            cutoff_time = (now - timedelta(hours=hours)).replace(minute=0, second=0, microsecond=0)
             cutoff_key = cutoff_time.strftime("%Y-%m-%d:%H")
 
             # Scan for old metric keys

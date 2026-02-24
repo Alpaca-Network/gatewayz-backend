@@ -22,6 +22,11 @@ from src.config import Config
 from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
+from src.services.anonymous_rate_limiter import (
+    ANONYMOUS_ALLOWED_MODELS,
+    record_anonymous_request,
+    validate_anonymous_request,
+)
 from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import (
     credits_used,
@@ -38,16 +43,11 @@ from src.services.stream_normalizer import (
     create_done_sse,
     create_error_sse_chunk,
 )
+from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.exceptions import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.sentry_context import capture_provider_error
-from src.services.anonymous_rate_limiter import (
-    validate_anonymous_request,
-    record_anonymous_request,
-    ANONYMOUS_ALLOWED_MODELS,
-)
-from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Optional Traceloop integration - gracefully handle if not installed
 try:
@@ -58,26 +58,26 @@ except ImportError:
         pass
 
 
-from src.services.connection_pool import get_butter_pooled_async_client
+from src.adapters.chat import OpenAIChatAdapter
 
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.adapters.chat import OpenAIChatAdapter
+from src.services.connection_pool import get_butter_pooled_async_client
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 # Braintrust tracing - use centralized service for proper project association
 # The key fix is using logger.start_span() instead of standalone start_span()
 try:
-    from src.services.braintrust_service import (
-        create_span,
-        flush as braintrust_flush,
-        is_available as check_braintrust_available,
-        NoopSpan,
-    )
-
     # Import traced decorator from braintrust SDK for route decoration
     from braintrust import traced
+
+    from src.services.braintrust_service import (
+        NoopSpan,
+        create_span,
+    )
+    from src.services.braintrust_service import flush as braintrust_flush
+    from src.services.braintrust_service import is_available as check_braintrust_available
 
     # Wrapper to maintain backward compatibility with existing code
     def start_span(name=None, span_type=None, **kwargs):
@@ -440,6 +440,13 @@ PROVIDER_ROUTING = {
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
+
+# HEALTH FIX #1094: Import health-based routing functions for proactive failover
+from src.services.health_routing import (
+    get_healthy_alternative_provider,
+    is_model_healthy,
+    should_use_health_based_routing,
+)
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 from src.services.pricing import calculate_cost_async
 from src.services.provider_failover import (
@@ -448,12 +455,6 @@ from src.services.provider_failover import (
     filter_by_circuit_breaker,
     map_provider_error,
     should_failover,
-)
-# HEALTH FIX #1094: Import health-based routing functions for proactive failover
-from src.services.health_routing import (
-    get_healthy_alternative_provider,
-    is_model_healthy,
-    should_use_health_based_routing,
 )
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
@@ -1460,9 +1461,11 @@ async def stream_generator(
                                     "model": model,
                                     "threshold": 10.0,
                                     "severity": "CRITICAL",
-                                    "timeout_config": Config.GOOGLE_VERTEX_TIMEOUT
-                                    if provider == "google-vertex"
-                                    else None,
+                                    "timeout_config": (
+                                        Config.GOOGLE_VERTEX_TIMEOUT
+                                        if provider == "google-vertex"
+                                        else None
+                                    ),
                                 },
                             )
                         except Exception as sentry_error:
@@ -1540,7 +1543,7 @@ async def stream_generator(
 
             # Track metric for monitoring
             try:
-                from src.services.prometheus_metrics import get_or_create_metric, Counter
+                from src.services.prometheus_metrics import Counter, get_or_create_metric
 
                 token_estimation_counter = get_or_create_metric(
                     Counter,
@@ -2071,12 +2074,12 @@ async def chat_completions(
         if is_auto_route:
             with tracker.stage("prompt_routing"):
                 try:
+                    from src.schemas.router import UserRouterPreferences
                     from src.services.prompt_router import (
                         is_auto_route_request,
                         parse_auto_route_options,
                         route_request,
                     )
-                    from src.schemas.router import UserRouterPreferences
 
                     if is_auto_route_request(original_model):
                         tier, optimization = parse_auto_route_options(original_model)
@@ -2107,12 +2110,16 @@ async def chat_completions(
                         logger.info(
                             "Prompt router selected model: %s (category=%s, confidence=%.2f, time=%.2fms, reason=%s)",
                             router_decision.selected_model,
-                            router_decision.classification.category.value
-                            if router_decision.classification
-                            else "unknown",
-                            router_decision.classification.confidence
-                            if router_decision.classification
-                            else 0,
+                            (
+                                router_decision.classification.category.value
+                                if router_decision.classification
+                                else "unknown"
+                            ),
+                            (
+                                router_decision.classification.confidence
+                                if router_decision.classification
+                                else 0
+                            ),
                             router_decision.decision_time_ms,
                             router_decision.reason,
                         )
@@ -2146,6 +2153,8 @@ async def chat_completions(
                 try:
                     from src.services.general_router import (
                         parse_router_model_string as parse_general_router,
+                    )
+                    from src.services.general_router import (
                         route_general_prompt,
                     )
 
@@ -2197,9 +2206,9 @@ async def chat_completions(
             with tracker.stage("code_routing"):
                 try:
                     from src.services.code_router import (
+                        get_routing_metadata,
                         parse_router_model_string,
                         route_code_prompt,
-                        get_routing_metadata,
                     )
 
                     # Parse the router mode from model string (use normalized model)
@@ -2415,11 +2424,15 @@ async def chat_completions(
                     )
 
                     # Try to find a healthy alternative provider
-                    alt_provider = get_healthy_alternative_provider(effective_model, primary_provider)
+                    alt_provider = get_healthy_alternative_provider(
+                        effective_model, primary_provider
+                    )
 
                     if alt_provider and alt_provider in provider_chain:
                         # Move healthy provider to the front of the chain
-                        provider_chain = [alt_provider] + [p for p in provider_chain if p != alt_provider]
+                        provider_chain = [alt_provider] + [
+                            p for p in provider_chain if p != alt_provider
+                        ]
                         logger.info(
                             f"✓ Health-based routing: Moved '{alt_provider}' to front of chain for model '{effective_model}' "
                             f"(primary '{primary_provider}' is unhealthy)"
@@ -2635,8 +2648,10 @@ async def chat_completions(
                         else:
                             # Default to OpenRouter with async streaming for performance
                             try:
-                                stream = await make_openrouter_request_openai_stream_async(  # noqa: F821
-                                    messages, request_model, **optional
+                                stream = (
+                                    await make_openrouter_request_openai_stream_async(  # noqa: F821
+                                        messages, request_model, **optional
+                                    )
                                 )
                                 is_async_stream = True
                                 logger.debug(
@@ -2836,9 +2851,11 @@ async def chat_completions(
                     )
                     trace_ctx.set_response_model(
                         response_model=model,
-                        finish_reason=processed.get("choices", [{}])[0].get("finish_reason")
-                        if processed.get("choices")
-                        else None,
+                        finish_reason=(
+                            processed.get("choices", [{}])[0].get("finish_reason")
+                            if processed.get("choices")
+                            else None
+                        ),
                         response_id=processed.get("id"),
                     )
                     if optional:
@@ -2954,7 +2971,10 @@ async def chat_completions(
                                 ),
                                 timeout=request_timeout,
                             )
-                            processed = await _to_thread(process_openrouter_response, resp_raw)  # noqa: F821
+                            processed = await _to_thread(
+                                process_openrouter_response,  # noqa: F821
+                                resp_raw,
+                            )
 
                         # Extract token usage from response for tracing
                         usage = processed.get("usage", {}) or {}
@@ -3426,9 +3446,7 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -3467,9 +3485,7 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -4610,9 +4626,7 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -4648,9 +4662,7 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error

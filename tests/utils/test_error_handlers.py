@@ -4,19 +4,20 @@ Unit tests for error handler utilities.
 Tests the FastAPI exception handler integration and error mapping logic.
 """
 
+from unittest.mock import MagicMock, Mock
+
 import pytest
-from unittest.mock import Mock, MagicMock
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from src.utils.error_handlers import (
-    detailed_http_exception_handler,
-    detailed_exception_handler,
-    create_error_response_dict,
-    _map_http_exception_to_detailed_error,
-)
 from src.schemas.errors import ErrorResponse
 from src.utils.error_factory import DetailedErrorFactory
+from src.utils.error_handlers import (
+    _map_http_exception_to_detailed_error,
+    create_error_response_dict,
+    detailed_exception_handler,
+    detailed_http_exception_handler,
+)
 
 
 @pytest.mark.asyncio
@@ -31,9 +32,7 @@ class TestDetailedHTTPExceptionHandler:
         )
 
         # Create HTTPException with detailed error as dict
-        exc = HTTPException(
-            status_code=404, detail=error_response.dict(exclude_none=True)
-        )
+        exc = HTTPException(status_code=404, detail=error_response.dict(exclude_none=True))
 
         # Mock request
         request = Mock(spec=Request)
@@ -150,9 +149,7 @@ class TestCreateErrorResponseDict:
 
     def test_creates_dict_from_error_response(self):
         """Test creating dict from ErrorResponse object."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test", request_id="test_123")
 
         response_dict, headers = create_error_response_dict(error)
 
@@ -179,9 +176,7 @@ class TestCreateErrorResponseDict:
 
     def test_includes_request_id_header(self):
         """Test that request_id is included in headers."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test", request_id="test_123")
 
         response_dict, headers = create_error_response_dict(error)
 

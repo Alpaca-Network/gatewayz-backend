@@ -51,6 +51,7 @@ def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
         return "0"
 
     import math
+
     if not math.isfinite(numeric) or numeric < 0:
         logger.warning(
             f"Pricing field '{field}' for model '{model_id}' is invalid "
@@ -167,7 +168,7 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         Pricing dictionary (normalized to per-token format) or None if not found
     """
     try:
-        from src.services.pricing_normalization import normalize_pricing_dict, get_provider_format
+        from src.services.pricing_normalization import get_provider_format, normalize_pricing_dict
 
         pricing_data = load_manual_pricing()
 
@@ -209,6 +210,7 @@ def _is_building_catalog() -> bool:
     """Check if we're currently building the model catalog to avoid circular imports"""
     try:
         from src.services.models import _is_building_catalog as check_building
+
         return check_building()
     except ImportError:
         return False
@@ -284,10 +286,12 @@ def _get_cross_reference_pricing(
         return None
 
     try:
-        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_pricing_dict
 
         # Use the provided index or build it on demand (single-model fallback path)
-        index = openrouter_index if openrouter_index is not None else _build_openrouter_pricing_index()
+        index = (
+            openrouter_index if openrouter_index is not None else _build_openrouter_pricing_index()
+        )
         if not index:
             return None
 
@@ -310,8 +314,10 @@ def _get_cross_reference_pricing(
         for key, pricing in index.items():
             if not key.startswith(base_lower):
                 continue
-            suffix = key[len(base_lower):]
-            if not suffix or (suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()):
+            suffix = key[len(base_lower) :]
+            if not suffix or (
+                suffix.startswith("-") and len(suffix) > 1 and suffix[1:].replace("-", "").isdigit()
+            ):
                 return normalize_pricing_dict(pricing, PricingFormat.PER_TOKEN)
 
         return None
@@ -354,7 +360,9 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
         # Note: model_id column was removed - now use model_name as canonical identifier
         result = (
             client.table("models")
-            .select("id, model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)")
+            .select(
+                "id, model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)"
+            )
             .eq("model_name", model_id)
             .eq("is_active", True)
             .limit(1)
@@ -379,9 +387,11 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
                 if prompt_price is not None and completion_price is not None:
                     return {
                         "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
-                        "completion": validate_pricing_value(completion_price, "completion", model_id),
+                        "completion": validate_pricing_value(
+                            completion_price, "completion", model_id
+                        ),
                         "request": "0",
-                        "image": "0"
+                        "image": "0",
                     }
 
         # Source 2: Try metadata.pricing_raw (current sync storage)
@@ -395,9 +405,15 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
                 if prompt_price is not None and completion_price is not None:
                     return {
                         "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
-                        "completion": validate_pricing_value(completion_price, "completion", model_id),
-                        "request": validate_pricing_value(pricing_raw.get("request", "0"), "request", model_id),
-                        "image": validate_pricing_value(pricing_raw.get("image", "0"), "image", model_id),
+                        "completion": validate_pricing_value(
+                            completion_price, "completion", model_id
+                        ),
+                        "request": validate_pricing_value(
+                            pricing_raw.get("request", "0"), "request", model_id
+                        ),
+                        "image": validate_pricing_value(
+                            pricing_raw.get("image", "0"), "image", model_id
+                        ),
                     }
 
         return None
@@ -430,7 +446,9 @@ def get_all_pricing_batch() -> dict[str, dict]:
         while True:
             result = (
                 client.table("models")
-                .select("model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)")
+                .select(
+                    "model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)"
+                )
                 .eq("is_active", True)
                 .range(offset, offset + page_size - 1)
                 .execute()
@@ -455,12 +473,18 @@ def get_all_pricing_batch() -> dict[str, dict]:
             mp = row.get("model_pricing")
             if mp and isinstance(mp, list) and len(mp) > 0:
                 mp = mp[0]
-            if mp and isinstance(mp, dict) and (
-                mp.get("price_per_input_token") or mp.get("price_per_output_token")
+            if (
+                mp
+                and isinstance(mp, dict)
+                and (mp.get("price_per_input_token") or mp.get("price_per_output_token"))
             ):
                 pricing_map[model_name] = {
-                    "prompt": validate_pricing_value(mp.get("price_per_input_token", 0), "prompt", model_name),
-                    "completion": validate_pricing_value(mp.get("price_per_output_token", 0), "completion", model_name),
+                    "prompt": validate_pricing_value(
+                        mp.get("price_per_input_token", 0), "prompt", model_name
+                    ),
+                    "completion": validate_pricing_value(
+                        mp.get("price_per_output_token", 0), "completion", model_name
+                    ),
                     "request": "0",
                     "image": "0",
                     "source": "database_batch",
@@ -472,13 +496,22 @@ def get_all_pricing_batch() -> dict[str, dict]:
             if isinstance(metadata, dict):
                 pricing_raw = metadata.get("pricing_raw") or metadata.get("pricing") or {}
                 if isinstance(pricing_raw, dict) and (
-                    pricing_raw.get("prompt") is not None or pricing_raw.get("completion") is not None
+                    pricing_raw.get("prompt") is not None
+                    or pricing_raw.get("completion") is not None
                 ):
                     pricing_map[model_name] = {
-                        "prompt": validate_pricing_value(pricing_raw.get("prompt", 0), "prompt", model_name),
-                        "completion": validate_pricing_value(pricing_raw.get("completion", 0), "completion", model_name),
-                        "request": validate_pricing_value(pricing_raw.get("request", 0), "request", model_name),
-                        "image": validate_pricing_value(pricing_raw.get("image", 0), "image", model_name),
+                        "prompt": validate_pricing_value(
+                            pricing_raw.get("prompt", 0), "prompt", model_name
+                        ),
+                        "completion": validate_pricing_value(
+                            pricing_raw.get("completion", 0), "completion", model_name
+                        ),
+                        "request": validate_pricing_value(
+                            pricing_raw.get("request", 0), "request", model_name
+                        ),
+                        "image": validate_pricing_value(
+                            pricing_raw.get("image", 0), "image", model_name
+                        ),
                         "source": "metadata_batch",
                     }
 
@@ -591,13 +624,16 @@ def enrich_model_with_pricing(
                 # Verify cross-reference pricing has non-zero values
                 # Models with zero pricing from OpenRouter should still be filtered out
                 has_valid_pricing = any(
-                    is_non_zero(v) for k, v in cross_ref_pricing.items()
+                    is_non_zero(v)
+                    for k, v in cross_ref_pricing.items()
                     if k in ("prompt", "completion")
                 )
                 if has_valid_pricing:
                     model_data["pricing"] = cross_ref_pricing
                     model_data["pricing_source"] = "cross-reference"
-                    logger.debug(f"Enriched {model_id} with cross-reference pricing from OpenRouter")
+                    logger.debug(
+                        f"Enriched {model_id} with cross-reference pricing from OpenRouter"
+                    )
                     return model_data
                 else:
                     logger.debug(f"Cross-reference pricing for {model_id} is zero, filtering out")

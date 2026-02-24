@@ -2,14 +2,15 @@
 Tests for model catalog validation service.
 """
 
-import pytest
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.model_catalog_validator import (
+    clear_validation_cache,
     validate_model_availability,
     validate_models_batch,
-    clear_validation_cache,
 )
 
 
@@ -46,9 +47,7 @@ class TestValidateModelAvailability:
             mock_client_fn.return_value = mock_client
 
             # Try to validate non-existent model
-            result = await validate_model_availability(
-                "non-existent-model", "cerebras", "cerebras"
-            )
+            result = await validate_model_availability("non-existent-model", "cerebras", "cerebras")
 
             assert result["available"] is False
             assert result["model_id"] == "non-existent-model"
@@ -93,9 +92,7 @@ class TestValidateModelAvailability:
                 return_value=mock_response
             )
 
-            result = await validate_model_availability(
-                "fake/model", "huggingface", "huggingface"
-            )
+            result = await validate_model_availability("fake/model", "huggingface", "huggingface")
 
             assert result["available"] is False
             assert "not found on HuggingFace Hub" in result["error"]
@@ -145,9 +142,7 @@ class TestValidateModelAvailability:
                 return_value=mock_response
             )
 
-            result = await validate_model_availability(
-                "openai/gpt-4", "openrouter", "openrouter"
-            )
+            result = await validate_model_availability("openai/gpt-4", "openrouter", "openrouter")
 
             assert result["available"] is True
             assert result["model_id"] == "openai/gpt-4"
@@ -168,9 +163,7 @@ class TestValidateModelAvailability:
                 return_value=mock_response
             )
 
-            result = await validate_model_availability(
-                "fake/model", "openrouter", "openrouter"
-            )
+            result = await validate_model_availability("fake/model", "openrouter", "openrouter")
 
             assert result["available"] is False
             assert "not found in OpenRouter catalog" in result["error"]
@@ -178,9 +171,7 @@ class TestValidateModelAvailability:
     @pytest.mark.asyncio
     async def test_validate_unsupported_provider(self):
         """Test validation for provider without validation implementation"""
-        result = await validate_model_availability(
-            "some-model", "unsupported-provider", "gateway"
-        )
+        result = await validate_model_availability("some-model", "unsupported-provider", "gateway")
 
         # Should assume available for providers without validation
         assert result["available"] is True
@@ -216,26 +207,20 @@ class TestValidateModelsBatch:
     async def test_validate_batch_all_available(self):
         """Test validating batch where all models are available"""
         models = [
-            {
-                "id": "llama3.1-8b",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            },
-            {
-                "id": "llama3.1-70b",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            }
+            {"id": "llama3.1-8b", "provider_slug": "cerebras", "source_gateway": "cerebras"},
+            {"id": "llama3.1-70b", "provider_slug": "cerebras", "source_gateway": "cerebras"},
         ]
 
-        with patch("src.services.model_catalog_validator.validate_model_availability") as mock_validate:
+        with patch(
+            "src.services.model_catalog_validator.validate_model_availability"
+        ) as mock_validate:
             # Mock all as available
             mock_validate.return_value = {
                 "available": True,
                 "model_id": "test",
                 "provider": "cerebras",
                 "checked_at": datetime.now(UTC),
-                "error": None
+                "error": None,
             }
 
             result = await validate_models_batch(models)
@@ -247,16 +232,8 @@ class TestValidateModelsBatch:
     async def test_validate_batch_some_unavailable(self):
         """Test validating batch where some models are unavailable"""
         models = [
-            {
-                "id": "available-model",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            },
-            {
-                "id": "unavailable-model",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            }
+            {"id": "available-model", "provider_slug": "cerebras", "source_gateway": "cerebras"},
+            {"id": "unavailable-model", "provider_slug": "cerebras", "source_gateway": "cerebras"},
         ]
 
         async def mock_validate(model_id, provider, gateway):
@@ -266,7 +243,7 @@ class TestValidateModelsBatch:
                     "model_id": model_id,
                     "provider": provider,
                     "checked_at": datetime.now(UTC),
-                    "error": None
+                    "error": None,
                 }
             else:
                 return {
@@ -274,10 +251,13 @@ class TestValidateModelsBatch:
                     "model_id": model_id,
                     "provider": provider,
                     "checked_at": datetime.now(UTC),
-                    "error": "Model not found"
+                    "error": "Model not found",
                 }
 
-        with patch("src.services.model_catalog_validator.validate_model_availability", side_effect=mock_validate):
+        with patch(
+            "src.services.model_catalog_validator.validate_model_availability",
+            side_effect=mock_validate,
+        ):
             result = await validate_models_batch(models)
 
             # Only available model should be in result
@@ -294,16 +274,8 @@ class TestValidateModelsBatch:
     async def test_validate_batch_with_exceptions(self):
         """Test batch validation handles exceptions gracefully"""
         models = [
-            {
-                "id": "model1",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            },
-            {
-                "id": "model2",
-                "provider_slug": "cerebras",
-                "source_gateway": "cerebras"
-            }
+            {"id": "model1", "provider_slug": "cerebras", "source_gateway": "cerebras"},
+            {"id": "model2", "provider_slug": "cerebras", "source_gateway": "cerebras"},
         ]
 
         async def mock_validate(model_id, provider, gateway):
@@ -314,10 +286,13 @@ class TestValidateModelsBatch:
                 "model_id": model_id,
                 "provider": provider,
                 "checked_at": datetime.now(UTC),
-                "error": None
+                "error": None,
             }
 
-        with patch("src.services.model_catalog_validator.validate_model_availability", side_effect=mock_validate):
+        with patch(
+            "src.services.model_catalog_validator.validate_model_availability",
+            side_effect=mock_validate,
+        ):
             result = await validate_models_batch(models)
 
             # Only model2 should be in result (model1 threw exception)

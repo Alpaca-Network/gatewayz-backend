@@ -4,7 +4,7 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_all_providers(
-    is_active_only: bool = True,
-    include_inactive: bool = False
+    is_active_only: bool = True, include_inactive: bool = False
 ) -> list[dict[str, Any]]:
     """
     Get all providers from database
@@ -116,12 +115,7 @@ def update_provider(provider_id: int, provider_data: dict[str, Any]) -> dict[str
     """
     try:
         supabase = get_supabase_client()
-        response = (
-            supabase.table("providers")
-            .update(provider_data)
-            .eq("id", provider_id)
-            .execute()
-        )
+        response = supabase.table("providers").update(provider_data).eq("id", provider_id).execute()
 
         if response.data:
             logger.info(f"Updated provider {provider_id}")
@@ -182,9 +176,7 @@ def activate_provider(provider_id: int) -> dict[str, Any] | None:
 
 
 def update_provider_health(
-    provider_id: int,
-    health_status: str,
-    average_response_time_ms: int | None = None
+    provider_id: int, health_status: str, average_response_time_ms: int | None = None
 ) -> dict[str, Any] | None:
     """
     Update provider health status

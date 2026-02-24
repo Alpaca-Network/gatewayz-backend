@@ -12,29 +12,31 @@ Testing coverage for:
 - Error handling
 """
 
-import pytest
-import json
 import asyncio
+import json
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock, patch
-from datetime import datetime, timezone, timedelta, UTC
 
 import src.config.supabase_config
-import src.db.users as users_module
-import src.db.api_keys as api_keys_module
-import src.db.rate_limits as rate_limits_module
-import src.db.plans as plans_module
-import src.db.chat_history as chat_history_module
 import src.db.activity as activity_module
+import src.db.api_keys as api_keys_module
+import src.db.chat_history as chat_history_module
+import src.db.plans as plans_module
+import src.db.rate_limits as rate_limits_module
+import src.db.users as users_module
 import src.services.openrouter_client as openrouter_module
-import src.services.vercel_ai_gateway_client as vercel_ai_gateway_module
+import src.services.pricing as pricing_module
 import src.services.rate_limiting as rate_limiting_module
 import src.services.trial_validation as trial_module
-import src.services.pricing as pricing_module
+import src.services.vercel_ai_gateway_client as vercel_ai_gateway_module
 
 # ==================================================
 # IN-MEMORY SUPABASE STUB
 # ==================================================
+
 
 class _Result:
     def __init__(self, data=None, count=None):
@@ -105,7 +107,7 @@ class _BaseQuery:
             matched.sort(key=lambda x: x.get(field, 0), reverse=desc)
 
         if self._limit:
-            matched = matched[:self._limit]
+            matched = matched[: self._limit]
 
         return _Result(matched, len(matched))
 
@@ -128,9 +130,11 @@ class _InsertQuery:
             self.store.tables[self.table] = []
 
         for record in self.data:
-            if 'id' not in record:
-                existing_ids = [int(r.get('id', 0)) for r in self.store.tables[self.table] if r.get('id')]
-                record['id'] = str(max(existing_ids, default=0) + 1)
+            if "id" not in record:
+                existing_ids = [
+                    int(r.get("id", 0)) for r in self.store.tables[self.table] if r.get("id")
+                ]
+                record["id"] = str(max(existing_ids, default=0) + 1)
 
         self.store.tables[self.table].extend(self.data)
         return _Result(self.data)
@@ -190,6 +194,7 @@ class SupabaseStub:
 # ==================================================
 # FIXTURES
 # ==================================================
+
 
 @pytest.fixture
 def sb():
@@ -257,7 +262,13 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(rate_limits_module, "update_rate_limit_usage", mock_update_rate_limit_usage)
 
     def mock_get_chat_session(session_id, user_id):
-        sessions = sb.table("chat_sessions").select("*").eq("id", session_id).eq("user_id", user_id).execute()
+        sessions = (
+            sb.table("chat_sessions")
+            .select("*")
+            .eq("id", session_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         if sessions.data:
             return sessions.data[0]
         return None
@@ -269,7 +280,9 @@ def client(sb, monkeypatch):
 
     monkeypatch.setattr(chat_history_module, "save_chat_message", mock_save_chat_message)
 
-    def mock_log_activity(user_id, model, provider, tokens, cost, speed, finish_reason, app, metadata=None):
+    def mock_log_activity(
+        user_id, model, provider, tokens, cost, speed, finish_reason, app, metadata=None
+    ):
         pass  # No-op for tests
 
     monkeypatch.setattr(activity_module, "log_activity", mock_log_activity)
@@ -305,7 +318,9 @@ def client(sb, monkeypatch):
 
         return response_obj
 
-    monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai", mock_openrouter_request)
+    monkeypatch.setattr(
+        openrouter_module, "make_openrouter_request_openai", mock_openrouter_request
+    )
 
     def mock_process_openrouter_response(response):
         return {
@@ -316,22 +331,21 @@ def client(sb, monkeypatch):
             "choices": [
                 {
                     "index": choice.index,
-                    "message": {
-                        "role": choice.message.role,
-                        "content": choice.message.content
-                    },
-                    "finish_reason": choice.finish_reason
+                    "message": {"role": choice.message.role, "content": choice.message.content},
+                    "finish_reason": choice.finish_reason,
                 }
                 for choice in response.choices
             ],
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
-            }
+                "total_tokens": response.usage.total_tokens,
+            },
         }
 
-    monkeypatch.setattr(openrouter_module, "process_openrouter_response", mock_process_openrouter_response)
+    monkeypatch.setattr(
+        openrouter_module, "process_openrouter_response", mock_process_openrouter_response
+    )
 
     # Mock streaming endpoint - use plain classes, NOT MagicMock (for JSON serialization)
     class MockDelta:
@@ -361,39 +375,45 @@ def client(sb, monkeypatch):
 
             delta = MockDelta(
                 role="assistant" if finish_reason is None else None,
-                content=content_chunk if finish_reason is None else None
+                content=content_chunk if finish_reason is None else None,
             )
 
-            choice = MockStreamChoice(
-                index=0,
-                delta=delta,
-                finish_reason=finish_reason
-            )
+            choice = MockStreamChoice(index=0, delta=delta, finish_reason=finish_reason)
 
             self.choices = [choice]
-            self.usage = MockStreamUsage(prompt_tokens=10, completion_tokens=15, total_tokens=25) if finish_reason else None
+            self.usage = (
+                MockStreamUsage(prompt_tokens=10, completion_tokens=15, total_tokens=25)
+                if finish_reason
+                else None
+            )
 
     def mock_openrouter_stream(messages, model, **kwargs):
         chunks = [
             MockStreamChunk("Hello"),
             MockStreamChunk(" world"),
-            MockStreamChunk("!", finish_reason="stop")
+            MockStreamChunk("!", finish_reason="stop"),
         ]
         return iter(chunks)
 
-    monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
+    monkeypatch.setattr(
+        openrouter_module, "make_openrouter_request_openai_stream", mock_openrouter_stream
+    )
 
     # Mock async streaming endpoint (also needed for chat routes)
     async def mock_openrouter_stream_async(messages, model, **kwargs):
         chunks = [
             MockStreamChunk("Hello"),
             MockStreamChunk(" world"),
-            MockStreamChunk("!", finish_reason="stop")
+            MockStreamChunk("!", finish_reason="stop"),
         ]
         for chunk in chunks:
             yield chunk
 
-    monkeypatch.setattr(openrouter_module, "make_openrouter_request_openai_stream_async", mock_openrouter_stream_async)
+    monkeypatch.setattr(
+        openrouter_module,
+        "make_openrouter_request_openai_stream_async",
+        mock_openrouter_stream_async,
+    )
 
     # 3b) Mock Vercel AI Gateway (for failover compatibility)
     def mock_vercel_request(messages, model, **kwargs):
@@ -410,11 +430,14 @@ def client(sb, monkeypatch):
             choices=[
                 MagicMock(
                     index=0,
-                    message=MagicMock(role="assistant", content="This is a test response from Vercel AI Gateway mock."),
-                    finish_reason="stop"
+                    message=MagicMock(
+                        role="assistant",
+                        content="This is a test response from Vercel AI Gateway mock.",
+                    ),
+                    finish_reason="stop",
                 )
             ],
-            usage=usage_obj
+            usage=usage_obj,
         )
 
     def mock_process_vercel_response(response):
@@ -426,33 +449,36 @@ def client(sb, monkeypatch):
             "choices": [
                 {
                     "index": choice.index,
-                    "message": {
-                        "role": choice.message.role,
-                        "content": choice.message.content
-                    },
-                    "finish_reason": choice.finish_reason
+                    "message": {"role": choice.message.role, "content": choice.message.content},
+                    "finish_reason": choice.finish_reason,
                 }
                 for choice in response.choices
             ],
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
-                "total_tokens": response.usage.total_tokens
-            }
+                "total_tokens": response.usage.total_tokens,
+            },
         }
 
-    monkeypatch.setattr(vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request)
-    monkeypatch.setattr(vercel_ai_gateway_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
+    monkeypatch.setattr(
+        vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request
+    )
+    monkeypatch.setattr(
+        vercel_ai_gateway_module, "process_vercel_ai_gateway_response", mock_process_vercel_response
+    )
 
     def mock_vercel_stream(messages, model, **kwargs):
         chunks = [
             MockStreamChunk("Hello"),
             MockStreamChunk(" from"),
-            MockStreamChunk(" Vercel", finish_reason="stop")
+            MockStreamChunk(" Vercel", finish_reason="stop"),
         ]
         return iter(chunks)
 
-    monkeypatch.setattr(vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream)
+    monkeypatch.setattr(
+        vercel_ai_gateway_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream
+    )
 
     # 4) Mock rate limiting
     class MockRateLimitManager:
@@ -474,7 +500,9 @@ def client(sb, monkeypatch):
         async def release_concurrency(self, api_key):
             pass
 
-    monkeypatch.setattr(rate_limiting_module, "get_rate_limit_manager", lambda: MockRateLimitManager())
+    monkeypatch.setattr(
+        rate_limiting_module, "get_rate_limit_manager", lambda: MockRateLimitManager()
+    )
 
     # 5) Mock trial validation
     def mock_validate_trial_access(api_key):
@@ -489,7 +517,7 @@ def client(sb, monkeypatch):
             trial_end = user.get("trial_expires_at")
             if trial_end:
                 if isinstance(trial_end, str):
-                    trial_end = datetime.fromisoformat(trial_end.replace('Z', '+00:00'))
+                    trial_end = datetime.fromisoformat(trial_end.replace("Z", "+00:00"))
                 is_expired = datetime.now(UTC) > trial_end
             else:
                 is_expired = False
@@ -500,7 +528,7 @@ def client(sb, monkeypatch):
                     "is_trial": True,
                     "is_expired": True,
                     "error": "Trial period has expired",
-                    "trial_end_date": trial_end.isoformat() if trial_end else None
+                    "trial_end_date": trial_end.isoformat() if trial_end else None,
                 }
 
             return {
@@ -508,7 +536,7 @@ def client(sb, monkeypatch):
                 "is_trial": True,
                 "is_expired": False,
                 "remaining_tokens": 10000,
-                "remaining_requests": 100
+                "remaining_requests": 100,
             }
 
         return {"is_valid": True, "is_trial": False}
@@ -528,17 +556,25 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(pricing_module, "calculate_cost", mock_calculate_cost)
 
     # 7) NOW import app (after all mocks are in place)
+    import src.routes.chat as chat_module
     from src.main import app
     from src.security.deps import get_api_key
-    import src.routes.chat as chat_module
 
     # Patch the chat module's imported functions (since it uses 'from ... import')
     monkeypatch.setattr(chat_module, "make_openrouter_request_openai", mock_openrouter_request)
-    monkeypatch.setattr(chat_module, "process_openrouter_response", mock_process_openrouter_response)
-    monkeypatch.setattr(chat_module, "make_openrouter_request_openai_stream", mock_openrouter_stream)
+    monkeypatch.setattr(
+        chat_module, "process_openrouter_response", mock_process_openrouter_response
+    )
+    monkeypatch.setattr(
+        chat_module, "make_openrouter_request_openai_stream", mock_openrouter_stream
+    )
     monkeypatch.setattr(chat_module, "make_vercel_ai_gateway_request_openai", mock_vercel_request)
-    monkeypatch.setattr(chat_module, "process_vercel_ai_gateway_response", mock_process_vercel_response)
-    monkeypatch.setattr(chat_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream)
+    monkeypatch.setattr(
+        chat_module, "process_vercel_ai_gateway_response", mock_process_vercel_response
+    )
+    monkeypatch.setattr(
+        chat_module, "make_vercel_ai_gateway_request_openai_stream", mock_vercel_stream
+    )
 
     # Also patch pricing module in chat_module since it's imported directly
     monkeypatch.setattr(chat_module, "calculate_cost", mock_calculate_cost)
@@ -560,14 +596,12 @@ def client(sb, monkeypatch):
 # AUTHENTICATION TESTS
 # ==================================================
 
+
 def test_chat_completions_no_api_key(client):
     """Test chat endpoint without API key - anonymous access is now allowed"""
     response = client.post(
         "/v1/chat/completions",
-        json={
-            "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": "Hello"}]
-        }
+        json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hello"}]},
     )
     # Anonymous access is now allowed - should return 200
     assert response.status_code == 200
@@ -579,11 +613,8 @@ def test_chat_completions_invalid_api_key(client, sb):
     """Test chat endpoint with invalid API key"""
     response = client.post(
         "/v1/chat/completions",
-        json={
-            "model": "gpt-3.5-turbo",
-            "messages": [{"role": "user", "content": "Hello"}]
-        },
-        headers={"Authorization": "Bearer invalid-key-123"}
+        json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hello"}]},
+        headers={"Authorization": "Bearer invalid-key-123"},
     )
     assert response.status_code == 401
     assert "Invalid API key" in response.json()["detail"]
@@ -593,44 +624,46 @@ def test_chat_completions_invalid_api_key(client, sb):
 # HAPPY PATH TESTS - NON-STREAMING
 # ==================================================
 
+
 def test_chat_completions_success(client, sb):
     """Test successful chat completion"""
     # Create test user
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key-123",
-        "credits": 100.0,
-        "is_trial": False,
-        "environment_tag": "live"
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": 1,
+            "api_key": "test-key-123",
+            "credits": 100.0,
+            "is_trial": False,
+            "environment_tag": "live",
+        }
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-key-123"}
+        headers={"Authorization": "Bearer test-key-123"},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert "choices" in data
     assert len(data["choices"]) > 0
-    assert data["choices"][0]["message"]["content"] == "This is a test response from OpenRouter mock."
+    assert (
+        data["choices"][0]["message"]["content"] == "This is a test response from OpenRouter mock."
+    )
     assert "usage" in data
     assert data["usage"]["total_tokens"] == 25
 
 
 def test_chat_completions_with_optional_params(client, sb):
     """Test chat completion with optional parameters"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key-456",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-key-456", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
@@ -642,9 +675,9 @@ def test_chat_completions_with_optional_params(client, sb):
             "top_p": 0.9,
             "frequency_penalty": 0.5,
             "presence_penalty": 0.3,
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-key-456"}
+        headers={"Authorization": "Bearer test-key-456"},
     )
 
     assert response.status_code == 200
@@ -652,21 +685,18 @@ def test_chat_completions_with_optional_params(client, sb):
 
 def test_chat_completions_credits_deducted(client, sb):
     """Test that credits are properly deducted"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key-789",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-key-789", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-key-789"}
+        headers={"Authorization": "Bearer test-key-789"},
     )
 
     assert response.status_code == 200
@@ -680,23 +710,21 @@ def test_chat_completions_credits_deducted(client, sb):
 # HAPPY PATH TESTS - STREAMING
 # ==================================================
 
+
 def test_chat_completions_streaming_success(client, sb):
     """Test successful streaming chat completion"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-stream-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-stream-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": True
+            "stream": True,
         },
-        headers={"Authorization": "Bearer test-stream-key"}
+        headers={"Authorization": "Bearer test-stream-key"},
     )
 
     assert response.status_code == 200
@@ -722,8 +750,8 @@ def test_chat_completions_streaming_anonymous_success(client):
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello from anonymous user"}],
-            "stream": True
-        }
+            "stream": True,
+        },
         # No Authorization header = anonymous request
     )
 
@@ -742,23 +770,21 @@ def test_chat_completions_streaming_anonymous_success(client):
 # BUSINESS LOGIC ERROR TESTS
 # ==================================================
 
+
 def test_chat_completions_insufficient_credits(client, sb):
     """Test chat endpoint with insufficient credits"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key-poor",
-        "credits": 0.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-key-poor", "credits": 0.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-key-poor"}
+        headers={"Authorization": "Bearer test-key-poor"},
     )
 
     assert response.status_code == 402
@@ -767,22 +793,24 @@ def test_chat_completions_insufficient_credits(client, sb):
 
 def test_chat_completions_trial_user_success(client, sb):
     """Test chat endpoint with trial user"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-trial-key",
-        "credits": 0.0,
-        "is_trial": True,
-        "trial_expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat()
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": 1,
+            "api_key": "test-trial-key",
+            "credits": 0.0,
+            "is_trial": True,
+            "trial_expires_at": (datetime.now(UTC) + timedelta(days=7)).isoformat(),
+        }
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-trial-key"}
+        headers={"Authorization": "Bearer test-trial-key"},
     )
 
     assert response.status_code == 200
@@ -790,22 +818,24 @@ def test_chat_completions_trial_user_success(client, sb):
 
 def test_chat_completions_trial_expired(client, sb):
     """Test chat endpoint with expired trial"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-expired-trial",
-        "credits": 0.0,
-        "is_trial": True,
-        "trial_expires_at": (datetime.now(UTC) - timedelta(days=1)).isoformat()
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": 1,
+            "api_key": "test-expired-trial",
+            "credits": 0.0,
+            "is_trial": True,
+            "trial_expires_at": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+        }
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-expired-trial"}
+        headers={"Authorization": "Bearer test-expired-trial"},
     )
 
     assert response.status_code == 403
@@ -817,20 +847,15 @@ def test_chat_completions_trial_expired(client, sb):
 # INPUT VALIDATION TESTS
 # ==================================================
 
+
 def test_chat_completions_missing_model(client, sb):
     """Test chat endpoint without model parameter"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key",
-        "credits": 100.0
-    }).execute()
+    sb.table("users").insert({"id": 1, "api_key": "test-key", "credits": 100.0}).execute()
 
     response = client.post(
         "/v1/chat/completions",
-        json={
-            "messages": [{"role": "user", "content": "Hello"}]
-        },
-        headers={"Authorization": "Bearer test-key"}
+        json={"messages": [{"role": "user", "content": "Hello"}]},
+        headers={"Authorization": "Bearer test-key"},
     )
 
     assert response.status_code == 422  # Unprocessable Entity
@@ -838,18 +863,12 @@ def test_chat_completions_missing_model(client, sb):
 
 def test_chat_completions_missing_messages(client, sb):
     """Test chat endpoint without messages parameter"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key",
-        "credits": 100.0
-    }).execute()
+    sb.table("users").insert({"id": 1, "api_key": "test-key", "credits": 100.0}).execute()
 
     response = client.post(
         "/v1/chat/completions",
-        json={
-            "model": "gpt-3.5-turbo"
-        },
-        headers={"Authorization": "Bearer test-key"}
+        json={"model": "gpt-3.5-turbo"},
+        headers={"Authorization": "Bearer test-key"},
     )
 
     assert response.status_code == 422
@@ -857,19 +876,12 @@ def test_chat_completions_missing_messages(client, sb):
 
 def test_chat_completions_empty_messages(client, sb):
     """Test chat endpoint with empty messages array"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-key",
-        "credits": 100.0
-    }).execute()
+    sb.table("users").insert({"id": 1, "api_key": "test-key", "credits": 100.0}).execute()
 
     response = client.post(
         "/v1/chat/completions",
-        json={
-            "model": "gpt-3.5-turbo",
-            "messages": []
-        },
-        headers={"Authorization": "Bearer test-key"}
+        json={"model": "gpt-3.5-turbo", "messages": []},
+        headers={"Authorization": "Bearer test-key"},
     )
 
     assert response.status_code == 422
@@ -879,25 +891,21 @@ def test_chat_completions_empty_messages(client, sb):
 # UNIFIED RESPONSES API TESTS
 # ==================================================
 
+
 def test_unified_responses_success(client, sb):
     """Test /v1/responses endpoint"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-responses-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-responses-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/responses",
         json={
             "model": "gpt-3.5-turbo",
-            "input": [
-                {"role": "user", "content": "Hello, how are you?"}
-            ],
-            "stream": False
+            "input": [{"role": "user", "content": "Hello, how are you?"}],
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-responses-key"}
+        headers={"Authorization": "Bearer test-responses-key"},
     )
 
     assert response.status_code == 200
@@ -909,12 +917,9 @@ def test_unified_responses_success(client, sb):
 
 def test_unified_responses_with_multimodal_input(client, sb):
     """Test /v1/responses with multimodal input"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-multimodal-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-multimodal-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/responses",
@@ -925,13 +930,16 @@ def test_unified_responses_with_multimodal_input(client, sb):
                     "role": "user",
                     "content": [
                         {"type": "input_text", "text": "What's in this image?"},
-                        {"type": "input_image_url", "image_url": {"url": "https://example.com/image.jpg"}}
-                    ]
+                        {
+                            "type": "input_image_url",
+                            "image_url": {"url": "https://example.com/image.jpg"},
+                        },
+                    ],
                 }
             ],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-multimodal-key"}
+        headers={"Authorization": "Bearer test-multimodal-key"},
     )
 
     assert response.status_code == 200
@@ -946,12 +954,9 @@ def test_unified_responses_with_output_text_transformation(client, sb):
     When clients send assistant messages from previous response conversations
     with output_text content type, it should be transformed to standard text type.
     """
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-output-text-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-output-text-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     # Simulate a conversation continuation where a previous assistant response
     # with output_text type content is included
@@ -960,26 +965,20 @@ def test_unified_responses_with_output_text_transformation(client, sb):
         json={
             "model": "gpt-4",
             "input": [
-                {
-                    "role": "user",
-                    "content": "Hello"
-                },
+                {"role": "user", "content": "Hello"},
                 {
                     # Assistant message from a previous Responses API response
                     # that used output_text content type
                     "role": "assistant",
                     "content": [
                         {"type": "output_text", "text": "Hello! How can I help you today?"}
-                    ]
+                    ],
                 },
-                {
-                    "role": "user",
-                    "content": "What's the weather?"
-                }
+                {"role": "user", "content": "What's the weather?"},
             ],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-output-text-key"}
+        headers={"Authorization": "Bearer test-output-text-key"},
     )
 
     # Should succeed - the output_text type should be transformed to text type
@@ -991,30 +990,25 @@ def test_unified_responses_with_output_text_transformation(client, sb):
 # CHAT HISTORY / SESSION TESTS
 # ==================================================
 
+
 def test_chat_completions_with_session_id(client, sb):
     """Test chat endpoint with session ID for history"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-session-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-session-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
-    sb.table("chat_sessions").insert({
-        "id": 100,
-        "user_id": 1,
-        "title": "Test Session",
-        "messages": []
-    }).execute()
+    sb.table("chat_sessions").insert(
+        {"id": 100, "user_id": 1, "title": "Test Session", "messages": []}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions?session_id=100",
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-session-key"}
+        headers={"Authorization": "Bearer test-session-key"},
     )
 
     assert response.status_code == 200
@@ -1024,14 +1018,12 @@ def test_chat_completions_with_session_id(client, sb):
 # PROVIDER-SPECIFIC TESTS
 # ==================================================
 
+
 def test_chat_completions_with_specific_provider(client, sb):
     """Test chat endpoint with specific provider"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-provider-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-provider-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
@@ -1039,9 +1031,9 @@ def test_chat_completions_with_specific_provider(client, sb):
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": "Hello"}],
             "provider": "openrouter",
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-provider-key"}
+        headers={"Authorization": "Bearer test-provider-key"},
     )
 
     assert response.status_code == 200
@@ -1051,14 +1043,12 @@ def test_chat_completions_with_specific_provider(client, sb):
 # EDGE CASES
 # ==================================================
 
+
 def test_chat_completions_very_long_message(client, sb):
     """Test chat endpoint with very long message"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-long-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-long-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     long_message = "This is a test. " * 1000  # ~16,000 characters
 
@@ -1067,9 +1057,9 @@ def test_chat_completions_very_long_message(client, sb):
         json={
             "model": "gpt-3.5-turbo",
             "messages": [{"role": "user", "content": long_message}],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-long-key"}
+        headers={"Authorization": "Bearer test-long-key"},
     )
 
     # Should either succeed or fail gracefully
@@ -1078,12 +1068,9 @@ def test_chat_completions_very_long_message(client, sb):
 
 def test_chat_completions_multiple_messages(client, sb):
     """Test chat endpoint with conversation history"""
-    sb.table("users").insert({
-        "id": 1,
-        "api_key": "test-multi-key",
-        "credits": 100.0,
-        "is_trial": False
-    }).execute()
+    sb.table("users").insert(
+        {"id": 1, "api_key": "test-multi-key", "credits": 100.0, "is_trial": False}
+    ).execute()
 
     response = client.post(
         "/v1/chat/completions",
@@ -1093,11 +1080,11 @@ def test_chat_completions_multiple_messages(client, sb):
                 {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": "What's 2+2?"},
                 {"role": "assistant", "content": "4"},
-                {"role": "user", "content": "What about 3+3?"}
+                {"role": "user", "content": "What about 3+3?"},
             ],
-            "stream": False
+            "stream": False,
         },
-        headers={"Authorization": "Bearer test-multi-key"}
+        headers={"Authorization": "Bearer test-multi-key"},
     )
 
     assert response.status_code == 200

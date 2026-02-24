@@ -111,9 +111,7 @@ class TestResilientSpanProcessor:
         assert resilient_processor._total_drops == 1
         mock_processor.force_flush.assert_not_called()
 
-    def test_circuit_attempts_recovery_after_cooldown(
-        self, resilient_processor, mock_processor
-    ):
+    def test_circuit_attempts_recovery_after_cooldown(self, resilient_processor, mock_processor):
         """Test that circuit attempts recovery after cooldown period."""
         # Arrange - Open the circuit
         mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
@@ -126,9 +124,7 @@ class TestResilientSpanProcessor:
         with patch("time.time") as mock_time:
             # Set current time to cooldown + 1 second in the future
             mock_time.return_value = (
-                resilient_processor._last_failure_time
-                + ResilientSpanProcessor.COOLDOWN_SECONDS
-                + 1
+                resilient_processor._last_failure_time + ResilientSpanProcessor.COOLDOWN_SECONDS + 1
             )
 
             # Reset mock processor to succeed
@@ -143,9 +139,7 @@ class TestResilientSpanProcessor:
             assert result is True
             mock_processor.force_flush.assert_called_once()
 
-    def test_circuit_closes_after_successful_recoveries(
-        self, resilient_processor, mock_processor
-    ):
+    def test_circuit_closes_after_successful_recoveries(self, resilient_processor, mock_processor):
         """Test that circuit closes after SUCCESS_THRESHOLD successful flushes."""
         # Arrange - Open the circuit
         mock_processor.force_flush.side_effect = RequestsConnectionError("Connection refused")
@@ -162,9 +156,7 @@ class TestResilientSpanProcessor:
         # Fast-forward time past cooldown
         with patch("time.time") as mock_time:
             mock_time.return_value = (
-                resilient_processor._last_failure_time
-                + ResilientSpanProcessor.COOLDOWN_SECONDS
-                + 1
+                resilient_processor._last_failure_time + ResilientSpanProcessor.COOLDOWN_SECONDS + 1
             )
 
             # Act - Succeed enough times to close circuit

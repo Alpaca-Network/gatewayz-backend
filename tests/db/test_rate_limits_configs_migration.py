@@ -5,8 +5,9 @@ This test suite verifies that the migration from the legacy rate_limits table
 to the rate_limit_configs table works correctly, as documented in Issue #977.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 import src.db.rate_limits as rate_limits_module
 
@@ -133,7 +134,12 @@ class TestSetUserRateLimitsConfigsMigration:
     @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
     async def test_set_rate_limits_creates_new_config(
-        self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
+        self,
+        mock_get_client,
+        mock_supabase_client,
+        sample_api_key,
+        sample_api_key_id,
+        sample_user_id,
     ):
         """Test creating new rate limit config in rate_limit_configs table"""
         mock_get_client.return_value = mock_supabase_client
@@ -184,7 +190,12 @@ class TestSetUserRateLimitsConfigsMigration:
     @pytest.mark.asyncio
     @patch("src.db.rate_limits.get_supabase_client")
     async def test_set_rate_limits_updates_existing_config(
-        self, mock_get_client, mock_supabase_client, sample_api_key, sample_api_key_id, sample_user_id
+        self,
+        mock_get_client,
+        mock_supabase_client,
+        sample_api_key,
+        sample_api_key_id,
+        sample_user_id,
     ):
         """Test updating existing rate limit config"""
         mock_get_client.return_value = mock_supabase_client
@@ -286,18 +297,22 @@ class TestRateLimitsLegacyTableRemoval:
         This is a documentation test to ensure we're using the correct table.
         """
         import inspect
+
         import src.db.rate_limits
 
         # Get source code of set_user_rate_limits
         source = inspect.getsource(src.db.rate_limits.set_user_rate_limits)
 
         # Verify rate_limit_configs is referenced
-        assert "rate_limit_configs" in source, "set_user_rate_limits should use rate_limit_configs table"
+        assert (
+            "rate_limit_configs" in source
+        ), "set_user_rate_limits should use rate_limit_configs table"
 
         # Verify legacy table is NOT used for writes
         # Note: The legacy table name might appear in comments, so we check for actual table operations
-        assert 'table("rate_limits")' not in source or "# " in source.split('table("rate_limits")')[0], \
-            "set_user_rate_limits should not write to legacy rate_limits table"
+        assert (
+            'table("rate_limits")' not in source or "# " in source.split('table("rate_limits")')[0]
+        ), "set_user_rate_limits should not write to legacy rate_limits table"
 
 
 @pytest.mark.integration

@@ -38,7 +38,9 @@ async def get_model_detail(
     modelId: str | None = Query(None, description="Full model ID (e.g., 'z-ai/glm-4-7')"),
     developer: str | None = Query(None, description="Developer/provider name (e.g., 'z-ai')"),
     modelName: str | None = Query(None, description="Model name (e.g., 'glm-4-7')"),
-    include_huggingface: bool = Query(True, description="Include Hugging Face metrics if available"),
+    include_huggingface: bool = Query(
+        True, description="Include Hugging Face metrics if available"
+    ),
     gateway: str | None = Query(None, description="Gateway to use for fetching model data"),
 ):
     """
@@ -70,7 +72,7 @@ async def get_model_detail(
             else:
                 # If no slash, treat the whole thing as model name
                 model_name = modelId
-        
+
         # Use developer/modelName if provided (overrides parsed values)
         if developer:
             provider_name = developer
@@ -82,7 +84,7 @@ async def get_model_detail(
             raise HTTPException(
                 status_code=400,
                 detail="Missing required parameters. Provide either 'modelId' (e.g., 'z-ai/glm-4-7') "
-                       "or both 'developer' and 'modelName' parameters."
+                "or both 'developer' and 'modelName' parameters.",
             )
 
         # Normalize the parameters
@@ -97,13 +99,14 @@ async def get_model_detail(
         )
 
         # Fetch model data from appropriate gateway
-        model_data = await asyncio.to_thread(fetch_specific_model, provider_name, model_name, gateway)
+        model_data = await asyncio.to_thread(
+            fetch_specific_model, provider_name, model_name, gateway
+        )
 
         if not model_data:
             gateway_msg = f" from gateway '{gateway}'" if gateway else ""
             raise HTTPException(
-                status_code=404,
-                detail=f"Model {provider_name}/{model_name} not found{gateway_msg}"
+                status_code=404, detail=f"Model {provider_name}/{model_name} not found{gateway_msg}"
             )
 
         # Determine which gateway was used

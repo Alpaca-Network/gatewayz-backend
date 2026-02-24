@@ -32,30 +32,43 @@ logger = logging.getLogger(__name__)
 # Standard Residential/Business limit
 DEFAULT_IP_LIMIT = 300  # requests per minute (was 60 - too low for shared IPs/NAT)
 # Cloud/Datacenter/VPN limit (Stricter)
-STRICT_IP_LIMIT = 60   # requests per minute (was 10 - too restrictive)
+STRICT_IP_LIMIT = 60  # requests per minute (was 10 - too restrictive)
 # Fingerprint limit (Cross-IP detection)
-FINGERPRINT_LIMIT = 100 # requests per minute across all IPs for 1 fingerprint
+FINGERPRINT_LIMIT = 100  # requests per minute across all IPs for 1 fingerprint
 
 # --- Global Velocity Mode Configuration ---
 # Activates when error rate exceeds threshold, tightens all limits system-wide
 VELOCITY_ERROR_THRESHOLD = 0.25  # 25% error rate triggers velocity mode (was 0.10 - too aggressive)
-VELOCITY_WINDOW_SECONDS = 60     # Look at errors in the last 60 seconds
+VELOCITY_WINDOW_SECONDS = 60  # Look at errors in the last 60 seconds
 VELOCITY_COOLDOWN_SECONDS = 180  # Stay in velocity mode for 3 minutes (was 600s - too long)
 VELOCITY_LIMIT_MULTIPLIER = 0.5  # Reduce all limits to 50% during velocity mode (basic tier)
-VELOCITY_MIN_REQUESTS = 100      # Minimum requests before calculating error rate (was 50 - better sample size)
+VELOCITY_MIN_REQUESTS = (
+    100  # Minimum requests before calculating error rate (was 50 - better sample size)
+)
 
 # --- Tiered Velocity Mode Configuration ---
 # Different multipliers based on user tier (pro/max users get less restriction)
 VELOCITY_TIER_MULTIPLIERS = {
-    "basic": 0.5,   # Basic tier: 50% reduction (most restrictive)
-    "pro": 0.75,    # Pro tier: 25% reduction
-    "max": 0.9,     # MAX tier: 10% reduction
-    "admin": 1.0,   # Admin tier: No reduction (bypasses velocity mode)
+    "basic": 0.5,  # Basic tier: 50% reduction (most restrictive)
+    "pro": 0.75,  # Pro tier: 25% reduction
+    "max": 0.9,  # MAX tier: 10% reduction
+    "admin": 1.0,  # Admin tier: No reduction (bypasses velocity mode)
 }
 
 # Known Datacenter/Proxy CIDR patterns (simplified for implementation)
 # In production, this would be a more comprehensive list or GeoIP database
-DATACENTER_KEYWORDS = ["aws", "amazon", "google", "digitalocean", "azure", "ovh", "linode", "proxy", "vpn"]
+DATACENTER_KEYWORDS = [
+    "aws",
+    "amazon",
+    "google",
+    "digitalocean",
+    "azure",
+    "ovh",
+    "linode",
+    "proxy",
+    "vpn",
+]
+
 
 class SecurityMiddleware(BaseHTTPMiddleware):
     """
@@ -140,6 +153,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # 1. Check CIDR ranges first (fast, accurate)
         # This catches known datacenter IPs like AWS, GCP, Azure, Huawei Cloud, etc.
         from src.services.ip_classification import is_datacenter_ip_fast
+
         if await is_datacenter_ip_fast(ip):
             return True
 
@@ -275,7 +289,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # Calculate error rate in the window
         cutoff = now - VELOCITY_WINDOW_SECONDS
-        recent_requests = [(ts, err, status) for ts, err, status in self._request_log if ts >= cutoff]
+        recent_requests = [
+            (ts, err, status) for ts, err, status in self._request_log if ts >= cutoff
+        ]
 
         if len(recent_requests) < VELOCITY_MIN_REQUESTS:
             return False
@@ -292,7 +308,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             error_details = dict(Counter(error_statuses))
 
             # Format error breakdown for logging
-            error_breakdown = ", ".join([f"{code}: {count}" for code, count in sorted(error_details.items())])
+            error_breakdown = ", ".join(
+                [f"{code}: {count}" for code, count in sorted(error_details.items())]
+            )
 
             logger.warning(
                 f"🚨 VELOCITY MODE ACTIVATED: {error_rate:.1%} error rate "
@@ -313,13 +331,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 )
                 rate_limited_requests.labels(limit_type="velocity_mode_activated").inc()
             except ImportError as e:
-                logger.warning(f"Prometheus metrics module unavailable, skipping velocity activation metrics: {e}")
+                logger.warning(
+                    f"Prometheus metrics module unavailable, skipping velocity activation metrics: {e}"
+                )
             except RuntimeError as e:
                 logger.warning(f"Failed to record velocity mode activation metrics: {e}")
 
             # Log to database (async operation, don't block on it)
             try:
                 import asyncio
+
                 from src.db.velocity_mode_events import create_velocity_event
 
                 def _log_event():
@@ -366,6 +387,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._current_velocity_event_id and not self._is_velocity_mode_active():
             try:
                 import asyncio
+
                 from src.db.velocity_mode_events import deactivate_velocity_event
                 from src.services.prometheus_metrics import record_velocity_mode_deactivation
 
@@ -380,13 +402,17 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
                 def _deactivate_event():
                     deactivate_velocity_event(self._current_velocity_event_id)
-                    logger.info(f"✅ VELOCITY MODE DEACTIVATED (event: {self._current_velocity_event_id})")
+                    logger.info(
+                        f"✅ VELOCITY MODE DEACTIVATED (event: {self._current_velocity_event_id})"
+                    )
 
                 # Run in thread pool to avoid blocking
                 asyncio.create_task(asyncio.to_thread(_deactivate_event))
                 self._current_velocity_event_id = None
             except ImportError as e:
-                logger.warning(f"DB/metrics module unavailable, skipping velocity mode deactivation log: {e}")
+                logger.warning(
+                    f"DB/metrics module unavailable, skipping velocity mode deactivation log: {e}"
+                )
             except RuntimeError as e:
                 logger.warning(f"Failed to schedule velocity mode deactivation: {e}")
 
@@ -539,7 +565,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             self._local_cache[full_key] = 0
             # Periodically clean old keys
             if now - self._last_cleanup > 300:
-                self._local_cache = {k: v for k, v in self._local_cache.items() if k.startswith(f"sec_rl:{key}:")}
+                self._local_cache = {
+                    k: v for k, v in self._local_cache.items() if k.startswith(f"sec_rl:{key}:")
+                }
                 self._last_cleanup = now
 
         self._local_cache[full_key] += 1
@@ -581,7 +609,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             logger.warning(f"IP whitelist check failed for {client_ip}: {e}")
         except Exception as e:
             # Catch-all for unexpected errors from the whitelist DB lookup
-            logger.error(f"Unexpected error in IP whitelist check for {client_ip}: {e}", exc_info=True)
+            logger.error(
+                f"Unexpected error in IP whitelist check for {client_ip}: {e}", exc_info=True
+            )
 
         fingerprint = self._generate_fingerprint(request)
 
@@ -604,7 +634,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
             rate_limited_requests.labels(limit_type="security_ip_tier").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
-            logger.warning(f"🛡️ Blocked Aggressive IP: {client_ip} (Limit: {ip_limit} RPM){mode_indicator}")
+            logger.warning(
+                f"🛡️ Blocked Aggressive IP: {client_ip} (Limit: {ip_limit} RPM){mode_indicator}"
+            )
 
             _ip_reset_ts = str(int(time.time()) + 60)
             headers = {
@@ -618,7 +650,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 "X-RateLimit-Limit": str(ip_limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": _ip_reset_ts,
-                "X-RateLimit-Reason": "ip_limit" if not velocity_active else "velocity_mode_ip_limit",
+                "X-RateLimit-Reason": (
+                    "ip_limit" if not velocity_active else "velocity_mode_ip_limit"
+                ),
                 "X-RateLimit-Mode": "velocity" if velocity_active else "normal",
                 "X-Velocity-Mode-Active": str(velocity_active).lower(),
                 "X-User-Tier": user_tier,
@@ -626,12 +660,19 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             if velocity_active:
                 headers["X-Velocity-Mode-Until"] = str(int(self._velocity_mode_until))
-                headers["X-Velocity-Mode-Multiplier"] = str(VELOCITY_TIER_MULTIPLIERS.get(user_tier, VELOCITY_LIMIT_MULTIPLIER))
+                headers["X-Velocity-Mode-Multiplier"] = str(
+                    VELOCITY_TIER_MULTIPLIERS.get(user_tier, VELOCITY_LIMIT_MULTIPLIER)
+                )
 
             return JSONResponse(
                 status_code=429,
-                content={"error": {"message": "Too many requests from this IP address.", "type": "security_limit"}},
-                headers=headers
+                content={
+                    "error": {
+                        "message": "Too many requests from this IP address.",
+                        "type": "security_limit",
+                    }
+                },
+                headers=headers,
             )
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
@@ -639,7 +680,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
-            logger.warning(f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}")
+            logger.warning(
+                f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}"
+            )
 
             _fp_reset_ts = str(int(time.time()) + 60)
             headers = {
@@ -653,7 +696,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 "X-RateLimit-Limit": str(fp_limit),
                 "X-RateLimit-Remaining": "0",
                 "X-RateLimit-Reset": _fp_reset_ts,
-                "X-RateLimit-Reason": "fingerprint_limit" if not velocity_active else "velocity_mode_fingerprint_limit",
+                "X-RateLimit-Reason": (
+                    "fingerprint_limit"
+                    if not velocity_active
+                    else "velocity_mode_fingerprint_limit"
+                ),
                 "X-RateLimit-Mode": "velocity" if velocity_active else "normal",
                 "X-Velocity-Mode-Active": str(velocity_active).lower(),
                 "X-User-Tier": user_tier,
@@ -661,12 +708,19 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
             if velocity_active:
                 headers["X-Velocity-Mode-Until"] = str(int(self._velocity_mode_until))
-                headers["X-Velocity-Mode-Multiplier"] = str(VELOCITY_TIER_MULTIPLIERS.get(user_tier, VELOCITY_LIMIT_MULTIPLIER))
+                headers["X-Velocity-Mode-Multiplier"] = str(
+                    VELOCITY_TIER_MULTIPLIERS.get(user_tier, VELOCITY_LIMIT_MULTIPLIER)
+                )
 
             return JSONResponse(
                 status_code=429,
-                content={"error": {"message": "Suspicious request patterns detected.", "type": "behavioral_limit"}},
-                headers=headers
+                content={
+                    "error": {
+                        "message": "Suspicious request patterns detected.",
+                        "type": "behavioral_limit",
+                    }
+                },
+                headers=headers,
             )
 
         # --- SSE / Streaming bypass ---

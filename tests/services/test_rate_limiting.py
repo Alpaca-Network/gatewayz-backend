@@ -1,8 +1,9 @@
 # tests/services/test_rate_limiting_adv.py
-import time
 import importlib
-import pytest
+import time
 from dataclasses import asdict
+
+import pytest
 
 MODULE_PATH = "src.services.rate_limiting"  # change if your file is elsewhere
 
@@ -24,9 +25,17 @@ def mod():
 
 # --------- Fake fallback rate limiting service ---------
 class _FallbackResult:
-    def __init__(self, allowed=True, remaining_requests=59, remaining_tokens=9990,
-                 reset_time=None, retry_after=None, reason=None,
-                 limit_req=250, limit_tok=10000):
+    def __init__(
+        self,
+        allowed=True,
+        remaining_requests=59,
+        remaining_tokens=9990,
+        reset_time=None,
+        retry_after=None,
+        reason=None,
+        limit_req=250,
+        limit_tok=10000,
+    ):
         self.allowed = allowed
         self.remaining_requests = remaining_requests
         self.remaining_tokens = remaining_tokens
@@ -74,10 +83,11 @@ def fake_fallback(monkeypatch, mod):
 
 # -------------------- SlidingWindowRateLimiter happy path --------------------
 
+
 @pytest.mark.anyio
 async def test_check_rate_limit_happy_path_local(monkeypatch, mod, fake_fallback):
     # Clear the limiter singleton to ensure fresh state
-    if hasattr(mod, '_rate_limiter'):
+    if hasattr(mod, "_rate_limiter"):
         mod._rate_limiter = None
 
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
@@ -99,12 +109,17 @@ async def test_check_rate_limit_happy_path_local(monkeypatch, mod, fake_fallback
 
 # -------------------- Concurrency limit --------------------
 
+
 @pytest.mark.anyio
 async def test_concurrency_limit_exceeded(mod, fake_fallback):
     """Test concurrency limit - currently disabled in source code (see rate_limiting.py lines 94-104)"""
-    pytest.skip("Concurrency limiting temporarily disabled - see rate_limiting.py _check_concurrency_limit()")
+    pytest.skip(
+        "Concurrency limiting temporarily disabled - see rate_limiting.py _check_concurrency_limit()"
+    )
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
-    cfg = mod.RateLimitConfig(concurrency_limit=1, burst_limit=50, requests_per_minute=60, tokens_per_minute=10000)
+    cfg = mod.RateLimitConfig(
+        concurrency_limit=1, burst_limit=50, requests_per_minute=60, tokens_per_minute=10000
+    )
 
     # Simulate 1 in-flight request already
     limiter.concurrent_requests["keyC"] = 1
@@ -117,10 +132,11 @@ async def test_concurrency_limit_exceeded(mod, fake_fallback):
 
 # -------------------- Burst limit (local path) --------------------
 
+
 @pytest.mark.anyio
 async def test_burst_limit_local(mod, fake_fallback):
     # Clear the limiter singleton to ensure fresh state
-    if hasattr(mod, '_rate_limiter'):
+    if hasattr(mod, "_rate_limiter"):
         mod._rate_limiter = None
 
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
@@ -144,6 +160,7 @@ async def test_burst_limit_local(mod, fake_fallback):
 
 # -------------------- Sliding window minute request limit --------------------
 
+
 @pytest.mark.anyio
 async def test_minute_request_limit_local(mod, fake_fallback):
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
@@ -165,6 +182,7 @@ async def test_minute_request_limit_local(mod, fake_fallback):
 
 # -------------------- Sliding window minute token limit --------------------
 
+
 @pytest.mark.anyio
 async def test_minute_token_limit_local(mod, fake_fallback):
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
@@ -184,13 +202,17 @@ async def test_minute_token_limit_local(mod, fake_fallback):
 
 # -------------------- Fail-open behavior on unexpected exception --------------------
 
+
 @pytest.mark.anyio
 async def test_fail_open_on_fallback_exception(monkeypatch, mod, fake_fallback):
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
-    cfg = mod.RateLimitConfig(burst_limit=50, concurrency_limit=10, requests_per_minute=60, tokens_per_minute=10000)
+    cfg = mod.RateLimitConfig(
+        burst_limit=50, concurrency_limit=10, requests_per_minute=60, tokens_per_minute=10000
+    )
 
     async def boom(*a, **k):
         raise RuntimeError("fallback exploded")
+
     fake_fallback.check_rate_limit = boom
 
     res = await limiter.check_rate_limit("keyZ", cfg, tokens_used=0)
@@ -199,6 +221,7 @@ async def test_fail_open_on_fallback_exception(monkeypatch, mod, fake_fallback):
 
 
 # -------------------- RateLimitManager: config load/save and integration --------------------
+
 
 @pytest.mark.anyio
 async def test_manager_get_key_config_from_db(monkeypatch, mod, fake_fallback):
@@ -215,6 +238,7 @@ async def test_manager_get_key_config_from_db(monkeypatch, mod, fake_fallback):
             "tokens_per_day": 50000,
             "window_size_seconds": 60,
         }
+
     monkeypatch.setattr(mod, "get_rate_limit_config", fake_get_config)
 
     mgr = mod.RateLimitManager(redis_client=None)
@@ -233,6 +257,7 @@ async def test_manager_get_key_config_from_db(monkeypatch, mod, fake_fallback):
 async def test_manager_get_key_config_default_on_error(monkeypatch, mod, fake_fallback):
     def boom(api_key):
         raise RuntimeError("db failure")
+
     monkeypatch.setattr(mod, "get_rate_limit_config", boom)
 
     mgr = mod.RateLimitManager(redis_client=None)
@@ -270,15 +295,18 @@ async def test_manager_update_key_config_calls_db(monkeypatch, mod, fake_fallbac
 
 # -------------------- Singletons and helpers --------------------
 
+
 def test_get_rate_limiter_singleton(mod, fake_fallback):
     a = mod.get_rate_limiter()
     b = mod.get_rate_limiter()
     assert a is b
 
+
 def test_get_rate_limit_manager_singleton(mod, fake_fallback):
     a = mod.get_rate_limit_manager()
     b = mod.get_rate_limit_manager()
     assert a is b
+
 
 @pytest.mark.anyio
 async def test_concurrency_increment_decrement_helpers(mod, fake_fallback):
@@ -321,6 +349,7 @@ async def test_severe_rate_limit_configs_exist(mod):
 @pytest.mark.anyio
 async def test_severe_rate_limit_for_temporary_email(monkeypatch, mod, fake_fallback):
     """Test that temporary email domains get SEVERE rate limiting"""
+
     # Mock get_user to return a user with a temporary email
     def mock_get_user(api_key):
         return {"id": 1, "email": "test@tempmail.com"}
@@ -334,7 +363,9 @@ async def test_severe_rate_limit_for_temporary_email(monkeypatch, mod, fake_fall
 
     monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
-    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+    monkeypatch.setattr(
+        "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
+    )
 
     mgr = mod.RateLimitManager(redis_client=None)
 
@@ -348,6 +379,7 @@ async def test_severe_rate_limit_for_temporary_email(monkeypatch, mod, fake_fall
 @pytest.mark.anyio
 async def test_blocked_rate_limit_for_blocked_email_domain(monkeypatch, mod, fake_fallback):
     """Test that blocked email domains get BLOCKED rate limiting (most restrictive)"""
+
     # Mock get_user to return a user with a blocked email domain
     def mock_get_user(api_key):
         return {"id": 1, "email": "test@rccg-clf.org"}
@@ -360,7 +392,9 @@ async def test_blocked_rate_limit_for_blocked_email_domain(monkeypatch, mod, fak
 
     monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
-    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+    monkeypatch.setattr(
+        "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
+    )
 
     mgr = mod.RateLimitManager(redis_client=None)
 
@@ -374,6 +408,7 @@ async def test_blocked_rate_limit_for_blocked_email_domain(monkeypatch, mod, fak
 @pytest.mark.anyio
 async def test_no_severe_rate_limit_for_normal_user(monkeypatch, mod, fake_fallback):
     """Test that normal users don't get severe rate limiting"""
+
     # Mock get_user to return a user with a normal email
     def mock_get_user(api_key):
         return {"id": 1, "email": "user@gmail.com"}
@@ -386,7 +421,9 @@ async def test_no_severe_rate_limit_for_normal_user(monkeypatch, mod, fake_fallb
 
     monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
-    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+    monkeypatch.setattr(
+        "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
+    )
 
     mgr = mod.RateLimitManager(redis_client=None)
 
@@ -399,6 +436,7 @@ async def test_no_severe_rate_limit_for_normal_user(monkeypatch, mod, fake_fallb
 @pytest.mark.anyio
 async def test_severe_rate_limit_graceful_on_missing_user(monkeypatch, mod, fake_fallback):
     """Test that severe rate limit check handles missing user gracefully"""
+
     def mock_get_user(api_key):
         return None
 
@@ -415,6 +453,7 @@ async def test_severe_rate_limit_graceful_on_missing_user(monkeypatch, mod, fake
 @pytest.mark.anyio
 async def test_severe_rate_limit_graceful_on_exception(monkeypatch, mod, fake_fallback):
     """Test that severe rate limit check handles exceptions gracefully"""
+
     def mock_get_user(api_key):
         raise Exception("Database error")
 
@@ -431,6 +470,7 @@ async def test_severe_rate_limit_graceful_on_exception(monkeypatch, mod, fake_fa
 @pytest.mark.anyio
 async def test_blocked_email_domain_check_priority(monkeypatch, mod, fake_fallback):
     """Test that blocked domains take priority over temporary domains"""
+
     # Mock a domain that is both blocked AND temporary (edge case)
     def mock_get_user(api_key):
         return {"id": 1, "email": "test@blockedtemp.com"}
@@ -443,7 +483,9 @@ async def test_blocked_email_domain_check_priority(monkeypatch, mod, fake_fallba
 
     monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
-    monkeypatch.setattr("src.utils.security_validators.is_temporary_email_domain", mock_is_temporary)
+    monkeypatch.setattr(
+        "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
+    )
 
     mgr = mod.RateLimitManager(redis_client=None)
 

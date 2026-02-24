@@ -17,96 +17,253 @@ logger = logging.getLogger(__name__)
 
 # Pre-compiled patterns for fast matching (compiled once at module load)
 CODE_PATTERN = re.compile(
-    r'```|'
-    r'\bdef\s+\w+\s*\(|'
-    r'\bfunction\s+\w+\s*\(|'
-    r'\bclass\s+\w+|'
-    r'\bimport\s+\w+|'
-    r'\bfrom\s+\w+\s+import\b|'
-    r'\b(const|let|var)\s+\w+\s*=|'
-    r'=>\s*\{|'
-    r'\.(py|js|ts|tsx|jsx|java|cpp|go|rs|rb|php|swift|kt)\b',
-    re.IGNORECASE
+    r"```|"
+    r"\bdef\s+\w+\s*\(|"
+    r"\bfunction\s+\w+\s*\(|"
+    r"\bclass\s+\w+|"
+    r"\bimport\s+\w+|"
+    r"\bfrom\s+\w+\s+import\b|"
+    r"\b(const|let|var)\s+\w+\s*=|"
+    r"=>\s*\{|"
+    r"\.(py|js|ts|tsx|jsx|java|cpp|go|rs|rb|php|swift|kt)\b",
+    re.IGNORECASE,
 )
 
-CODE_KEYWORDS = frozenset({
-    "code", "function", "class", "method", "variable", "bug", "error",
-    "exception", "debug", "compile", "syntax", "runtime", "algorithm",
-    "implement", "refactor", "optimize", "python", "javascript", "typescript",
-    "java", "rust", "golang", "sql", "html", "css", "react", "vue", "angular",
-    "api", "endpoint", "database", "query", "script", "program", "module",
-    "package", "library", "framework", "git", "commit", "merge", "branch",
-})
+CODE_KEYWORDS = frozenset(
+    {
+        "code",
+        "function",
+        "class",
+        "method",
+        "variable",
+        "bug",
+        "error",
+        "exception",
+        "debug",
+        "compile",
+        "syntax",
+        "runtime",
+        "algorithm",
+        "implement",
+        "refactor",
+        "optimize",
+        "python",
+        "javascript",
+        "typescript",
+        "java",
+        "rust",
+        "golang",
+        "sql",
+        "html",
+        "css",
+        "react",
+        "vue",
+        "angular",
+        "api",
+        "endpoint",
+        "database",
+        "query",
+        "script",
+        "program",
+        "module",
+        "package",
+        "library",
+        "framework",
+        "git",
+        "commit",
+        "merge",
+        "branch",
+    }
+)
 
 MATH_PATTERN = re.compile(
-    r'\bcalculate\b|'
-    r'\bcompute\b|'
-    r'\bsolve\b|'
-    r'\bequation\b|'
-    r'\bintegral\b|'
-    r'\bderivative\b|'
-    r'\bmatrix\b|'
-    r'\d+\s*[\+\-\*\/\^]\s*\d+|'
-    r'\bsum\s+of\b|'
-    r'\baverage\s+of\b',
-    re.IGNORECASE
+    r"\bcalculate\b|"
+    r"\bcompute\b|"
+    r"\bsolve\b|"
+    r"\bequation\b|"
+    r"\bintegral\b|"
+    r"\bderivative\b|"
+    r"\bmatrix\b|"
+    r"\d+\s*[\+\-\*\/\^]\s*\d+|"
+    r"\bsum\s+of\b|"
+    r"\baverage\s+of\b",
+    re.IGNORECASE,
 )
 
-MATH_KEYWORDS = frozenset({
-    "math", "calculate", "compute", "solve", "equation", "formula",
-    "integral", "derivative", "matrix", "algebra", "geometry", "calculus",
-    "statistics", "probability", "percentage", "fraction", "decimal",
-    "multiply", "divide", "subtract", "add", "sum", "average", "mean",
-    "median", "mode", "variance", "standard deviation", "logarithm",
-})
+MATH_KEYWORDS = frozenset(
+    {
+        "math",
+        "calculate",
+        "compute",
+        "solve",
+        "equation",
+        "formula",
+        "integral",
+        "derivative",
+        "matrix",
+        "algebra",
+        "geometry",
+        "calculus",
+        "statistics",
+        "probability",
+        "percentage",
+        "fraction",
+        "decimal",
+        "multiply",
+        "divide",
+        "subtract",
+        "add",
+        "sum",
+        "average",
+        "mean",
+        "median",
+        "mode",
+        "variance",
+        "standard deviation",
+        "logarithm",
+    }
+)
 
 REASONING_PATTERN = re.compile(
-    r'\bexplain\s+why\b|'
-    r'\banalyze\b|'
-    r'\bcompare\s+(and\s+)?contrast\b|'
-    r'\bstep\s+by\s+step\b|'
-    r'\bpros\s+and\s+cons\b|'
-    r'\bevaluate\b|'
-    r'\bassess\b|'
-    r'\bcritique\b|'
-    r'\bimplications\b|'
-    r'\bconsequences\b',
-    re.IGNORECASE
+    r"\bexplain\s+why\b|"
+    r"\banalyze\b|"
+    r"\bcompare\s+(and\s+)?contrast\b|"
+    r"\bstep\s+by\s+step\b|"
+    r"\bpros\s+and\s+cons\b|"
+    r"\bevaluate\b|"
+    r"\bassess\b|"
+    r"\bcritique\b|"
+    r"\bimplications\b|"
+    r"\bconsequences\b",
+    re.IGNORECASE,
 )
 
-REASONING_KEYWORDS = frozenset({
-    "analyze", "analyse", "explain", "why", "reason", "reasoning",
-    "logic", "logical", "evaluate", "assess", "critique", "compare",
-    "contrast", "implications", "consequences", "consider", "think",
-    "argument", "evidence", "conclusion", "hypothesis", "theory",
-    "step by step", "pros and cons", "advantages", "disadvantages",
-})
+REASONING_KEYWORDS = frozenset(
+    {
+        "analyze",
+        "analyse",
+        "explain",
+        "why",
+        "reason",
+        "reasoning",
+        "logic",
+        "logical",
+        "evaluate",
+        "assess",
+        "critique",
+        "compare",
+        "contrast",
+        "implications",
+        "consequences",
+        "consider",
+        "think",
+        "argument",
+        "evidence",
+        "conclusion",
+        "hypothesis",
+        "theory",
+        "step by step",
+        "pros and cons",
+        "advantages",
+        "disadvantages",
+    }
+)
 
-CREATIVE_KEYWORDS = frozenset({
-    "write", "story", "poem", "poetry", "creative", "fiction",
-    "novel", "narrative", "character", "plot", "dialogue", "scene",
-    "imagine", "fantasy", "tale", "script", "screenplay", "lyrics",
-    "song", "compose", "brainstorm", "ideas", "generate", "create",
-})
+CREATIVE_KEYWORDS = frozenset(
+    {
+        "write",
+        "story",
+        "poem",
+        "poetry",
+        "creative",
+        "fiction",
+        "novel",
+        "narrative",
+        "character",
+        "plot",
+        "dialogue",
+        "scene",
+        "imagine",
+        "fantasy",
+        "tale",
+        "script",
+        "screenplay",
+        "lyrics",
+        "song",
+        "compose",
+        "brainstorm",
+        "ideas",
+        "generate",
+        "create",
+    }
+)
 
-SUMMARIZATION_KEYWORDS = frozenset({
-    "summarize", "summarise", "summary", "brief", "condense",
-    "shorten", "tldr", "tl;dr", "key points", "main points",
-    "overview", "recap", "digest", "abstract", "synopsis",
-})
+SUMMARIZATION_KEYWORDS = frozenset(
+    {
+        "summarize",
+        "summarise",
+        "summary",
+        "brief",
+        "condense",
+        "shorten",
+        "tldr",
+        "tl;dr",
+        "key points",
+        "main points",
+        "overview",
+        "recap",
+        "digest",
+        "abstract",
+        "synopsis",
+    }
+)
 
-TRANSLATION_KEYWORDS = frozenset({
-    "translate", "translation", "spanish", "french", "german",
-    "chinese", "japanese", "korean", "portuguese", "italian",
-    "russian", "arabic", "hindi", "language", "convert to",
-})
+TRANSLATION_KEYWORDS = frozenset(
+    {
+        "translate",
+        "translation",
+        "spanish",
+        "french",
+        "german",
+        "chinese",
+        "japanese",
+        "korean",
+        "portuguese",
+        "italian",
+        "russian",
+        "arabic",
+        "hindi",
+        "language",
+        "convert to",
+    }
+)
 
-DATA_ANALYSIS_KEYWORDS = frozenset({
-    "data", "dataset", "csv", "json", "excel", "spreadsheet",
-    "table", "rows", "columns", "filter", "sort", "aggregate",
-    "pivot", "chart", "graph", "visualization", "trend", "pattern",
-    "correlation", "regression", "cluster", "segment",
-})
+DATA_ANALYSIS_KEYWORDS = frozenset(
+    {
+        "data",
+        "dataset",
+        "csv",
+        "json",
+        "excel",
+        "spreadsheet",
+        "table",
+        "rows",
+        "columns",
+        "filter",
+        "sort",
+        "aggregate",
+        "pivot",
+        "chart",
+        "graph",
+        "visualization",
+        "trend",
+        "pattern",
+        "correlation",
+        "regression",
+        "cluster",
+        "segment",
+    }
+)
 
 # Minimum word count for complex classification
 MIN_WORDS_FOR_COMPLEX = 30
@@ -142,7 +299,9 @@ def classify_prompt(messages: list[dict[str, Any]]) -> ClassificationResult:
     if CODE_PATTERN.search(text):
         signals["matched_pattern"] = "code_pattern"
         # Determine if it's generation or review
-        if _contains_keywords(text_lower, {"review", "fix", "debug", "error", "bug", "issue", "problem"}):
+        if _contains_keywords(
+            text_lower, {"review", "fix", "debug", "error", "bug", "issue", "problem"}
+        ):
             return ClassificationResult(PromptCategory.CODE_REVIEW, 0.85, signals)
         return ClassificationResult(PromptCategory.CODE_GENERATION, 0.85, signals)
 

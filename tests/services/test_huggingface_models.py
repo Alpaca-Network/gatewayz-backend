@@ -1,9 +1,10 @@
 """
 Comprehensive tests for Huggingface Models service
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestHuggingfaceModels:
@@ -12,9 +13,11 @@ class TestHuggingfaceModels:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.huggingface_models
+
         assert src.services.huggingface_models is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import huggingface_models
-        assert hasattr(huggingface_models, '__name__')
+
+        assert hasattr(huggingface_models, "__name__")

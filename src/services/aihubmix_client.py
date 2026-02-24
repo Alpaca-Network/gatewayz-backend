@@ -2,10 +2,10 @@ import logging
 
 from openai import OpenAI
 
-from src.services.model_catalog_cache import cache_gateway_catalog
-from src.services.gateway_health_service import clear_gateway_error, set_gateway_error
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.gateway_health_service import clear_gateway_error, set_gateway_error
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -238,7 +238,7 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         # Extract pricing from the API response
         # AiHubMix returns pricing per 1K tokens
         # Use pricing_normalization to convert to per-token format
-        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_pricing_dict
 
         pricing_data = model.get("pricing", {})
 

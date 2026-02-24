@@ -46,7 +46,9 @@ from src.utils.sentry_context import (
 logger = logging.getLogger(__name__)
 
 # Context variable to track current request context
-request_context: ContextVar[dict[str, Any]] = ContextVar("request_context", default={})  # noqa: B039
+request_context: ContextVar[dict[str, Any]] = ContextVar(
+    "request_context", default={}  # noqa: B039
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -97,9 +99,7 @@ def auto_capture_errors(  # noqa: UP047
                 return await func_to_wrap(*args, **kwargs)
             except Exception as e:
                 # Automatically capture with intelligent context detection
-                _auto_capture_exception(
-                    e, func_to_wrap, args, kwargs, context_type, capture_locals
-                )
+                _auto_capture_exception(e, func_to_wrap, args, kwargs, context_type, capture_locals)
                 if reraise:
                     raise
 
@@ -112,9 +112,7 @@ def auto_capture_errors(  # noqa: UP047
                 return func_to_wrap(*args, **kwargs)
             except Exception as e:
                 # Automatically capture with intelligent context detection
-                _auto_capture_exception(
-                    e, func_to_wrap, args, kwargs, context_type, capture_locals
-                )
+                _auto_capture_exception(e, func_to_wrap, args, kwargs, context_type, capture_locals)
                 if reraise:
                     raise
 
@@ -164,9 +162,7 @@ def _auto_capture_exception(
         params = {}
 
     # Determine context type if not explicitly provided
-    context_type = explicit_context_type or _detect_context_type(
-        func_name, module_name, params
-    )
+    context_type = explicit_context_type or _detect_context_type(func_name, module_name, params)
 
     # Extract context based on type
     context_data = _extract_context_data(context_type, params, func_name, module_name)
@@ -235,9 +231,7 @@ def _auto_capture_exception(
         sentry_sdk.capture_exception(exception)
 
 
-def _detect_context_type(
-    func_name: str, module_name: str, params: dict[str, Any]
-) -> str:
+def _detect_context_type(func_name: str, module_name: str, params: dict[str, Any]) -> str:
     """
     Automatically detect the context type based on function name and module.
 

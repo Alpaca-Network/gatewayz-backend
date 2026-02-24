@@ -21,7 +21,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -166,7 +166,9 @@ class IntelligentHealthMonitor:
     async def stop_monitoring(self):
         """Stop the health monitoring service and wait for all background tasks to complete"""
         self.monitoring_active = False
-        logger.info(f"Stopping intelligent health monitoring service (worker: {self._worker_id})...")
+        logger.info(
+            f"Stopping intelligent health monitoring service (worker: {self._worker_id})..."
+        )
 
         # Cancel and await all monitoring tasks to ensure clean shutdown
         for task in self._monitoring_tasks:
@@ -231,7 +233,9 @@ class IntelligentHealthMonitor:
                 logger.error(f"Error in monitoring loop: {e}", exc_info=True)
                 await asyncio.sleep(60)
 
-    async def _check_model_health_with_limit(self, model: dict[str, Any]) -> HealthCheckResult | None:
+    async def _check_model_health_with_limit(
+        self, model: dict[str, Any]
+    ) -> HealthCheckResult | None:
         """Check model health with concurrency limiting"""
         async with self._semaphore:
             return await self._check_model_health(model)
@@ -264,15 +268,13 @@ class IntelligentHealthMonitor:
                 # Filter out models being checked by other workers
                 models = await self._filter_with_redis_locks(models)
 
-            return models[:self.batch_size]
+            return models[: self.batch_size]
 
         except Exception as e:
             logger.error(f"Failed to get models for checking: {e}")
             return []
 
-    async def _filter_with_redis_locks(
-        self, models: list[dict[str, Any]]
-    ) -> list[dict[str, Any]]:
+    async def _filter_with_redis_locks(self, models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Filter models using Redis locks to coordinate across workers
 
@@ -288,7 +290,9 @@ class IntelligentHealthMonitor:
 
             filtered_models = []
             for model in models:
-                lock_key = f"health_check_lock:{model['provider']}:{model['model']}:{model['gateway']}"
+                lock_key = (
+                    f"health_check_lock:{model['provider']}:{model['model']}:{model['gateway']}"
+                )
 
                 # Try to acquire lock (60 second expiry)
                 # Note: redis_client is synchronous, so we use asyncio.to_thread
@@ -549,13 +553,19 @@ class IntelligentHealthMonitor:
             # Calculate new values
             call_count = current_data.get("call_count", 0) + 1
             success_count = (
-                current_data.get("success_count", 0) + 1 if is_success else current_data.get("success_count", 0)
+                current_data.get("success_count", 0) + 1
+                if is_success
+                else current_data.get("success_count", 0)
             )
             error_count = (
-                current_data.get("error_count", 0) if is_success else current_data.get("error_count", 0) + 1
+                current_data.get("error_count", 0)
+                if is_success
+                else current_data.get("error_count", 0) + 1
             )
 
-            consecutive_failures = 0 if is_success else current_data.get("consecutive_failures", 0) + 1
+            consecutive_failures = (
+                0 if is_success else current_data.get("consecutive_failures", 0) + 1
+            )
             consecutive_successes = (
                 current_data.get("consecutive_successes", 0) + 1 if is_success else 0
             )
@@ -607,14 +617,28 @@ class IntelligentHealthMonitor:
                 "consecutive_successes": consecutive_successes,
                 "circuit_breaker_state": circuit_breaker_state.value,
                 "last_error_message": result.error_message if not is_success else None,
-                "last_success_at": result.checked_at.isoformat() if is_success else current_data.get("last_success_at"),
-                "last_failure_at": result.checked_at.isoformat() if not is_success else current_data.get("last_failure_at"),
+                "last_success_at": (
+                    result.checked_at.isoformat()
+                    if is_success
+                    else current_data.get("last_success_at")
+                ),
+                "last_failure_at": (
+                    result.checked_at.isoformat()
+                    if not is_success
+                    else current_data.get("last_failure_at")
+                ),
                 "next_check_at": next_check_at.isoformat(),
                 # Preserve existing uptime percentages (calculated by aggregate task)
                 # Default to 100.0 for new models - they will be updated by the aggregate task
-                "uptime_percentage_24h": existing_uptime_24h if existing_uptime_24h is not None else 100.0,
-                "uptime_percentage_7d": existing_uptime_7d if existing_uptime_7d is not None else 100.0,
-                "uptime_percentage_30d": existing_uptime_30d if existing_uptime_30d is not None else 100.0,
+                "uptime_percentage_24h": (
+                    existing_uptime_24h if existing_uptime_24h is not None else 100.0
+                ),
+                "uptime_percentage_7d": (
+                    existing_uptime_7d if existing_uptime_7d is not None else 100.0
+                ),
+                "uptime_percentage_30d": (
+                    existing_uptime_30d if existing_uptime_30d is not None else 100.0
+                ),
                 "updated_at": datetime.now(UTC).isoformat(),
             }
 
@@ -643,11 +667,15 @@ class IntelligentHealthMonitor:
 
             logger.debug(
                 f"Processed health check for {result.model}: {result.status.value} "
-                f"({result.response_time_ms:.0f}ms)" if result.response_time_ms else f"Processed health check for {result.model}: {result.status.value}"
+                f"({result.response_time_ms:.0f}ms)"
+                if result.response_time_ms
+                else f"Processed health check for {result.model}: {result.status.value}"
             )
 
         except Exception as e:
-            logger.error(f"Failed to process health check result for {result.model}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to process health check result for {result.model}: {e}", exc_info=True
+            )
 
     def _calculate_circuit_breaker_state(
         self,
@@ -712,7 +740,9 @@ class IntelligentHealthMonitor:
 
         return CircuitBreakerState.CLOSED
 
-    async def _create_or_update_incident(self, result: HealthCheckResult, consecutive_failures: int):
+    async def _create_or_update_incident(
+        self, result: HealthCheckResult, consecutive_failures: int
+    ):
         """Create or update incident for failing model"""
         try:
             from src.config.supabase_config import supabase
@@ -824,7 +854,9 @@ class IntelligentHealthMonitor:
                     "resolution_notes": "Model recovered and passed health checks",
                     "updated_at": now.isoformat(),
                 }
-            ).eq("provider", result.provider).eq("model", result.model).eq("gateway", result.gateway).eq(
+            ).eq("provider", result.provider).eq("model", result.model).eq(
+                "gateway", result.gateway
+            ).eq(
                 "status", "active"
             ).execute()
 
@@ -869,7 +901,9 @@ class IntelligentHealthMonitor:
             # Get model health data
             models_response = (
                 supabase.table("model_health_tracking")
-                .select("provider, model, gateway, last_status, last_response_time_ms, uptime_percentage_24h, error_count, call_count, last_called_at")
+                .select(
+                    "provider, model, gateway, last_status, last_response_time_ms, uptime_percentage_24h, error_count, call_count, last_called_at"
+                )
                 .eq("is_enabled", True)
                 .order("last_called_at", desc=True)
                 .limit(500)  # Limit for cache size
@@ -885,18 +919,20 @@ class IntelligentHealthMonitor:
                 stored_gateway = m.get("gateway")
                 # If gateway is not set, use provider as gateway since that's what's stored
                 effective_gateway = stored_gateway if stored_gateway else stored_provider
-                models_data.append({
-                    "model_id": m.get("model") or "unknown",
-                    "provider": stored_provider,
-                    "gateway": effective_gateway,
-                    "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
-                    "response_time_ms": m.get("last_response_time_ms"),
-                    "avg_response_time_ms": m.get("last_response_time_ms"),
-                    "uptime_percentage": m.get("uptime_percentage_24h", 0.0),
-                    "error_count": m.get("error_count", 0),
-                    "total_requests": m.get("call_count", 0),
-                    "last_checked": m.get("last_called_at"),
-                })
+                models_data.append(
+                    {
+                        "model_id": m.get("model") or "unknown",
+                        "provider": stored_provider,
+                        "gateway": effective_gateway,
+                        "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
+                        "response_time_ms": m.get("last_response_time_ms"),
+                        "avg_response_time_ms": m.get("last_response_time_ms"),
+                        "uptime_percentage": m.get("uptime_percentage_24h", 0.0),
+                        "error_count": m.get("error_count", 0),
+                        "total_requests": m.get("call_count", 0),
+                        "last_checked": m.get("last_called_at"),
+                    }
+                )
 
             if models_data:
                 simple_health_cache.cache_models_health(models_data)
@@ -951,14 +987,30 @@ class IntelligentHealthMonitor:
             # Get total counts from openrouter_models table (not just tracked)
             # NOTE: We get total counts FIRST so we can properly calculate healthy/unhealthy
             try:
-                catalog_models_response = supabase.table("openrouter_models").select("id", count="exact", head=True).execute()
-                total_models = catalog_models_response.count if catalog_models_response.count is not None else 0
+                catalog_models_response = (
+                    supabase.table("openrouter_models")
+                    .select("id", count="exact", head=True)
+                    .execute()
+                )
+                total_models = (
+                    catalog_models_response.count
+                    if catalog_models_response.count is not None
+                    else 0
+                )
                 logger.info(f"Got {total_models} total models from openrouter_models table")
             except Exception as e:
-                logger.warning(f"Failed to get models from 'openrouter_models' table: {e}, trying models table")
+                logger.warning(
+                    f"Failed to get models from 'openrouter_models' table: {e}, trying models table"
+                )
                 try:
-                    catalog_models_response = supabase.table("models").select("id", count="exact", head=True).execute()
-                    total_models = catalog_models_response.count if catalog_models_response.count is not None else 0
+                    catalog_models_response = (
+                        supabase.table("models").select("id", count="exact", head=True).execute()
+                    )
+                    total_models = (
+                        catalog_models_response.count
+                        if catalog_models_response.count is not None
+                        else 0
+                    )
                     logger.info(f"Got {total_models} total models from models table")
                 except Exception as e2:
                     logger.warning(f"Failed to get models catalog count: {e2}")
@@ -966,8 +1018,12 @@ class IntelligentHealthMonitor:
 
             try:
                 # Get all providers from providers table
-                providers_response = supabase.table("providers").select("id", count="exact", head=True).execute()
-                total_providers = providers_response.count if providers_response.count is not None else 0
+                providers_response = (
+                    supabase.table("providers").select("id", count="exact", head=True).execute()
+                )
+                total_providers = (
+                    providers_response.count if providers_response.count is not None else 0
+                )
                 logger.info(f"Got {total_providers} total providers from providers table")
             except Exception as e:
                 logger.warning(f"Failed to get providers catalog count: {e}")
@@ -976,6 +1032,7 @@ class IntelligentHealthMonitor:
             # Get gateway count from GATEWAY_CONFIG (not a database table)
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
+
                 total_gateways = len(GATEWAY_CONFIG)
             except Exception:
                 total_gateways = 0
@@ -1010,7 +1067,11 @@ class IntelligentHealthMonitor:
             # Determine overall status based on tracked data
             if tracked_models == 0:
                 overall_status = "unknown"
-            elif unhealthy_providers == 0 and degraded_providers == 0 and tracked_healthy_models == tracked_models:
+            elif (
+                unhealthy_providers == 0
+                and degraded_providers == 0
+                and tracked_healthy_models == tracked_models
+            ):
                 overall_status = "healthy"
             elif tracked_providers > 0 and unhealthy_providers >= tracked_providers * 0.5:
                 overall_status = "unhealthy"
@@ -1020,7 +1081,9 @@ class IntelligentHealthMonitor:
                 overall_status = "healthy"
 
             # Calculate system uptime from tracked models
-            system_uptime = (tracked_healthy_models / tracked_models * 100) if tracked_models > 0 else 0.0
+            system_uptime = (
+                (tracked_healthy_models / tracked_models * 100) if tracked_models > 0 else 0.0
+            )
 
             # Calculate healthy gateways based on provider health data
             # A gateway is considered healthy if at least one of its providers is online
@@ -1034,7 +1097,7 @@ class IntelligentHealthMonitor:
                         "latency_ms": 0,
                         "available": False,
                         "last_check": None,
-                        "error": None
+                        "error": None,
                     }
                 if p.get("status") == "online":
                     gateway_health[gw]["healthy"] = True
@@ -1049,6 +1112,7 @@ class IntelligentHealthMonitor:
             # Check cache and API key status to determine appropriate status
             try:
                 from src.services.gateway_health_service import GATEWAY_CONFIG
+
                 for gateway_name, gateway_config in GATEWAY_CONFIG.items():
                     if gateway_name not in gateway_health:
                         # Check if API key is configured (static_catalog is valid for some gateways)
@@ -1056,12 +1120,16 @@ class IntelligentHealthMonitor:
                         url = gateway_config.get("url")
                         # Gateway is considered configured if it has an API key OR doesn't need one (url is None)
                         has_api_key = api_key is not None and api_key != ""
-                        needs_api_key = url is not None  # Gateways with url=None use static catalogs
+                        needs_api_key = (
+                            url is not None
+                        )  # Gateways with url=None use static catalogs
 
                         # Check if cache has models
                         cache = gateway_config.get("cache", {})
                         cache_data = cache.get("data") if cache else None
-                        has_cached_models = cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        has_cached_models = (
+                            cache_data is not None and len(cache_data) > 0 if cache_data else False
+                        )
                         model_count = len(cache_data) if has_cached_models else 0
 
                         # Determine status and error based on configuration state
@@ -1082,7 +1150,9 @@ class IntelligentHealthMonitor:
                         else:
                             # Has API key but no models in cache - needs sync
                             status = "pending"
-                            error_msg = "Models not yet synced. They will appear when first accessed."
+                            error_msg = (
+                                "Models not yet synced. They will appear when first accessed."
+                            )
                             is_healthy = False
 
                         gateway_health[gateway_name] = {
@@ -1222,6 +1292,7 @@ class IntelligentHealthMonitor:
                 # Send to Sentry
                 try:
                     import sentry_sdk
+
                     sentry_sdk.capture_message(
                         error_message,
                         level=severity,
@@ -1345,7 +1416,11 @@ class IntelligentHealthMonitor:
                             success_checks_24h = len(
                                 [h for h in history_24h.data if h.get("status") == "success"]
                             )
-                            uptime_24h = (success_checks_24h / total_checks_24h * 100) if total_checks_24h > 0 else 100.0
+                            uptime_24h = (
+                                (success_checks_24h / total_checks_24h * 100)
+                                if total_checks_24h > 0
+                                else 100.0
+                            )
                         else:
                             # No history data in 24h - use last_status as indicator
                             # If no checks, assume healthy (new model)
@@ -1366,7 +1441,11 @@ class IntelligentHealthMonitor:
                             success_checks_7d = len(
                                 [h for h in history_7d.data if h.get("status") == "success"]
                             )
-                            uptime_7d = (success_checks_7d / total_checks_7d * 100) if total_checks_7d > 0 else 100.0
+                            uptime_7d = (
+                                (success_checks_7d / total_checks_7d * 100)
+                                if total_checks_7d > 0
+                                else 100.0
+                            )
                         else:
                             uptime_7d = 100.0
 
@@ -1385,7 +1464,11 @@ class IntelligentHealthMonitor:
                             success_checks_30d = len(
                                 [h for h in history_30d.data if h.get("status") == "success"]
                             )
-                            uptime_30d = (success_checks_30d / total_checks_30d * 100) if total_checks_30d > 0 else 100.0
+                            uptime_30d = (
+                                (success_checks_30d / total_checks_30d * 100)
+                                if total_checks_30d > 0
+                                else 100.0
+                            )
                         else:
                             uptime_30d = 100.0
 

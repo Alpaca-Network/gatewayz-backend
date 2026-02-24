@@ -4,7 +4,7 @@ Provides monitoring and alerting for API key tracking quality.
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -81,7 +81,9 @@ async def get_api_key_tracking_quality(
             .is_("api_key_id", "null")
             .execute()
         )
-        requests_without_key = without_key_result.count if hasattr(without_key_result, "count") else 0
+        requests_without_key = (
+            without_key_result.count if hasattr(without_key_result, "count") else 0
+        )
 
         # Get requests with NULL api_key_id but valid user_id (potential issues)
         null_key_valid_user_result = (
@@ -125,7 +127,9 @@ async def get_api_key_tracking_quality(
         # Generate recommendations
         recommendations = []
         if null_key_valid_user > 0:
-            pct = round((null_key_valid_user / total_requests) * 100, 2) if total_requests > 0 else 0
+            pct = (
+                round((null_key_valid_user / total_requests) * 100, 2) if total_requests > 0 else 0
+            )
             recommendations.append(
                 f"Found {null_key_valid_user} ({pct}%) authenticated requests without api_key_id. "
                 "This suggests API key lookup failures. Check logs for errors."

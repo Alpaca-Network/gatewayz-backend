@@ -1,9 +1,10 @@
 """
 Comprehensive tests for Request Prioritization service
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestRequestPrioritization:
@@ -12,12 +13,14 @@ class TestRequestPrioritization:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.request_prioritization
+
         assert src.services.request_prioritization is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import request_prioritization
-        assert hasattr(request_prioritization, '__name__')
+
+        assert hasattr(request_prioritization, "__name__")
 
 
 class TestLowLatencyModels:
@@ -26,21 +29,24 @@ class TestLowLatencyModels:
     def test_ultra_low_latency_models_defined(self):
         """Test that ultra-low-latency models are defined"""
         from src.services.request_prioritization import ULTRA_LOW_LATENCY_MODELS
+
         assert ULTRA_LOW_LATENCY_MODELS is not None
         assert len(ULTRA_LOW_LATENCY_MODELS) > 0
 
     def test_low_latency_models_defined(self):
         """Test that low-latency models are defined"""
         from src.services.request_prioritization import LOW_LATENCY_MODELS
+
         assert LOW_LATENCY_MODELS is not None
         assert len(LOW_LATENCY_MODELS) > 0
 
     def test_ultra_low_latency_subset_of_low_latency(self):
         """Test that ultra-low-latency models are included in low-latency set"""
         from src.services.request_prioritization import (
-            ULTRA_LOW_LATENCY_MODELS,
             LOW_LATENCY_MODELS,
+            ULTRA_LOW_LATENCY_MODELS,
         )
+
         for model in ULTRA_LOW_LATENCY_MODELS:
             assert model in LOW_LATENCY_MODELS, f"{model} should be in LOW_LATENCY_MODELS"
 
@@ -104,29 +110,33 @@ class TestProviderLatencyTiers:
     def test_provider_latency_tiers_defined(self):
         """Test that provider latency tiers are defined"""
         from src.services.request_prioritization import PROVIDER_LATENCY_TIERS
+
         assert PROVIDER_LATENCY_TIERS is not None
         assert len(PROVIDER_LATENCY_TIERS) > 0
 
     def test_groq_is_tier_1(self):
         """Test that Groq is classified as tier 1 (fastest)"""
         from src.services.request_prioritization import PROVIDER_LATENCY_TIERS
+
         assert PROVIDER_LATENCY_TIERS.get("groq") == 1
 
     def test_cerebras_is_tier_1(self):
         """Test that Cerebras is classified as tier 1 (fastest)"""
         from src.services.request_prioritization import PROVIDER_LATENCY_TIERS
+
         assert PROVIDER_LATENCY_TIERS.get("cerebras") == 1
 
     def test_fireworks_is_tier_2(self):
         """Test that Fireworks is classified as tier 2"""
         from src.services.request_prioritization import PROVIDER_LATENCY_TIERS
+
         assert PROVIDER_LATENCY_TIERS.get("fireworks") == 2
 
     def test_get_provider_latency_tier(self):
         """Test get_provider_latency_tier function"""
         from src.services.request_prioritization import (
-            get_provider_latency_tier,
             DEFAULT_PROVIDER_TIER,
+            get_provider_latency_tier,
         )
 
         assert get_provider_latency_tier("groq") == 1
@@ -188,8 +198,8 @@ class TestProviderSelection:
     def test_high_priority_gets_fastest_first(self):
         """Test that high priority requests get fastest providers first"""
         from src.services.request_prioritization import (
-            get_preferred_providers_for_priority,
             RequestPriority,
+            get_preferred_providers_for_priority,
         )
 
         available = ["openrouter", "groq", "huggingface", "fireworks"]
@@ -203,8 +213,8 @@ class TestProviderSelection:
     def test_low_priority_gets_slower_first(self):
         """Test that low priority requests get slower providers first"""
         from src.services.request_prioritization import (
-            get_preferred_providers_for_priority,
             RequestPriority,
+            get_preferred_providers_for_priority,
         )
 
         available = ["openrouter", "groq", "huggingface", "fireworks"]
@@ -218,8 +228,8 @@ class TestProviderSelection:
     def test_all_providers_included(self):
         """Test that all available providers are included in result"""
         from src.services.request_prioritization import (
-            get_preferred_providers_for_priority,
             RequestPriority,
+            get_preferred_providers_for_priority,
         )
 
         available = ["openrouter", "groq", "unknown-new-provider", "fireworks"]
@@ -230,8 +240,8 @@ class TestProviderSelection:
     def test_empty_providers_list(self):
         """Test handling of empty providers list"""
         from src.services.request_prioritization import (
-            get_preferred_providers_for_priority,
             RequestPriority,
+            get_preferred_providers_for_priority,
         )
 
         ordered = get_preferred_providers_for_priority(RequestPriority.HIGH, [])

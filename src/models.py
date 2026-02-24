@@ -12,9 +12,7 @@ class ImageGenerationRequest(BaseModel):
     n: int = 1
     quality: Literal["standard", "hd"] | None = "standard"
     style: Literal["natural", "vivid"] | None = "natural"
-    provider: str | None = (
-        "deepinfra"  # Provider selection: "deepinfra" or "google-vertex"
-    )
+    provider: str | None = "deepinfra"  # Provider selection: "deepinfra" or "google-vertex"
     google_project_id: str | None = None  # Google Cloud project ID for Vertex AI
     google_location: str | None = None  # Google Cloud region for Vertex AI
     google_endpoint_id: str | None = None  # Vertex AI endpoint ID

@@ -66,7 +66,9 @@ class DetailedErrorFactory:
 
         # Add specific model suggestions if provided
         if suggested_models:
-            suggestions.insert(1, f"Try using one of these similar models: {', '.join(suggested_models[:3])}")
+            suggestions.insert(
+                1, f"Try using one of these similar models: {', '.join(suggested_models[:3])}"
+            )
 
         context = ErrorContext(
             requested_model=model_id,
@@ -545,11 +547,13 @@ class DetailedErrorFactory:
 
         # Add suggestion to reduce max_tokens with calculation
         if max_tokens > 100:
-            suggested_max_tokens = int(max_tokens * (current_credits / max_cost)) if max_cost > 0 else 100
+            suggested_max_tokens = (
+                int(max_tokens * (current_credits / max_cost)) if max_cost > 0 else 100
+            )
             if suggested_max_tokens > 0:
                 suggestions.insert(
                     1,
-                    f"Try setting max_tokens to {suggested_max_tokens} or less to fit your available balance"
+                    f"Try setting max_tokens to {suggested_max_tokens} or less to fit your available balance",
                 )
 
         context = ErrorContext(

@@ -8,7 +8,8 @@ processed by the handler, then converted back FROM these schemas.
 This provides a single source of truth for what a "chat request" is internally.
 """
 
-from typing import Literal, Any
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -24,10 +25,13 @@ class InternalMessage(BaseModel):
         ..., description="Role of the message sender"
     )
     content: str | list[dict[str, Any]] | None = Field(
-        ..., description="Message content - can be text, multimodal array, or None for tool responses"
+        ...,
+        description="Message content - can be text, multimodal array, or None for tool responses",
     )
     name: str | None = Field(None, description="Optional name of the sender (for function calls)")
-    tool_call_id: str | None = Field(None, description="ID of the tool call this message is responding to")
+    tool_call_id: str | None = Field(
+        None, description="ID of the tool call this message is responding to"
+    )
     tool_calls: list[dict[str, Any]] | None = Field(
         None, description="Tool/function calls made by the assistant"
     )
@@ -63,7 +67,9 @@ class InternalChatRequest(BaseModel):
     )
 
     # Response format
-    response_format: dict[str, Any] | None = Field(None, description="Desired response format (e.g., JSON)")
+    response_format: dict[str, Any] | None = Field(
+        None, description="Desired response format (e.g., JSON)"
+    )
 
     # Metadata
     user: str | None = Field(None, description="End-user identifier for abuse monitoring")
@@ -107,11 +113,17 @@ class InternalChatResponse(BaseModel):
     usage: InternalUsage = Field(..., description="Token usage statistics")
 
     # Completion metadata
-    finish_reason: str | None = Field(None, description="Reason completion finished (stop, length, etc.)")
-    tool_calls: list[dict[str, Any]] | None = Field(None, description="Tool calls made by the model")
+    finish_reason: str | None = Field(
+        None, description="Reason completion finished (stop, length, etc.)"
+    )
+    tool_calls: list[dict[str, Any]] | None = Field(
+        None, description="Tool calls made by the model"
+    )
 
     # Provider metadata
-    provider_used: str = Field(..., description="Provider that handled the request (openrouter, cerebras, etc.)")
+    provider_used: str = Field(
+        ..., description="Provider that handled the request (openrouter, cerebras, etc.)"
+    )
     provider_response_id: str | None = Field(None, description="Original response ID from provider")
 
     # Cost tracking (calculated by handler)

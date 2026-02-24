@@ -15,6 +15,7 @@ from typing import Any, TypeVar
 try:
     import sentry_sdk
     from sentry_sdk import capture_exception, set_context, set_tag
+
     SENTRY_AVAILABLE = True
 except ImportError:
     SENTRY_AVAILABLE = False
@@ -22,9 +23,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Context variables for request-scoped Sentry context
-sentry_context: ContextVar[dict[str, Any]] = ContextVar('sentry_context', default={})  # noqa: B039
+sentry_context: ContextVar[dict[str, Any]] = ContextVar("sentry_context", default={})  # noqa: B039
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def set_error_context(context_type: str, data: dict[str, Any]) -> None:
@@ -140,6 +141,7 @@ def with_sentry_context(
         def create_user(email: str):
             ...
     """
+
     def decorator(func: F) -> F:
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -157,7 +159,7 @@ def with_sentry_context(
                     e,
                     context_type=context_type,
                     context_data=context_data,
-                    tags={'function': func.__name__}
+                    tags={"function": func.__name__},
                 )
                 raise
 
@@ -177,7 +179,7 @@ def with_sentry_context(
                     e,
                     context_type=context_type,
                     context_data=context_data,
-                    tags={'function': func.__name__}
+                    tags={"function": func.__name__},
                 )
                 raise
 
@@ -211,21 +213,18 @@ def capture_provider_error(
     Returns:
         Event ID if captured, None if Sentry is disabled
     """
-    context_data = {'provider': provider}
+    context_data = {"provider": provider}
     if model:
-        context_data['model'] = model
+        context_data["model"] = model
     if request_id:
-        context_data['request_id'] = request_id
+        context_data["request_id"] = request_id
     if endpoint:
-        context_data['endpoint'] = endpoint
+        context_data["endpoint"] = endpoint
     if extra_context:
         context_data.update(extra_context)
 
     return capture_error(
-        exception,
-        context_type='provider',
-        context_data=context_data,
-        tags={'provider': provider}
+        exception, context_type="provider", context_data=context_data, tags={"provider": provider}
     )
 
 
@@ -248,24 +247,24 @@ def capture_database_error(
         Event ID if captured, None if Sentry is disabled
     """
     context_data = {
-        'operation': operation,
-        'table': table,
+        "operation": operation,
+        "table": table,
     }
     if details:
         context_data.update(details)
 
     return capture_error(
         exception,
-        context_type='database',
+        context_type="database",
         context_data=context_data,
-        tags={'operation': operation, 'table': table}
+        tags={"operation": operation, "table": table},
     )
 
 
 def capture_payment_error(
     exception: Exception,
     operation: str,
-    provider: str = 'stripe',
+    provider: str = "stripe",
     user_id: str | None = None,
     amount: float | None = None,
     details: dict[str, Any] | None = None,
@@ -285,21 +284,21 @@ def capture_payment_error(
         Event ID if captured, None if Sentry is disabled
     """
     context_data = {
-        'operation': operation,
-        'provider': provider,
+        "operation": operation,
+        "provider": provider,
     }
     if user_id:
-        context_data['user_id'] = user_id
+        context_data["user_id"] = user_id
     if amount:
-        context_data['amount'] = amount
+        context_data["amount"] = amount
     if details:
         context_data.update(details)
 
     return capture_error(
         exception,
-        context_type='payment',
+        context_type="payment",
         context_data=context_data,
-        tags={'operation': operation, 'provider': provider}
+        tags={"operation": operation, "provider": provider},
     )
 
 
@@ -321,24 +320,24 @@ def capture_auth_error(
     Returns:
         Event ID if captured, None if Sentry is disabled
     """
-    context_data = {'operation': operation}
+    context_data = {"operation": operation}
     if user_id:
-        context_data['user_id'] = user_id
+        context_data["user_id"] = user_id
     if details:
         context_data.update(details)
 
     return capture_error(
         exception,
-        context_type='authentication',
+        context_type="authentication",
         context_data=context_data,
-        tags={'operation': operation}
+        tags={"operation": operation},
     )
 
 
 def capture_cache_error(
     exception: Exception,
     operation: str,
-    cache_type: str = 'redis',
+    cache_type: str = "redis",
     key: str | None = None,
     details: dict[str, Any] | None = None,
 ) -> str | None:
@@ -356,19 +355,19 @@ def capture_cache_error(
         Event ID if captured, None if Sentry is disabled
     """
     context_data = {
-        'operation': operation,
-        'cache_type': cache_type,
+        "operation": operation,
+        "cache_type": cache_type,
     }
     if key:
-        context_data['key'] = key
+        context_data["key"] = key
     if details:
         context_data.update(details)
 
     return capture_error(
         exception,
-        context_type='cache',
+        context_type="cache",
         context_data=context_data,
-        tags={'operation': operation, 'cache_type': cache_type}
+        tags={"operation": operation, "cache_type": cache_type},
     )
 
 
@@ -377,7 +376,7 @@ def capture_model_health_error(
     model_id: str,
     provider: str,
     gateway: str,
-    operation: str = 'health_check',
+    operation: str = "health_check",
     status: str | None = None,
     response_time_ms: float | None = None,
     details: dict[str, Any] | None = None,
@@ -399,26 +398,26 @@ def capture_model_health_error(
         Event ID if captured, None if Sentry is disabled
     """
     context_data = {
-        'model_id': model_id,
-        'provider': provider,
-        'gateway': gateway,
-        'operation': operation,
+        "model_id": model_id,
+        "provider": provider,
+        "gateway": gateway,
+        "operation": operation,
     }
     if status:
-        context_data['status'] = status
+        context_data["status"] = status
     if response_time_ms is not None:
-        context_data['response_time_ms'] = response_time_ms
+        context_data["response_time_ms"] = response_time_ms
     if details:
         context_data.update(details)
 
     return capture_error(
         exception,
-        context_type='model_health',
+        context_type="model_health",
         context_data=context_data,
         tags={
-            'provider': provider,
-            'gateway': gateway,
-            'model_id': model_id,
-            'operation': operation,
-        }
+            "provider": provider,
+            "gateway": gateway,
+            "model_id": model_id,
+            "operation": operation,
+        },
     )

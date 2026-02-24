@@ -71,7 +71,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created payment failure notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create payment failure notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create payment failure notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_model_outage(
@@ -101,7 +103,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created model outage notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create model outage notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create model outage notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_high_error_rate(
@@ -130,7 +134,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created high error rate notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create high error rate notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create high error rate notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_credit_depletion(
@@ -167,7 +173,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created credit depletion notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create credit depletion notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create credit depletion notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_api_key_breach_attempt(
@@ -196,7 +204,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created security breach notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create security breach notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create security breach notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_trial_expiring_soon(
@@ -230,7 +240,9 @@ class NotificationTriggers:
                 await notification_service.create_notification(notification)
                 logger.debug(f"Created trial expiring notification for admin {admin_id}")
             except Exception as e:
-                logger.error(f"Failed to create trial expiring notification for admin {admin_id}: {e}")
+                logger.error(
+                    f"Failed to create trial expiring notification for admin {admin_id}: {e}"
+                )
 
     @staticmethod
     async def notify_subscription_payment_success(

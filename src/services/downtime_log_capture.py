@@ -16,7 +16,7 @@ Features:
 import json
 import logging
 from collections import deque
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -92,9 +92,7 @@ class LogBuffer:
                 # If we can't parse timestamp, remove it
                 self._buffer.popleft()
 
-    def get_logs_in_range(
-        self, start_time: datetime, end_time: datetime
-    ) -> list[dict[str, Any]]:
+    def get_logs_in_range(self, start_time: datetime, end_time: datetime) -> list[dict[str, Any]]:
         """
         Get all logs within a time range.
 
@@ -201,9 +199,7 @@ def query_loki_logs(
                     timestamp_ns, log_line = value
 
                     # Convert timestamp to datetime
-                    timestamp = datetime.fromtimestamp(
-                        int(timestamp_ns) / 1_000_000_000, tz=UTC
-                    )
+                    timestamp = datetime.fromtimestamp(int(timestamp_ns) / 1_000_000_000, tz=UTC)
 
                     # Try to parse JSON log line
                     try:
@@ -288,9 +284,7 @@ def capture_downtime_logs(
         # Save logs
         if save_to_file:
             # Save to file
-            file_path = _save_logs_to_file(
-                incident_id, logs, file_directory or "logs/downtime"
-            )
+            file_path = _save_logs_to_file(incident_id, logs, file_directory or "logs/downtime")
 
             # Update incident with file path
             update_incident(
@@ -338,9 +332,7 @@ def capture_downtime_logs(
         }
 
 
-def _save_logs_to_file(
-    incident_id: str, logs: list[dict[str, Any]], directory: str
-) -> str:
+def _save_logs_to_file(incident_id: str, logs: list[dict[str, Any]], directory: str) -> str:
     """
     Save logs to a JSON file.
 
@@ -458,9 +450,7 @@ def get_filtered_logs(
 
     if search_term:
         filtered = [
-            log
-            for log in filtered
-            if search_term.lower() in log.get("message", "").lower()
+            log for log in filtered if search_term.lower() in log.get("message", "").lower()
         ]
 
     return filtered

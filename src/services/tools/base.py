@@ -115,9 +115,7 @@ class BaseTool(ABC):
         """
         pass
 
-    def _success(
-        self, result: dict[str, Any] | None = None, **metadata
-    ) -> ToolResult:
+    def _success(self, result: dict[str, Any] | None = None, **metadata) -> ToolResult:
         """Create a successful ToolResult.
 
         Args:

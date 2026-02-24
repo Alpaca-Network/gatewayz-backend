@@ -6,8 +6,8 @@ from typing import Any
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -177,7 +177,8 @@ def get_fal_models_by_type(model_type: str) -> list[dict[str, Any]]:
     all_models = get_fal_models()
     # API uses "category", static catalog uses "type"
     return [
-        model for model in all_models
+        model
+        for model in all_models
         if model.get("type") == model_type or model.get("category") == model_type
     ]
 
@@ -196,8 +197,7 @@ def validate_fal_model(model_id: str) -> bool:
     all_models = get_fal_models()
     # API uses "endpoint_id", static catalog uses "id"
     return any(
-        model.get("id") == model_id or model.get("endpoint_id") == model_id
-        for model in all_models
+        model.get("id") == model_id or model.get("endpoint_id") == model_id for model in all_models
     )
 
 
@@ -307,35 +307,45 @@ def _extract_images_from_response(fal_response: dict[str, Any]) -> list[dict[str
         # Standard image generation response
         for img in fal_response["images"]:
             if isinstance(img, dict):
-                data.append({
-                    "url": img.get("url"),
-                    "b64_json": None,
-                })
+                data.append(
+                    {
+                        "url": img.get("url"),
+                        "b64_json": None,
+                    }
+                )
             elif isinstance(img, str):
                 # Sometimes Fal returns just URLs
-                data.append({
-                    "url": img,
-                    "b64_json": None,
-                })
+                data.append(
+                    {
+                        "url": img,
+                        "b64_json": None,
+                    }
+                )
     elif "image" in fal_response:
         # Single image response
         img = fal_response["image"]
         if isinstance(img, dict):
-            data.append({
-                "url": img.get("url"),
-                "b64_json": None,
-            })
+            data.append(
+                {
+                    "url": img.get("url"),
+                    "b64_json": None,
+                }
+            )
         elif isinstance(img, str):
-            data.append({
-                "url": img,
-                "b64_json": None,
-            })
+            data.append(
+                {
+                    "url": img,
+                    "b64_json": None,
+                }
+            )
     elif "url" in fal_response:
         # Direct URL response
-        data.append({
-            "url": fal_response["url"],
-            "b64_json": None,
-        })
+        data.append(
+            {
+                "url": fal_response["url"],
+                "b64_json": None,
+            }
+        )
 
     return data
 
@@ -478,7 +488,10 @@ def normalize_fal_model(fal_model: dict) -> dict | None:
     # API returns "endpoint_id", static catalog uses "id"
     model_id = fal_model.get("endpoint_id") or fal_model.get("id")
     if not model_id:
-        logger.warning("Fal.ai model missing 'id'/'endpoint_id' field: %s", sanitize_for_logging(str(fal_model)))
+        logger.warning(
+            "Fal.ai model missing 'id'/'endpoint_id' field: %s",
+            sanitize_for_logging(str(fal_model)),
+        )
         return None
 
     # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")

@@ -50,10 +50,7 @@ class SafeLogger:
         Returns:
             Dictionary with sanitized values
         """
-        return {
-            key: sanitize_for_logging(value)
-            for key, value in kwargs.items()
-        }
+        return {key: sanitize_for_logging(value) for key, value in kwargs.items()}
 
     def debug(self, message: str, **kwargs):
         """

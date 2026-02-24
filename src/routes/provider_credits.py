@@ -8,13 +8,13 @@ and receive alerts before credits run out.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from src.security.deps import require_admin
-from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +75,7 @@ async def get_provider_credit_balances(
                 error=info.get("error"),
             )
 
-        return ProviderCreditsResponse(
-            providers=providers, timestamp=datetime.now(UTC).isoformat()
-        )
+        return ProviderCreditsResponse(providers=providers, timestamp=datetime.now(UTC).isoformat())
 
     except Exception as e:
         logger.error(f"Failed to get provider credit balances: {e}")

@@ -57,4 +57,3 @@ class TestHuggingFaceToolsSupport:
         assert "temperature" in payload
         assert "tools" in payload
         assert "invalid_param" not in payload
-

@@ -15,7 +15,7 @@ This module provides comprehensive metrics collection for:
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from functools import wraps
 from typing import Any, Callable
 
@@ -31,18 +31,22 @@ class MetricsCollector:
         self.request_counts = defaultdict(lambda: defaultdict(int))  # {endpoint: {method: count}}
         self.error_counts = defaultdict(lambda: defaultdict(int))  # {endpoint: {method: count}}
         self.status_codes = defaultdict(lambda: defaultdict(int))  # {endpoint: {status: count}}
-        self.provider_metrics = defaultdict(lambda: {
-            "requests": 0,
-            "errors": 0,
-            "total_latency": 0.0,
-            "min_latency": float("inf"),
-            "max_latency": 0.0,
-        })
-        self.model_metrics = defaultdict(lambda: {
-            "requests": 0,
-            "errors": 0,
-            "total_latency": 0.0,
-        })
+        self.provider_metrics = defaultdict(
+            lambda: {
+                "requests": 0,
+                "errors": 0,
+                "total_latency": 0.0,
+                "min_latency": float("inf"),
+                "max_latency": 0.0,
+            }
+        )
+        self.model_metrics = defaultdict(
+            lambda: {
+                "requests": 0,
+                "errors": 0,
+                "total_latency": 0.0,
+            }
+        )
         self.cache_hits = 0
         self.cache_misses = 0
         self.db_queries = 0
@@ -172,23 +176,17 @@ class MetricsCollector:
         provider_metrics = {}
         for provider, metrics in self.provider_metrics.items():
             avg_latency = (
-                metrics["total_latency"] / metrics["requests"]
-                if metrics["requests"] > 0
-                else 0
+                metrics["total_latency"] / metrics["requests"] if metrics["requests"] > 0 else 0
             )
             provider_metrics[provider] = {
                 "requests": metrics["requests"],
                 "errors": metrics["errors"],
                 "error_rate": (
-                    metrics["errors"] / metrics["requests"]
-                    if metrics["requests"] > 0
-                    else 0
+                    metrics["errors"] / metrics["requests"] if metrics["requests"] > 0 else 0
                 ),
                 "avg_latency": avg_latency,
                 "min_latency": (
-                    metrics["min_latency"]
-                    if metrics["min_latency"] != float("inf")
-                    else None
+                    metrics["min_latency"] if metrics["min_latency"] != float("inf") else None
                 ),
                 "max_latency": metrics["max_latency"],
             }
@@ -196,17 +194,13 @@ class MetricsCollector:
         model_metrics = {}
         for model, metrics in self.model_metrics.items():
             avg_latency = (
-                metrics["total_latency"] / metrics["requests"]
-                if metrics["requests"] > 0
-                else 0
+                metrics["total_latency"] / metrics["requests"] if metrics["requests"] > 0 else 0
             )
             model_metrics[model] = {
                 "requests": metrics["requests"],
                 "errors": metrics["errors"],
                 "error_rate": (
-                    metrics["errors"] / metrics["requests"]
-                    if metrics["requests"] > 0
-                    else 0
+                    metrics["errors"] / metrics["requests"] if metrics["requests"] > 0 else 0
                 ),
                 "avg_latency": avg_latency,
             }
@@ -217,9 +211,7 @@ class MetricsCollector:
             else 0
         )
 
-        db_avg_latency = (
-            self.db_query_latency / self.db_queries if self.db_queries > 0 else 0
-        )
+        db_avg_latency = self.db_query_latency / self.db_queries if self.db_queries > 0 else 0
 
         uptime_seconds = (datetime.now(UTC) - self.start_time).total_seconds()
 

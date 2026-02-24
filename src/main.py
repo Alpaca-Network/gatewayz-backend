@@ -16,11 +16,11 @@ from src.config.logging_config import configure_logging
 from src.constants import (
     FRONTEND_BETA_URL,
     FRONTEND_STAGING_URL,
-    TAURI_DESKTOP_URL,
     TAURI_DESKTOP_PROTOCOL_URL,
+    TAURI_DESKTOP_URL,
 )
-from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.middleware.security_middleware import SecurityMiddleware
+from src.middleware.selective_gzip_middleware import SelectiveGZipMiddleware
 from src.services.startup import lifespan
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
@@ -264,7 +264,9 @@ def create_app() -> FastAPI:
         from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
 
         app.add_middleware(AutoSentryMiddleware)
-        logger.info("  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)")
+        logger.info(
+            "  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)"
+        )
 
     # [5] TraceContext — propagates W3C traceparent / baggage for distributed tracing
     from src.middleware.trace_context_middleware import TraceContextMiddleware
@@ -314,7 +316,9 @@ def create_app() -> FastAPI:
     except Exception as e:
         # Fallback to in-memory limiting if redis is unavailable
         app.add_middleware(SecurityMiddleware)
-        logger.warning(f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})")
+        logger.warning(
+            f"  🛡️  [1] Security middleware enabled with LOCAL fallback (Redis error: {e})"
+        )
 
     # Security
     HTTPBearer()
@@ -363,6 +367,7 @@ def create_app() -> FastAPI:
             from prometheus_client.openmetrics.exposition import (
                 generate_latest as generate_openmetrics,
             )
+
             return Response(generate_openmetrics(REGISTRY), media_type=OPENMETRICS_CT)
 
         return Response(generate_latest(REGISTRY), media_type="text/plain; charset=utf-8")
@@ -910,7 +915,8 @@ def create_app() -> FastAPI:
 
         # Shutdown Traceloop SDK (OpenLLMetry) - only if available
         try:
-            from src.config.traceloop_config import shutdown as traceloop_shutdown, is_initialized
+            from src.config.traceloop_config import is_initialized
+            from src.config.traceloop_config import shutdown as traceloop_shutdown
 
             if is_initialized():
                 traceloop_shutdown()

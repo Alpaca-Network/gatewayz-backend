@@ -232,15 +232,21 @@ def fetch_models_from_xai():
                     "slug": provider_model_id,
                     "canonical_slug": provider_model_id,
                     "name": cleaned_name,
-                    "description": db_model.get("description") or f"xAI Grok model: {provider_model_id}",
+                    "description": db_model.get("description")
+                    or f"xAI Grok model: {provider_model_id}",
                     "context_length": db_model.get("context_length") or 131072,
-                    "architecture": db_model.get("metadata", {}).get("architecture") or {
+                    "architecture": db_model.get("metadata", {}).get("architecture")
+                    or {
                         "modality": "text->text",
                         "input_modalities": ["text"],
                         "output_modalities": ["text"],
                     },
-                    "pricing": db_model.get("pricing") or {
-                        "prompt": "5", "completion": "15", "request": "0", "image": "0",
+                    "pricing": db_model.get("pricing")
+                    or {
+                        "prompt": "5",
+                        "completion": "15",
+                        "request": "0",
+                        "image": "0",
                     },
                     "provider_slug": "xai",
                     "source_gateway": "xai",

@@ -1,10 +1,10 @@
 """Internal unified schemas for cross-format compatibility."""
 
 from src.schemas.internal.chat import (
-    InternalMessage,
     InternalChatRequest,
-    InternalUsage,
     InternalChatResponse,
+    InternalMessage,
+    InternalUsage,
 )
 
 __all__ = [

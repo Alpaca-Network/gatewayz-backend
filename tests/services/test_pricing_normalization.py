@@ -5,17 +5,19 @@ These tests verify that pricing is correctly converted from various
 provider formats to per-token format.
 """
 
-import pytest
 from decimal import Decimal
+
+import pytest
+
 from src.services.pricing_normalization import (
-    normalize_to_per_token,
-    normalize_pricing_dict,
     PricingFormat,
-    get_provider_format,
     auto_detect_format,
     convert_between_formats,
-    validate_normalized_price,
+    get_provider_format,
     normalize_price_from_provider,
+    normalize_pricing_dict,
+    normalize_to_per_token,
+    validate_normalized_price,
 )
 
 
@@ -187,36 +189,28 @@ class TestConvertBetweenFormats:
     def test_convert_1m_to_token(self):
         """Convert from per-1M to per-token"""
         result = convert_between_formats(
-            0.055,
-            PricingFormat.PER_1M_TOKENS,
-            PricingFormat.PER_TOKEN
+            0.055, PricingFormat.PER_1M_TOKENS, PricingFormat.PER_TOKEN
         )
         assert result == Decimal("0.000000055")
 
     def test_convert_1k_to_token(self):
         """Convert from per-1K to per-token"""
         result = convert_between_formats(
-            0.055,
-            PricingFormat.PER_1K_TOKENS,
-            PricingFormat.PER_TOKEN
+            0.055, PricingFormat.PER_1K_TOKENS, PricingFormat.PER_TOKEN
         )
         assert result == Decimal("0.000055")
 
     def test_convert_token_to_1m(self):
         """Convert from per-token to per-1M"""
         result = convert_between_formats(
-            0.000000055,
-            PricingFormat.PER_TOKEN,
-            PricingFormat.PER_1M_TOKENS
+            0.000000055, PricingFormat.PER_TOKEN, PricingFormat.PER_1M_TOKENS
         )
         assert result == Decimal("0.055")
 
     def test_convert_1k_to_1m(self):
         """Convert from per-1K to per-1M"""
         result = convert_between_formats(
-            0.055,
-            PricingFormat.PER_1K_TOKENS,
-            PricingFormat.PER_1M_TOKENS
+            0.055, PricingFormat.PER_1K_TOKENS, PricingFormat.PER_1M_TOKENS
         )
         assert result == Decimal("55")
 

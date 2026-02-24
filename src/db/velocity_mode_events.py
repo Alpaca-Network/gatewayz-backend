@@ -6,7 +6,7 @@ which tracks when and why velocity mode protection is activated.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -86,7 +86,9 @@ def deactivate_velocity_event(event_id: str | UUID) -> dict[str, Any] | None:
         now = datetime.now(UTC)
 
         # First, get the event to calculate duration
-        event_result = supabase.table("velocity_mode_events").select("*").eq("id", event_id_str).execute()
+        event_result = (
+            supabase.table("velocity_mode_events").select("*").eq("id", event_id_str).execute()
+        )
 
         if not event_result.data:
             logger.warning(f"Velocity mode event not found: {event_id_str}")
@@ -104,7 +106,10 @@ def deactivate_velocity_event(event_id: str | UUID) -> dict[str, Any] | None:
         }
 
         result = (
-            supabase.table("velocity_mode_events").update(update_data).eq("id", event_id_str).execute()
+            supabase.table("velocity_mode_events")
+            .update(update_data)
+            .eq("id", event_id_str)
+            .execute()
         )
 
         if result.data:
@@ -241,9 +246,7 @@ def get_velocity_event_stats(hours: int = 24) -> dict[str, Any]:
         # Calculate average duration (only for deactivated events)
         deactivated = [e for e in events if e["duration_seconds"] is not None]
         avg_duration = (
-            sum(e["duration_seconds"] for e in deactivated) / len(deactivated)
-            if deactivated
-            else 0
+            sum(e["duration_seconds"] for e in deactivated) / len(deactivated) if deactivated else 0
         )
 
         total_time = sum(e["duration_seconds"] or 0 for e in events)

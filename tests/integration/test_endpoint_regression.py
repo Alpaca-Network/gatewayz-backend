@@ -7,25 +7,26 @@ Run with: pytest tests/test_endpoint_regression.py -v
 """
 
 import os
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 # Set test environment variables before imports
-os.environ['APP_ENV'] = 'testing'
-os.environ['TESTING'] = 'true'
-os.environ['SUPABASE_URL'] = 'https://test.supabase.co'
-os.environ['SUPABASE_KEY'] = 'test-key'
-os.environ['OPENROUTER_API_KEY'] = 'test-openrouter-key'
-os.environ['ENCRYPTION_KEY'] = 'test-encryption-key-32-bytes-long!'
-os.environ['FEATHERLESS_API_KEY'] = 'test-featherless-key'
+os.environ["APP_ENV"] = "testing"
+os.environ["TESTING"] = "true"
+os.environ["SUPABASE_URL"] = "https://test.supabase.co"
+os.environ["SUPABASE_KEY"] = "test-key"
+os.environ["OPENROUTER_API_KEY"] = "test-openrouter-key"
+os.environ["ENCRYPTION_KEY"] = "test-encryption-key-32-bytes-long!"
+os.environ["FEATHERLESS_API_KEY"] = "test-featherless-key"
 
 from src.main import app
-
 
 # ============================================================================
 # FIXTURES
 # ============================================================================
+
 
 @pytest.fixture
 def client():
@@ -37,22 +38,22 @@ def client():
 def mock_user():
     """Mock user data for testing"""
     return {
-        'id': 1,
-        'user_id': 1,
-        'email': 'test@example.com',
-        'username': 'testuser',
-        'credits': 100.0,
-        'api_key': 'gw_test_key_123456789',
-        'environment_tag': 'live',
-        'is_admin': False,
-        'is_active': True,
-        'role': 'user',
-        'auth_method': 'api_key',
-        'subscription_status': 'active',
-        'trial_expires_at': None,
-        'registration_date': '2025-01-01T00:00:00Z',
-        'created_at': '2025-01-01T00:00:00Z',
-        'updated_at': '2025-01-01T00:00:00Z'
+        "id": 1,
+        "user_id": 1,
+        "email": "test@example.com",
+        "username": "testuser",
+        "credits": 100.0,
+        "api_key": "gw_test_key_123456789",
+        "environment_tag": "live",
+        "is_admin": False,
+        "is_active": True,
+        "role": "user",
+        "auth_method": "api_key",
+        "subscription_status": "active",
+        "trial_expires_at": None,
+        "registration_date": "2025-01-01T00:00:00Z",
+        "created_at": "2025-01-01T00:00:00Z",
+        "updated_at": "2025-01-01T00:00:00Z",
     }
 
 
@@ -60,15 +61,15 @@ def mock_user():
 def mock_admin_user():
     """Mock admin user data for testing"""
     return {
-        'id': 2,
-        'email': 'admin@example.com',
-        'username': 'admin',
-        'credits': 1000.0,
-        'api_key': 'gw_test_admin_key_123456789',
-        'environment_tag': 'live',
-        'is_admin': True,
-        'role': 'admin',
-        'subscription_status': 'active'
+        "id": 2,
+        "email": "admin@example.com",
+        "username": "admin",
+        "credits": 1000.0,
+        "api_key": "gw_test_admin_key_123456789",
+        "environment_tag": "live",
+        "is_admin": True,
+        "role": "admin",
+        "subscription_status": "active",
     }
 
 
@@ -104,6 +105,7 @@ def mock_rate_limiter():
 # HEALTH & STATUS ENDPOINTS
 # ============================================================================
 
+
 class TestHealthEndpoints:
     """Test health check and status endpoints"""
 
@@ -130,10 +132,11 @@ class TestHealthEndpoints:
 # AUTHENTICATION ENDPOINTS
 # ============================================================================
 
+
 class TestAuthenticationEndpoints:
     """Test authentication and user profile endpoints"""
 
-    @patch('src.db.users.get_user')
+    @patch("src.db.users.get_user")
     def test_user_balance_endpoint_exists(self, mock_get_user, client, mock_user, auth_headers):
         """Regression: GET /user/balance must exist"""
         mock_get_user.return_value = mock_user
@@ -142,9 +145,11 @@ class TestAuthenticationEndpoints:
         # Should exist (may fail due to mocking but not 404)
         assert response.status_code in [200, 401, 500]
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.get_user_profile')
-    def test_user_profile_endpoint_exists(self, mock_profile, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.users.get_user_profile")
+    def test_user_profile_endpoint_exists(
+        self, mock_profile, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: GET /user/profile must exist"""
         mock_get_user.return_value = mock_user
         mock_profile.return_value = mock_user
@@ -152,24 +157,18 @@ class TestAuthenticationEndpoints:
         response = client.get("/user/profile", headers=auth_headers)
         assert response.status_code in [200, 401, 500]
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.get_user_usage_metrics')
-    @patch('src.db.rate_limits.get_user_rate_limits')
+    @patch("src.db.users.get_user")
+    @patch("src.db.users.get_user_usage_metrics")
+    @patch("src.db.rate_limits.get_user_rate_limits")
     def test_user_monitor_endpoint_exists(
-        self,
-        mock_rate_limits,
-        mock_usage,
-        mock_get_user,
-        client,
-        mock_user,
-        auth_headers
+        self, mock_rate_limits, mock_usage, mock_get_user, client, mock_user, auth_headers
     ):
         """Regression: GET /user/monitor must exist"""
         mock_get_user.return_value = mock_user
         mock_usage.return_value = {
-            'user_id': mock_user['id'],
-            'current_credits': mock_user['credits'],
-            'usage_metrics': {}
+            "user_id": mock_user["id"],
+            "current_credits": mock_user["credits"],
+            "usage_metrics": {},
         }
         mock_rate_limits.return_value = None
 
@@ -181,20 +180,21 @@ class TestAuthenticationEndpoints:
 # CHAT COMPLETIONS ENDPOINTS (CRITICAL)
 # ============================================================================
 
+
 class TestChatCompletionsEndpoints:
     """Test chat completion endpoints - CRITICAL for business"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai')
-    @patch('src.services.openrouter_client.process_openrouter_response')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
-    @patch('src.db.users.deduct_credits')
-    @patch('src.db.users.record_usage')
-    @patch('src.db.rate_limits.update_rate_limit_usage')
-    @patch('src.db.api_keys.increment_api_key_usage')
-    @patch('src.db.activity.log_activity')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai")
+    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.db.api_keys.increment_api_key_usage")
+    @patch("src.db.activity.log_activity")
     def test_v1_chat_completions_endpoint_exists(
         self,
         mock_log_activity,
@@ -210,12 +210,13 @@ class TestChatCompletionsEndpoints:
         mock_get_user,
         client,
         mock_user,
-        auth_headers):
+        auth_headers,
+    ):
         """CRITICAL: POST /v1/chat/completions must exist and process requests"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
         # Create mock rate limiter
         mock_rl_result = Mock()
         mock_rl_result.allowed = True
@@ -235,36 +236,43 @@ class TestChatCompletionsEndpoints:
             "object": "chat.completion",
             "created": 1234567890,
             "model": "gpt-3.5-turbo",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop"
-            }],
-            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5}
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
         }
 
         response = client.post(
             "/v1/chat/completions",
             headers=auth_headers,
-            json={
-                "model": "gpt-3.5-turbo",
-                "messages": [{"role": "user", "content": "Hello"}]
-            }
+            json={"model": "gpt-3.5-turbo", "messages": [{"role": "user", "content": "Hello"}]},
         )
 
         # Endpoint must exist and return expected structure (or auth error if mocks fail)
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             data = response.json()
             assert "choices" in data
             assert "usage" in data
             assert data["object"] == "chat.completion"
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai_stream')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai_stream")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
     def test_v1_chat_completions_streaming_exists(
         self,
         mock_enforce_limits,
@@ -274,11 +282,12 @@ class TestChatCompletionsEndpoints:
         mock_get_user,
         client,
         mock_user,
-        auth_headers):
+        auth_headers,
+    ):
         """CRITICAL: POST /v1/chat/completions with stream=true must work"""
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
         # Create mock rate limiter
         mock_rl_result = Mock()
         mock_rl_result.allowed = True
@@ -308,12 +317,20 @@ class TestChatCompletionsEndpoints:
             json={
                 "model": "gpt-3.5-turbo",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "stream": True
-            }
+                "stream": True,
+            },
         )
 
         # Must return streaming response or auth error
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
 
@@ -322,20 +339,21 @@ class TestChatCompletionsEndpoints:
 # UNIFIED RESPONSES ENDPOINT (NEW API)
 # ============================================================================
 
+
 class TestUnifiedResponsesEndpoint:
     """Test the new /v1/responses endpoint (OpenAI unified API)"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai')
-    @patch('src.services.openrouter_client.process_openrouter_response')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
-    @patch('src.db.users.deduct_credits')
-    @patch('src.db.users.record_usage')
-    @patch('src.db.rate_limits.update_rate_limit_usage')
-    @patch('src.db.api_keys.increment_api_key_usage')
-    @patch('src.db.activity.log_activity')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai")
+    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.db.api_keys.increment_api_key_usage")
+    @patch("src.db.activity.log_activity")
     def test_v1_responses_endpoint_exists(
         self,
         mock_log_activity,
@@ -351,12 +369,13 @@ class TestUnifiedResponsesEndpoint:
         mock_get_user,
         client,
         mock_user,
-        auth_headers):
+        auth_headers,
+    ):
         """CRITICAL: POST /v1/responses must exist (unified API)"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
         # Create mock rate limiter
         mock_rl_result = Mock()
         mock_rl_result.allowed = True
@@ -376,25 +395,32 @@ class TestUnifiedResponsesEndpoint:
             "object": "chat.completion",
             "created": 1234567890,
             "model": "gpt-3.5-turbo",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello!"},
-                "finish_reason": "stop"
-            }],
-            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5}
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
         }
 
         response = client.post(
             "/v1/responses",
             headers=auth_headers,
-            json={
-                "model": "gpt-3.5-turbo",
-                "input": [{"role": "user", "content": "Hello"}]
-            }
+            json={"model": "gpt-3.5-turbo", "input": [{"role": "user", "content": "Hello"}]},
         )
 
         # Endpoint must exist and return unified format
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             data = response.json()
             assert data["object"] == "response"
@@ -403,17 +429,17 @@ class TestUnifiedResponsesEndpoint:
             assert len(data["output"]) > 0
             assert "content" in data["output"][0]
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai')
-    @patch('src.services.openrouter_client.process_openrouter_response')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
-    @patch('src.db.users.deduct_credits')
-    @patch('src.db.users.record_usage')
-    @patch('src.db.rate_limits.update_rate_limit_usage')
-    @patch('src.db.api_keys.increment_api_key_usage')
-    @patch('src.db.activity.log_activity')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai")
+    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.db.api_keys.increment_api_key_usage")
+    @patch("src.db.activity.log_activity")
     def test_v1_responses_with_json_format(
         self,
         mock_log_activity,
@@ -429,12 +455,13 @@ class TestUnifiedResponsesEndpoint:
         mock_get_user,
         client,
         mock_user,
-        auth_headers):
+        auth_headers,
+    ):
         """Regression: /v1/responses must support response_format parameter"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
         # Create mock rate limiter
         mock_rl_result = Mock()
         mock_rl_result.allowed = True
@@ -453,12 +480,14 @@ class TestUnifiedResponsesEndpoint:
             "object": "chat.completion",
             "created": 1234567890,
             "model": "gpt-3.5-turbo",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": '{"name": "John", "age": 30}'},
-                "finish_reason": "stop"
-            }],
-            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5}
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": '{"name": "John", "age": 30}'},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
         }
 
         response = client.post(
@@ -467,11 +496,19 @@ class TestUnifiedResponsesEndpoint:
             json={
                 "model": "gpt-3.5-turbo",
                 "input": [{"role": "user", "content": "Generate a person"}],
-                "response_format": {"type": "json_object"}
-            }
+                "response_format": {"type": "json_object"},
+            },
         )
 
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             data = response.json()
             assert "output" in data
@@ -482,20 +519,21 @@ class TestUnifiedResponsesEndpoint:
 # ANTHROPIC MESSAGES API ENDPOINT (CLAUDE COMPATIBLE)
 # ============================================================================
 
+
 class TestAnthropicMessagesEndpoint:
     """Test Anthropic Messages API endpoint (/v1/messages) - Claude compatible"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai')
-    @patch('src.services.openrouter_client.process_openrouter_response')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
-    @patch('src.db.users.deduct_credits')
-    @patch('src.db.users.record_usage')
-    @patch('src.db.rate_limits.update_rate_limit_usage')
-    @patch('src.db.api_keys.increment_api_key_usage')
-    @patch('src.db.activity.log_activity')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai")
+    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.db.api_keys.increment_api_key_usage")
+    @patch("src.db.activity.log_activity")
     def test_v1_messages_endpoint_exists(
         self,
         mock_log_activity,
@@ -511,13 +549,13 @@ class TestAnthropicMessagesEndpoint:
         mock_get_user,
         client,
         mock_user,
-        auth_headers
+        auth_headers,
     ):
         """CRITICAL: POST /v1/messages must exist (Anthropic/Claude API)"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
 
         # Create mock rate limiter
         mock_rl_result = Mock()
@@ -538,12 +576,14 @@ class TestAnthropicMessagesEndpoint:
             "object": "chat.completion",
             "created": 1234567890,
             "model": "claude-sonnet-4-5-20250929",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "Hello! How can I help?"},
-                "finish_reason": "stop"
-            }],
-            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5}
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "Hello! How can I help?"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 10, "prompt_tokens": 5, "completion_tokens": 5},
         }
 
         # Make Anthropic-style request
@@ -553,12 +593,20 @@ class TestAnthropicMessagesEndpoint:
             json={
                 "model": "claude-sonnet-4-5-20250929",
                 "max_tokens": 1024,  # Required in Anthropic API
-                "messages": [{"role": "user", "content": "Hello"}]
-            }
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
         )
 
         # Endpoint must exist and return Anthropic format
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             data = response.json()
 
@@ -572,17 +620,17 @@ class TestAnthropicMessagesEndpoint:
             assert "input_tokens" in data["usage"]
             assert "output_tokens" in data["usage"]
 
-    @patch('src.db.users.get_user')
-    @patch('src.services.openrouter_client.make_openrouter_request_openai')
-    @patch('src.services.openrouter_client.process_openrouter_response')
-    @patch('src.services.rate_limiting.get_rate_limit_manager')
-    @patch('src.services.trial_validation.validate_trial_access')
-    @patch('src.db.plans.enforce_plan_limits')
-    @patch('src.db.users.deduct_credits')
-    @patch('src.db.users.record_usage')
-    @patch('src.db.rate_limits.update_rate_limit_usage')
-    @patch('src.db.api_keys.increment_api_key_usage')
-    @patch('src.db.activity.log_activity')
+    @patch("src.db.users.get_user")
+    @patch("src.services.openrouter_client.make_openrouter_request_openai")
+    @patch("src.services.openrouter_client.process_openrouter_response")
+    @patch("src.services.rate_limiting.get_rate_limit_manager")
+    @patch("src.services.trial_validation.validate_trial_access")
+    @patch("src.db.plans.enforce_plan_limits")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.db.api_keys.increment_api_key_usage")
+    @patch("src.db.activity.log_activity")
     def test_v1_messages_with_system_parameter(
         self,
         mock_log_activity,
@@ -598,13 +646,13 @@ class TestAnthropicMessagesEndpoint:
         mock_get_user,
         client,
         mock_user,
-        auth_headers
+        auth_headers,
     ):
         """Regression: /v1/messages must support separate 'system' parameter"""
         # Setup mocks
         mock_get_user.return_value = mock_user
-        mock_trial.return_value = {'is_valid': True, 'is_trial': False}
-        mock_enforce_limits.return_value = {'allowed': True}
+        mock_trial.return_value = {"is_valid": True, "is_trial": False}
+        mock_enforce_limits.return_value = {"allowed": True}
 
         mock_rl_result = Mock()
         mock_rl_result.allowed = True
@@ -623,12 +671,14 @@ class TestAnthropicMessagesEndpoint:
             "object": "chat.completion",
             "created": 1234567890,
             "model": "claude-sonnet-4-5-20250929",
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": "I'm Claude!"},
-                "finish_reason": "stop"
-            }],
-            "usage": {"total_tokens": 15, "prompt_tokens": 10, "completion_tokens": 5}
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "I'm Claude!"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"total_tokens": 15, "prompt_tokens": 10, "completion_tokens": 5},
         }
 
         # Test with system parameter (Anthropic-specific)
@@ -639,11 +689,19 @@ class TestAnthropicMessagesEndpoint:
                 "model": "claude-sonnet-4-5-20250929",
                 "max_tokens": 1024,
                 "system": "You are Claude, a helpful AI assistant.",
-                "messages": [{"role": "user", "content": "Who are you?"}]
-            }
+                "messages": [{"role": "user", "content": "Who are you?"}],
+            },
         )
 
-        assert response.status_code in [200, 400, 401, 404, 500, 502, 503]  # 400/404 allowed due to provider/route issues
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            404,
+            500,
+            502,
+            503,
+        ]  # 400/404 allowed due to provider/route issues
         if response.status_code == 200:
             data = response.json()
             assert data["type"] == "message"
@@ -654,18 +712,14 @@ class TestAnthropicMessagesEndpoint:
 # API KEY MANAGEMENT ENDPOINTS
 # ============================================================================
 
+
 class TestAPIKeyEndpoints:
     """Test API key management endpoints"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.api_keys.get_user_api_keys')
+    @patch("src.db.users.get_user")
+    @patch("src.db.api_keys.get_user_api_keys")
     def test_list_api_keys_endpoint_exists(
-        self,
-        mock_keys,
-        mock_get_user,
-        client,
-        mock_user,
-        auth_headers
+        self, mock_keys, mock_get_user, client, mock_user, auth_headers
     ):
         """Regression: GET /user/api-keys must exist"""
         mock_get_user.return_value = mock_user
@@ -674,24 +728,19 @@ class TestAPIKeyEndpoints:
         response = client.get("/user/api-keys", headers=auth_headers)
         assert response.status_code in [200, 401, 500]
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.api_keys.create_api_key')
+    @patch("src.db.users.get_user")
+    @patch("src.db.api_keys.create_api_key")
     def test_create_api_key_endpoint_exists(
-        self,
-        mock_create,
-        mock_get_user,
-        client,
-        mock_user,
-        auth_headers
+        self, mock_create, mock_get_user, client, mock_user, auth_headers
     ):
         """Regression: POST /user/api-keys must exist"""
         mock_get_user.return_value = mock_user
-        mock_create.return_value = ('new_key', 1)
+        mock_create.return_value = ("new_key", 1)
 
         response = client.post(
             "/user/api-keys",
             headers=auth_headers,
-            json={"key_name": "Test Key"}  # Fixed: use correct field name
+            json={"key_name": "Test Key"},  # Fixed: use correct field name
         )
         # Accept 422 if validation fails, but endpoint should exist
         assert response.status_code in [200, 201, 401, 422, 500]
@@ -701,17 +750,22 @@ class TestAPIKeyEndpoints:
 # PAYMENT ENDPOINTS
 # ============================================================================
 
+
 class TestPaymentEndpoints:
     """Test Stripe payment endpoints"""
 
-    @patch('src.db.users.get_user')
-    def test_stripe_checkout_session_endpoint_exists(self, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    def test_stripe_checkout_session_endpoint_exists(
+        self, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Stripe checkout session endpoint must exist"""
         pytest.skip("Stripe endpoint path needs verification - currently 404")
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.payments.get_user_payments')
-    def test_list_payments_endpoint_exists(self, mock_payments, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.payments.get_user_payments")
+    def test_list_payments_endpoint_exists(
+        self, mock_payments, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Payments list endpoint must exist"""
         pytest.skip("Payments endpoint path needs verification - currently 404")
 
@@ -720,34 +774,34 @@ class TestPaymentEndpoints:
 # CHAT HISTORY ENDPOINTS
 # ============================================================================
 
+
 class TestChatHistoryEndpoints:
     """Test chat history and session management endpoints"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.chat_history.get_user_chat_sessions')
-    def test_list_chat_sessions_endpoint_exists(self, mock_sessions, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.chat_history.get_user_chat_sessions")
+    def test_list_chat_sessions_endpoint_exists(
+        self, mock_sessions, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Chat sessions list endpoint must exist"""
         pytest.skip("Chat history endpoint path needs verification - currently 404")
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.chat_history.create_chat_session')
-    def test_create_chat_session_endpoint_exists(self, mock_create, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.chat_history.create_chat_session")
+    def test_create_chat_session_endpoint_exists(
+        self, mock_create, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Chat session creation endpoint must exist"""
         pytest.skip("Chat history endpoint path needs verification - currently 404")
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.chat_history.get_chat_session')
+    @patch("src.db.users.get_user")
+    @patch("src.db.chat_history.get_chat_session")
     def test_get_chat_session_endpoint_exists(
-        self,
-        mock_get_session,
-        mock_get_user,
-        client,
-        mock_user,
-        auth_headers
+        self, mock_get_session, mock_get_user, client, mock_user, auth_headers
     ):
         """Regression: GET /chat-history/sessions/{session_id} must exist"""
         mock_get_user.return_value = mock_user
-        mock_get_session.return_value = {'id': 1, 'title': 'Test', 'messages': []}
+        mock_get_session.return_value = {"id": 1, "title": "Test", "messages": []}
 
         response = client.get("/chat-history/sessions/1", headers=auth_headers)
         assert response.status_code in [200, 401, 404, 500]
@@ -757,28 +811,40 @@ class TestChatHistoryEndpoints:
 # CATALOG ENDPOINTS
 # ============================================================================
 
+
 class TestCatalogEndpoints:
     """Test model catalog endpoints"""
 
     def test_catalog_models_endpoint_exists(self, client):
         """Regression: GET /v1/models must exist"""
         response = client.get("/v1/models")
-        assert response.status_code in [200, 404, 500, 503]  # 503 allowed when external APIs timeout
+        assert response.status_code in [
+            200,
+            404,
+            500,
+            503,
+        ]  # 503 allowed when external APIs timeout
 
     def test_catalog_providers_endpoint_exists(self, client):
         """Regression: GET /v1/provider must exist"""
         response = client.get("/v1/provider")
-        assert response.status_code in [200, 404, 500, 503]  # 503 allowed when external APIs timeout
+        assert response.status_code in [
+            200,
+            404,
+            500,
+            503,
+        ]  # 503 allowed when external APIs timeout
 
 
 # ============================================================================
 # RANKING ENDPOINTS
 # ============================================================================
 
+
 class TestRankingEndpoints:
     """Test model and app ranking endpoints"""
 
-    @patch('src.db.ranking.get_all_latest_models')
+    @patch("src.db.ranking.get_all_latest_models")
     def test_ranking_models_endpoint_exists(self, mock_models, client):
         """Regression: GET /ranking/models must exist"""
         mock_models.return_value = []
@@ -786,7 +852,7 @@ class TestRankingEndpoints:
         response = client.get("/ranking/models")
         assert response.status_code in [200, 404, 500]  # 404 allowed due to route loading issues
 
-    @patch('src.db.ranking.get_all_latest_apps')
+    @patch("src.db.ranking.get_all_latest_apps")
     def test_ranking_apps_endpoint_exists(self, mock_apps, client):
         """Regression: GET /ranking/apps must exist"""
         mock_apps.return_value = []
@@ -799,17 +865,22 @@ class TestRankingEndpoints:
 # ADMIN ENDPOINTS
 # ============================================================================
 
+
 class TestAdminEndpoints:
     """Test admin endpoints"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.users.get_all_users')
-    def test_admin_list_users_endpoint_exists(self, mock_all_users, mock_get_user, client, mock_admin_user, admin_auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.users.get_all_users")
+    def test_admin_list_users_endpoint_exists(
+        self, mock_all_users, mock_get_user, client, mock_admin_user, admin_auth_headers
+    ):
         """Regression: Admin list users endpoint must exist"""
         pytest.skip("Admin endpoint path needs verification - currently 404")
 
-    @patch('src.db.users.get_user')
-    def test_admin_add_credits_endpoint_exists(self, mock_get_user, client, mock_admin_user, admin_auth_headers):
+    @patch("src.db.users.get_user")
+    def test_admin_add_credits_endpoint_exists(
+        self, mock_get_user, client, mock_admin_user, admin_auth_headers
+    ):
         """Regression: Admin add credits endpoint must exist"""
         pytest.skip("Admin endpoint path needs verification - currently 404")
 
@@ -818,12 +889,15 @@ class TestAdminEndpoints:
 # RATE LIMIT ENDPOINTS
 # ============================================================================
 
+
 class TestRateLimitEndpoints:
     """Test rate limiting endpoints"""
 
-    @patch('src.db.users.get_user')
-    @patch('src.db.rate_limits.get_user_rate_limits')
-    def test_get_rate_limits_endpoint_exists(self, mock_rate_limits, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    @patch("src.db.rate_limits.get_user_rate_limits")
+    def test_get_rate_limits_endpoint_exists(
+        self, mock_rate_limits, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Rate limits endpoint must exist"""
         pytest.skip("Rate limits endpoint path needs verification - currently 404")
 
@@ -832,10 +906,11 @@ class TestRateLimitEndpoints:
 # ACTIVITY ENDPOINTS
 # ============================================================================
 
+
 class TestActivityEndpoints:
     """Test activity tracking endpoints"""
 
-    @patch('src.db.users.get_user')
+    @patch("src.db.users.get_user")
     def test_get_activity_endpoint_exists(self, mock_get_user, client, mock_user, auth_headers):
         """Regression: Activity endpoint must exist"""
         pytest.skip("Activity module not found - function may have been renamed or moved")
@@ -845,11 +920,14 @@ class TestActivityEndpoints:
 # NOTIFICATION ENDPOINTS
 # ============================================================================
 
+
 class TestNotificationEndpoints:
     """Test notification endpoints"""
 
-    @patch('src.db.users.get_user')
-    def test_get_notifications_endpoint_exists(self, mock_get_user, client, mock_user, auth_headers):
+    @patch("src.db.users.get_user")
+    def test_get_notifications_endpoint_exists(
+        self, mock_get_user, client, mock_user, auth_headers
+    ):
         """Regression: Notifications endpoint must exist"""
         pytest.skip("Notifications module not found - may not be available in current version")
 

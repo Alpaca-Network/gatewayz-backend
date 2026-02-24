@@ -6,15 +6,15 @@ including cache hit rates, cost savings, and usage trends.
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
-from src.security.deps import get_api_key
 from src.db.users import get_user
+from src.security.deps import get_api_key
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -56,15 +56,16 @@ async def get_cache_analytics(
         client = get_supabase_client()
 
         # Query chat completion requests with cache metadata
-        result = client.table("chat_completion_requests").select(
-            "model_id, cost_usd, metadata, created_at, models(model_name, providers(name, slug))"
-        ).eq(
-            "user_id", user_id
-        ).eq(
-            "status", "completed"
-        ).gte(
-            "created_at", since_date.isoformat()
-        ).execute()
+        result = (
+            client.table("chat_completion_requests")
+            .select(
+                "model_id, cost_usd, metadata, created_at, models(model_name, providers(name, slug))"
+            )
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .gte("created_at", since_date.isoformat())
+            .execute()
+        )
 
         requests = result.data or []
 
@@ -117,15 +118,17 @@ async def get_cache_analytics(
         top_cached_models = []
         for model_name, stats in model_stats.items():
             if stats["total_requests"] >= 5:  # Only include models with sufficient data
-                hit_rate = (stats["cache_hits"] / stats["total_requests"] * 100)
-                top_cached_models.append({
-                    "model_name": model_name,
-                    "provider": stats["provider"],
-                    "total_requests": stats["total_requests"],
-                    "cache_hits": stats["cache_hits"],
-                    "cache_hit_rate_percent": round(hit_rate, 2),
-                    "savings_usd": round(stats["savings_usd"], 6),
-                })
+                hit_rate = stats["cache_hits"] / stats["total_requests"] * 100
+                top_cached_models.append(
+                    {
+                        "model_name": model_name,
+                        "provider": stats["provider"],
+                        "total_requests": stats["total_requests"],
+                        "cache_hits": stats["cache_hits"],
+                        "cache_hit_rate_percent": round(hit_rate, 2),
+                        "savings_usd": round(stats["savings_usd"], 6),
+                    }
+                )
 
         # Sort by cache hit rate descending
         top_cached_models.sort(key=lambda x: x["cache_hit_rate_percent"], reverse=True)
@@ -142,7 +145,9 @@ async def get_cache_analytics(
             "total_savings_usd": round(total_savings, 6),
             "estimated_monthly_savings_usd": round(estimated_monthly_savings, 2),
             "top_cached_models": top_cached_models,
-            "cache_enabled": (user.get("preferences") or {}).get("enable_butter_cache", True),  # Enabled by default
+            "cache_enabled": (user.get("preferences") or {}).get(
+                "enable_butter_cache", True
+            ),  # Enabled by default
             "system_enabled": Config.BUTTER_DEV_ENABLED,
         }
 
@@ -198,8 +203,7 @@ async def get_cache_summary(
         # Use RPC function if available, otherwise do manual calculation
         try:
             result = client.rpc(
-                "get_user_cache_savings",
-                {"p_user_id": user_id, "p_days": 30}
+                "get_user_cache_savings", {"p_user_id": user_id, "p_days": 30}
             ).execute()
 
             if result.data and len(result.data) > 0:
@@ -219,15 +223,14 @@ async def get_cache_summary(
             logger.debug(f"RPC function not available, using fallback: {rpc_err}")
 
         # Fallback: manual query
-        result = client.table("chat_completion_requests").select(
-            "metadata"
-        ).eq(
-            "user_id", user_id
-        ).eq(
-            "status", "completed"
-        ).gte(
-            "created_at", since_date.isoformat()
-        ).execute()
+        result = (
+            client.table("chat_completion_requests")
+            .select("metadata")
+            .eq("user_id", user_id)
+            .eq("status", "completed")
+            .gte("created_at", since_date.isoformat())
+            .execute()
+        )
 
         requests = result.data or []
         total_requests = len(requests)

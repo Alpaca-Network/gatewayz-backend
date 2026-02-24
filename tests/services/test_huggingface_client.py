@@ -1,38 +1,40 @@
 """Tests for Hugging Face Inference API client"""
-import pytest
+
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException
 
 from src.services.huggingface_client import (
+    _prepare_model,
+    _resolve_model_id_case,
     get_huggingface_client,
     make_huggingface_request_openai,
     make_huggingface_request_openai_stream,
     process_huggingface_response,
-    _resolve_model_id_case,
-    _prepare_model,
 )
 
 
 class TestHuggingFaceClient:
     """Test Hugging Face Inference API client functionality"""
 
-    @patch('src.services.huggingface_client.Config.HUG_API_KEY', 'hf_test_token')
+    @patch("src.services.huggingface_client.Config.HUG_API_KEY", "hf_test_token")
     def test_get_huggingface_client(self):
         """Test getting Hugging Face client"""
         client = get_huggingface_client()
         try:
             assert client is not None
-            assert str(client.base_url).rstrip('/') == "https://router.huggingface.co/v1"
+            assert str(client.base_url).rstrip("/") == "https://router.huggingface.co/v1"
         finally:
             client.close()
 
-    @patch('src.services.huggingface_client.Config.HUG_API_KEY', None)
+    @patch("src.services.huggingface_client.Config.HUG_API_KEY", None)
     def test_get_huggingface_client_no_key(self):
         """Test getting Hugging Face client without API key"""
         with pytest.raises(ValueError, match="Hugging Face API key"):
             get_huggingface_client()
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_make_huggingface_request_openai(self, mock_get_client):
         """Test making request to Hugging Face"""
         # Mock the client and response
@@ -65,7 +67,7 @@ class TestHuggingFaceClient:
         assert sent_payload["model"] == "meta-llama/Llama-2-7b-chat-hf:hf-inference"
         mock_client.close.assert_called_once()
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_make_huggingface_request_openai_stream(self, mock_get_client):
         """Test making streaming request to Hugging Face"""
         from unittest.mock import MagicMock
@@ -97,7 +99,7 @@ class TestHuggingFaceClient:
         assert stream_payload["model"] == "meta-llama/Llama-2-7b-chat-hf:hf-inference"
         mock_client.close.assert_called_once()
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_make_huggingface_request_openai_foreign_namespace(self, mock_get_client):
         """Models scoped to other providers should not be routed through Hugging Face"""
         mock_client = Mock()
@@ -111,7 +113,7 @@ class TestHuggingFaceClient:
         mock_client.post.assert_not_called()
         mock_client.close.assert_called_once()
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_make_huggingface_request_openai_stream_foreign_namespace(self, mock_get_client):
         """Streaming helper should also reject foreign provider models"""
         mock_client = Mock()

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Comprehensive streaming test - Smoke test for production validation"""
-import pytest
-import requests
+
 import json
 import time
+
+import pytest
+import requests
 
 # Mark entire module as smoke test - requires live production server
 pytestmark = pytest.mark.smoke
@@ -13,13 +15,11 @@ pytestmark = pytest.mark.smoke
 def api_config():
     """API configuration for smoke tests"""
     import os
+
     api_key = os.getenv("GATEWAYZ_API_KEY")
     if not api_key:
         pytest.skip("GATEWAYZ_API_KEY environment variable not set")
-    return {
-        "api_key": api_key,
-        "base_url": "https://api.gatewayz.ai"
-    }
+    return {"api_key": api_key, "base_url": "https://api.gatewayz.ai"}
 
 
 def test_streaming_response(api_config):
@@ -33,14 +33,14 @@ def test_streaming_response(api_config):
     url = f"{api_config['base_url']}/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_config['api_key']}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     payload = {
         "model": "openai/gpt-3.5-turbo",
         "messages": [{"role": "user", "content": "Write a haiku about coding"}],
         "stream": True,
-        "max_tokens": 100
+        "max_tokens": 100,
     }
 
     start_time = time.time()
@@ -58,7 +58,7 @@ def test_streaming_response(api_config):
     try:
         for line in response.iter_lines():
             if line:
-                line_str = line.decode('utf-8')
+                line_str = line.decode("utf-8")
                 if line_str.startswith("data: "):
                     data = line_str[6:]
                     if data == "[DONE]":
@@ -105,14 +105,14 @@ def test_non_streaming_response(api_config):
     url = f"{api_config['base_url']}/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_config['api_key']}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     payload = {
         "model": "openai/gpt-3.5-turbo",
         "messages": [{"role": "user", "content": "Write a haiku about coding"}],
         "stream": False,
-        "max_tokens": 100
+        "max_tokens": 100,
     }
 
     response = requests.post(url, headers=headers, json=payload, timeout=30)

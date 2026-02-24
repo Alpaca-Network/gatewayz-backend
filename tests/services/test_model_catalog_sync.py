@@ -2,10 +2,10 @@
 
 from src.services.model_catalog_sync import (
     PROVIDER_FETCH_FUNCTIONS,
-    transform_normalized_model_to_db_schema,
+    extract_capabilities,
     extract_modality,
     extract_pricing,
-    extract_capabilities,
+    transform_normalized_model_to_db_schema,
 )
 
 
@@ -31,9 +31,7 @@ class TestTransformNormalizedModelToDbSchema:
         }
 
         result = transform_normalized_model_to_db_schema(
-            normalized_model,
-            provider_id=1,
-            provider_slug="google-vertex"
+            normalized_model, provider_id=1, provider_slug="google-vertex"
         )
 
         assert result is not None
@@ -54,9 +52,7 @@ class TestTransformNormalizedModelToDbSchema:
         }
 
         result = transform_normalized_model_to_db_schema(
-            normalized_model,
-            provider_id=2,
-            provider_slug="openai"
+            normalized_model, provider_id=2, provider_slug="openai"
         )
 
         assert result is not None
@@ -76,9 +72,7 @@ class TestTransformNormalizedModelToDbSchema:
         }
 
         result = transform_normalized_model_to_db_schema(
-            normalized_model,
-            provider_id=3,
-            provider_slug="anthropic"
+            normalized_model, provider_id=3, provider_slug="anthropic"
         )
 
         assert result is not None
@@ -101,15 +95,14 @@ class TestGoogleVertexProviderModelId:
 
         # Transform to DB schema
         result = transform_normalized_model_to_db_schema(
-            gemini_3_flash,
-            provider_id=1,
-            provider_slug="google-vertex"
+            gemini_3_flash, provider_id=1, provider_slug="google-vertex"
         )
 
         assert result is not None
         assert result["model_id"] == "gemini-3-flash"
-        assert result["provider_model_id"] == "gemini-3-flash-preview", \
-            "Gemini 3 Flash should have provider_model_id 'gemini-3-flash-preview' for proper DB lookup"
+        assert (
+            result["provider_model_id"] == "gemini-3-flash-preview"
+        ), "Gemini 3 Flash should have provider_model_id 'gemini-3-flash-preview' for proper DB lookup"
 
     def test_gemini_3_pro_provider_model_id(self):
         """Test that Gemini 3 Pro models have correct provider_model_id."""
@@ -123,15 +116,14 @@ class TestGoogleVertexProviderModelId:
 
         # Transform to DB schema
         result = transform_normalized_model_to_db_schema(
-            gemini_3_pro,
-            provider_id=1,
-            provider_slug="google-vertex"
+            gemini_3_pro, provider_id=1, provider_slug="google-vertex"
         )
 
         assert result is not None
         assert result["model_id"] == "gemini-3-pro"
-        assert result["provider_model_id"] == "gemini-3-pro-preview", \
-            "Gemini 3 Pro should have provider_model_id 'gemini-3-pro-preview' for proper DB lookup"
+        assert (
+            result["provider_model_id"] == "gemini-3-pro-preview"
+        ), "Gemini 3 Pro should have provider_model_id 'gemini-3-pro-preview' for proper DB lookup"
 
     def test_gemini_2_models_same_provider_model_id(self):
         """Test that Gemini 2.x models have same model_id and provider_model_id."""
@@ -145,9 +137,7 @@ class TestGoogleVertexProviderModelId:
 
         # Transform to DB schema
         result = transform_normalized_model_to_db_schema(
-            gemini_25_flash,
-            provider_id=1,
-            provider_slug="google-vertex"
+            gemini_25_flash, provider_id=1, provider_slug="google-vertex"
         )
 
         assert result is not None
@@ -288,11 +278,13 @@ class TestProviderFetchFunctionsRegistry:
         ]
         for provider in expected_providers:
             assert provider in PROVIDER_FETCH_FUNCTIONS, f"Provider '{provider}' not registered"
-            assert callable(PROVIDER_FETCH_FUNCTIONS[provider]), \
-                f"Provider '{provider}' fetch function is not callable"
+            assert callable(
+                PROVIDER_FETCH_FUNCTIONS[provider]
+            ), f"Provider '{provider}' fetch function is not callable"
 
     def test_provider_count(self):
         """Test that we have the expected number of providers registered."""
         # 28 providers total after adding the missing ones
-        assert len(PROVIDER_FETCH_FUNCTIONS) >= 28, \
-            f"Expected at least 28 providers, got {len(PROVIDER_FETCH_FUNCTIONS)}"
+        assert (
+            len(PROVIDER_FETCH_FUNCTIONS) >= 28
+        ), f"Expected at least 28 providers, got {len(PROVIDER_FETCH_FUNCTIONS)}"

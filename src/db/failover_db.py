@@ -15,7 +15,7 @@ def get_providers_for_model(
     model_id: str,
     active_only: bool = True,
     healthy_only: bool = False,
-    min_success_rate: float = 0.0
+    min_success_rate: float = 0.0,
 ) -> list[dict[str, Any]]:
     """
     Get all providers that offer a specific model, sorted by health and performance
@@ -60,8 +60,7 @@ def get_providers_for_model(
 
         # Query models table with provider join and pricing from model_pricing table
         # Note: model_id column was removed - now use model_name as canonical identifier
-        query = supabase.table("models").select(
-            """
+        query = supabase.table("models").select("""
             id,
             model_name,
             provider_model_id,
@@ -90,8 +89,7 @@ def get_providers_for_model(
                 supports_function_calling,
                 supports_vision
             )
-            """
-        )
+            """)
 
         # Filter by model_name (canonical name)
         query = query.eq("model_name", model_id)
@@ -136,29 +134,24 @@ def get_providers_for_model(
                 "provider_health_status": provider_info["health_status"],
                 "provider_response_time_ms": provider_info["average_response_time_ms"],
                 "provider_is_active": provider_info["is_active"],
-
                 # Model-specific info
                 "model_db_id": row["id"],
                 "model_id": row["model_name"],  # Canonical ID (now using model_name)
                 "provider_model_id": row["provider_model_id"],  # Provider-specific ID
-
                 # Pricing (from model_pricing table - per-token format)
                 "pricing_prompt": pricing_prompt,
                 "pricing_completion": pricing_completion,
                 "pricing_image": pricing_image,
                 "pricing_request": pricing_request,
-
                 # Health
                 "model_health_status": row["health_status"],
                 "model_response_time_ms": row["average_response_time_ms"],
                 "success_rate": float(row["success_rate"]) if row["success_rate"] else 0.0,
-
                 # Capabilities
                 "supports_streaming": row["supports_streaming"],
                 "supports_function_calling": row["supports_function_calling"],
                 "supports_vision": row["supports_vision"],
                 "context_length": row["context_length"],
-
                 # Status
                 "is_active": row["is_active"],
             }
@@ -170,13 +163,17 @@ def get_providers_for_model(
             providers.append(provider)
 
         # Sort by priority (health, speed, cost)
-        providers.sort(key=lambda p: (
-            0 if p["provider_health_status"] == "healthy" else (
-                1 if p["provider_health_status"] == "degraded" else 2
-            ),
-            p["provider_response_time_ms"] or 9999,
-            p["pricing_prompt"]
-        ))
+        providers.sort(
+            key=lambda p: (
+                (
+                    0
+                    if p["provider_health_status"] == "healthy"
+                    else (1 if p["provider_health_status"] == "degraded" else 2)
+                ),
+                p["provider_response_time_ms"] or 9999,
+                p["pricing_prompt"],
+            )
+        )
 
         logger.info(f"Found {len(providers)} providers for model '{model_id}'")
         return providers
@@ -208,13 +205,14 @@ def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> str | 
         supabase = get_supabase_client()
 
         # Note: model_id column was removed - now use model_name as canonical identifier
-        response = supabase.table("models").select(
-            "provider_model_id"
-        ).eq(
-            "model_name", canonical_model_id
-        ).eq(
-            "providers.slug", provider_slug
-        ).single().execute()
+        response = (
+            supabase.table("models")
+            .select("provider_model_id")
+            .eq("model_name", canonical_model_id)
+            .eq("providers.slug", provider_slug)
+            .single()
+            .execute()
+        )
 
         if response.data:
             return response.data["provider_model_id"]
@@ -222,7 +220,9 @@ def get_provider_model_id(canonical_model_id: str, provider_slug: str) -> str | 
         return None
 
     except Exception as e:
-        logger.warning(f"Could not find provider model ID for {canonical_model_id} on {provider_slug}: {e}")
+        logger.warning(
+            f"Could not find provider model ID for {canonical_model_id} on {provider_slug}: {e}"
+        )
         return None
 
 
@@ -239,15 +239,14 @@ def get_healthy_providers(min_success_rate: float = 80.0) -> list[dict[str, Any]
     try:
         supabase = get_supabase_client()
 
-        response = supabase.table("providers").select(
-            "*"
-        ).eq(
-            "is_active", True
-        ).eq(
-            "health_status", "healthy"
-        ).order(
-            "average_response_time_ms", desc=False
-        ).execute()
+        response = (
+            supabase.table("providers")
+            .select("*")
+            .eq("is_active", True)
+            .eq("health_status", "healthy")
+            .order("average_response_time_ms", desc=False)
+            .execute()
+        )
 
         return response.data or []
 
@@ -256,10 +255,7 @@ def get_healthy_providers(min_success_rate: float = 80.0) -> list[dict[str, Any]
         return []
 
 
-def check_model_available_on_provider(
-    model_id: str,
-    provider_slug: str
-) -> bool:
+def check_model_available_on_provider(model_id: str, provider_slug: str) -> bool:
     """
     Check if a specific model is available on a provider
 
@@ -274,17 +270,15 @@ def check_model_available_on_provider(
         supabase = get_supabase_client()
 
         # Note: model_id column was removed - now use model_name as canonical identifier
-        response = supabase.table("models").select(
-            "id"
-        ).eq(
-            "model_name", model_id
-        ).eq(
-            "is_active", True
-        ).eq(
-            "providers.slug", provider_slug
-        ).eq(
-            "providers.is_active", True
-        ).execute()
+        response = (
+            supabase.table("models")
+            .select("id")
+            .eq("model_name", model_id)
+            .eq("is_active", True)
+            .eq("providers.slug", provider_slug)
+            .eq("providers.is_active", True)
+            .execute()
+        )
 
         return len(response.data or []) > 0
 

@@ -1,6 +1,7 @@
 # tests/services/test_openrouter_client_unit.py
 import importlib
 import types
+
 import pytest
 
 MODULE_PATH = "src.services.openrouter_client"  # <- change if needed
@@ -48,10 +49,7 @@ def test_get_openrouter_client_success(monkeypatch, mod):
     fake_client = FakeOpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key="sk-or-123",
-        default_headers={
-            "HTTP-Referer": "https://gatewayz.example",
-            "X-Title": "Gatewayz"
-        }
+        default_headers={"HTTP-Referer": "https://gatewayz.example", "X-Title": "Gatewayz"},
     )
 
     # Patch the connection pool function to return our fake client
@@ -145,7 +143,7 @@ def test_process_openrouter_response_happy(monkeypatch, mod):
         model = "openrouter/some-model"
         choices = [
             _Choice(0, "assistant", "Hello world", "stop"),
-            _Choice(1, "assistant", "Another", "length")
+            _Choice(1, "assistant", "Another", "length"),
         ]
         usage = _Usage(10, 20, 30)
 
@@ -214,17 +212,15 @@ class TestMergeExtraBody:
 
     def test_merge_preserves_existing_provider_settings(self, mod):
         """Existing provider settings should be preserved and merged."""
-        result = mod._merge_extra_body({
-            "extra_body": {"provider": {"order": ["anthropic", "openai"]}}
-        })
+        result = mod._merge_extra_body(
+            {"extra_body": {"provider": {"order": ["anthropic", "openai"]}}}
+        )
         assert result["extra_body"]["provider"]["order"] == ["anthropic", "openai"]
         assert result["extra_body"]["provider"]["data_collection"] == "allow"
 
     def test_user_can_override_data_collection(self, mod):
         """User-provided data_collection should override the default."""
-        result = mod._merge_extra_body({
-            "extra_body": {"provider": {"data_collection": "deny"}}
-        })
+        result = mod._merge_extra_body({"extra_body": {"provider": {"data_collection": "deny"}}})
         # User's explicit setting takes precedence
         assert result["extra_body"]["provider"]["data_collection"] == "deny"
 

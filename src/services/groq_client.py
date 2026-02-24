@@ -12,11 +12,15 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
-from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
+from src.services.circuit_breaker import (
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    get_circuit_breaker,
+)
 from src.services.connection_pool import get_groq_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.sentry_context import capture_provider_error
 
@@ -83,20 +87,17 @@ def make_groq_request_openai(messages, model, **kwargs):
 
     try:
         response = circuit_breaker.call(
-            _make_groq_request_openai_internal,
-            messages,
-            model,
-            **kwargs
+            _make_groq_request_openai_internal, messages, model, **kwargs
         )
         return response
     except CircuitBreakerError as e:
         logger.warning(f"Groq circuit breaker OPEN: {e.message}")
         capture_provider_error(
             e,
-            provider='groq',
+            provider="groq",
             model=model,
-            endpoint='/chat/completions',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except Exception as e:
@@ -107,7 +108,7 @@ def make_groq_request_openai(messages, model, **kwargs):
                 logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
         except UnicodeEncodeError:
             logger.error("Groq request failed (encoding error in logging)")
-        capture_provider_error(e, provider='groq', model=model, endpoint='/chat/completions')
+        capture_provider_error(e, provider="groq", model=model, endpoint="/chat/completions")
         raise
 
 
@@ -141,20 +142,17 @@ def make_groq_request_openai_stream(messages, model, **kwargs):
 
     try:
         stream = circuit_breaker.call(
-            _make_groq_request_openai_stream_internal,
-            messages,
-            model,
-            **kwargs
+            _make_groq_request_openai_stream_internal, messages, model, **kwargs
         )
         return stream
     except CircuitBreakerError as e:
         logger.warning(f"Groq circuit breaker OPEN (streaming): {e.message}")
         capture_provider_error(
             e,
-            provider='groq',
+            provider="groq",
             model=model,
-            endpoint='/chat/completions (stream)',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions (stream)",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except Exception as e:
@@ -165,7 +163,9 @@ def make_groq_request_openai_stream(messages, model, **kwargs):
                 logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
         except UnicodeEncodeError:
             logger.error("Groq streaming request failed (encoding error in logging)")
-        capture_provider_error(e, provider='groq', model=model, endpoint='/chat/completions (stream)')
+        capture_provider_error(
+            e, provider="groq", model=model, endpoint="/chat/completions (stream)"
+        )
         raise
 
 
@@ -226,7 +226,8 @@ def normalize_groq_model(groq_model: dict) -> dict:
     provider_slug = "groq"
 
     raw_display_name = (
-        groq_model.get("display_name") or provider_model_id.replace("-", " ").replace("_", " ").title()
+        groq_model.get("display_name")
+        or provider_model_id.replace("-", " ").replace("_", " ").title()
     )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
@@ -306,14 +307,15 @@ def normalize_groq_model(groq_model: dict) -> dict:
 
 def fetch_models_from_groq():
     """Fetch models from Groq API with step-by-step logging"""
-    from src.utils.step_logger import StepLogger
+    import time
+
     from src.utils.provider_error_logging import (
         ProviderErrorType,
         ProviderFetchContext,
         log_provider_fetch_error,
         log_provider_fetch_success,
     )
-    import time
+    from src.utils.step_logger import StepLogger
 
     start_time = time.time()
     step_logger = StepLogger("Groq Model Fetch", total_steps=4)
@@ -364,14 +366,18 @@ def fetch_models_from_groq():
         step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count)
 
         # Step 4: Cache the models
-        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+        step_logger.step(
+            4, "Caching models", cache_type="redis+local", model_count=len(normalized_models)
+        )
 
         cache_gateway_catalog("groq", normalized_models)
         step_logger.success(cached_count=len(normalized_models))
 
         # Complete with summary
         duration = time.time() - start_time
-        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+        step_logger.complete(
+            total_models=len(normalized_models), duration_seconds=f"{duration:.2f}"
+        )
 
         # Log success with provider_error_logging utility
         log_provider_fetch_success(
@@ -476,7 +482,10 @@ def fetch_models_from_groq():
         step_logger.failure(e)
 
         context = ProviderFetchContext(
-            provider_slug="groq", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+            provider_slug="groq",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.UNKNOWN,
         )
         log_provider_fetch_error("groq", e, context)
 

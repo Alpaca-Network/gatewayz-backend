@@ -8,9 +8,10 @@ Tests cover:
 - Health check endpoint
 """
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -31,6 +32,7 @@ def mock_env_vars(mock_admin_key):
 def client(mock_env_vars):
     """Create a test client with mocked environment."""
     from src.main import create_app
+
     app = create_app()
     return TestClient(app)
 
@@ -96,7 +98,7 @@ class TestOtelInitialize:
 
             response = client.post(
                 "/api/instrumentation/otel/initialize",
-                headers={"Authorization": f"Bearer {mock_admin_key}"}
+                headers={"Authorization": f"Bearer {mock_admin_key}"},
             )
             # Should succeed or return info about current state
             assert response.status_code == 200
@@ -119,7 +121,7 @@ class TestOtelInitialize:
 
             response = client.post(
                 "/api/instrumentation/otel/initialize",
-                headers={"Authorization": f"Bearer {mock_admin_key}"}
+                headers={"Authorization": f"Bearer {mock_admin_key}"},
             )
             assert response.status_code == 200
             data = response.json()
@@ -145,7 +147,7 @@ class TestOtelReinitialize:
 
             response = client.post(
                 "/api/instrumentation/otel/reinitialize",
-                headers={"Authorization": f"Bearer {mock_admin_key}"}
+                headers={"Authorization": f"Bearer {mock_admin_key}"},
             )
             assert response.status_code == 200
             # Verify shutdown was called
@@ -169,7 +171,7 @@ class TestOtelStatus:
 
             response = client.get(
                 "/api/instrumentation/otel/status",
-                headers={"Authorization": f"Bearer {mock_admin_key}"}
+                headers={"Authorization": f"Bearer {mock_admin_key}"},
             )
             assert response.status_code == 200
             data = response.json()
@@ -254,8 +256,9 @@ class TestEndpointReachabilityCheck:
 
     def test_check_endpoint_reachable_dns_failure(self):
         """Test reachability check with DNS failure."""
-        from src.config.opentelemetry_config import _check_endpoint_reachable
         import socket
+
+        from src.config.opentelemetry_config import _check_endpoint_reachable
 
         with patch("socket.getaddrinfo", side_effect=socket.gaierror("DNS failed")):
             result = _check_endpoint_reachable("http://nonexistent.invalid:4318")

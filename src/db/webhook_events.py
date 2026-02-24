@@ -5,7 +5,7 @@ Handles storage and retrieval of processed Stripe webhook events for idempotency
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.supabase_config import execute_with_retry
@@ -136,7 +136,9 @@ def get_processed_event(event_id: str) -> dict[str, Any] | None:
     try:
 
         def _get_event(client):
-            return client.table("stripe_webhook_events").select("*").eq("event_id", event_id).execute()
+            return (
+                client.table("stripe_webhook_events").select("*").eq("event_id", event_id).execute()
+            )
 
         result = execute_with_retry(_get_event, max_retries=2, retry_delay=0.2)
 
@@ -166,7 +168,9 @@ def cleanup_old_events(days: int = 90) -> int:
         cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC).isoformat()
 
         def _cleanup_events(client):
-            return client.table("stripe_webhook_events").delete().lt("created_at", cutoff_dt).execute()
+            return (
+                client.table("stripe_webhook_events").delete().lt("created_at", cutoff_dt).execute()
+            )
 
         result = execute_with_retry(_cleanup_events, max_retries=2, retry_delay=0.2)
 

@@ -36,16 +36,16 @@ class TestUniqueModelsBasic:
         # If we have data, verify structure
         if db_models:
             model = db_models[0]
-            assert 'unique_model_id' in model, "Should have unique_model_id"
-            assert 'model_name' in model, "Should have model_name"
-            assert 'providers' in model, "Should have providers array"
-            assert isinstance(model['providers'], list), "Providers should be a list"
+            assert "unique_model_id" in model, "Should have unique_model_id"
+            assert "model_name" in model, "Should have model_name"
+            assert "providers" in model, "Should have providers array"
+            assert isinstance(model["providers"], list), "Providers should be a list"
 
             # Verify provider structure if providers exist
-            if model['providers']:
-                provider = model['providers'][0]
-                assert 'provider_slug' in provider, "Provider should have slug"
-                assert 'pricing_prompt' in provider, "Provider should have pricing"
+            if model["providers"]:
+                provider = model["providers"][0]
+                assert "provider_slug" in provider, "Provider should have slug"
+                assert "pricing_prompt" in provider, "Provider should have pricing"
 
     def test_database_layer_transformation(self):
         """Test database-to-API transformation."""
@@ -62,15 +62,15 @@ class TestUniqueModelsBasic:
             api_model = transform_unique_model_to_api_format(db_models[0])
 
             # Verify API format
-            assert 'id' in api_model, "Should have id"
-            assert 'name' in api_model, "Should have name"
-            assert 'providers' in api_model, "Should have providers array"
-            assert 'provider_count' in api_model, "Should have provider_count"
-            assert 'cheapest_provider' in api_model, "Should have cheapest_provider"
-            assert 'fastest_provider' in api_model, "Should have fastest_provider"
+            assert "id" in api_model, "Should have id"
+            assert "name" in api_model, "Should have name"
+            assert "providers" in api_model, "Should have providers array"
+            assert "provider_count" in api_model, "Should have provider_count"
+            assert "cheapest_provider" in api_model, "Should have cheapest_provider"
+            assert "fastest_provider" in api_model, "Should have fastest_provider"
 
             # Verify provider_count matches array length
-            assert api_model['provider_count'] == len(api_model['providers'])
+            assert api_model["provider_count"] == len(api_model["providers"])
 
     def test_service_layer_unique_models_cache(self):
         """Test service layer unique models caching."""
@@ -85,9 +85,9 @@ class TestUniqueModelsBasic:
         # If we have models, verify API format
         if models:
             model = models[0]
-            assert 'id' in model, "Should have id"
-            assert 'providers' in model, "Should have providers array"
-            assert isinstance(model['providers'], list), "Providers should be a list"
+            assert "id" in model, "Should have id"
+            assert "providers" in model, "Should have providers array"
+            assert isinstance(model["providers"], list), "Providers should be a list"
 
     def test_service_layer_get_cached_models_flat_mode(self):
         """Test backward compatibility - flat mode."""
@@ -112,8 +112,8 @@ class TestUniqueModelsBasic:
         # If we have models, verify unique format
         if models:
             model = models[0]
-            assert 'providers' in model, "Should have providers array"
-            assert 'provider_count' in model, "Should have provider_count"
+            assert "providers" in model, "Should have providers array"
+            assert "provider_count" in model, "Should have provider_count"
 
     def test_route_layer_default_behavior(self, client):
         """Test /models endpoint default behavior (backward compatibility)."""
@@ -142,9 +142,9 @@ class TestUniqueModelsBasic:
         # If we have models, verify unique structure
         if models:
             model = models[0]
-            assert 'providers' in model, "Should have providers array"
-            assert isinstance(model['providers'], list), "Providers should be a list"
-            assert 'provider_count' in model, "Should have provider_count"
+            assert "providers" in model, "Should have providers array"
+            assert isinstance(model["providers"], list), "Providers should be a list"
+            assert "provider_count" in model, "Should have provider_count"
 
     def test_route_layer_unique_models_with_specific_gateway(self, client):
         """Test that unique_models is ignored for provider-specific queries."""
@@ -168,10 +168,12 @@ class TestUniqueModelsBasic:
 
         # Unique catalog should have fewer or equal entries
         if flat_models and unique_models:
-            assert len(unique_models) <= len(flat_models), \
-                "Unique catalog should have fewer or equal entries than flat catalog"
+            assert len(unique_models) <= len(
+                flat_models
+            ), "Unique catalog should have fewer or equal entries than flat catalog"
 
             # All unique model names should be unique
-            unique_names = [m['name'] for m in unique_models]
-            assert len(unique_names) == len(set(unique_names)), \
-                "All model names in unique catalog should be unique"
+            unique_names = [m["name"] for m in unique_models]
+            assert len(unique_names) == len(
+                set(unique_names)
+            ), "All model names in unique catalog should be unique"

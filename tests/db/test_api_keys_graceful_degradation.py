@@ -4,8 +4,10 @@ Tests for API key creation graceful degradation when tables are missing.
 This tests the fixes for handling missing rate_limit_configs and api_key_audit_logs tables.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from src.db.api_keys import create_api_key, delete_api_key, update_api_key
 
 
@@ -57,9 +59,7 @@ class TestAPIKeyGracefulDegradation:
 
         # Call create_api_key - should NOT raise exception despite missing table
         api_key, key_id = create_api_key(
-            user_id=123,
-            key_name="Test Key",
-            environment_tag="production"
+            user_id=123, key_name="Test Key", environment_tag="production"
         )
 
         # Verify API key was returned successfully
@@ -104,9 +104,7 @@ class TestAPIKeyGracefulDegradation:
 
         # Should succeed despite missing audit logs table
         api_key, key_id = create_api_key(
-            user_id=456,
-            key_name="Test Key 2",
-            environment_tag="staging"
+            user_id=456, key_name="Test Key 2", environment_tag="staging"
         )
 
         assert api_key == "gw_test_key_456"
@@ -146,9 +144,7 @@ class TestAPIKeyGracefulDegradation:
 
         # Should succeed with both tables missing
         api_key, key_id = create_api_key(
-            user_id=789,
-            key_name="Test Key 3",
-            environment_tag="development"
+            user_id=789, key_name="Test Key 3", environment_tag="development"
         )
 
         assert api_key == "gw_test_key_789"
@@ -193,7 +189,9 @@ class TestAPIKeyGracefulDegradation:
 
         # Mock the get operation to return existing key data
         mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[{"id": 1, "key_name": "Old Name", "environment_tag": "production", "user_id": 123}]
+            data=[
+                {"id": 1, "key_name": "Old Name", "environment_tag": "production", "user_id": 123}
+            ]
         )
 
         # Mock successful update but auxiliary operations fail
@@ -213,7 +211,14 @@ class TestAPIKeyGracefulDegradation:
                     )
                 # select also succeeds
                 mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = MagicMock(
-                    data=[{"id": 1, "key_name": "Old Name", "environment_tag": "production", "user_id": 123}]
+                    data=[
+                        {
+                            "id": 1,
+                            "key_name": "Old Name",
+                            "environment_tag": "production",
+                            "user_id": 123,
+                        }
+                    ]
                 )
             return mock_table
 
@@ -223,7 +228,7 @@ class TestAPIKeyGracefulDegradation:
         result = update_api_key(
             api_key="gw_test_key",
             user_id=123,
-            updates={"key_name": "Updated Name", "max_requests": 2000}
+            updates={"key_name": "Updated Name", "max_requests": 2000},
         )
 
         assert result is True
@@ -264,9 +269,7 @@ class TestAPIKeyGracefulDegradation:
         # but the real error should be logged (not suppressed)
         with patch("src.db.api_keys.logger") as mock_logger:
             api_key, key_id = create_api_key(
-                user_id=999,
-                key_name="Error Test Key",
-                environment_tag="test"
+                user_id=999, key_name="Error Test Key", environment_tag="test"
             )
 
             # Verify real error WAS logged (not suppressed)

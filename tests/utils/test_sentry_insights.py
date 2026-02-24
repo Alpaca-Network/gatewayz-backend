@@ -369,12 +369,12 @@ class TestGracefulDegradation:
         """Test that all instrumentation functions work when Sentry is not available."""
         with patch("src.utils.sentry_insights.SENTRY_AVAILABLE", False):
             from src.utils.sentry_insights import (
-                trace_database_query,
-                trace_cache_operation,
-                trace_queue_publish,
-                trace_queue_process,
                 CacheSpanTracker,
                 QueueTracker,
+                trace_cache_operation,
+                trace_database_query,
+                trace_queue_process,
+                trace_queue_publish,
             )
 
             # All should yield None or empty dict without errors

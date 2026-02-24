@@ -294,7 +294,9 @@ class TestCanopywaveClient:
         fake_client.chat.completions.create.return_value = fake_response
 
         monkeypatch.setattr("src.config.Config.CANOPYWAVE_API_KEY", "test-api-key")
-        monkeypatch.setattr("src.services.canopywave_client.get_canopywave_client", lambda: fake_client)
+        monkeypatch.setattr(
+            "src.services.canopywave_client.get_canopywave_client", lambda: fake_client
+        )
 
         messages = [{"role": "user", "content": "Hello"}]
         response = canopywave_client.make_canopywave_request_openai(messages, "test-model")
@@ -313,7 +315,9 @@ class TestCanopywaveClient:
         fake_client.chat.completions.create.return_value = fake_stream
 
         monkeypatch.setattr("src.config.Config.CANOPYWAVE_API_KEY", "test-api-key")
-        monkeypatch.setattr("src.services.canopywave_client.get_canopywave_client", lambda: fake_client)
+        monkeypatch.setattr(
+            "src.services.canopywave_client.get_canopywave_client", lambda: fake_client
+        )
 
         messages = [{"role": "user", "content": "Hello"}]
         stream = canopywave_client.make_canopywave_request_openai_stream(messages, "test-model")

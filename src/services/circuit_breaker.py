@@ -28,18 +28,18 @@ Related Issues: #1043, #1039
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from threading import Lock
 from typing import Any, Callable
 
 from src.config.redis_config import get_redis_client
 from src.services.prometheus_metrics import (
-    circuit_breaker_state_transitions,
-    circuit_breaker_failures,
-    circuit_breaker_successes,
-    circuit_breaker_rejected_requests,
     circuit_breaker_current_state,
+    circuit_breaker_failures,
+    circuit_breaker_rejected_requests,
+    circuit_breaker_state_transitions,
+    circuit_breaker_successes,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 class CircuitState(str, Enum):  # noqa: UP042
     """Circuit breaker states"""
+
     CLOSED = "closed"  # Normal operation
     OPEN = "open"  # Failing, reject requests
     HALF_OPEN = "half_open"  # Testing recovery
@@ -113,7 +114,9 @@ class CircuitBreaker:
         # Rolling window for failure rate calculation
         self._recent_requests: list[tuple[float, bool]] = []  # (timestamp, success)
 
-        logger.info(f"Initialized circuit breaker for provider '{provider}' with config: {self.config}")
+        logger.info(
+            f"Initialized circuit breaker for provider '{provider}' with config: {self.config}"
+        )
 
     def _get_redis_key(self, suffix: str) -> str:
         """Generate Redis key for circuit breaker state"""
@@ -182,8 +185,7 @@ class CircuitBreaker:
 
         # Remove old requests
         self._recent_requests = [
-            (ts, success) for ts, success in self._recent_requests
-            if ts > cutoff
+            (ts, success) for ts, success in self._recent_requests if ts > cutoff
         ]
 
         if len(self._recent_requests) < self.config.min_requests_for_rate:
@@ -221,20 +223,12 @@ class CircuitBreaker:
 
         # Update metrics
         circuit_breaker_state_transitions.labels(
-            provider=self.provider,
-            from_state=old_state.value,
-            to_state=new_state.value
+            provider=self.provider, from_state=old_state.value, to_state=new_state.value
         ).inc()
 
-        circuit_breaker_current_state.labels(
-            provider=self.provider,
-            state=new_state.value
-        ).set(1)
+        circuit_breaker_current_state.labels(provider=self.provider, state=new_state.value).set(1)
 
-        circuit_breaker_current_state.labels(
-            provider=self.provider,
-            state=old_state.value
-        ).set(0)
+        circuit_breaker_current_state.labels(provider=self.provider, state=old_state.value).set(0)
 
         log_msg = f"Circuit breaker for '{self.provider}' transitioned: {old_state.value} → {new_state.value}"
         if reason:
@@ -259,8 +253,7 @@ class CircuitBreaker:
                 now = time.time()
                 if now - self._opened_at >= self.config.timeout_seconds:
                     self._transition_to(
-                        CircuitState.HALF_OPEN,
-                        f"timeout elapsed ({self.config.timeout_seconds}s)"
+                        CircuitState.HALF_OPEN, f"timeout elapsed ({self.config.timeout_seconds}s)"
                     )
                     return True
 
@@ -277,16 +270,13 @@ class CircuitBreaker:
             self._success_count += 1
             self._last_failure_time = 0.0
 
-            circuit_breaker_successes.labels(
-                provider=self.provider,
-                state=self._state.value
-            ).inc()
+            circuit_breaker_successes.labels(provider=self.provider, state=self._state.value).inc()
 
             if self._state == CircuitState.HALF_OPEN:
                 if self._success_count >= self.config.success_threshold:
                     self._transition_to(
                         CircuitState.CLOSED,
-                        f"success threshold reached ({self.config.success_threshold} successes)"
+                        f"success threshold reached ({self.config.success_threshold} successes)",
                     )
 
             self._save_state_to_redis()
@@ -300,10 +290,7 @@ class CircuitBreaker:
             self._success_count = 0
             self._last_failure_time = now
 
-            circuit_breaker_failures.labels(
-                provider=self.provider,
-                state=self._state.value
-            ).inc()
+            circuit_breaker_failures.labels(provider=self.provider, state=self._state.value).inc()
 
             if self._state == CircuitState.HALF_OPEN:
                 # Allow multiple failures in HALF_OPEN before reopening
@@ -311,23 +298,25 @@ class CircuitBreaker:
                 if self._failure_count >= self.config.half_open_max_failures:
                     self._transition_to(
                         CircuitState.OPEN,
-                        f"recovery test failed ({self._failure_count} failures in HALF_OPEN)"
+                        f"recovery test failed ({self._failure_count} failures in HALF_OPEN)",
                     )
             elif self._state == CircuitState.CLOSED:
                 # Check consecutive failures
                 if self._failure_count >= self.config.failure_threshold:
                     self._transition_to(
                         CircuitState.OPEN,
-                        f"failure threshold reached ({self.config.failure_threshold} consecutive failures)"
+                        f"failure threshold reached ({self.config.failure_threshold} consecutive failures)",
                     )
                 else:
                     # Check failure rate
                     failure_rate, total_requests = self._calculate_failure_rate()
-                    if (total_requests >= self.config.min_requests_for_rate and
-                        failure_rate >= self.config.failure_rate_threshold):
+                    if (
+                        total_requests >= self.config.min_requests_for_rate
+                        and failure_rate >= self.config.failure_rate_threshold
+                    ):
                         self._transition_to(
                             CircuitState.OPEN,
-                            f"failure rate threshold reached ({failure_rate:.1%} >= {self.config.failure_rate_threshold:.1%})"
+                            f"failure rate threshold reached ({failure_rate:.1%} >= {self.config.failure_rate_threshold:.1%})",
                         )
 
             self._save_state_to_redis()
@@ -349,15 +338,13 @@ class CircuitBreaker:
             Exception: Any exception raised by func
         """
         if not self._check_should_attempt():
-            circuit_breaker_rejected_requests.labels(
-                provider=self.provider
-            ).inc()
+            circuit_breaker_rejected_requests.labels(provider=self.provider).inc()
 
             raise CircuitBreakerError(
                 provider=self.provider,
                 state=self._state,
                 message=f"Circuit breaker is OPEN for provider '{self.provider}'. "
-                        f"Provider will be retried in {self.config.timeout_seconds}s."
+                f"Provider will be retried in {self.config.timeout_seconds}s.",
             )
 
         try:
@@ -385,15 +372,13 @@ class CircuitBreaker:
             Exception: Any exception raised by func
         """
         if not self._check_should_attempt():
-            circuit_breaker_rejected_requests.labels(
-                provider=self.provider
-            ).inc()
+            circuit_breaker_rejected_requests.labels(provider=self.provider).inc()
 
             raise CircuitBreakerError(
                 provider=self.provider,
                 state=self._state,
                 message=f"Circuit breaker is OPEN for provider '{self.provider}'. "
-                        f"Provider will be retried in {self.config.timeout_seconds}s."
+                f"Provider will be retried in {self.config.timeout_seconds}s.",
             )
 
         try:
@@ -417,8 +402,16 @@ class CircuitBreaker:
                 "success_count": self._success_count,
                 "failure_rate": failure_rate,
                 "recent_requests": total_requests,
-                "opened_at": datetime.fromtimestamp(self._opened_at, tz=UTC).isoformat() if self._opened_at else None,
-                "seconds_until_retry": max(0, int(self.config.timeout_seconds - (time.time() - self._opened_at))) if self._state == CircuitState.OPEN else 0,
+                "opened_at": (
+                    datetime.fromtimestamp(self._opened_at, tz=UTC).isoformat()
+                    if self._opened_at
+                    else None
+                ),
+                "seconds_until_retry": (
+                    max(0, int(self.config.timeout_seconds - (time.time() - self._opened_at)))
+                    if self._state == CircuitState.OPEN
+                    else 0
+                ),
             }
 
     def reset(self) -> None:
@@ -436,7 +429,9 @@ _circuit_breakers: dict[str, CircuitBreaker] = {}
 _registry_lock = Lock()
 
 
-def get_circuit_breaker(provider: str, config: CircuitBreakerConfig | None = None) -> CircuitBreaker:
+def get_circuit_breaker(
+    provider: str, config: CircuitBreakerConfig | None = None
+) -> CircuitBreaker:
     """
     Get or create a circuit breaker for a provider.
 
@@ -456,10 +451,7 @@ def get_circuit_breaker(provider: str, config: CircuitBreakerConfig | None = Non
 def get_all_circuit_breakers() -> dict[str, dict[str, Any]]:
     """Get state of all circuit breakers for monitoring"""
     with _registry_lock:
-        return {
-            provider: breaker.get_state()
-            for provider, breaker in _circuit_breakers.items()
-        }
+        return {provider: breaker.get_state() for provider, breaker in _circuit_breakers.items()}
 
 
 def reset_circuit_breaker(provider: str) -> bool:

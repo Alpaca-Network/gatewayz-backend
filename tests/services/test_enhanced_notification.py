@@ -9,8 +9,9 @@ Tests cover:
 - Email sending skip behavior for invalid emails
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestEmailValidation:
@@ -19,9 +20,12 @@ class TestEmailValidation:
     @pytest.fixture
     def notification_service(self):
         """EnhancedNotificationService instance with mocked dependencies"""
-        with patch('src.enhanced_notification_service.supabase_config'), \
-             patch('src.enhanced_notification_service.resend'):
+        with (
+            patch("src.enhanced_notification_service.supabase_config"),
+            patch("src.enhanced_notification_service.resend"),
+        ):
             from src.enhanced_notification_service import EnhancedNotificationService
+
             service = EnhancedNotificationService()
             service.resend_api_key = "test_key"
             service.from_email = "test@example.com"
@@ -38,8 +42,9 @@ class TestEmailValidation:
             "simple@test.io",
         ]
         for email in valid_emails:
-            assert notification_service._is_valid_email_for_sending(email) is True, \
-                f"Expected {email} to be valid"
+            assert (
+                notification_service._is_valid_email_for_sending(email) is True
+            ), f"Expected {email} to be valid"
 
     def test_privy_fallback_email_rejected(self, notification_service):
         """Test that Privy fallback emails are rejected"""
@@ -49,8 +54,9 @@ class TestEmailValidation:
             "anything@privy.user",
         ]
         for email in privy_emails:
-            assert notification_service._is_valid_email_for_sending(email) is False, \
-                f"Expected {email} to be invalid (Privy fallback)"
+            assert (
+                notification_service._is_valid_email_for_sending(email) is False
+            ), f"Expected {email} to be invalid (Privy fallback)"
 
     def test_empty_email_rejected(self, notification_service):
         """Test that empty/None emails are rejected"""
@@ -65,17 +71,15 @@ class TestEmailValidation:
             "@no-local-part.com",
         ]
         for email in invalid_emails:
-            assert notification_service._is_valid_email_for_sending(email) is False, \
-                f"Expected {email} to be invalid"
+            assert (
+                notification_service._is_valid_email_for_sending(email) is False
+            ), f"Expected {email} to be invalid"
 
-    @patch('src.enhanced_notification_service.resend')
+    @patch("src.enhanced_notification_service.resend")
     def test_send_welcome_email_skips_privy_fallback(self, mock_resend, notification_service):
         """Test that welcome email is skipped for Privy fallback addresses"""
         result = notification_service.send_welcome_email(
-            user_id=123,
-            username="testuser",
-            email="did:privy:abc123@privy.user",
-            credits=5
+            user_id=123, username="testuser", email="did:privy:abc123@privy.user", credits=5
         )
 
         # Should return True (success) without attempting to send
@@ -83,14 +87,14 @@ class TestEmailValidation:
         # Resend should NOT be called
         mock_resend.Emails.send.assert_not_called()
 
-    @patch('src.enhanced_notification_service.resend')
+    @patch("src.enhanced_notification_service.resend")
     def test_send_email_notification_skips_privy_fallback(self, mock_resend, notification_service):
         """Test that email notification is skipped for Privy fallback addresses"""
         result = notification_service.send_email_notification(
             to_email="did:privy:cmjlc79wn01m9l70bqdnfkzqi@privy.user",
             subject="Test Subject",
             html_content="<p>Test</p>",
-            text_content="Test"
+            text_content="Test",
         )
 
         # Should return True (success) without attempting to send
@@ -98,7 +102,7 @@ class TestEmailValidation:
         # Resend should NOT be called
         mock_resend.Emails.send.assert_not_called()
 
-    @patch('src.enhanced_notification_service.resend')
+    @patch("src.enhanced_notification_service.resend")
     def test_send_email_notification_sends_valid_email(self, mock_resend, notification_service):
         """Test that valid emails are sent normally"""
         mock_resend.Emails.send.return_value = {"id": "test-email-id"}
@@ -107,7 +111,7 @@ class TestEmailValidation:
             to_email="valid@example.com",
             subject="Test Subject",
             html_content="<p>Test</p>",
-            text_content="Test"
+            text_content="Test",
         )
 
         # Should return True and call Resend
@@ -121,9 +125,12 @@ class TestEdgeCases:
     @pytest.fixture
     def notification_service(self):
         """EnhancedNotificationService instance with mocked dependencies"""
-        with patch('src.enhanced_notification_service.supabase_config'), \
-             patch('src.enhanced_notification_service.resend'):
+        with (
+            patch("src.enhanced_notification_service.supabase_config"),
+            patch("src.enhanced_notification_service.resend"),
+        ):
             from src.enhanced_notification_service import EnhancedNotificationService
+
             service = EnhancedNotificationService()
             return service
 
@@ -143,16 +150,15 @@ class TestEdgeCases:
             "user@privyuser.com",
         ]
         for email in valid_emails:
-            assert notification_service._is_valid_email_for_sending(email) is True, \
-                f"Expected {email} to be valid (not @privy.user domain)"
+            assert (
+                notification_service._is_valid_email_for_sending(email) is True
+            ), f"Expected {email} to be valid (not @privy.user domain)"
 
     def test_password_reset_validates_email_before_token_creation(self, notification_service):
         """Test that password reset validates email BEFORE creating token"""
-        with patch.object(notification_service, '_is_valid_email_for_sending', return_value=False):
+        with patch.object(notification_service, "_is_valid_email_for_sending", return_value=False):
             # Should return None without creating token
             result = notification_service.send_password_reset_email(
-                user_id=1,
-                username="test",
-                email="invalid@privy.user"
+                user_id=1, username="test", email="invalid@privy.user"
             )
             assert result is None

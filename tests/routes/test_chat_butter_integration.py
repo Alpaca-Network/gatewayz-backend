@@ -86,7 +86,9 @@ class TestButterProviderConfig:
         for provider, config in BUTTER_PROVIDER_CONFIG.items():
             assert "api_key_attr" in config, f"{provider} missing api_key_attr"
             assert "base_url" in config, f"{provider} missing base_url"
-            assert config["api_key_attr"].endswith("_API_KEY"), f"{provider} api_key_attr should end with _API_KEY"
+            assert config["api_key_attr"].endswith(
+                "_API_KEY"
+            ), f"{provider} api_key_attr should end with _API_KEY"
             assert config["base_url"].startswith("https://"), f"{provider} base_url should be HTTPS"
 
 
@@ -199,8 +201,7 @@ class TestButterCacheHeaderLogic:
         # Test system_disabled
         mock_config.BUTTER_DEV_ENABLED = False
         use_cache, reason = should_use_butter_cache(
-            {"id": 1, "preferences": {"enable_butter_cache": True}},
-            "openrouter"
+            {"id": 1, "preferences": {"enable_butter_cache": True}}, "openrouter"
         )
         assert reason == "system_disabled"
 
@@ -211,22 +212,19 @@ class TestButterCacheHeaderLogic:
 
         # Test user_preference_disabled
         use_cache, reason = should_use_butter_cache(
-            {"id": 1, "preferences": {"enable_butter_cache": False}},
-            "openrouter"
+            {"id": 1, "preferences": {"enable_butter_cache": False}}, "openrouter"
         )
         assert reason == "user_preference_disabled"
 
         # Test provider_incompatible
         use_cache, reason = should_use_butter_cache(
-            {"id": 1, "preferences": {"enable_butter_cache": True}},
-            "anthropic"
+            {"id": 1, "preferences": {"enable_butter_cache": True}}, "anthropic"
         )
         assert "provider_incompatible" in reason
 
         # Test enabled
         use_cache, reason = should_use_butter_cache(
-            {"id": 1, "preferences": {"enable_butter_cache": True}},
-            "openrouter"
+            {"id": 1, "preferences": {"enable_butter_cache": True}}, "openrouter"
         )
         assert reason == "enabled"
         assert use_cache is True

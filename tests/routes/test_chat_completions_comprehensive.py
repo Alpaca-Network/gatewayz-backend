@@ -8,11 +8,11 @@ Tests the following:
 - Response structure
 """
 
-import pytest
-from fastapi.testclient import TestClient
 import json
 import os
 
+import pytest
+from fastapi.testclient import TestClient
 
 # Test API key and model (must be provided via environment variables)
 # These should be set before running tests that require authentication
@@ -24,6 +24,7 @@ TEST_MODEL = os.getenv("TEST_MODEL", "gpt-3.5-turbo")
 def client():
     """Create test client for FastAPI app."""
     from src.main import create_app
+
     app = create_app()
     return TestClient(app)
 
@@ -371,7 +372,7 @@ class TestChatCompletionsResponseStructure:
         # Check choice structure
         choice = data["choices"][0]
         assert "index" in choice
-        assert ("message" in choice or "delta" in choice)
+        assert "message" in choice or "delta" in choice
 
         print("✅ Chat completions response structure valid")
         print(f"   ID: {data.get('id')}")

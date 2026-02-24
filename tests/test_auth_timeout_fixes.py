@@ -7,28 +7,29 @@ These tests validate that:
 4. Connection pool is monitored properly
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import json
+from unittest.mock import MagicMock, Mock, patch
 
-from src.services.query_timeout import (
-    execute_with_timeout,
-    safe_query_with_timeout,
-    QueryTimeoutError,
-    AUTH_QUERY_TIMEOUT,
-    USER_LOOKUP_TIMEOUT,
-)
+import pytest
+
 from src.services.auth_cache import (
     cache_user_by_privy_id,
-    get_cached_user_by_privy_id,
     cache_user_by_username,
+    get_cached_user_by_privy_id,
     get_cached_user_by_username,
     invalidate_user_cache,
 )
 from src.services.connection_pool_monitor import (
     ConnectionPoolStats,
-    get_supabase_pool_stats,
     check_pool_health_and_warn,
+    get_supabase_pool_stats,
+)
+from src.services.query_timeout import (
+    AUTH_QUERY_TIMEOUT,
+    USER_LOOKUP_TIMEOUT,
+    QueryTimeoutError,
+    execute_with_timeout,
+    safe_query_with_timeout,
 )
 
 
@@ -38,6 +39,7 @@ class TestQueryTimeout:
 
     def test_execute_with_timeout_success(self):
         """Test successful execution within timeout."""
+
         def quick_operation():
             return {"result": "success"}
 
@@ -80,6 +82,7 @@ class TestQueryTimeout:
 
     def test_safe_query_with_timeout_exception_fallback(self):
         """Test that fallback value is returned on exception."""
+
         def failing_operation():
             raise ValueError("Database error")
 

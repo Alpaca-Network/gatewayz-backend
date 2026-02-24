@@ -17,7 +17,6 @@ These tests validate:
 import pytest
 from fastapi.testclient import TestClient
 
-
 # Sybil models available via the API
 SYBIL_MODELS = [
     "deepseek-ai/DeepSeek-V3-0324",

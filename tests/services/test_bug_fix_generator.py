@@ -10,24 +10,26 @@ Tests cover:
 - Request/response logging
 """
 
-import pytest
-from unittest.mock import AsyncMock, Mock, patch, MagicMock
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import httpx
+import pytest
 
 from src.services.bug_fix_generator import (
-    BugFixGenerator,
-    BugFix,
-    MAX_PROMPT_LENGTH,
     MAX_ERROR_MESSAGE_LENGTH,
+    MAX_PROMPT_LENGTH,
+    BugFix,
+    BugFixGenerator,
 )
-from src.services.error_monitor import ErrorPattern, ErrorCategory, ErrorSeverity
+from src.services.error_monitor import ErrorCategory, ErrorPattern, ErrorSeverity
 
 
 @pytest.fixture
 def mock_anthropic_key(monkeypatch):
     """Mock ANTHROPIC_API_KEY in Config class."""
     from src.config import config
+
     monkeypatch.setattr(config.Config, "ANTHROPIC_API_KEY", "sk-ant-test-key-1234567890")
     monkeypatch.setattr(config.Config, "ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
     return "sk-ant-test-key-1234567890"
@@ -57,6 +59,7 @@ class TestBugFixGeneratorInitialization:
     def test_init_without_api_key(self, monkeypatch):
         """Test that initialization fails without ANTHROPIC_API_KEY."""
         from src.config import config
+
         monkeypatch.setattr(config.Config, "ANTHROPIC_API_KEY", None)
 
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY is not configured"):
@@ -73,6 +76,7 @@ class TestBugFixGeneratorInitialization:
     def test_init_with_invalid_key_format(self, monkeypatch, caplog):
         """Test warning when API key doesn't start with sk-ant-."""
         from src.config import config
+
         monkeypatch.setattr(config.Config, "ANTHROPIC_API_KEY", "invalid-key-format")
 
         with caplog.at_level("WARNING"):
@@ -82,6 +86,7 @@ class TestBugFixGeneratorInitialization:
     def test_init_with_github_token(self, mock_anthropic_key, monkeypatch):
         """Test initialization with GitHub token."""
         from src.config import config
+
         monkeypatch.setattr(config.Config, "GITHUB_TOKEN", "ghp_test_token")
 
         generator = BugFixGenerator()
@@ -90,6 +95,7 @@ class TestBugFixGeneratorInitialization:
     def test_init_with_custom_model(self, mock_anthropic_key, monkeypatch):
         """Test initialization with custom ANTHROPIC_MODEL."""
         from src.config import config
+
         monkeypatch.setattr(config.Config, "ANTHROPIC_MODEL", "claude-opus-4-1-20250805")
 
         generator = BugFixGenerator()
@@ -298,9 +304,7 @@ class TestErrorAnalysis:
             assert "failed" in analysis.lower()
 
     @pytest.mark.asyncio
-    async def test_analyze_error_sanitizes_long_messages(
-        self, mock_anthropic_key
-    ):
+    async def test_analyze_error_sanitizes_long_messages(self, mock_anthropic_key):
         """Test that error analysis sanitizes long error messages."""
         generator = BugFixGenerator()
         await generator.initialize()
@@ -473,9 +477,7 @@ class TestRetryLogic:
                 raise httpx.TimeoutException("Timeout")
             mock_response = Mock()
             mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "content": [{"text": "Success", "type": "text"}]
-            }
+            mock_response.json.return_value = {"content": [{"text": "Success", "type": "text"}]}
             return mock_response
 
         with patch.object(httpx.AsyncClient, "post", side_effect=mock_post):
@@ -535,9 +537,7 @@ class TestRequestLogging:
 
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "content": [{"text": "Success", "type": "text"}]
-        }
+        mock_response.json.return_value = {"content": [{"text": "Success", "type": "text"}]}
 
         with caplog.at_level("DEBUG"):
             with patch.object(httpx.AsyncClient, "post", return_value=mock_response):
@@ -545,8 +545,12 @@ class TestRequestLogging:
 
             # Check for correlation ID in logs
             assert any("test123" in record.message for record in caplog.records)
-            assert any("Sending request to Claude API" in record.message for record in caplog.records)
-            assert any("Successfully received response" in record.message for record in caplog.records)
+            assert any(
+                "Sending request to Claude API" in record.message for record in caplog.records
+            )
+            assert any(
+                "Successfully received response" in record.message for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_request_logging_error(self, mock_anthropic_key, caplog):

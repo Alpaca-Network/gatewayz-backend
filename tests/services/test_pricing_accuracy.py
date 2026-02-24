@@ -11,17 +11,18 @@ Created: 2026-01-22
 Purpose: Validate pricing system end-to-end
 """
 
+from decimal import Decimal
+
 import httpx
 import pytest
-from decimal import Decimal
 
 from src.services.pricing import calculate_cost, get_model_pricing
 from src.services.pricing_normalization import (
-    normalize_to_per_token,
-    normalize_pricing_dict,
-    get_provider_format,
-    validate_normalized_price,
     PricingFormat,
+    get_provider_format,
+    normalize_pricing_dict,
+    normalize_to_per_token,
+    validate_normalized_price,
 )
 
 
@@ -41,10 +42,7 @@ class TestProviderAPIFormats:
         """
         try:
             # Fetch actual OpenRouter pricing for a known model
-            response = httpx.get(
-                "https://openrouter.ai/api/v1/models",
-                timeout=10.0
-            )
+            response = httpx.get("https://openrouter.ai/api/v1/models", timeout=10.0)
             response.raise_for_status()
             models = response.json().get("data", [])
 
@@ -75,8 +73,7 @@ class TestProviderAPIFormats:
             # We expect approximately 0.00000015
             expected_per_token = 0.15 / 1_000_000
             assert abs(prompt_price - expected_per_token) < 0.00000001, (
-                f"Expected ~{expected_per_token} for GPT-4o-mini input, "
-                f"got {prompt_price}"
+                f"Expected ~{expected_per_token} for GPT-4o-mini input, " f"got {prompt_price}"
             )
 
             print(f"✓ OpenRouter returns per-token pricing: {prompt_price}")
@@ -99,9 +96,7 @@ class TestProviderAPIFormats:
         deepinfra_pricing = pricing_data.get("deepinfra", {})
         llama_pricing = deepinfra_pricing.get("meta-llama/Meta-Llama-3.1-8B-Instruct", {})
 
-        assert llama_pricing.get("prompt") == "0.055", (
-            "Manual pricing format has changed!"
-        )
+        assert llama_pricing.get("prompt") == "0.055", "Manual pricing format has changed!"
 
         # This should be per-1M format (DeepInfra charges $0.055 per 1M tokens)
         # NOT per-token format (which would be 0.000000055)
@@ -143,12 +138,7 @@ class TestPricingNormalization:
 
     def test_normalize_pricing_dict(self):
         """Test normalizing a full pricing dictionary"""
-        pricing = {
-            "prompt": "0.055",
-            "completion": "0.08",
-            "image": "0",
-            "request": "0"
-        }
+        pricing = {"prompt": "0.055", "completion": "0.08", "image": "0", "request": "0"}
 
         result = normalize_pricing_dict(pricing, PricingFormat.PER_1M_TOKENS)
 
@@ -293,8 +283,7 @@ class TestEndToEndPricing:
         expected_cost = (1000 * expected_prompt) + (500 * expected_completion)
 
         assert abs(cost - expected_cost) / expected_cost < 0.1, (
-            f"Cost calculation is off: expected ${expected_cost:.6f}, "
-            f"got ${cost:.6f}"
+            f"Cost calculation is off: expected ${expected_cost:.6f}, " f"got ${cost:.6f}"
         )
 
         print("✓ GPT-4o-mini end-to-end pricing verified")
@@ -318,13 +307,13 @@ class TestPricingConsistency:
             "prompt": "0.00000015",  # Already per-token
             "completion": "0.0000006",  # Already per-token
             "request": "0",
-            "image": "0"
+            "image": "0",
         }
 
         # If we incorrectly normalize this as per-1M...
         incorrectly_normalized = normalize_pricing_dict(
             openrouter_response_pricing,
-            PricingFormat.PER_1M_TOKENS  # WRONG! OpenRouter is already per-token
+            PricingFormat.PER_1M_TOKENS,  # WRONG! OpenRouter is already per-token
         )
 
         # The result is 1M times too cheap
@@ -333,9 +322,9 @@ class TestPricingConsistency:
 
         # This shows the bug
         ratio = correct_price / wrong_price
-        assert abs(ratio - 1_000_000) < 1, (
-            f"Normalizing OpenRouter pricing as per-1M makes it {ratio:.0f}x cheaper!"
-        )
+        assert (
+            abs(ratio - 1_000_000) < 1
+        ), f"Normalizing OpenRouter pricing as per-1M makes it {ratio:.0f}x cheaper!"
 
         print(f"✗ BUG CONFIRMED: Treating OpenRouter as per-1M makes prices {ratio:.0f}x too cheap")
 
@@ -343,12 +332,15 @@ class TestPricingConsistency:
 class TestKnownModelPricing:
     """Test pricing for known models against public pricing pages"""
 
-    @pytest.mark.parametrize("model_id,expected_input_per_1m,expected_output_per_1m", [
-        ("openai/gpt-4o-mini", 0.15, 0.60),
-        ("openai/gpt-4o", 2.50, 10.00),
-        ("anthropic/claude-3-5-sonnet", 3.00, 15.00),
-        # Add more known models
-    ])
+    @pytest.mark.parametrize(
+        "model_id,expected_input_per_1m,expected_output_per_1m",
+        [
+            ("openai/gpt-4o-mini", 0.15, 0.60),
+            ("openai/gpt-4o", 2.50, 10.00),
+            ("anthropic/claude-3-5-sonnet", 3.00, 15.00),
+            # Add more known models
+        ],
+    )
     def test_known_model_pricing(self, model_id, expected_input_per_1m, expected_output_per_1m):
         """
         Test that known models have correct pricing (within 20% tolerance)

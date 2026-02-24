@@ -76,7 +76,7 @@ async def get_all_circuit_breaker_states():
         logger.error(f"Failed to get circuit breaker states: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve circuit breaker states: {str(e)}"
+            detail=f"Failed to retrieve circuit breaker states: {str(e)}",
         )
 
 
@@ -112,7 +112,7 @@ async def get_circuit_breaker_state(provider: str):
         logger.error(f"Failed to get circuit breaker state for {provider}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve circuit breaker state: {str(e)}"
+            detail=f"Failed to retrieve circuit breaker state: {str(e)}",
         )
 
 
@@ -151,7 +151,7 @@ async def reset_provider_circuit_breaker(provider: str):
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Circuit breaker for provider '{provider}' not found"
+                detail=f"Circuit breaker for provider '{provider}' not found",
             )
 
         breaker = get_circuit_breaker(provider)
@@ -170,7 +170,7 @@ async def reset_provider_circuit_breaker(provider: str):
         logger.error(f"Failed to reset circuit breaker for {provider}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reset circuit breaker: {str(e)}"
+            detail=f"Failed to reset circuit breaker: {str(e)}",
         )
 
 
@@ -216,5 +216,5 @@ async def reset_all_provider_circuit_breakers():
         logger.error(f"Failed to reset all circuit breakers: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to reset circuit breakers: {str(e)}"
+            detail=f"Failed to reset circuit breakers: {str(e)}",
         )

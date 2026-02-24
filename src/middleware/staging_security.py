@@ -79,9 +79,7 @@ class StagingSecurityMiddleware:
         auth_header = headers.get(b"authorization", b"").decode()
 
         if not auth_header.startswith("Bearer "):
-            await self._send_access_denied(
-                send, "Missing or invalid Authorization header", scope
-            )
+            await self._send_access_denied(send, "Missing or invalid Authorization header", scope)
             return
 
         # Extract the API key
@@ -165,9 +163,7 @@ class StagingSecurityMiddleware:
         client = scope.get("client")
         return client[0] if client else "unknown"
 
-    async def _send_access_denied(
-        self, send: Send, reason: str, scope: Scope
-    ) -> None:
+    async def _send_access_denied(self, send: Send, reason: str, scope: Scope) -> None:
         """Send access denied response."""
         body = json.dumps(
             {

@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 def client():
     """Create test client for FastAPI app."""
     from src.main import create_app
+
     app = create_app()
     return TestClient(app)
 
@@ -25,10 +26,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second/all with valid parameters."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "openrouter",
-                "model_id": 1
-            }
+            params={"provider_id": "openrouter", "model_id": 1},
         )
 
         assert response.status_code == 200
@@ -39,8 +37,7 @@ class TestTokensPerSecondEndpoints:
     def test_get_all_tokens_per_second_missing_provider(self, client):
         """Test /tokens-per-second/all without provider_id parameter."""
         response = client.get(
-            "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={"model_id": 1}
+            "/v1/chat/completions/metrics/tokens-per-second/all", params={"model_id": 1}
         )
 
         # Should return 422 or 400 for missing required parameter
@@ -51,7 +48,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second/all without model_id parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={"provider_id": "openrouter"}
+            params={"provider_id": "openrouter"},
         )
 
         # Should return 422 or 400 for missing required parameter
@@ -62,11 +59,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with valid hour parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "hour",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "hour", "model_id": 1, "provider_id": "openrouter"},
         )
 
         assert response.status_code in [200, 403]  # 403 if model not in top 3
@@ -81,11 +74,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with valid week parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "week",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "week", "model_id": 1, "provider_id": "openrouter"},
         )
 
         assert response.status_code in [200, 403]
@@ -99,11 +88,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with valid month parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "month",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "month", "model_id": 1, "provider_id": "openrouter"},
         )
 
         assert response.status_code in [200, 403]
@@ -117,11 +102,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with valid 1year parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "1year",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "1year", "model_id": 1, "provider_id": "openrouter"},
         )
 
         assert response.status_code in [200, 403]
@@ -135,11 +116,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with valid 2year parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "2year",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "2year", "model_id": 1, "provider_id": "openrouter"},
         )
 
         assert response.status_code in [200, 403]
@@ -153,11 +130,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second with invalid time parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "invalid_time",
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"time": "invalid_time", "model_id": 1, "provider_id": "openrouter"},
         )
 
         # Should return 400 for invalid time parameter
@@ -169,10 +142,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second without time parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "model_id": 1,
-                "provider_id": "openrouter"
-            }
+            params={"model_id": 1, "provider_id": "openrouter"},
         )
 
         # Should return 422 for missing required parameter
@@ -183,10 +153,7 @@ class TestTokensPerSecondEndpoints:
         """Test /tokens-per-second without model_id parameter."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "hour",
-                "provider_id": "openrouter"
-            }
+            params={"time": "hour", "provider_id": "openrouter"},
         )
 
         # Should return 422 for missing required parameter
@@ -196,11 +163,7 @@ class TestTokensPerSecondEndpoints:
     def test_get_tokens_per_second_missing_provider(self, client):
         """Test /tokens-per-second without provider_id parameter."""
         response = client.get(
-            "/v1/chat/completions/metrics/tokens-per-second",
-            params={
-                "time": "hour",
-                "model_id": 1
-            }
+            "/v1/chat/completions/metrics/tokens-per-second", params={"time": "hour", "model_id": 1}
         )
 
         # Should return 422 for missing required parameter
@@ -215,10 +178,7 @@ class TestPrometheusFormat:
         """Test that response follows Prometheus text format."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "openrouter",
-                "model_id": 1
-            }
+            params={"provider_id": "openrouter", "model_id": 1},
         )
 
         assert response.status_code == 200
@@ -235,10 +195,7 @@ class TestPrometheusFormat:
         """Test that metrics include proper labels."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "openrouter",
-                "model_id": 1
-            }
+            params={"provider_id": "openrouter", "model_id": 1},
         )
 
         assert response.status_code == 200
@@ -246,10 +203,10 @@ class TestPrometheusFormat:
 
         # If there's data, check for required labels
         if "gatewayz_tokens_per_second{" in text:
-            assert 'model=' in text
-            assert 'provider=' in text
-            assert 'requests=' in text
-            assert 'total_tokens=' in text
+            assert "model=" in text
+            assert "provider=" in text
+            assert "requests=" in text
+            assert "total_tokens=" in text
             print("✅ Prometheus labels present")
         else:
             print("✅ No data available (metrics format still valid)")
@@ -258,10 +215,7 @@ class TestPrometheusFormat:
         """Test that content-type is text/plain."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "openrouter",
-                "model_id": 1
-            }
+            params={"provider_id": "openrouter", "model_id": 1},
         )
 
         assert response.status_code == 200
@@ -276,10 +230,7 @@ class TestErrorHandling:
         """Test error handling with invalid model_id type."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "openrouter",
-                "model_id": "not_a_number"
-            }
+            params={"provider_id": "openrouter", "model_id": "not_a_number"},
         )
 
         # Should return 422 for type validation error
@@ -290,10 +241,7 @@ class TestErrorHandling:
         """Test error handling with empty provider_id."""
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "",
-                "model_id": 1
-            }
+            params={"provider_id": "", "model_id": 1},
         )
 
         # Empty string should be accepted but might not find data
@@ -306,10 +254,7 @@ class TestErrorHandling:
         # Use invalid parameters that might cause server errors
         response = client.get(
             "/v1/chat/completions/metrics/tokens-per-second/all",
-            params={
-                "provider_id": "nonexistent_provider_abc123",
-                "model_id": 999999
-            }
+            params={"provider_id": "nonexistent_provider_abc123", "model_id": 999999},
         )
 
         # Should either return 200 with no data or handle gracefully

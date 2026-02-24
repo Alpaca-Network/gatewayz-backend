@@ -2,18 +2,19 @@
 Tests for Daily Usage Limiter Service
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone, UTC
-from unittest.mock import Mock, patch, MagicMock
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+
+from src.config.usage_limits import DAILY_USAGE_LIMIT
 from src.services.daily_usage_limiter import (
-    get_daily_reset_time,
-    get_daily_usage,
+    DailyUsageLimitExceeded,
     check_daily_usage_limit,
     enforce_daily_usage_limit,
-    DailyUsageLimitExceeded,
+    get_daily_reset_time,
+    get_daily_usage,
 )
-from src.config.usage_limits import DAILY_USAGE_LIMIT
 
 
 class TestDailyResetTime:
@@ -31,7 +32,7 @@ class TestDailyResetTime:
 
     def test_get_daily_reset_time_tomorrow_if_past_midnight(self):
         """Test that reset time is tomorrow if we're past midnight"""
-        with patch('src.services.daily_usage_limiter.datetime') as mock_datetime:
+        with patch("src.services.daily_usage_limiter.datetime") as mock_datetime:
             # Mock current time as 1 AM UTC
             mock_now = datetime(2026, 1, 5, 1, 0, 0, tzinfo=UTC)
             mock_datetime.now.return_value = mock_now
@@ -47,14 +48,16 @@ class TestDailyResetTime:
 class TestDailyUsageTracking:
     """Test daily usage tracking"""
 
-    @patch('src.services.daily_usage_limiter.get_supabase_client')
+    @patch("src.services.daily_usage_limiter.get_supabase_client")
     def test_get_daily_usage_no_transactions(self, mock_client):
         """Test get_daily_usage when user has no transactions"""
         mock_result = Mock()
         mock_result.data = []
 
         mock_table = Mock()
-        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = mock_result
+        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = (
+            mock_result
+        )
 
         mock_client.return_value.table.return_value = mock_table
 
@@ -62,7 +65,7 @@ class TestDailyUsageTracking:
 
         assert usage == 0.0
 
-    @patch('src.services.daily_usage_limiter.get_supabase_client')
+    @patch("src.services.daily_usage_limiter.get_supabase_client")
     def test_get_daily_usage_with_transactions(self, mock_client):
         """Test get_daily_usage with multiple transactions"""
         mock_result = Mock()
@@ -73,7 +76,9 @@ class TestDailyUsageTracking:
         ]
 
         mock_table = Mock()
-        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = mock_result
+        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = (
+            mock_result
+        )
 
         mock_client.return_value.table.return_value = mock_table
 
@@ -81,7 +86,7 @@ class TestDailyUsageTracking:
 
         assert usage == 0.70  # 0.25 + 0.30 + 0.15
 
-    @patch('src.services.daily_usage_limiter.get_supabase_client')
+    @patch("src.services.daily_usage_limiter.get_supabase_client")
     def test_get_daily_usage_error_handling(self, mock_client):
         """Test that errors are handled gracefully"""
         mock_client.side_effect = Exception("Database error")
@@ -95,7 +100,7 @@ class TestDailyUsageTracking:
 class TestDailyUsageLimitCheck:
     """Test daily usage limit checking"""
 
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_daily_usage_limit_within_limit(self, mock_get_usage):
         """Test check when usage is within limit"""
         mock_get_usage.return_value = 0.50  # $0.50 used
@@ -108,7 +113,7 @@ class TestDailyUsageLimitCheck:
         assert result["limit"] == DAILY_USAGE_LIMIT
         assert result["warning_level"] == "ok"
 
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_daily_usage_limit_would_exceed(self, mock_get_usage):
         """Test check when request would exceed limit"""
         mock_get_usage.return_value = 0.90  # $0.90 used
@@ -120,7 +125,7 @@ class TestDailyUsageLimitCheck:
         assert result["remaining"] == 0.10
         assert result["warning_level"] in ("critical", "exceeded")
 
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_daily_usage_limit_warning_threshold(self, mock_get_usage):
         """Test warning level at 80% usage"""
         mock_get_usage.return_value = 0.80  # Exactly at warning threshold
@@ -130,7 +135,7 @@ class TestDailyUsageLimitCheck:
         assert result["allowed"] is True
         assert result["warning_level"] in ("warning", "critical")
 
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_daily_usage_limit_critical_threshold(self, mock_get_usage):
         """Test warning level at 95% usage"""
         mock_get_usage.return_value = 0.95  # At critical threshold
@@ -140,7 +145,7 @@ class TestDailyUsageLimitCheck:
         assert result["allowed"] is True
         assert result["warning_level"] == "critical"
 
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_daily_usage_limit_exceeded(self, mock_get_usage):
         """Test when limit is already exceeded"""
         mock_get_usage.return_value = 1.10  # Already over limit
@@ -155,7 +160,7 @@ class TestDailyUsageLimitCheck:
 class TestEnforceDailyUsageLimit:
     """Test daily usage limit enforcement"""
 
-    @patch('src.services.daily_usage_limiter.check_daily_usage_limit')
+    @patch("src.services.daily_usage_limiter.check_daily_usage_limit")
     def test_enforce_daily_usage_limit_allowed(self, mock_check):
         """Test that enforcement passes when within limit"""
         mock_check.return_value = {
@@ -170,7 +175,7 @@ class TestEnforceDailyUsageLimit:
         # Should not raise exception
         enforce_daily_usage_limit(user_id=123, requested_amount=0.30)
 
-    @patch('src.services.daily_usage_limiter.check_daily_usage_limit')
+    @patch("src.services.daily_usage_limiter.check_daily_usage_limit")
     def test_enforce_daily_usage_limit_exceeded_raises_exception(self, mock_check):
         """Test that enforcement raises exception when limit exceeded"""
         reset_time = datetime.now(UTC) + timedelta(hours=5)
@@ -195,7 +200,7 @@ class TestEnforceDailyUsageLimit:
 class TestDailyUsageLimitIntegration:
     """Integration tests for daily usage limiter"""
 
-    @patch('src.services.daily_usage_limiter.get_supabase_client')
+    @patch("src.services.daily_usage_limiter.get_supabase_client")
     def test_full_workflow_within_limit(self, mock_client):
         """Test full workflow when staying within limit"""
         # Mock transactions showing $0.60 used
@@ -206,7 +211,9 @@ class TestDailyUsageLimitIntegration:
         ]
 
         mock_table = Mock()
-        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = mock_result
+        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = (
+            mock_result
+        )
         mock_client.return_value.table.return_value = mock_table
 
         # Check if $0.25 request is allowed
@@ -216,7 +223,7 @@ class TestDailyUsageLimitIntegration:
         assert result["used"] == 0.60
         assert result["remaining"] == 0.40
 
-    @patch('src.services.daily_usage_limiter.get_supabase_client')
+    @patch("src.services.daily_usage_limiter.get_supabase_client")
     def test_full_workflow_exceeds_limit(self, mock_client):
         """Test full workflow when exceeding limit"""
         # Mock transactions showing $0.95 used
@@ -227,7 +234,9 @@ class TestDailyUsageLimitIntegration:
         ]
 
         mock_table = Mock()
-        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = mock_result
+        mock_table.select.return_value.eq.return_value.gte.return_value.lt.return_value.execute.return_value = (
+            mock_result
+        )
         mock_client.return_value.table.return_value = mock_table
 
         # Try to deduct $0.10 (would be $1.05 total)
@@ -238,18 +247,18 @@ class TestDailyUsageLimitIntegration:
 class TestDisabledLimits:
     """Test behavior when limits are disabled"""
 
-    @patch('src.config.usage_limits.ENFORCE_DAILY_LIMITS', False)
-    @patch('src.services.daily_usage_limiter.get_daily_usage')
+    @patch("src.config.usage_limits.ENFORCE_DAILY_LIMITS", False)
+    @patch("src.services.daily_usage_limiter.get_daily_usage")
     def test_check_with_limits_disabled(self, mock_get_usage):
         """Test that checks pass when limits are disabled"""
         # Even with high usage, should allow if enforcement is disabled
         mock_get_usage.return_value = 50.0
 
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', False):
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", False):
             result = check_daily_usage_limit(user_id=123, requested_amount=10.0)
 
             assert result["allowed"] is True
-            assert result["limit"] == float('inf')
+            assert result["limit"] == float("inf")
 
 
 if __name__ == "__main__":

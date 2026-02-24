@@ -8,15 +8,15 @@ Tests verify:
 - Fallback behavior when database unavailable
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.model_catalog_cache import (
     get_cached_full_catalog,
     get_cached_provider_catalog,
 )
 from src.services.models import get_cached_models
-
 
 # ============================================================================
 # FIXTURES
@@ -137,9 +137,7 @@ def test_get_cached_provider_catalog_fetches_from_db_on_miss(
     # Verify
     assert result is not None
     assert len(result) == 2
-    mock_get_db_models.assert_called_once_with(
-        gateway_slug="openrouter", include_inactive=False
-    )
+    mock_get_db_models.assert_called_once_with(gateway_slug="openrouter", include_inactive=False)
 
 
 # ============================================================================

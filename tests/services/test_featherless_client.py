@@ -1,14 +1,15 @@
 """Unit tests for Featherless client"""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import os
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 
 @pytest.fixture
 def mock_featherless_api_key():
     """Mock the Featherless API key"""
-    with patch('src.services.featherless_client.Config') as mock_config:
+    with patch("src.services.featherless_client.Config") as mock_config:
         mock_config.FEATHERLESS_API_KEY = "test_featherless_key_123"
         yield mock_config
 
@@ -70,7 +71,9 @@ class TestGetFeatherlessClient:
         from src.services.featherless_client import get_featherless_client
 
         mock_client = Mock()
-        with patch('src.services.featherless_client.get_featherless_pooled_client') as mock_get_pooled:
+        with patch(
+            "src.services.featherless_client.get_featherless_pooled_client"
+        ) as mock_get_pooled:
             mock_get_pooled.return_value = mock_client
 
             client = get_featherless_client()
@@ -82,7 +85,7 @@ class TestGetFeatherlessClient:
         """Test client initialization with missing API key"""
         from src.services.featherless_client import get_featherless_client
 
-        with patch('src.services.featherless_client.Config') as mock_config:
+        with patch("src.services.featherless_client.Config") as mock_config:
             mock_config.FEATHERLESS_API_KEY = None
 
             with pytest.raises(ValueError, match="Featherless API key not configured"):
@@ -101,7 +104,7 @@ class TestMakeFeatherlessRequest:
         messages = [{"role": "user", "content": "Hello"}]
         model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-        with patch('src.services.featherless_client.get_featherless_client') as mock_get_client:
+        with patch("src.services.featherless_client.get_featherless_client") as mock_get_client:
             mock_client = Mock()
             mock_completions = Mock()
             mock_completions.create.return_value = mock_openai_response
@@ -109,18 +112,12 @@ class TestMakeFeatherlessRequest:
             mock_get_client.return_value = mock_client
 
             response = make_featherless_request_openai(
-                messages=messages,
-                model=model,
-                max_tokens=100,
-                temperature=0.7
+                messages=messages, model=model, max_tokens=100, temperature=0.7
             )
 
             assert response == mock_openai_response
             mock_completions.create.assert_called_once_with(
-                model=model,
-                messages=messages,
-                max_tokens=100,
-                temperature=0.7
+                model=model, messages=messages, max_tokens=100, temperature=0.7
             )
 
     def test_make_featherless_request_openai_error(self, mock_featherless_api_key):
@@ -130,7 +127,7 @@ class TestMakeFeatherlessRequest:
         messages = [{"role": "user", "content": "Hello"}]
         model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-        with patch('src.services.featherless_client.get_featherless_client') as mock_get_client:
+        with patch("src.services.featherless_client.get_featherless_client") as mock_get_client:
             mock_client = Mock()
             mock_client.chat.completions.create.side_effect = Exception("API error")
             mock_get_client.return_value = mock_client
@@ -150,7 +147,7 @@ class TestMakeFeatherlessRequestStream:
         model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
         mock_stream = Mock()
 
-        with patch('src.services.featherless_client.get_featherless_client') as mock_get_client:
+        with patch("src.services.featherless_client.get_featherless_client") as mock_get_client:
             mock_client = Mock()
             mock_completions = Mock()
             mock_completions.create.return_value = mock_stream
@@ -158,17 +155,12 @@ class TestMakeFeatherlessRequestStream:
             mock_get_client.return_value = mock_client
 
             stream = make_featherless_request_openai_stream(
-                messages=messages,
-                model=model,
-                max_tokens=100
+                messages=messages, model=model, max_tokens=100
             )
 
             assert stream == mock_stream
             mock_completions.create.assert_called_once_with(
-                model=model,
-                messages=messages,
-                stream=True,
-                max_tokens=100
+                model=model, messages=messages, stream=True, max_tokens=100
             )
 
     def test_make_featherless_request_openai_stream_error(self, mock_featherless_api_key):
@@ -178,7 +170,7 @@ class TestMakeFeatherlessRequestStream:
         messages = [{"role": "user", "content": "Hello"}]
         model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-        with patch('src.services.featherless_client.get_featherless_client') as mock_get_client:
+        with patch("src.services.featherless_client.get_featherless_client") as mock_get_client:
             mock_client = Mock()
             mock_client.chat.completions.create.side_effect = Exception("Streaming error")
             mock_get_client.return_value = mock_client

@@ -140,7 +140,9 @@ async def execute_tool_endpoint(
         raise HTTPException(status_code=404, detail=f"Tool '{request.name}' not found")
 
     try:
-        logger.info(f"Executing tool '{request.name}' with params: {list(request.parameters.keys())}")
+        logger.info(
+            f"Executing tool '{request.name}' with params: {list(request.parameters.keys())}"
+        )
         result = await execute_tool(request.name, request.parameters)
 
         return ToolExecuteResponse(
@@ -195,12 +197,15 @@ async def search_augment(
         logger.info(f"Search augment request: query='{request.query[:50]}...'")
 
         # Execute web search using the existing tool
-        result = await execute_tool("web_search", {
-            "query": request.query,
-            "max_results": request.max_results,
-            "include_answer": request.include_answer,
-            "search_depth": "basic",
-        })
+        result = await execute_tool(
+            "web_search",
+            {
+                "query": request.query,
+                "max_results": request.max_results,
+                "include_answer": request.include_answer,
+                "search_depth": "basic",
+            },
+        )
 
         if not result.success:
             logger.warning(f"Search augment failed: {result.error}")
@@ -252,7 +257,9 @@ async def search_augment(
 
         context = "\n".join(context_parts)
 
-        logger.info(f"Search augment success: {len(results)} results, context_length={len(context)}")
+        logger.info(
+            f"Search augment success: {len(results)} results, context_length={len(context)}"
+        )
 
         return SearchAugmentResponse(
             success=True,

@@ -11,7 +11,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from src.security.deps import get_api_key, get_user_id as get_current_user_id
+from src.security.deps import get_api_key
+from src.security.deps import get_user_id as get_current_user_id
 from src.services.partner_trial_service import PartnerTrialService
 
 logger = logging.getLogger(__name__)

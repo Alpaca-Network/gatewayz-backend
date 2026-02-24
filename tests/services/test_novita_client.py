@@ -1,8 +1,10 @@
 """
 Comprehensive tests for src/services/novita_client.py
 """
-import pytest
+
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestNovitaSDKImport:
@@ -19,16 +21,16 @@ class TestNovitaSDKImport:
         from src.services import novita_client
 
         assert novita_client is not None
-        assert hasattr(novita_client, 'fetch_models_from_novita')
-        assert hasattr(novita_client, 'get_novita_sdk_client')
-        assert hasattr(novita_client, 'fetch_image_models_from_novita_sdk')
-        assert hasattr(novita_client, 'generate_image_with_novita_sdk')
+        assert hasattr(novita_client, "fetch_models_from_novita")
+        assert hasattr(novita_client, "get_novita_sdk_client")
+        assert hasattr(novita_client, "fetch_image_models_from_novita_sdk")
+        assert hasattr(novita_client, "generate_image_with_novita_sdk")
 
 
 class TestGetNovitaSDKClient:
     """Test get_novita_sdk_client function"""
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', False)
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", False)
     def test_returns_none_when_sdk_not_available(self):
         """Test that function returns None when SDK is not installed"""
         from src.services.novita_client import get_novita_sdk_client
@@ -36,8 +38,8 @@ class TestGetNovitaSDKClient:
         result = get_novita_sdk_client()
         assert result is None
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.config.Config')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.config.Config")
     def test_raises_error_when_api_key_missing(self, mock_config):
         """Test that function raises ValueError when API key is not configured"""
         from src.services.novita_client import get_novita_sdk_client
@@ -47,10 +49,12 @@ class TestGetNovitaSDKClient:
         with pytest.raises(ValueError, match="NOVITA_API_KEY not configured"):
             get_novita_sdk_client()
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.NovitaClient')
-    @patch('src.config.Config')
-    def test_returns_client_when_sdk_available_and_key_configured(self, mock_config, mock_novita_client):
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.NovitaClient")
+    @patch("src.config.Config")
+    def test_returns_client_when_sdk_available_and_key_configured(
+        self, mock_config, mock_novita_client
+    ):
         """Test that function returns NovitaClient instance when everything is configured"""
         from src.services.novita_client import get_novita_sdk_client
 
@@ -67,7 +71,7 @@ class TestGetNovitaSDKClient:
 class TestFetchModelsFromNovita:
     """Test fetch_models_from_novita function (LLM models)"""
 
-    @patch('src.config.Config')
+    @patch("src.config.Config")
     def test_returns_fallback_when_api_key_missing(self, mock_config):
         """Test that function returns fallback models when API key is not configured"""
         from src.services.novita_client import fetch_models_from_novita
@@ -80,11 +84,11 @@ class TestFetchModelsFromNovita:
         assert isinstance(result, list)
         assert len(result) > 0
         # Check that default models are returned
-        model_ids = [m['id'] for m in result]
-        assert 'qwen3-235b-thinking' in model_ids or 'qwen3-max' in model_ids
+        model_ids = [m["id"] for m in result]
+        assert "qwen3-235b-thinking" in model_ids or "qwen3-max" in model_ids
 
-    @patch('openai.OpenAI')
-    @patch('src.config.Config')
+    @patch("openai.OpenAI")
+    @patch("src.config.Config")
     def test_fetches_models_from_openai_api(self, mock_config, mock_openai):
         """Test that function fetches models from OpenAI-compatible API"""
         from src.services.novita_client import fetch_models_from_novita
@@ -111,8 +115,8 @@ class TestFetchModelsFromNovita:
         mock_openai.assert_called_once()
         mock_client.models.list.assert_called_once()
 
-    @patch('openai.OpenAI')
-    @patch('src.config.Config')
+    @patch("openai.OpenAI")
+    @patch("src.config.Config")
     def test_returns_fallback_on_api_error(self, mock_config, mock_openai):
         """Test that function returns fallback models when API call fails"""
         from src.services.novita_client import fetch_models_from_novita
@@ -129,7 +133,7 @@ class TestFetchModelsFromNovita:
 class TestFetchImageModelsFromNovitaSDK:
     """Test fetch_image_models_from_novita_sdk function"""
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', False)
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", False)
     def test_returns_none_when_sdk_not_available(self):
         """Test that function returns None when SDK is not installed"""
         from src.services.novita_client import fetch_image_models_from_novita_sdk
@@ -137,8 +141,8 @@ class TestFetchImageModelsFromNovitaSDK:
         result = fetch_image_models_from_novita_sdk()
         assert result is None
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_returns_none_when_client_initialization_fails(self, mock_get_client):
         """Test that function returns None when client initialization fails"""
         from src.services.novita_client import fetch_image_models_from_novita_sdk
@@ -148,8 +152,8 @@ class TestFetchImageModelsFromNovitaSDK:
         result = fetch_image_models_from_novita_sdk()
         assert result is None
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_fetches_models_using_sdk(self, mock_get_client):
         """Test that function fetches models using SDK's models_v3 method"""
         from src.services.novita_client import fetch_image_models_from_novita_sdk
@@ -173,8 +177,8 @@ class TestFetchImageModelsFromNovitaSDK:
         assert len(result) == 1
         mock_client.models_v3.assert_called_once_with(refresh=True)
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_returns_none_on_sdk_error(self, mock_get_client):
         """Test that function returns None when SDK call fails"""
         from src.services.novita_client import fetch_image_models_from_novita_sdk
@@ -190,7 +194,7 @@ class TestFetchImageModelsFromNovitaSDK:
 class TestGenerateImageWithNovitaSDK:
     """Test generate_image_with_novita_sdk function"""
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', False)
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", False)
     def test_raises_import_error_when_sdk_not_available(self):
         """Test that function raises ImportError when SDK is not installed"""
         from src.services.novita_client import generate_image_with_novita_sdk
@@ -198,8 +202,8 @@ class TestGenerateImageWithNovitaSDK:
         with pytest.raises(ImportError, match="Novita SDK not installed"):
             generate_image_with_novita_sdk(prompt="test prompt")
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_raises_value_error_when_client_initialization_fails(self, mock_get_client):
         """Test that function raises ValueError when client initialization fails"""
         from src.services.novita_client import generate_image_with_novita_sdk
@@ -209,8 +213,8 @@ class TestGenerateImageWithNovitaSDK:
         with pytest.raises(ValueError, match="Failed to initialize Novita SDK client"):
             generate_image_with_novita_sdk(prompt="test prompt")
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_generates_image_with_default_parameters(self, mock_get_client):
         """Test that function generates image with default parameters"""
         from src.services.novita_client import generate_image_with_novita_sdk
@@ -228,13 +232,13 @@ class TestGenerateImageWithNovitaSDK:
         assert result is mock_response
         mock_client.txt2img_v3.assert_called_once()
         call_kwargs = mock_client.txt2img_v3.call_args[1]
-        assert call_kwargs['prompt'] == "test prompt"
-        assert call_kwargs['model_name'] == "dreamshaper_8_93211.safetensors"
-        assert call_kwargs['width'] == 512
-        assert call_kwargs['height'] == 512
+        assert call_kwargs["prompt"] == "test prompt"
+        assert call_kwargs["model_name"] == "dreamshaper_8_93211.safetensors"
+        assert call_kwargs["width"] == 512
+        assert call_kwargs["height"] == 512
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_generates_image_with_custom_parameters(self, mock_get_client):
         """Test that function generates image with custom parameters"""
         from src.services.novita_client import generate_image_with_novita_sdk
@@ -254,21 +258,21 @@ class TestGenerateImageWithNovitaSDK:
             height=768,
             steps=50,
             guidance_scale=10.0,
-            negative_prompt="ugly"
+            negative_prompt="ugly",
         )
 
         assert result is mock_response
         call_kwargs = mock_client.txt2img_v3.call_args[1]
-        assert call_kwargs['prompt'] == "custom prompt"
-        assert call_kwargs['model_name'] == "custom-model"
-        assert call_kwargs['width'] == 1024
-        assert call_kwargs['height'] == 768
-        assert call_kwargs['steps'] == 50
-        assert call_kwargs['guidance_scale'] == 10.0
-        assert call_kwargs['negative_prompt'] == "ugly"
+        assert call_kwargs["prompt"] == "custom prompt"
+        assert call_kwargs["model_name"] == "custom-model"
+        assert call_kwargs["width"] == 1024
+        assert call_kwargs["height"] == 768
+        assert call_kwargs["steps"] == 50
+        assert call_kwargs["guidance_scale"] == 10.0
+        assert call_kwargs["negative_prompt"] == "ugly"
 
-    @patch('src.services.novita_client.NOVITA_SDK_AVAILABLE', True)
-    @patch('src.services.novita_client.get_novita_sdk_client')
+    @patch("src.services.novita_client.NOVITA_SDK_AVAILABLE", True)
+    @patch("src.services.novita_client.get_novita_sdk_client")
     def test_raises_error_on_generation_failure(self, mock_get_client):
         """Test that function raises error when image generation fails"""
         from src.services.novita_client import generate_image_with_novita_sdk
@@ -297,14 +301,14 @@ class TestDefaultModels:
         from src.services.novita_client import DEFAULT_NOVITA_MODELS
 
         for model in DEFAULT_NOVITA_MODELS:
-            assert 'id' in model
-            assert 'name' in model
-            assert 'owned_by' in model
-            assert 'context_length' in model
+            assert "id" in model
+            assert "name" in model
+            assert "owned_by" in model
+            assert "context_length" in model
 
-            assert isinstance(model['id'], str)
-            assert isinstance(model['name'], str)
-            assert isinstance(model['context_length'], int)
+            assert isinstance(model["id"], str)
+            assert isinstance(model["name"], str)
+            assert isinstance(model["context_length"], int)
 
 
 class TestHelperFunctions:
@@ -328,22 +332,19 @@ class TestHelperFunctions:
 
         assert result is not None
         assert isinstance(result, dict)
-        assert 'prompt' in result
-        assert 'completion' in result
+        assert "prompt" in result
+        assert "completion" in result
 
     def test_normalize_pricing_extracts_values(self):
         """Test that _normalize_pricing extracts pricing values"""
         from src.services.novita_client import _normalize_pricing
 
-        pricing_data = {
-            'prompt': '0.001',
-            'completion': '0.002'
-        }
+        pricing_data = {"prompt": "0.001", "completion": "0.002"}
 
         result = _normalize_pricing(pricing_data)
 
-        assert result['prompt'] == '0.001'
-        assert result['completion'] == '0.002'
+        assert result["prompt"] == "0.001"
+        assert result["completion"] == "0.002"
 
 
 class TestModuleDocumentation:
@@ -354,16 +355,16 @@ class TestModuleDocumentation:
         from src.services import novita_client
 
         assert novita_client.__doc__ is not None
-        assert 'Novita AI' in novita_client.__doc__
-        assert 'OpenAI-compatible' in novita_client.__doc__
+        assert "Novita AI" in novita_client.__doc__
+        assert "OpenAI-compatible" in novita_client.__doc__
 
     def test_functions_have_docstrings(self):
         """Test that all main functions have docstrings"""
         from src.services.novita_client import (
-            get_novita_sdk_client,
-            fetch_models_from_novita,
             fetch_image_models_from_novita_sdk,
-            generate_image_with_novita_sdk
+            fetch_models_from_novita,
+            generate_image_with_novita_sdk,
+            get_novita_sdk_client,
         )
 
         assert get_novita_sdk_client.__doc__ is not None

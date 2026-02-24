@@ -1,7 +1,8 @@
 """Trial Analytics Routes - Admin endpoints for monitoring trial usage and conversions"""
+
 import json
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -75,10 +76,16 @@ def calculate_abuse_score(domain_data: dict) -> float:
     return min(score, 10.0)  # Cap at 10
 
 
-@router.get("/admin/trial/users", response_model=TrialUsersResponse, tags=["admin", "trial-analytics"])
+@router.get(
+    "/admin/trial/users", response_model=TrialUsersResponse, tags=["admin", "trial-analytics"]
+)
 async def get_trial_users(
-    status: Literal["active", "expired", "converted", "all"] = Query("all", description="Filter by trial status"),
-    sort_by: Literal["requests", "tokens", "credits", "created_at"] = Query("created_at", description="Sort by field"),
+    status: Literal["active", "expired", "converted", "all"] = Query(
+        "all", description="Filter by trial status"
+    ),
+    sort_by: Literal["requests", "tokens", "credits", "created_at"] = Query(
+        "created_at", description="Sort by field"
+    ),
     sort_order: Literal["asc", "desc"] = Query("desc", description="Sort order"),
     limit: int = Query(100, ge=1, le=1000, description="Results per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
@@ -95,28 +102,29 @@ async def get_trial_users(
         current_time = datetime.now(UTC)
 
         # Build base query joining users and api_keys
-        query = (
-            client.table("users")
-            .select(
-                "id, email, created_at, "
-                "api_keys_new!inner("
-                "id, api_key, is_trial, trial_converted, "
-                "trial_start_date, trial_end_date, trial_used_tokens, "
-                "trial_used_requests, trial_used_credits, trial_credits, "
-                "last_used_at, created_at"
-                ")",
-                count="exact"
-            )
+        query = client.table("users").select(
+            "id, email, created_at, "
+            "api_keys_new!inner("
+            "id, api_key, is_trial, trial_converted, "
+            "trial_start_date, trial_end_date, trial_used_tokens, "
+            "trial_used_requests, trial_used_credits, trial_credits, "
+            "last_used_at, created_at"
+            ")",
+            count="exact",
         )
 
         # Filter by trial status
         if status != "all":
             if status == "active":
                 # Active trials: is_trial=true, not expired, not converted
-                query = query.eq("api_keys_new.is_trial", True).eq("api_keys_new.trial_converted", False)
+                query = query.eq("api_keys_new.is_trial", True).eq(
+                    "api_keys_new.trial_converted", False
+                )
             elif status == "expired":
                 # Expired trials: is_trial=true, expired, not converted
-                query = query.eq("api_keys_new.is_trial", True).eq("api_keys_new.trial_converted", False)
+                query = query.eq("api_keys_new.is_trial", True).eq(
+                    "api_keys_new.trial_converted", False
+                )
             elif status == "converted":
                 # Converted trials
                 query = query.eq("api_keys_new.trial_converted", True)
@@ -134,25 +142,26 @@ async def get_trial_users(
         # For sorting by usage metrics, we'll need to do client-side sorting
 
         # Execute data query with pagination
-        data_query = (
-            client.table("users")
-            .select(
-                "id, email, created_at, "
-                "api_keys_new!inner("
-                "id, api_key, is_trial, trial_converted, "
-                "trial_start_date, trial_end_date, trial_used_tokens, "
-                "trial_used_requests, trial_used_credits, trial_credits, "
-                "last_used_at, created_at"
-                ")"
-            )
+        data_query = client.table("users").select(
+            "id, email, created_at, "
+            "api_keys_new!inner("
+            "id, api_key, is_trial, trial_converted, "
+            "trial_start_date, trial_end_date, trial_used_tokens, "
+            "trial_used_requests, trial_used_credits, trial_credits, "
+            "last_used_at, created_at"
+            ")"
         )
 
         # Apply same filters
         if status != "all":
             if status == "active":
-                data_query = data_query.eq("api_keys_new.is_trial", True).eq("api_keys_new.trial_converted", False)
+                data_query = data_query.eq("api_keys_new.is_trial", True).eq(
+                    "api_keys_new.trial_converted", False
+                )
             elif status == "expired":
-                data_query = data_query.eq("api_keys_new.is_trial", True).eq("api_keys_new.trial_converted", False)
+                data_query = data_query.eq("api_keys_new.is_trial", True).eq(
+                    "api_keys_new.trial_converted", False
+                )
             elif status == "converted":
                 data_query = data_query.eq("api_keys_new.trial_converted", True)
 
@@ -161,7 +170,9 @@ async def get_trial_users(
 
         # Apply sorting by users table field and pagination
         # Note: Only sorting by created_at is supported due to PostgREST join limitations
-        data_query = data_query.order("created_at", desc=(sort_order == "desc")).range(offset, offset + limit - 1)
+        data_query = data_query.order("created_at", desc=(sort_order == "desc")).range(
+            offset, offset + limit - 1
+        )
 
         result = data_query.execute()
 
@@ -203,11 +214,15 @@ async def get_trial_users(
 
                 used_requests = api_key_data.get("trial_used_requests", 0)
                 max_requests = 1000  # Default from trial_config
-                request_utilization = (used_requests / max_requests * 100) if max_requests > 0 else 0
+                request_utilization = (
+                    (used_requests / max_requests * 100) if max_requests > 0 else 0
+                )
 
                 used_credits = float(api_key_data.get("trial_used_credits", 0))
                 allocated_credits = float(api_key_data.get("trial_credits", 10.0))
-                credit_utilization = (used_credits / allocated_credits * 100) if allocated_credits > 0 else 0
+                credit_utilization = (
+                    (used_credits / allocated_credits * 100) if allocated_credits > 0 else 0
+                )
 
                 # Create API key preview (show last 7 chars)
                 api_key = api_key_data.get("api_key", "")
@@ -280,7 +295,11 @@ async def get_trial_users(
         raise HTTPException(status_code=500, detail=f"Failed to get trial users: {str(e)}") from e
 
 
-@router.get("/admin/trial/domain-analysis", response_model=DomainAnalysisResponse, tags=["admin", "trial-analytics"])
+@router.get(
+    "/admin/trial/domain-analysis",
+    response_model=DomainAnalysisResponse,
+    tags=["admin", "trial-analytics"],
+)
 async def get_domain_analysis(
     admin_user: dict = Depends(require_admin),
 ):
@@ -304,8 +323,8 @@ async def get_domain_analysis(
                 # Return properly formatted response
                 return DomainAnalysisResponse(
                     success=True,
-                    domains=[DomainAnalysis(**d) for d in cached_result['domains']],
-                    suspicious_domains=cached_result['suspicious_domains']
+                    domains=[DomainAnalysis(**d) for d in cached_result["domains"]],
+                    suspicious_domains=cached_result["suspicious_domains"],
                 )
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning(f"Failed to decode cached domain analysis: {e}, fetching fresh data")
@@ -439,7 +458,7 @@ async def get_domain_analysis(
         try:
             cache_payload = {
                 "domains": [d.dict() for d in domains],
-                "suspicious_domains": suspicious_domains
+                "suspicious_domains": suspicious_domains,
             }
             redis_config.set_cache(CACHE_KEY, json.dumps(cache_payload), CACHE_TTL)
             logger.info("Domain analysis cached successfully")
@@ -453,7 +472,11 @@ async def get_domain_analysis(
         raise HTTPException(status_code=500, detail=f"Failed to analyze domains: {str(e)}") from e
 
 
-@router.get("/admin/trial/conversion-funnel", response_model=ConversionFunnelResponse, tags=["admin", "trial-analytics"])
+@router.get(
+    "/admin/trial/conversion-funnel",
+    response_model=ConversionFunnelResponse,
+    tags=["admin", "trial-analytics"],
+)
 async def get_conversion_funnel(
     admin_user: dict = Depends(require_admin),
 ):
@@ -565,11 +588,27 @@ async def get_conversion_funnel(
                 converted_after_100 += 1
 
         # Calculate averages and medians
-        avg_requests = sum(requests_at_conversion_list) / len(requests_at_conversion_list) if requests_at_conversion_list else 0
-        avg_tokens = sum(tokens_at_conversion_list) / len(tokens_at_conversion_list) if tokens_at_conversion_list else 0
+        avg_requests = (
+            sum(requests_at_conversion_list) / len(requests_at_conversion_list)
+            if requests_at_conversion_list
+            else 0
+        )
+        avg_tokens = (
+            sum(tokens_at_conversion_list) / len(tokens_at_conversion_list)
+            if tokens_at_conversion_list
+            else 0
+        )
 
-        median_requests = sorted(requests_at_conversion_list)[len(requests_at_conversion_list) // 2] if requests_at_conversion_list else 0
-        median_tokens = sorted(tokens_at_conversion_list)[len(tokens_at_conversion_list) // 2] if tokens_at_conversion_list else 0
+        median_requests = (
+            sorted(requests_at_conversion_list)[len(requests_at_conversion_list) // 2]
+            if requests_at_conversion_list
+            else 0
+        )
+        median_tokens = (
+            sorted(tokens_at_conversion_list)[len(tokens_at_conversion_list) // 2]
+            if tokens_at_conversion_list
+            else 0
+        )
 
         return ConversionFunnelResponse(
             success=True,
@@ -596,10 +635,14 @@ async def get_conversion_funnel(
 
     except Exception as e:
         logger.error(f"Error getting conversion funnel: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get conversion funnel: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get conversion funnel: {str(e)}"
+        ) from e
 
 
-@router.get("/admin/trial/ip-analysis", response_model=IPAnalysisResponse, tags=["admin", "trial-analytics"])
+@router.get(
+    "/admin/trial/ip-analysis", response_model=IPAnalysisResponse, tags=["admin", "trial-analytics"]
+)
 async def get_ip_analysis(
     min_accounts: int = Query(2, ge=1, description="Minimum accounts per IP to show"),
     admin_user: dict = Depends(require_admin),
@@ -626,7 +669,11 @@ async def get_ip_analysis(
         raise HTTPException(status_code=500, detail=f"Failed to analyze IPs: {str(e)}") from e
 
 
-@router.post("/admin/trial/save-conversion-metrics", response_model=SaveConversionMetricsResponse, tags=["admin", "trial-analytics"])
+@router.post(
+    "/admin/trial/save-conversion-metrics",
+    response_model=SaveConversionMetricsResponse,
+    tags=["admin", "trial-analytics"],
+)
 async def save_conversion_metrics(
     request: SaveConversionMetricsRequest,
     admin_user: dict = Depends(require_admin),
@@ -644,24 +691,28 @@ async def save_conversion_metrics(
         # Insert conversion metrics
         result = (
             client.table("trial_conversion_metrics")
-            .insert({
-                "user_id": request.user_id,
-                "api_key_id": request.api_key_id,
-                "requests_at_conversion": request.requests_at_conversion,
-                "tokens_at_conversion": request.tokens_at_conversion,
-                "credits_used_at_conversion": request.credits_used_at_conversion,
-                "trial_days_used": request.trial_days_used,
-                "converted_plan": request.converted_plan,
-                "conversion_trigger": request.conversion_trigger,
-                "conversion_date": datetime.now(UTC).isoformat(),
-            })
+            .insert(
+                {
+                    "user_id": request.user_id,
+                    "api_key_id": request.api_key_id,
+                    "requests_at_conversion": request.requests_at_conversion,
+                    "tokens_at_conversion": request.tokens_at_conversion,
+                    "credits_used_at_conversion": request.credits_used_at_conversion,
+                    "trial_days_used": request.trial_days_used,
+                    "converted_plan": request.converted_plan,
+                    "conversion_trigger": request.conversion_trigger,
+                    "conversion_date": datetime.now(UTC).isoformat(),
+                }
+            )
             .execute()
         )
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to save conversion metrics")
 
-        logger.info(f"Saved conversion metrics for user {request.user_id}, api_key {request.api_key_id}")
+        logger.info(
+            f"Saved conversion metrics for user {request.user_id}, api_key {request.api_key_id}"
+        )
 
         return SaveConversionMetricsResponse(
             success=True,
@@ -670,10 +721,16 @@ async def save_conversion_metrics(
 
     except Exception as e:
         logger.error(f"Error saving conversion metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to save conversion metrics: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to save conversion metrics: {str(e)}"
+        ) from e
 
 
-@router.get("/admin/trial/cohort-analysis", response_model=CohortAnalysisResponse, tags=["admin", "trial-analytics"])
+@router.get(
+    "/admin/trial/cohort-analysis",
+    response_model=CohortAnalysisResponse,
+    tags=["admin", "trial-analytics"],
+)
 async def get_cohort_analysis(
     period: Literal["week", "month"] = Query("week", description="Cohort period: week or month"),
     lookback: int = Query(12, ge=1, le=52, description="Number of periods to look back"),
@@ -769,7 +826,9 @@ async def get_cohort_analysis(
             if period == "week":
                 cohort_label = f"{period_label} {lookback - cohort_index} ({cohort_start.strftime('%b %d')}-{cohort_end.strftime('%b %d')})"
             else:
-                cohort_label = f"{period_label} {lookback - cohort_index} ({cohort_start.strftime('%b %Y')})"
+                cohort_label = (
+                    f"{period_label} {lookback - cohort_index} ({cohort_start.strftime('%b %Y')})"
+                )
 
             # Filter trials in this cohort
             cohort_trials = []
@@ -786,20 +845,38 @@ async def get_cohort_analysis(
 
             # Calculate cohort metrics
             total_trials_in_cohort = len(cohort_trials)
-            converted_trials_in_cohort = sum(1 for t in cohort_trials if t.get("trial_converted", False))
-            conversion_rate = (converted_trials_in_cohort / total_trials_in_cohort * 100) if total_trials_in_cohort > 0 else 0
+            converted_trials_in_cohort = sum(
+                1 for t in cohort_trials if t.get("trial_converted", False)
+            )
+            conversion_rate = (
+                (converted_trials_in_cohort / total_trials_in_cohort * 100)
+                if total_trials_in_cohort > 0
+                else 0
+            )
 
             # Calculate average days to convert for this cohort
             days_to_convert_list = []
             for trial in cohort_trials:
                 if trial.get("trial_converted") and trial["id"] in conversion_metrics_map:
-                    days_to_convert_list.append(conversion_metrics_map[trial["id"]].get("trial_days_used", 0))
+                    days_to_convert_list.append(
+                        conversion_metrics_map[trial["id"]].get("trial_days_used", 0)
+                    )
 
-            avg_days_to_convert = sum(days_to_convert_list) / len(days_to_convert_list) if days_to_convert_list else 0
+            avg_days_to_convert = (
+                sum(days_to_convert_list) / len(days_to_convert_list) if days_to_convert_list else 0
+            )
 
             # Calculate average usage at signup
-            avg_requests = sum(t.get("trial_used_requests", 0) for t in cohort_trials) / total_trials_in_cohort if total_trials_in_cohort > 0 else 0
-            avg_tokens = sum(t.get("trial_used_tokens", 0) for t in cohort_trials) / total_trials_in_cohort if total_trials_in_cohort > 0 else 0
+            avg_requests = (
+                sum(t.get("trial_used_requests", 0) for t in cohort_trials) / total_trials_in_cohort
+                if total_trials_in_cohort > 0
+                else 0
+            )
+            avg_tokens = (
+                sum(t.get("trial_used_tokens", 0) for t in cohort_trials) / total_trials_in_cohort
+                if total_trials_in_cohort > 0
+                else 0
+            )
 
             # Track totals for summary
             all_trials_count += total_trials_in_cohort
@@ -823,7 +900,9 @@ async def get_cohort_analysis(
         cohorts.reverse()
 
         # Calculate summary statistics
-        overall_conversion_rate = (all_converted_count / all_trials_count * 100) if all_trials_count > 0 else 0
+        overall_conversion_rate = (
+            (all_converted_count / all_trials_count * 100) if all_trials_count > 0 else 0
+        )
 
         # Find best and worst cohorts (with at least 5 trials to avoid outliers)
         cohorts_with_trials = [c for c in cohorts if c.total_trials >= 5]
@@ -833,10 +912,20 @@ async def get_cohort_analysis(
             worst_cohort = min(cohorts_with_trials, key=lambda c: c.conversion_rate)
         else:
             # Fallback if no cohorts have 5+ trials
-            best_cohort = cohorts[0] if cohorts else CohortData(
-                cohort_label="N/A", cohort_start_date="", cohort_end_date="",
-                total_trials=0, converted_trials=0, conversion_rate=0,
-                avg_days_to_convert=0, avg_requests_at_signup=0, avg_tokens_at_signup=0
+            best_cohort = (
+                cohorts[0]
+                if cohorts
+                else CohortData(
+                    cohort_label="N/A",
+                    cohort_start_date="",
+                    cohort_end_date="",
+                    total_trials=0,
+                    converted_trials=0,
+                    conversion_rate=0,
+                    avg_days_to_convert=0,
+                    avg_requests_at_signup=0,
+                    avg_tokens_at_signup=0,
+                )
             )
             worst_cohort = best_cohort
 
@@ -861,4 +950,6 @@ async def get_cohort_analysis(
 
     except Exception as e:
         logger.error(f"Error getting cohort analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get cohort analysis: {str(e)}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get cohort analysis: {str(e)}"
+        ) from e

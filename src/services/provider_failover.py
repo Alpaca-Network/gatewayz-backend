@@ -29,15 +29,13 @@ except ImportError:  # pragma: no cover - handled gracefully below
 # Cerebras SDK has its own exception hierarchy separate from OpenAI's.
 # Import these to properly handle Cerebras-specific errors.
 try:  # pragma: no cover - import guard
-    from cerebras.cloud.sdk import (
-        APIConnectionError as CerebrasAPIConnectionError,
-        APIStatusError as CerebrasAPIStatusError,
-        AuthenticationError as CerebrasAuthenticationError,
-        BadRequestError as CerebrasBadRequestError,
-        NotFoundError as CerebrasNotFoundError,
-        PermissionDeniedError as CerebrasPermissionDeniedError,
-        RateLimitError as CerebrasRateLimitError,
-    )
+    from cerebras.cloud.sdk import APIConnectionError as CerebrasAPIConnectionError
+    from cerebras.cloud.sdk import APIStatusError as CerebrasAPIStatusError
+    from cerebras.cloud.sdk import AuthenticationError as CerebrasAuthenticationError
+    from cerebras.cloud.sdk import BadRequestError as CerebrasBadRequestError
+    from cerebras.cloud.sdk import NotFoundError as CerebrasNotFoundError
+    from cerebras.cloud.sdk import PermissionDeniedError as CerebrasPermissionDeniedError
+    from cerebras.cloud.sdk import RateLimitError as CerebrasRateLimitError
 except ImportError:  # pragma: no cover - handled gracefully below
     CerebrasAPIConnectionError = CerebrasAPIStatusError = CerebrasAuthenticationError = None
     CerebrasBadRequestError = CerebrasNotFoundError = CerebrasPermissionDeniedError = None
@@ -67,7 +65,10 @@ _OPENROUTER_ONLY_PREFIX_LOCKS = ("openrouter/",)  # Models that can ONLY use Ope
 # Models that should try native provider first, then OpenRouter as fallback
 _NATIVE_PROVIDER_PREFIXES = {
     "openai/": ("openai", "openrouter"),  # OpenAI models: try openai first, then openrouter
-    "anthropic/": ("anthropic", "openrouter"),  # Anthropic models: try anthropic first, then openrouter
+    "anthropic/": (
+        "anthropic",
+        "openrouter",
+    ),  # Anthropic models: try anthropic first, then openrouter
 }
 
 
@@ -216,8 +217,7 @@ def enforce_model_failover_rules(
                 # This prevents complete service failure when OpenRouter is down
                 if suffix == "free":
                     try:
-                        from src.services.circuit_breaker import get_circuit_breaker
-                        from src.services.circuit_breaker import CircuitState
+                        from src.services.circuit_breaker import CircuitState, get_circuit_breaker
 
                         breaker = get_circuit_breaker("openrouter")
                         breaker_state = breaker.get_state()
@@ -232,7 +232,7 @@ def enforce_model_failover_rules(
                                 "Paid rates may apply. Retry in %ss.",
                                 model_id,
                                 base_model,
-                                breaker_state.get("seconds_until_retry", 60)
+                                breaker_state.get("seconds_until_retry", 60),
                             )
                             # Return full provider chain to allow failover
                             # The base model (without :free) should work on other providers
@@ -580,13 +580,19 @@ def map_provider_error(
             except Exception as log_exc:
                 logger.debug("Failed to extract httpx response body: %r", log_exc)
             return HTTPException(status_code=400, detail=error_detail)
-        return HTTPException(status_code=502, detail=f"Provider '{provider}' service error for model '{model}'")
+        return HTTPException(
+            status_code=502, detail=f"Provider '{provider}' service error for model '{model}'"
+        )
 
     if isinstance(exc, httpx.RequestError):
-        return HTTPException(status_code=503, detail=f"Provider '{provider}' service unavailable for model '{model}'")
+        return HTTPException(
+            status_code=503, detail=f"Provider '{provider}' service unavailable for model '{model}'"
+        )
 
     # Final fallback - include provider and model for better error tracking
-    return HTTPException(status_code=502, detail=f"Provider '{provider}' error for model '{model}': {str(exc)}")
+    return HTTPException(
+        status_code=502, detail=f"Provider '{provider}' error for model '{model}': {str(exc)}"
+    )
 
 
 def map_provider_error_detailed(

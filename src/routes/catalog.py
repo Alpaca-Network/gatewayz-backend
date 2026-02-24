@@ -20,7 +20,8 @@ except ImportError:  # pragma: no cover
         """Fallback to stdlib json when orjson is not installed."""
         return json.dumps(obj)
 
-from datetime import datetime, UTC
+
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -369,13 +370,12 @@ def get_provider_fetch_timeout(provider_slug: str) -> int:
 
     return _DEFAULT_FETCH_TIMEOUT
 
+
 # Pre-computed set of all valid gateway values (registry keys + aliases + "all").
 # Used for input validation in query parameters across multiple endpoints.
 _GATEWAY_REGISTRY_KEYS: set[str] = set(GATEWAY_REGISTRY.keys())
 _GATEWAY_ALIASES: set[str] = {
-    alias
-    for config in GATEWAY_REGISTRY.values()
-    for alias in config.get("aliases", [])
+    alias for config in GATEWAY_REGISTRY.values() for alias in config.get("aliases", [])
 }
 VALID_GATEWAY_VALUES: set[str] = _GATEWAY_REGISTRY_KEYS | _GATEWAY_ALIASES | {"all"}
 
@@ -726,7 +726,9 @@ async def get_gateways_status():
                 model_count = 0
                 if not in_error_state:
                     error_message = str(e)
-                logger.warning("Failed to get cached model count for gateway '%s': %s", gateway_id, e)
+                logger.warning(
+                    "Failed to get cached model count for gateway '%s': %s", gateway_id, e
+                )
 
             status_list.append(
                 {
@@ -867,7 +869,9 @@ def derive_providers_from_models(models: list[dict], gateway_name: str) -> list[
 
     result = list(providers.values())
     # Evict stale entries to prevent unbounded memory growth
-    stale_keys = [k for k, (_, ts) in _derived_providers_cache.items() if now - ts >= _DERIVED_PROVIDERS_TTL]
+    stale_keys = [
+        k for k, (_, ts) in _derived_providers_cache.items() if now - ts >= _DERIVED_PROVIDERS_TTL
+    ]
     for k in stale_keys:
         _derived_providers_cache.pop(k, None)
     _derived_providers_cache[cache_key] = (result, now)
@@ -1075,7 +1079,9 @@ async def get_models(
     try:
         _validate_gateway(gateway)
         provider = normalize_developer_segment(provider)
-        logger.debug(f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}")
+        logger.debug(
+            f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}"
+        )
         gateway_value = (gateway or "all").lower()
         # Resolve any alias to its canonical fetch slug (e.g. "google" → "google-vertex")
         gateway_value = _GATEWAY_SLUG_RESOLUTION.get(gateway_value, gateway_value)
@@ -1086,8 +1092,8 @@ async def get_models(
         # PERFORMANCE: Check response cache FIRST (before expensive provider fetches)
         # This provides 5-10ms response times for cached requests (vs 500ms-2s uncached)
         from src.services.catalog_response_cache import (
-            get_cached_catalog_response,
             cache_catalog_response,
+            get_cached_catalog_response,
         )
 
         # Build cache params from all request parameters
@@ -1124,8 +1130,13 @@ async def get_models(
         # This uses the parallel fetch with 45s timeout and proper caching
         # Instead of calling each provider individually (slow!)
         if gateway_value == "all":
-            logger.info(f"Using aggregated multi-provider catalog cache for gateway=all (unique_models={unique_models})")
-            all_models_from_cache = await asyncio.to_thread(get_cached_models, "all", use_unique_models=unique_models) or []
+            logger.info(
+                f"Using aggregated multi-provider catalog cache for gateway=all (unique_models={unique_models})"
+            )
+            all_models_from_cache = (
+                await asyncio.to_thread(get_cached_models, "all", use_unique_models=unique_models)
+                or []
+            )
             # The aggregated catalog is returned directly without individual provider calls
             # We still need to populate all_models dict for the response structure
             # The models already have source_gateway field populated
@@ -1142,7 +1153,10 @@ async def get_models(
                 logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
                 try:
                     from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
-                    all_models_list = merge_models_by_slug(await fetch_and_merge_all_providers(timeout=30.0))
+
+                    all_models_list = merge_models_by_slug(
+                        await fetch_and_merge_all_providers(timeout=30.0)
+                    )
                     logger.info(f"Parallel fetch returned {len(all_models_list)} models")
                 except Exception as e:
                     logger.error(f"Parallel fetch failed: {e}")
@@ -1161,11 +1175,14 @@ async def get_models(
 
         # Import circuit breaker for individual provider fetches
         from src.utils.circuit_breaker import get_provider_circuit_breaker
+
         breaker = get_provider_circuit_breaker()
 
         # Individual provider fetches (only used when gateway != "all" OR cache is empty)
         # Skip if parallel fetch already populated all_models_list
-        if gateway_value in ("openrouter", "all") and not (gateway_value == "all" and all_models_list):
+        if gateway_value in ("openrouter", "all") and not (
+            gateway_value == "all" and all_models_list
+        ):
             if not breaker.should_skip("openrouter"):
                 try:
                     openrouter_models = get_cached_models("openrouter") or []
@@ -1201,9 +1218,7 @@ async def get_models(
                 _fetched = get_cached_models(_slug) or []
                 provider_models[_slug] = _fetched
                 if not _fetched and gateway_value == _slug:
-                    logger.warning(
-                        "%s models unavailable - continuing without them", _slug
-                    )
+                    logger.warning("%s models unavailable - continuing without them", _slug)
 
         # Select the model list for the requested gateway.
         if gateway_value != "all":
@@ -1212,7 +1227,9 @@ async def get_models(
             # For "all" gateway, use aggregated cache if available
             # This is much faster than merging individual provider models
             if all_models_list:
-                logger.info(f"Using aggregated cache for gateway=all ({len(all_models_list)} models)")
+                logger.info(
+                    f"Using aggregated cache for gateway=all ({len(all_models_list)} models)"
+                )
                 models = all_models_list
             else:
                 # Fallback: merge individual provider models (slow path)
@@ -1307,7 +1324,12 @@ async def get_models(
             offset_int = int(str(offset)) if offset else 0
             limit_int = int(str(limit)) if limit else None
         except (ValueError, TypeError) as e:
-            logger.warning("Invalid pagination parameters (offset=%r, limit=%r), using defaults: %s", offset, limit, e)
+            logger.warning(
+                "Invalid pagination parameters (offset=%r, limit=%r), using defaults: %s",
+                offset,
+                limit,
+                e,
+            )
             offset_int = 0
             limit_int = None
 
@@ -1318,7 +1340,9 @@ async def get_models(
 
         if limit_int:
             models = models[:limit_int]
-            logger.info(f"Applied limit {limit_int}: returning {len(models)} models (total available: {total_models})")
+            logger.info(
+                f"Applied limit {limit_int}: returning {len(models)} models (total available: {total_models})"
+            )
 
         # Optimize model enhancement for fast response
         # Only enhance with provider info (fast operation)
@@ -1576,8 +1600,8 @@ async def get_developer_models(
     """
     try:
         from src.services.catalog_response_cache import (
-            get_cached_catalog_response,
             cache_catalog_response,
+            get_cached_catalog_response,
         )
 
         developer_name = normalize_developer_segment(developer_name) or developer_name
@@ -2359,11 +2383,13 @@ async def get_unique_models_with_providers(
     ),
     offset: int | None = Query(0, description="Offset for pagination", ge=0),
     min_providers: int | None = Query(
-        None, description="Minimum number of providers (e.g., 2 for models with multiple providers)", ge=1
+        None,
+        description="Minimum number of providers (e.g., 2 for models with multiple providers)",
+        ge=1,
     ),
     sort_by: str = Query(
         "provider_count",
-        description="Sort by: 'provider_count' (most providers), 'name' (alphabetical), 'cheapest_price' (lowest price)"
+        description="Sort by: 'provider_count' (most providers), 'name' (alphabetical), 'cheapest_price' (lowest price)",
     ),
     order: str = Query("desc", description="Sort order: 'asc' or 'desc'"),
     include_inactive: bool = Query(False, description="Include inactive models"),
@@ -2429,11 +2455,11 @@ async def get_unique_models_with_providers(
     ```
     """
     try:
-        from src.services.model_catalog_cache import get_cached_unique_models_smart
         from src.db.models_catalog_db import (
             get_all_unique_models_for_catalog,
             transform_unique_models_batch,
         )
+        from src.services.model_catalog_cache import get_cached_unique_models_smart
 
         # Validate sort_by; silently fall back to default for backwards compatibility
         valid_unique_sort = {"provider_count", "name", "cheapest_price"}
@@ -2454,7 +2480,7 @@ async def get_unique_models_with_providers(
             include_inactive=include_inactive,
             min_providers=min_providers,
             sort_by=sort_by,
-            order=order
+            order=order,
         )
 
         if api_models:
@@ -2469,9 +2495,7 @@ async def get_unique_models_with_providers(
             )
 
             # Transform to API format
-            api_models = await asyncio.to_thread(
-                transform_unique_models_batch, db_unique_models
-            )
+            api_models = await asyncio.to_thread(transform_unique_models_batch, db_unique_models)
 
             # Apply filters
             if min_providers is not None:
@@ -2484,25 +2508,30 @@ async def get_unique_models_with_providers(
                 api_models.sort(key=lambda m: m.get("name", "").lower(), reverse=(order == "desc"))
             elif sort_by == "cheapest_price":
                 api_models.sort(
-                    key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
-                    reverse=(order == "desc")
+                    key=lambda m: (
+                        m.get("cheapest_prompt_price")
+                        if m.get("cheapest_prompt_price") is not None
+                        else float("inf")
+                    ),
+                    reverse=(order == "desc"),
                 )
 
             # Cache the result for this specific filter/sort combination
             from src.services.model_catalog_cache import cache_unique_models_with_filters
+
             await cache_unique_models_with_filters(
                 models=api_models,
                 include_inactive=include_inactive,
                 min_providers=min_providers,
                 sort_by=sort_by,
-                order=order
+                order=order,
             )
 
         # Calculate total before pagination
         total = len(api_models)
 
         # Apply pagination
-        paginated_models = api_models[offset:offset + limit] if limit else api_models[offset:]
+        paginated_models = api_models[offset : offset + limit] if limit else api_models[offset:]
 
         logger.info(
             f"Returning {len(paginated_models)} unique models "
@@ -2881,7 +2910,11 @@ def _calculate_recommendation(comparisons: list[dict[str, Any]]) -> dict[str, An
             )
             comp["_total_cost"] = prompt_price + completion_price
         except (ValueError, TypeError) as e:
-            logger.debug("Failed to parse pricing for gateway '%s' in recommendation: %s", comp.get("gateway"), e)
+            logger.debug(
+                "Failed to parse pricing for gateway '%s' in recommendation: %s",
+                comp.get("gateway"),
+                e,
+            )
             comp["_total_cost"] = float("inf")
 
     # Find cheapest
@@ -2912,7 +2945,11 @@ def _calculate_savings(comparisons: list[dict[str, Any]]) -> dict[str, Any]:
                 total = prompt + completion
                 costs.append({"gateway": comp["gateway"], "total_cost": total})
         except (ValueError, TypeError) as e:
-            logger.debug("Failed to parse pricing for gateway '%s' in savings calculation: %s", comp.get("gateway"), e)
+            logger.debug(
+                "Failed to parse pricing for gateway '%s' in savings calculation: %s",
+                comp.get("gateway"),
+                e,
+            )
             continue
 
     if len(costs) < 2:

@@ -13,9 +13,10 @@ This module tests the monitoring REST API endpoints that expose:
 - Cost analysis
 """
 
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from datetime import datetime, timedelta, timezone, UTC
-from unittest.mock import Mock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -38,44 +39,46 @@ def mock_redis_metrics():
         redis_instance = Mock()
 
         # Mock provider health
-        redis_instance.get_all_provider_health = AsyncMock(return_value={
-            "openrouter": 95.0,
-            "portkey": 88.5,
-            "fireworks": 72.0,
-        })
+        redis_instance.get_all_provider_health = AsyncMock(
+            return_value={
+                "openrouter": 95.0,
+                "portkey": 88.5,
+                "fireworks": 72.0,
+            }
+        )
 
         redis_instance.get_provider_health = AsyncMock(return_value=95.0)
 
         # Mock recent errors
-        redis_instance.get_recent_errors = AsyncMock(return_value=[
-            {
-                "model": "gpt-4",
-                "error": "Rate limit exceeded",
-                "timestamp": datetime.now(UTC).timestamp(),
-                "latency_ms": 1500
-            }
-        ])
+        redis_instance.get_recent_errors = AsyncMock(
+            return_value=[
+                {
+                    "model": "gpt-4",
+                    "error": "Rate limit exceeded",
+                    "timestamp": datetime.now(UTC).timestamp(),
+                    "latency_ms": 1500,
+                }
+            ]
+        )
 
         # Mock hourly stats
-        redis_instance.get_hourly_stats = AsyncMock(return_value={
-            "2025-11-27:14": {
-                "total_requests": 1000,
-                "successful_requests": 950,
-                "failed_requests": 50,
-                "tokens_input": 50000,
-                "tokens_output": 25000,
-                "total_cost": 12.50
+        redis_instance.get_hourly_stats = AsyncMock(
+            return_value={
+                "2025-11-27:14": {
+                    "total_requests": 1000,
+                    "successful_requests": 950,
+                    "failed_requests": 50,
+                    "tokens_input": 50000,
+                    "tokens_output": 25000,
+                    "total_cost": 12.50,
+                }
             }
-        })
+        )
 
         # Mock latency percentiles
-        redis_instance.get_latency_percentiles = AsyncMock(return_value={
-            "count": 100,
-            "avg": 500.0,
-            "p50": 450.0,
-            "p95": 800.0,
-            "p99": 1200.0
-        })
+        redis_instance.get_latency_percentiles = AsyncMock(
+            return_value={"count": 100, "avg": 500.0, "p50": 450.0, "p95": 800.0, "p99": 1200.0}
+        )
 
         mock.return_value = redis_instance
         yield redis_instance
@@ -88,93 +91,107 @@ def mock_analytics_service():
         analytics_instance = Mock()
 
         # Mock provider comparison
-        analytics_instance.get_provider_comparison = AsyncMock(return_value=[
-            {
-                "provider": "openrouter",
-                "total_requests": 10000,
-                "successful_requests": 9500,
-                "failed_requests": 500,
-                "avg_latency_ms": 500.0,
-                "total_cost": 125.50,
-                "total_tokens": 750000,
-                "avg_error_rate": 0.05,
-                "unique_models": 15,
-                "success_rate": 0.95
-            }
-        ])
+        analytics_instance.get_provider_comparison = AsyncMock(
+            return_value=[
+                {
+                    "provider": "openrouter",
+                    "total_requests": 10000,
+                    "successful_requests": 9500,
+                    "failed_requests": 500,
+                    "avg_latency_ms": 500.0,
+                    "total_cost": 125.50,
+                    "total_tokens": 750000,
+                    "avg_error_rate": 0.05,
+                    "unique_models": 15,
+                    "success_rate": 0.95,
+                }
+            ]
+        )
 
         # Mock anomaly detection
-        analytics_instance.detect_anomalies = AsyncMock(return_value=[
-            {
-                "type": "cost_spike",
-                "provider": "openrouter",
-                "hour": "2025-11-27:14",
-                "value": 50.0,
-                "expected": 12.5,
-                "severity": "warning"
-            }
-        ])
+        analytics_instance.detect_anomalies = AsyncMock(
+            return_value=[
+                {
+                    "type": "cost_spike",
+                    "provider": "openrouter",
+                    "hour": "2025-11-27:14",
+                    "value": 50.0,
+                    "expected": 12.5,
+                    "severity": "warning",
+                }
+            ]
+        )
 
         # Mock trial analytics
-        analytics_instance.get_trial_analytics = Mock(return_value={
-            "signups": 1000,
-            "started_trial": 750,
-            "converted": 50,
-            "conversion_rate": 5.0,
-            "activation_rate": 75.0,
-            "avg_time_to_conversion_days": 7.5
-        })
+        analytics_instance.get_trial_analytics = Mock(
+            return_value={
+                "signups": 1000,
+                "started_trial": 750,
+                "converted": 50,
+                "conversion_rate": 5.0,
+                "activation_rate": 75.0,
+                "avg_time_to_conversion_days": 7.5,
+            }
+        )
 
         # Mock cost analysis
-        analytics_instance.get_cost_by_provider = AsyncMock(return_value={
-            "start_date": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
-            "end_date": datetime.now(UTC).isoformat(),
-            "providers": {
-                "openrouter": {
-                    "total_cost": 250.0,
-                    "total_requests": 50000,
-                    "cost_per_request": 0.005
-                }
-            },
-            "total_cost": 250.0,
-            "total_requests": 50000
-        })
+        analytics_instance.get_cost_by_provider = AsyncMock(
+            return_value={
+                "start_date": (datetime.now(UTC) - timedelta(days=7)).isoformat(),
+                "end_date": datetime.now(UTC).isoformat(),
+                "providers": {
+                    "openrouter": {
+                        "total_cost": 250.0,
+                        "total_requests": 50000,
+                        "cost_per_request": 0.005,
+                    }
+                },
+                "total_cost": 250.0,
+                "total_requests": 50000,
+            }
+        )
 
         # Mock latency trends
-        analytics_instance.get_latency_trends = AsyncMock(return_value={
-            "provider": "openrouter",
-            "hours": 24,
-            "overall_avg_latency_ms": 500.0,
-            "overall_p95_latency_ms": 800.0,
-            "hourly_data": []
-        })
+        analytics_instance.get_latency_trends = AsyncMock(
+            return_value={
+                "provider": "openrouter",
+                "hours": 24,
+                "overall_avg_latency_ms": 500.0,
+                "overall_p95_latency_ms": 800.0,
+                "hourly_data": [],
+            }
+        )
 
         # Mock error rates
-        analytics_instance.get_error_rate_by_model = AsyncMock(return_value={
-            "hours": 24,
-            "models": {
-                "gpt-4": {
-                    "total_requests": 10000,
-                    "failed_requests": 100,
-                    "error_rate": 0.01,
-                    "providers": ["openrouter"]
-                }
+        analytics_instance.get_error_rate_by_model = AsyncMock(
+            return_value={
+                "hours": 24,
+                "models": {
+                    "gpt-4": {
+                        "total_requests": 10000,
+                        "failed_requests": 100,
+                        "error_rate": 0.01,
+                        "providers": ["openrouter"],
+                    }
+                },
             }
-        })
+        )
 
         # Mock token efficiency
-        analytics_instance.get_token_efficiency = AsyncMock(return_value={
-            "provider": "openrouter",
-            "model": "gpt-4",
-            "total_cost": 100.0,
-            "total_tokens": 1000000,
-            "total_requests": 10000,
-            "cost_per_token": 0.0001,
-            "tokens_per_request": 100.0,
-            "cost_per_request": 0.01,
-            "avg_input_tokens": 75.0,
-            "avg_output_tokens": 25.0
-        })
+        analytics_instance.get_token_efficiency = AsyncMock(
+            return_value={
+                "provider": "openrouter",
+                "model": "gpt-4",
+                "total_cost": 100.0,
+                "total_tokens": 1000000,
+                "total_requests": 10000,
+                "cost_per_token": 0.0001,
+                "tokens_per_request": 100.0,
+                "cost_per_request": 0.01,
+                "avg_input_tokens": 75.0,
+                "avg_output_tokens": 25.0,
+            }
+        )
 
         mock.return_value = analytics_instance
         yield analytics_instance
@@ -192,16 +209,10 @@ def mock_availability_service():
         open_state.name = "OPEN"
 
         mock.circuit_breakers = {
-            "openrouter:gpt-4": Mock(
-                state=closed_state,
-                failure_count=0,
-                last_failure_time=0.0
-            ),
+            "openrouter:gpt-4": Mock(state=closed_state, failure_count=0, last_failure_time=0.0),
             "fireworks:llama-3-70b": Mock(
-                state=open_state,
-                failure_count=5,
-                last_failure_time=datetime.now(UTC).timestamp()
-            )
+                state=open_state, failure_count=5, last_failure_time=datetime.now(UTC).timestamp()
+            ),
         }
         mock.is_model_available = Mock(side_effect=lambda model, provider: provider != "fireworks")
         yield mock
@@ -499,6 +510,7 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_no_dsn(self, client: TestClient):
         """Test that envelope without DSN returns 400"""
         import json
+
         envelope = json.dumps({"event_id": "12345"}).encode() + b"\n"
         response = client.post("/monitoring", content=envelope)
         assert response.status_code == 400
@@ -507,10 +519,11 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_blocked_host(self, client: TestClient):
         """Test that non-Sentry hosts are blocked"""
         import json
-        envelope = json.dumps({
-            "dsn": "https://key@evil.example.com/12345",
-            "event_id": "12345"
-        }).encode() + b"\n"
+
+        envelope = (
+            json.dumps({"dsn": "https://key@evil.example.com/12345", "event_id": "12345"}).encode()
+            + b"\n"
+        )
         response = client.post("/monitoring", content=envelope)
         assert response.status_code == 403
         assert "Invalid Sentry host" in response.text
@@ -518,11 +531,12 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_ssrf_prevention_suffix_attack(self, client: TestClient):
         """Test that SSRF attacks via suffix matching are blocked (e.g., evil-sentry.io)"""
         import json
+
         # This domain ends with sentry.io but is not a valid Sentry domain
-        envelope = json.dumps({
-            "dsn": "https://key@evil-sentry.io/12345",
-            "event_id": "12345"
-        }).encode() + b"\n"
+        envelope = (
+            json.dumps({"dsn": "https://key@evil-sentry.io/12345", "event_id": "12345"}).encode()
+            + b"\n"
+        )
         response = client.post("/monitoring", content=envelope)
         assert response.status_code == 403
         assert "Invalid Sentry host" in response.text
@@ -530,11 +544,14 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_ssrf_prevention_malicious_subdomain(self, client: TestClient):
         """Test that SSRF attacks via malicious subdomains are blocked"""
         import json
+
         # This looks like a subdomain but isn't properly formed
-        envelope = json.dumps({
-            "dsn": "https://key@malicioussentry.io/12345",
-            "event_id": "12345"
-        }).encode() + b"\n"
+        envelope = (
+            json.dumps(
+                {"dsn": "https://key@malicioussentry.io/12345", "event_id": "12345"}
+            ).encode()
+            + b"\n"
+        )
         response = client.post("/monitoring", content=envelope)
         assert response.status_code == 403
         assert "Invalid Sentry host" in response.text
@@ -542,11 +559,14 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_null_hostname(self, client: TestClient):
         """Test that malformed DSN with null hostname is rejected"""
         import json
+
         # DSN without valid hostname
-        envelope = json.dumps({
-            "dsn": "://key@/12345",  # Malformed URL with no hostname
-            "event_id": "12345"
-        }).encode() + b"\n"
+        envelope = (
+            json.dumps(
+                {"dsn": "://key@/12345", "event_id": "12345"}  # Malformed URL with no hostname
+            ).encode()
+            + b"\n"
+        )
         response = client.post("/monitoring", content=envelope)
         assert response.status_code == 403
         assert "Invalid Sentry host" in response.text
@@ -554,6 +574,7 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_non_dict_json(self, client: TestClient):
         """Test that non-dict JSON envelope returns 400"""
         import json
+
         # Array instead of object
         envelope = json.dumps([1, 2, 3]).encode() + b"\n"
         response = client.post("/monitoring", content=envelope)
@@ -563,6 +584,7 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_string_json(self, client: TestClient):
         """Test that string JSON envelope returns 400"""
         import json
+
         # String instead of object
         envelope = json.dumps("just a string").encode() + b"\n"
         response = client.post("/monitoring", content=envelope)
@@ -572,6 +594,7 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_number_json(self, client: TestClient):
         """Test that number JSON envelope returns 400"""
         import json
+
         # Number instead of object
         envelope = json.dumps(12345).encode() + b"\n"
         response = client.post("/monitoring", content=envelope)
@@ -581,6 +604,7 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_null_json(self, client: TestClient):
         """Test that null JSON envelope returns 400"""
         import json
+
         # Null instead of object
         envelope = json.dumps(None).encode() + b"\n"
         response = client.post("/monitoring", content=envelope)
@@ -591,15 +615,15 @@ class TestSentryTunnelEndpoint:
     def test_sentry_tunnel_valid_envelope(self, client: TestClient):
         """Test that valid Sentry envelope is forwarded"""
         import json
+
         # Create a valid Sentry envelope with allowed host
-        envelope_header = json.dumps({
-            "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
-            "event_id": "12345"
-        }).encode()
-        envelope_item_header = json.dumps({
-            "type": "event",
-            "length": 2
-        }).encode()
+        envelope_header = json.dumps(
+            {
+                "dsn": "https://key@o4510344966111232.ingest.us.sentry.io/4510344986099712",
+                "event_id": "12345",
+            }
+        ).encode()
+        envelope_item_header = json.dumps({"type": "event", "length": 2}).encode()
         envelope_item_payload = b"{}"
         envelope = envelope_header + b"\n" + envelope_item_header + b"\n" + envelope_item_payload
 

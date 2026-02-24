@@ -73,12 +73,8 @@ def execute_with_timeout(  # noqa: UP047
     thread.start()
 
     if not event.wait(timeout=timeout_seconds):
-        logger.error(
-            f"Query timeout: {operation_name} exceeded {timeout_seconds}s threshold"
-        )
-        raise QueryTimeoutError(
-            f"{operation_name} exceeded timeout of {timeout_seconds}s"
-        )
+        logger.error(f"Query timeout: {operation_name} exceeded {timeout_seconds}s threshold")
+        raise QueryTimeoutError(f"{operation_name} exceeded timeout of {timeout_seconds}s")
 
     if exception[0]:
         raise exception[0]

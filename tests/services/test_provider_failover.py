@@ -13,20 +13,21 @@ Tests cover:
 - Model not found errors
 """
 
-import pytest
-from unittest.mock import Mock
 import asyncio
+from unittest.mock import Mock
+
 import httpx
+import pytest
 from fastapi import HTTPException
 
 from src.services.provider_failover import (
+    FAILOVER_STATUS_CODES,
+    FALLBACK_ELIGIBLE_PROVIDERS,
+    FALLBACK_PROVIDER_PRIORITY,
     build_provider_failover_chain,
     enforce_model_failover_rules,
-    should_failover,
     map_provider_error,
-    FALLBACK_PROVIDER_PRIORITY,
-    FALLBACK_ELIGIBLE_PROVIDERS,
-    FAILOVER_STATUS_CODES
+    should_failover,
 )
 
 # Try to import OpenAI SDK exceptions (same pattern as the module)
@@ -42,64 +43,81 @@ try:
         PermissionDeniedError,
         RateLimitError,
     )
+
     OPENAI_SDK_AVAILABLE = True
 except ImportError:
     OPENAI_SDK_AVAILABLE = False
+
     # Create mock exception classes for testing
     class APIConnectionError(Exception):
         pass
+
     class APITimeoutError(Exception):
         pass
+
     class APIStatusError(Exception):
         def __init__(self, message, response=None, body=None):
             super().__init__(message)
             self.response = response
             self.body = body
-            self.status_code = getattr(response, 'status_code', 500) if response else 500
+            self.status_code = getattr(response, "status_code", 500) if response else 500
+
     class AuthenticationError(APIStatusError):
         pass
+
     class BadRequestError(APIStatusError):
         pass
+
     class NotFoundError(APIStatusError):
         pass
+
     class OpenAIError(Exception):
         pass
+
     class PermissionDeniedError(APIStatusError):
         pass
+
     class RateLimitError(APIStatusError):
         pass
 
+
 # Try to import Cerebras SDK exceptions (same pattern as the module)
 try:
-    from cerebras.cloud.sdk import (
-        APIConnectionError as CerebrasAPIConnectionError,
-        APIStatusError as CerebrasAPIStatusError,
-        AuthenticationError as CerebrasAuthenticationError,
-        BadRequestError as CerebrasBadRequestError,
-        NotFoundError as CerebrasNotFoundError,
-        PermissionDeniedError as CerebrasPermissionDeniedError,
-        RateLimitError as CerebrasRateLimitError,
-    )
+    from cerebras.cloud.sdk import APIConnectionError as CerebrasAPIConnectionError
+    from cerebras.cloud.sdk import APIStatusError as CerebrasAPIStatusError
+    from cerebras.cloud.sdk import AuthenticationError as CerebrasAuthenticationError
+    from cerebras.cloud.sdk import BadRequestError as CerebrasBadRequestError
+    from cerebras.cloud.sdk import NotFoundError as CerebrasNotFoundError
+    from cerebras.cloud.sdk import PermissionDeniedError as CerebrasPermissionDeniedError
+    from cerebras.cloud.sdk import RateLimitError as CerebrasRateLimitError
+
     CEREBRAS_SDK_AVAILABLE = True
 except ImportError:
     CEREBRAS_SDK_AVAILABLE = False
+
     # Create mock exception classes for testing
     class CerebrasAPIConnectionError(Exception):
         pass
+
     class CerebrasAPIStatusError(Exception):
         def __init__(self, message, response=None, body=None):
             super().__init__(message)
             self.response = response
             self.body = body
-            self.status_code = getattr(response, 'status_code', 500) if response else 500
+            self.status_code = getattr(response, "status_code", 500) if response else 500
+
     class CerebrasAuthenticationError(CerebrasAPIStatusError):
         pass
+
     class CerebrasBadRequestError(CerebrasAPIStatusError):
         pass
+
     class CerebrasNotFoundError(CerebrasAPIStatusError):
         pass
+
     class CerebrasPermissionDeniedError(CerebrasAPIStatusError):
         pass
+
     class CerebrasRateLimitError(CerebrasAPIStatusError):
         pass
 
@@ -107,6 +125,7 @@ except ImportError:
 # ============================================================
 # TEST CLASS: Provider Chain Building
 # ============================================================
+
 
 class TestBuildProviderFailoverChain:
     """Test provider failover chain construction"""
@@ -337,9 +356,10 @@ class TestEnforceModelFailoverRules:
 
         for model in bare_openai_models:
             filtered = enforce_model_failover_rules(model, chain.copy())
-            assert filtered == ["openai", "openrouter"], (
-                f"Model '{model}' should route to ['openai', 'openrouter'], but got {filtered}"
-            )
+            assert filtered == [
+                "openai",
+                "openrouter",
+            ], f"Model '{model}' should route to ['openai', 'openrouter'], but got {filtered}"
 
     def test_bare_openai_model_names_fallback_to_openrouter(self):
         """Test that bare OpenAI model names fall back to OpenRouter if native not in chain."""
@@ -359,9 +379,7 @@ class TestEnforceModelFailoverRules:
         chain = ["openai", "openrouter", "cerebras", "huggingface"]
 
         # With payment failover enabled, restriction is STILL enforced
-        filtered = enforce_model_failover_rules(
-            "gpt-4", chain.copy(), allow_payment_failover=True
-        )
+        filtered = enforce_model_failover_rules("gpt-4", chain.copy(), allow_payment_failover=True)
         assert filtered == ["openai", "openrouter"]
 
     def test_bare_anthropic_model_names_route_to_native_first(self):
@@ -387,9 +405,10 @@ class TestEnforceModelFailoverRules:
 
         for model in bare_anthropic_models:
             filtered = enforce_model_failover_rules(model, chain.copy())
-            assert filtered == ["anthropic", "openrouter"], (
-                f"Model '{model}' should route to ['anthropic', 'openrouter'], but got {filtered}"
-            )
+            assert filtered == [
+                "anthropic",
+                "openrouter",
+            ], f"Model '{model}' should route to ['anthropic', 'openrouter'], but got {filtered}"
 
     def test_bare_anthropic_model_names_fallback_to_openrouter(self):
         """Test that bare Anthropic model names fall back to OpenRouter if native not in chain."""
@@ -418,6 +437,7 @@ class TestEnforceModelFailoverRules:
 # ============================================================
 # TEST CLASS: Failover Eligibility
 # ============================================================
+
 
 class TestShouldFailover:
     """Test failover eligibility detection"""
@@ -476,7 +496,9 @@ class TestShouldFailover:
     def test_failover_status_codes_constant(self):
         """Test FAILOVER_STATUS_CODES contains expected codes"""
         assert 401 in FAILOVER_STATUS_CODES
-        assert 402 in FAILOVER_STATUS_CODES  # Payment Required - failover when provider credits exhausted
+        assert (
+            402 in FAILOVER_STATUS_CODES
+        )  # Payment Required - failover when provider credits exhausted
         assert 403 in FAILOVER_STATUS_CODES
         assert 404 in FAILOVER_STATUS_CODES
         assert 502 in FAILOVER_STATUS_CODES
@@ -497,6 +519,7 @@ class TestShouldFailover:
 # ============================================================
 # TEST CLASS: Error Mapping - HTTPException
 # ============================================================
+
 
 class TestMapProviderErrorHTTPException:
     """Test mapping existing HTTPException instances"""
@@ -522,6 +545,7 @@ class TestMapProviderErrorHTTPException:
 # ============================================================
 # TEST CLASS: Error Mapping - HTTPX Exceptions
 # ============================================================
+
 
 class TestMapProviderErrorHTTPX:
     """Test mapping httpx exceptions"""
@@ -631,6 +655,7 @@ class TestMapProviderErrorHTTPX:
 # ============================================================
 # TEST CLASS: Error Mapping - OpenAI SDK Exceptions
 # ============================================================
+
 
 @pytest.mark.skipif(not OPENAI_SDK_AVAILABLE, reason="OpenAI SDK not installed")
 class TestMapProviderErrorOpenAI:
@@ -791,6 +816,7 @@ class TestMapProviderErrorOpenAI:
 # TEST CLASS: Error Mapping - Cerebras SDK Exceptions
 # ============================================================
 
+
 @pytest.mark.skipif(not CEREBRAS_SDK_AVAILABLE, reason="Cerebras SDK not installed")
 class TestMapProviderErrorCerebras:
     """Test mapping Cerebras SDK exceptions"""
@@ -938,6 +964,7 @@ class TestMapProviderErrorCerebras:
 # ============================================================
 # TEST CLASS: Error Mapping - Cerebras SDK Exceptions
 # ============================================================
+
 
 @pytest.mark.skipif(not CEREBRAS_SDK_AVAILABLE, reason="Cerebras SDK not installed")
 class TestMapProviderErrorCerebras:
@@ -1087,6 +1114,7 @@ class TestMapProviderErrorCerebras:
 # TEST CLASS: Error Mapping - Generic Exceptions
 # ============================================================
 
+
 class TestMapProviderErrorGeneric:
     """Test mapping generic exceptions"""
 
@@ -1117,6 +1145,7 @@ class TestMapProviderErrorGeneric:
 # TEST CLASS: Integration Tests
 # ============================================================
 
+
 class TestProviderFailoverIntegration:
     """Test provider failover integration scenarios"""
 
@@ -1139,13 +1168,13 @@ class TestProviderFailoverIntegration:
         """Test failover decisions for various error scenarios"""
         test_cases = [
             # (status_code, should_failover)
-            (401, True),   # Auth error - try another provider
-            (403, True),   # Permission denied - try another provider
-            (404, True),   # Model not found - try another provider
+            (401, True),  # Auth error - try another provider
+            (403, True),  # Permission denied - try another provider
+            (404, True),  # Model not found - try another provider
             (429, False),  # Rate limited - return to client (don't failover)
-            (502, True),   # Bad gateway - try another provider
-            (503, True),   # Service unavailable - try another provider
-            (504, True),   # Gateway timeout - try another provider
+            (502, True),  # Bad gateway - try another provider
+            (503, True),  # Service unavailable - try another provider
+            (504, True),  # Gateway timeout - try another provider
             (400, False),  # Bad request - don't failover
             (422, False),  # Validation error - don't failover
             (500, False),  # Internal server error - don't failover
@@ -1154,16 +1183,29 @@ class TestProviderFailoverIntegration:
         for status_code, expected_should_failover in test_cases:
             exc = HTTPException(status_code=status_code, detail="Test")
             result = should_failover(exc)
-            assert result == expected_should_failover, \
-                f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
+            assert (
+                result == expected_should_failover
+            ), f"Status {status_code} should {' ' if expected_should_failover else 'not '}failover"
 
     def test_error_mapping_preserves_provider_context(self):
         """Test error messages include provider and model context"""
         test_cases = [
-            (httpx.HTTPStatusError("", request=Mock(), response=Mock(status_code=404, headers={})),
-             "openrouter", "gpt-4", 404),
-            (httpx.HTTPStatusError("", request=Mock(), response=Mock(status_code=401, headers={})),
-             "fireworks", "llama-2", 500),
+            (
+                httpx.HTTPStatusError(
+                    "", request=Mock(), response=Mock(status_code=404, headers={})
+                ),
+                "openrouter",
+                "gpt-4",
+                404,
+            ),
+            (
+                httpx.HTTPStatusError(
+                    "", request=Mock(), response=Mock(status_code=401, headers={})
+                ),
+                "fireworks",
+                "llama-2",
+                500,
+            ),
         ]
 
         for error, provider, model, expected_status in test_cases:
@@ -1179,6 +1221,7 @@ class TestProviderFailoverIntegration:
 # ============================================================
 # TEST CLASS: No Candidates Error Handling for Vertex AI
 # ============================================================
+
 
 class TestMapProviderErrorNoCandidates:
     """Test that 'no candidates' errors from Vertex AI trigger failover"""

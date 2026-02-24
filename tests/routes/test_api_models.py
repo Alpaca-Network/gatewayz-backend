@@ -6,9 +6,10 @@ This endpoint provides frontend compatibility for fetching model details
 using query parameters instead of path parameters.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, MagicMock
 
 from src.main import app
 
@@ -18,8 +19,8 @@ client = TestClient(app)
 class TestApiModelsDetailEndpoint:
     """Test /api/models/detail endpoint"""
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_model_id(self, mock_providers, mock_fetch):
         """Test getting model detail using modelId parameter"""
         mock_providers.return_value = []
@@ -38,8 +39,8 @@ class TestApiModelsDetailEndpoint:
         assert data["provider"] == "z-ai"
         assert data["model"] == "glm-4-7"
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_separate_params(self, mock_providers, mock_fetch):
         """Test getting model detail using separate developer and modelName params"""
         mock_providers.return_value = []
@@ -56,8 +57,8 @@ class TestApiModelsDetailEndpoint:
         assert data["provider"] == "openai"
         assert data["model"] == "gpt-4"
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_all_params(self, mock_providers, mock_fetch):
         """Test with both modelId and separate params (separate params take precedence)"""
         mock_providers.return_value = []
@@ -77,8 +78,8 @@ class TestApiModelsDetailEndpoint:
         assert data["provider"] == "anthropic"
         assert data["model"] == "claude-3"
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_gateway(self, mock_providers, mock_fetch):
         """Test getting model detail with specific gateway"""
         mock_providers.return_value = []
@@ -88,15 +89,13 @@ class TestApiModelsDetailEndpoint:
             "source_gateway": "deepinfra",
         }
 
-        response = client.get(
-            "/api/models/detail?modelId=meta-llama/llama-2-70b&gateway=deepinfra"
-        )
+        response = client.get("/api/models/detail?modelId=meta-llama/llama-2-70b&gateway=deepinfra")
 
         assert response.status_code == 200
         data = response.json()
         assert data["gateway"] == "deepinfra"
 
-    @patch('src.routes.api_models.fetch_specific_model')
+    @patch("src.routes.api_models.fetch_specific_model")
     def test_get_model_detail_not_found(self, mock_fetch):
         """Test 404 when model not found"""
         mock_fetch.return_value = None
@@ -128,8 +127,8 @@ class TestApiModelsDetailEndpoint:
 
         assert response.status_code == 400
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_huggingface(self, mock_providers, mock_fetch):
         """Test including HuggingFace data"""
         mock_providers.return_value = []
@@ -148,8 +147,8 @@ class TestApiModelsDetailEndpoint:
         data = response.json()
         assert data["include_huggingface"] is True
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_returns_providers_list(self, mock_providers, mock_fetch):
         """Test that providers list is included in response"""
         mock_providers.return_value = []
@@ -168,8 +167,8 @@ class TestApiModelsDetailEndpoint:
         assert isinstance(data["providers"], list)
         assert "openrouter" in data["providers"]
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_url_encoded_model_id(self, mock_providers, mock_fetch):
         """Test with URL-encoded modelId (as sent by frontend)"""
         mock_providers.return_value = []
@@ -188,8 +187,8 @@ class TestApiModelsDetailEndpoint:
         assert data["provider"] == "z-ai"
         assert data["model"] == "glm-4-7"
 
-    @patch('src.routes.api_models.fetch_specific_model')
-    @patch('src.routes.api_models.get_cached_providers')
+    @patch("src.routes.api_models.fetch_specific_model")
+    @patch("src.routes.api_models.get_cached_providers")
     def test_get_model_detail_with_complex_model_name(self, mock_providers, mock_fetch):
         """Test with complex model names containing multiple slashes"""
         mock_providers.return_value = []
@@ -210,7 +209,7 @@ class TestApiModelsDetailEndpoint:
 class TestApiModelsDetailErrorHandling:
     """Test error handling in /api/models/detail endpoint"""
 
-    @patch('src.routes.api_models.fetch_specific_model')
+    @patch("src.routes.api_models.fetch_specific_model")
     def test_internal_error_handling(self, mock_fetch):
         """Test that internal errors return 500"""
         mock_fetch.side_effect = Exception("Database error")

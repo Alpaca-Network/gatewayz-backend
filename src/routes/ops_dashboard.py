@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Query
@@ -43,16 +43,17 @@ def _ts() -> str:
 # Anomaly classification helpers
 # ---------------------------------------------------------------------------
 
+
 class AnomalyClassifier:
     """Classify system health into actionable severity levels."""
 
     # Thresholds
-    CRITICAL_ERROR_RATE = 0.20      # >= 20 % error rate
-    WARNING_ERROR_RATE = 0.05       # >= 5 % error rate
-    CRITICAL_LATENCY_MS = 10_000    # >= 10 s average
-    WARNING_LATENCY_MS = 3_000      # >= 3 s average
-    CRITICAL_GATEWAY_RATIO = 0.40   # >= 40 % gateways down
-    WARNING_GATEWAY_RATIO = 0.15    # >= 15 % gateways down
+    CRITICAL_ERROR_RATE = 0.20  # >= 20 % error rate
+    WARNING_ERROR_RATE = 0.05  # >= 5 % error rate
+    CRITICAL_LATENCY_MS = 10_000  # >= 10 s average
+    WARNING_LATENCY_MS = 3_000  # >= 3 s average
+    CRITICAL_GATEWAY_RATIO = 0.40  # >= 40 % gateways down
+    WARNING_GATEWAY_RATIO = 0.15  # >= 15 % gateways down
 
     @staticmethod
     def classify(
@@ -69,58 +70,70 @@ class AnomalyClassifier:
 
         # Error rate checks
         if error_rate >= AnomalyClassifier.CRITICAL_ERROR_RATE:
-            anomalies.append({
-                "type": "error_rate",
-                "severity": "critical",
-                "message": f"Error rate at {error_rate:.1%} (threshold {AnomalyClassifier.CRITICAL_ERROR_RATE:.0%})",
-                "value": round(error_rate * 100, 1),
-            })
+            anomalies.append(
+                {
+                    "type": "error_rate",
+                    "severity": "critical",
+                    "message": f"Error rate at {error_rate:.1%} (threshold {AnomalyClassifier.CRITICAL_ERROR_RATE:.0%})",
+                    "value": round(error_rate * 100, 1),
+                }
+            )
             severity = "critical"
         elif error_rate >= AnomalyClassifier.WARNING_ERROR_RATE:
-            anomalies.append({
-                "type": "error_rate",
-                "severity": "warning",
-                "message": f"Elevated error rate {error_rate:.1%}",
-                "value": round(error_rate * 100, 1),
-            })
+            anomalies.append(
+                {
+                    "type": "error_rate",
+                    "severity": "warning",
+                    "message": f"Elevated error rate {error_rate:.1%}",
+                    "value": round(error_rate * 100, 1),
+                }
+            )
             if severity != "critical":
                 severity = "warning"
 
         # Latency checks
         if avg_latency_ms >= AnomalyClassifier.CRITICAL_LATENCY_MS:
-            anomalies.append({
-                "type": "latency",
-                "severity": "critical",
-                "message": f"Average latency {avg_latency_ms:.0f} ms (threshold {AnomalyClassifier.CRITICAL_LATENCY_MS} ms)",
-                "value": round(avg_latency_ms),
-            })
+            anomalies.append(
+                {
+                    "type": "latency",
+                    "severity": "critical",
+                    "message": f"Average latency {avg_latency_ms:.0f} ms (threshold {AnomalyClassifier.CRITICAL_LATENCY_MS} ms)",
+                    "value": round(avg_latency_ms),
+                }
+            )
             severity = "critical"
         elif avg_latency_ms >= AnomalyClassifier.WARNING_LATENCY_MS:
-            anomalies.append({
-                "type": "latency",
-                "severity": "warning",
-                "message": f"Elevated latency {avg_latency_ms:.0f} ms",
-                "value": round(avg_latency_ms),
-            })
+            anomalies.append(
+                {
+                    "type": "latency",
+                    "severity": "warning",
+                    "message": f"Elevated latency {avg_latency_ms:.0f} ms",
+                    "value": round(avg_latency_ms),
+                }
+            )
             if severity != "critical":
                 severity = "warning"
 
         # Gateway availability checks
         if gw_ratio >= AnomalyClassifier.CRITICAL_GATEWAY_RATIO:
-            anomalies.append({
-                "type": "gateway_availability",
-                "severity": "critical",
-                "message": f"{unhealthy_gateways}/{total_gateways} gateways unhealthy ({gw_ratio:.0%})",
-                "value": unhealthy_gateways,
-            })
+            anomalies.append(
+                {
+                    "type": "gateway_availability",
+                    "severity": "critical",
+                    "message": f"{unhealthy_gateways}/{total_gateways} gateways unhealthy ({gw_ratio:.0%})",
+                    "value": unhealthy_gateways,
+                }
+            )
             severity = "critical"
         elif gw_ratio >= AnomalyClassifier.WARNING_GATEWAY_RATIO:
-            anomalies.append({
-                "type": "gateway_availability",
-                "severity": "warning",
-                "message": f"{unhealthy_gateways}/{total_gateways} gateways degraded",
-                "value": unhealthy_gateways,
-            })
+            anomalies.append(
+                {
+                    "type": "gateway_availability",
+                    "severity": "warning",
+                    "message": f"{unhealthy_gateways}/{total_gateways} gateways degraded",
+                    "value": unhealthy_gateways,
+                }
+            )
             if severity != "critical":
                 severity = "warning"
 
@@ -131,10 +144,12 @@ class AnomalyClassifier:
 # Data collection helpers
 # ---------------------------------------------------------------------------
 
+
 async def _collect_system_health() -> dict[str, Any]:
     """Gather system health from the simple_health_cache."""
     try:
         from src.services.simple_health_cache import simple_health_cache
+
         cached = simple_health_cache.get_system_health()
         if cached:
             return cached
@@ -147,6 +162,7 @@ async def _collect_gateway_health() -> dict[str, Any]:
     """Gather gateway health summary."""
     try:
         from src.services.gateway_health_service import run_comprehensive_check
+
         results = await run_comprehensive_check(auto_fix=False, verbose=False)
         return results
     except Exception as exc:
@@ -158,6 +174,7 @@ async def _collect_circuit_breaker_states() -> list[dict[str, Any]]:
     """Gather circuit breaker states for all providers."""
     try:
         from src.services.circuit_breaker import get_all_circuit_breakers
+
         breakers = get_all_circuit_breakers()
         return [cb.get_state() for cb in breakers.values()]
     except Exception as exc:
@@ -169,6 +186,7 @@ async def _collect_provider_health() -> list[dict[str, Any]]:
     """Gather per-provider health from cache."""
     try:
         from src.services.simple_health_cache import simple_health_cache
+
         cached = simple_health_cache.get_providers_health()
         return cached or []
     except Exception as exc:
@@ -182,6 +200,7 @@ async def _collect_error_metrics() -> dict[str, Any]:
         from src.services.prometheus_metrics import (
             model_inference_requests,
         )
+
         # Prometheus client metrics are in-process; read them directly
         total_requests = 0
         error_requests = 0
@@ -204,6 +223,7 @@ async def _collect_error_metrics() -> dict[str, Any]:
 # JSON API endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.get("/ops/dashboard/data", tags=["ops-dashboard"])
 async def ops_dashboard_data():
     """
@@ -215,15 +235,13 @@ async def ops_dashboard_data():
     start = time.monotonic()
 
     # Gather data concurrently
-    system_health, gateway_health, cb_states, providers, error_metrics = (
-        await asyncio.gather(
-            _collect_system_health(),
-            _collect_gateway_health(),
-            _collect_circuit_breaker_states(),
-            _collect_provider_health(),
-            _collect_error_metrics(),
-            return_exceptions=True,
-        )
+    system_health, gateway_health, cb_states, providers, error_metrics = await asyncio.gather(
+        _collect_system_health(),
+        _collect_gateway_health(),
+        _collect_circuit_breaker_states(),
+        _collect_provider_health(),
+        _collect_error_metrics(),
+        return_exceptions=True,
     )
 
     # Safely unpack (replace exceptions with empty defaults)
@@ -250,12 +268,10 @@ async def ops_dashboard_data():
 
     # Provider aggregates
     healthy_providers = sum(
-        1 for p in providers
-        if (p.get("status") or "").lower() in ("healthy", "operational")
+        1 for p in providers if (p.get("status") or "").lower() in ("healthy", "operational")
     )
     degraded_providers = sum(
-        1 for p in providers
-        if (p.get("status") or "").lower() in ("degraded", "warning")
+        1 for p in providers if (p.get("status") or "").lower() in ("degraded", "warning")
     )
     unhealthy_providers = len(providers) - healthy_providers - degraded_providers
 
@@ -294,14 +310,16 @@ async def ops_dashboard_data():
         else:
             status = "unhealthy"
 
-        gateways_detail.append({
-            "name": gw_name,
-            "status": status,
-            "configured": configured,
-            "endpoint_ok": ep_test.get("success", False),
-            "cache_ok": cache_test.get("success", False),
-            "model_count": (cache_test.get("model_count") or ep_test.get("model_count") or 0),
-        })
+        gateways_detail.append(
+            {
+                "name": gw_name,
+                "status": status,
+                "configured": configured,
+                "endpoint_ok": ep_test.get("success", False),
+                "cache_ok": cache_test.get("success", False),
+                "model_count": (cache_test.get("model_count") or ep_test.get("model_count") or 0),
+            }
+        )
 
     # Record this check in telemetry ring buffer
     sample = {
@@ -357,6 +375,7 @@ async def ops_dashboard_data():
 # ---------------------------------------------------------------------------
 # HTML dashboard
 # ---------------------------------------------------------------------------
+
 
 @router.get("/ops/dashboard", response_class=HTMLResponse, tags=["ops-dashboard"])
 async def ops_dashboard(

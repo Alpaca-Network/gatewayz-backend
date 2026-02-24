@@ -50,9 +50,7 @@ def app_with_selective_gzip():
             "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
         }
-        return StreamingResponse(
-            generate(), media_type="text/event-stream", headers=headers
-        )
+        return StreamingResponse(generate(), media_type="text/event-stream", headers=headers)
 
     @app.get("/sse-stream-no-headers")
     async def sse_stream_no_headers():
@@ -83,9 +81,7 @@ def app_with_selective_gzip():
                 yield b"binary data chunk "
 
         headers = {"X-Accel-Buffering": "no"}
-        return StreamingResponse(
-            generate(), media_type="application/octet-stream", headers=headers
-        )
+        return StreamingResponse(generate(), media_type="application/octet-stream", headers=headers)
 
     return app
 
@@ -104,9 +100,10 @@ class TestSelectiveGZipMiddleware:
         response = client.get("/json-small", headers={"Accept-Encoding": "gzip"})
         assert response.status_code == 200
         # Small response should not be compressed
-        assert "content-encoding" not in response.headers or response.headers.get(
-            "content-encoding"
-        ) != "gzip"
+        assert (
+            "content-encoding" not in response.headers
+            or response.headers.get("content-encoding") != "gzip"
+        )
 
     def test_large_json_compressed(self, client):
         """Test that large JSON responses ARE compressed"""
@@ -142,9 +139,7 @@ class TestSelectiveGZipMiddleware:
 
     def test_sse_stream_without_explicit_headers_not_compressed(self, client):
         """Test that SSE streaming is NOT compressed even without explicit headers"""
-        response = client.get(
-            "/sse-stream-no-headers", headers={"Accept-Encoding": "gzip"}
-        )
+        response = client.get("/sse-stream-no-headers", headers={"Accept-Encoding": "gzip"})
         assert response.status_code == 200
 
         # SSE should NOT be gzip compressed based on content-type alone

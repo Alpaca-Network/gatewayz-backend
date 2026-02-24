@@ -126,7 +126,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.INVALID_MODEL_FORMAT: 400,
     ErrorCode.PROVIDER_MISMATCH: 400,
     ErrorCode.MODEL_REGION_RESTRICTED: 403,
-
     # Validation errors -> 400
     ErrorCode.MISSING_REQUIRED_FIELD: 400,
     ErrorCode.INVALID_PARAMETER_TYPE: 400,
@@ -143,7 +142,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.UNSUPPORTED_PARAMETER: 400,
     ErrorCode.INVALID_CONTENT_TYPE: 400,
     ErrorCode.INVALID_REQUEST_BODY: 400,
-
     # Authentication errors -> 401
     ErrorCode.INVALID_API_KEY: 401,
     ErrorCode.API_KEY_EXPIRED: 401,
@@ -151,7 +149,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.API_KEY_MISSING: 401,
     ErrorCode.API_KEY_MALFORMED: 401,
     ErrorCode.AUTHENTICATION_REQUIRED: 401,
-
     # Authorization errors -> 403
     ErrorCode.IP_RESTRICTED: 403,
     ErrorCode.DOMAIN_RESTRICTED: 403,
@@ -160,7 +157,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.INSUFFICIENT_PERMISSIONS: 403,
     ErrorCode.ACCESS_DENIED: 403,
     ErrorCode.FEATURE_NOT_AVAILABLE: 403,
-
     # Payment errors -> 402
     ErrorCode.INSUFFICIENT_CREDITS: 402,
     ErrorCode.CREDIT_BELOW_MINIMUM: 402,
@@ -168,7 +164,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.PAYMENT_FAILED: 402,
     ErrorCode.INVOICE_OVERDUE: 402,
     ErrorCode.BILLING_ERROR: 402,
-
     # Rate limiting errors -> 429
     ErrorCode.RATE_LIMIT_EXCEEDED: 429,
     ErrorCode.TOKEN_RATE_LIMIT: 429,
@@ -176,7 +171,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.DAILY_QUOTA_EXCEEDED: 429,
     ErrorCode.MONTHLY_QUOTA_EXCEEDED: 429,
     ErrorCode.HOURLY_QUOTA_EXCEEDED: 429,
-
     # Provider errors -> 502/503/504
     ErrorCode.PROVIDER_ERROR: 502,
     ErrorCode.PROVIDER_TIMEOUT: 504,
@@ -185,7 +179,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.PROVIDER_AUTHENTICATION_ERROR: 502,
     ErrorCode.PROVIDER_INVALID_RESPONSE: 502,
     ErrorCode.ALL_PROVIDERS_FAILED: 502,
-
     # Service errors -> 500/503
     ErrorCode.INTERNAL_ERROR: 500,
     ErrorCode.DATABASE_ERROR: 500,
@@ -193,7 +186,6 @@ ERROR_STATUS_CODES: dict[ErrorCode, int] = {
     ErrorCode.MAINTENANCE_MODE: 503,
     ErrorCode.CONFIGURATION_ERROR: 500,
     ErrorCode.UNEXPECTED_ERROR: 500,
-
     # Resource errors -> 404/410
     ErrorCode.RESOURCE_NOT_FOUND: 404,
     ErrorCode.ENDPOINT_NOT_FOUND: 404,
@@ -211,7 +203,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.INVALID_MODEL_FORMAT: ErrorCategory.MODEL_ERRORS,
     ErrorCode.PROVIDER_MISMATCH: ErrorCategory.MODEL_ERRORS,
     ErrorCode.MODEL_REGION_RESTRICTED: ErrorCategory.MODEL_ERRORS,
-
     # Validation errors
     ErrorCode.MISSING_REQUIRED_FIELD: ErrorCategory.VALIDATION_ERRORS,
     ErrorCode.INVALID_PARAMETER_TYPE: ErrorCategory.VALIDATION_ERRORS,
@@ -228,7 +219,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.UNSUPPORTED_PARAMETER: ErrorCategory.VALIDATION_ERRORS,
     ErrorCode.INVALID_CONTENT_TYPE: ErrorCategory.VALIDATION_ERRORS,
     ErrorCode.INVALID_REQUEST_BODY: ErrorCategory.VALIDATION_ERRORS,
-
     # Authentication errors
     ErrorCode.INVALID_API_KEY: ErrorCategory.AUTHENTICATION_ERRORS,
     ErrorCode.API_KEY_EXPIRED: ErrorCategory.AUTHENTICATION_ERRORS,
@@ -236,7 +226,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.API_KEY_MISSING: ErrorCategory.AUTHENTICATION_ERRORS,
     ErrorCode.API_KEY_MALFORMED: ErrorCategory.AUTHENTICATION_ERRORS,
     ErrorCode.AUTHENTICATION_REQUIRED: ErrorCategory.AUTHENTICATION_ERRORS,
-
     # Authorization errors
     ErrorCode.IP_RESTRICTED: ErrorCategory.AUTHORIZATION_ERRORS,
     ErrorCode.DOMAIN_RESTRICTED: ErrorCategory.AUTHORIZATION_ERRORS,
@@ -245,7 +234,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.INSUFFICIENT_PERMISSIONS: ErrorCategory.AUTHORIZATION_ERRORS,
     ErrorCode.ACCESS_DENIED: ErrorCategory.AUTHORIZATION_ERRORS,
     ErrorCode.FEATURE_NOT_AVAILABLE: ErrorCategory.AUTHORIZATION_ERRORS,
-
     # Payment errors
     ErrorCode.INSUFFICIENT_CREDITS: ErrorCategory.PAYMENT_ERRORS,
     ErrorCode.CREDIT_BELOW_MINIMUM: ErrorCategory.PAYMENT_ERRORS,
@@ -253,7 +241,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.PAYMENT_FAILED: ErrorCategory.PAYMENT_ERRORS,
     ErrorCode.INVOICE_OVERDUE: ErrorCategory.PAYMENT_ERRORS,
     ErrorCode.BILLING_ERROR: ErrorCategory.PAYMENT_ERRORS,
-
     # Rate limit errors
     ErrorCode.RATE_LIMIT_EXCEEDED: ErrorCategory.RATE_LIMIT_ERRORS,
     ErrorCode.TOKEN_RATE_LIMIT: ErrorCategory.RATE_LIMIT_ERRORS,
@@ -261,7 +248,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.DAILY_QUOTA_EXCEEDED: ErrorCategory.RATE_LIMIT_ERRORS,
     ErrorCode.MONTHLY_QUOTA_EXCEEDED: ErrorCategory.RATE_LIMIT_ERRORS,
     ErrorCode.HOURLY_QUOTA_EXCEEDED: ErrorCategory.RATE_LIMIT_ERRORS,
-
     # Provider errors
     ErrorCode.PROVIDER_ERROR: ErrorCategory.PROVIDER_ERRORS,
     ErrorCode.PROVIDER_TIMEOUT: ErrorCategory.PROVIDER_ERRORS,
@@ -270,7 +256,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.PROVIDER_AUTHENTICATION_ERROR: ErrorCategory.PROVIDER_ERRORS,
     ErrorCode.PROVIDER_INVALID_RESPONSE: ErrorCategory.PROVIDER_ERRORS,
     ErrorCode.ALL_PROVIDERS_FAILED: ErrorCategory.PROVIDER_ERRORS,
-
     # Service errors
     ErrorCode.INTERNAL_ERROR: ErrorCategory.SERVICE_ERRORS,
     ErrorCode.DATABASE_ERROR: ErrorCategory.SERVICE_ERRORS,
@@ -278,7 +263,6 @@ ERROR_CATEGORIES: dict[ErrorCode, ErrorCategory] = {
     ErrorCode.MAINTENANCE_MODE: ErrorCategory.SERVICE_ERRORS,
     ErrorCode.CONFIGURATION_ERROR: ErrorCategory.SERVICE_ERRORS,
     ErrorCode.UNEXPECTED_ERROR: ErrorCategory.SERVICE_ERRORS,
-
     # Resource errors (could be model or service category)
     ErrorCode.RESOURCE_NOT_FOUND: ErrorCategory.SERVICE_ERRORS,
     ErrorCode.ENDPOINT_NOT_FOUND: ErrorCategory.SERVICE_ERRORS,

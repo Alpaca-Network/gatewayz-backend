@@ -9,9 +9,10 @@ Purpose: Verify all endpoints use real database data, not mock data.
 Created: 2025-12-28
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from httpx import AsyncClient
-from datetime import datetime, timezone
 
 
 class TestChatRequestsCountsEndpoint:
@@ -21,7 +22,9 @@ class TestChatRequestsCountsEndpoint:
     async def test_counts_endpoint_returns_200(self, client: AsyncClient):
         """Test that counts endpoint returns 200 OK"""
         response = await client.get("/api/monitoring/chat-requests/counts")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.text}"
 
     @pytest.mark.asyncio
     async def test_counts_endpoint_response_structure(self, client: AsyncClient):
@@ -59,7 +62,9 @@ class TestChatRequestsCountsEndpoint:
             assert "request_count" in first_record, "Missing request_count"
 
             # Values should be real (not test/mock markers)
-            assert isinstance(first_record["model_id"], (int, str)), "model_id should be int or string"
+            assert isinstance(
+                first_record["model_id"], (int, str)
+            ), "model_id should be int or string"
             assert isinstance(first_record["request_count"], int), "request_count should be integer"
             assert first_record["request_count"] >= 0, "request_count should be non-negative"
 
@@ -72,7 +77,9 @@ class TestChatRequestsCountsEndpoint:
         if len(data["data"]) > 1:
             counts = [record["request_count"] for record in data["data"]]
             # Verify sorted descending
-            assert counts == sorted(counts, reverse=True), "Data should be sorted by request_count (descending)"
+            assert counts == sorted(
+                counts, reverse=True
+            ), "Data should be sorted by request_count (descending)"
 
     @pytest.mark.asyncio
     async def test_counts_endpoint_metadata_accuracy(self, client: AsyncClient):
@@ -81,12 +88,14 @@ class TestChatRequestsCountsEndpoint:
         data = response.json()
 
         # Verify metadata matches data
-        assert data["metadata"]["total_models"] == len(data["data"]), \
-            f"total_models ({data['metadata']['total_models']}) doesn't match data length ({len(data['data'])})"
+        assert data["metadata"]["total_models"] == len(
+            data["data"]
+        ), f"total_models ({data['metadata']['total_models']}) doesn't match data length ({len(data['data'])})"
 
         actual_total_requests = sum(record["request_count"] for record in data["data"])
-        assert data["metadata"]["total_requests"] == actual_total_requests, \
-            f"total_requests in metadata ({data['metadata']['total_requests']}) doesn't match actual sum ({actual_total_requests})"
+        assert (
+            data["metadata"]["total_requests"] == actual_total_requests
+        ), f"total_requests in metadata ({data['metadata']['total_requests']}) doesn't match actual sum ({actual_total_requests})"
 
     @pytest.mark.asyncio
     async def test_counts_endpoint_timestamp_is_valid(self, client: AsyncClient):
@@ -109,7 +118,9 @@ class TestChatRequestsModelsEndpoint:
     async def test_models_endpoint_returns_200(self, client: AsyncClient):
         """Test that models endpoint returns 200 OK"""
         response = await client.get("/api/monitoring/chat-requests/models")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.text}"
 
     @pytest.mark.asyncio
     async def test_models_endpoint_response_structure(self, client: AsyncClient):
@@ -164,7 +175,9 @@ class TestChatRequestsModelsEndpoint:
             # Token counts should be reasonable
             assert stats["total_input_tokens"] >= 0
             assert stats["total_output_tokens"] >= 0
-            assert stats["total_tokens"] == stats["total_input_tokens"] + stats["total_output_tokens"]
+            assert (
+                stats["total_tokens"] == stats["total_input_tokens"] + stats["total_output_tokens"]
+            )
 
     @pytest.mark.asyncio
     async def test_models_endpoint_provider_data(self, client: AsyncClient):
@@ -190,8 +203,9 @@ class TestChatRequestsModelsEndpoint:
 
         if len(data["data"]) > 1:
             request_counts = [model["stats"]["total_requests"] for model in data["data"]]
-            assert request_counts == sorted(request_counts, reverse=True), \
-                "Models should be sorted by request count (descending)"
+            assert request_counts == sorted(
+                request_counts, reverse=True
+            ), "Models should be sorted by request count (descending)"
 
 
 class TestChatRequestsEndpoint:
@@ -201,7 +215,9 @@ class TestChatRequestsEndpoint:
     async def test_chat_requests_returns_200(self, client: AsyncClient):
         """Test that endpoint returns 200 OK"""
         response = await client.get("/api/monitoring/chat-requests")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        assert (
+            response.status_code == 200
+        ), f"Expected 200, got {response.status_code}: {response.text}"
 
     @pytest.mark.asyncio
     async def test_chat_requests_response_structure(self, client: AsyncClient):
@@ -245,8 +261,9 @@ class TestChatRequestsEndpoint:
             # - created_at
 
             # At minimum, should have model relation
-            assert "models" in first_request or "model_id" in first_request, \
-                "Request should have model information"
+            assert (
+                "models" in first_request or "model_id" in first_request
+            ), "Request should have model information"
 
     @pytest.mark.asyncio
     async def test_chat_requests_pagination(self, client: AsyncClient):
@@ -282,7 +299,9 @@ class TestChatRequestsEndpoint:
 
             if model_id:
                 # Filter by that model_id
-                response_filtered = await client.get(f"/api/monitoring/chat-requests?model_id={model_id}")
+                response_filtered = await client.get(
+                    f"/api/monitoring/chat-requests?model_id={model_id}"
+                )
                 data_filtered = response_filtered.json()
 
                 # Should be successful
@@ -305,8 +324,9 @@ class TestChatRequestsEndpoint:
             # All results should have model names containing "gpt" (case-insensitive)
             for request in data["data"]:
                 if "models" in request and "model_name" in request["models"]:
-                    assert "gpt" in request["models"]["model_name"].lower(), \
-                        f"Expected 'gpt' in model name, got {request['models']['model_name']}"
+                    assert (
+                        "gpt" in request["models"]["model_name"].lower()
+                    ), f"Expected 'gpt' in model name, got {request['models']['model_name']}"
 
     @pytest.mark.asyncio
     async def test_chat_requests_returned_count_matches_data(self, client: AsyncClient):
@@ -314,8 +334,9 @@ class TestChatRequestsEndpoint:
         response = await client.get("/api/monitoring/chat-requests?limit=50")
         data = response.json()
 
-        assert data["metadata"]["returned_count"] == len(data["data"]), \
-            f"returned_count ({data['metadata']['returned_count']}) doesn't match actual data length ({len(data['data'])})"
+        assert data["metadata"]["returned_count"] == len(
+            data["data"]
+        ), f"returned_count ({data['metadata']['returned_count']}) doesn't match actual data length ({len(data['data'])})"
 
     @pytest.mark.asyncio
     async def test_chat_requests_limit_validation(self, client: AsyncClient):
@@ -347,13 +368,14 @@ class TestChatRequestsDataIntegrity:
         data_models = response_models.json()
 
         # Should have same number of models
-        assert data_counts["metadata"]["total_models"] == data_models["metadata"]["total_models"], \
-            "counts and models endpoints report different model counts"
+        assert (
+            data_counts["metadata"]["total_models"] == data_models["metadata"]["total_models"]
+        ), "counts and models endpoints report different model counts"
 
         # Total requests should match between endpoints
-        assert data_counts["metadata"]["total_requests"] == \
-               sum(m["stats"]["total_requests"] for m in data_models["data"]), \
-            "total_requests don't match between endpoints"
+        assert data_counts["metadata"]["total_requests"] == sum(
+            m["stats"]["total_requests"] for m in data_models["data"]
+        ), "total_requests don't match between endpoints"
 
     @pytest.mark.asyncio
     async def test_all_endpoints_return_real_timestamps(self, client: AsyncClient):
@@ -361,7 +383,7 @@ class TestChatRequestsDataIntegrity:
         endpoints = [
             "/api/monitoring/chat-requests/counts",
             "/api/monitoring/chat-requests/models",
-            "/api/monitoring/chat-requests"
+            "/api/monitoring/chat-requests",
         ]
 
         for endpoint in endpoints:
@@ -381,7 +403,7 @@ class TestChatRequestsDataIntegrity:
         endpoints = [
             "/api/monitoring/chat-requests/counts",
             "/api/monitoring/chat-requests/models",
-            "/api/monitoring/chat-requests"
+            "/api/monitoring/chat-requests",
         ]
 
         mock_markers = ["mock_", "test_data", "fake_", "N/A", "TODO", "PLACEHOLDER"]
@@ -391,8 +413,9 @@ class TestChatRequestsDataIntegrity:
             response_text = response.text
 
             for marker in mock_markers:
-                assert marker not in response_text, \
-                    f"Found mock marker '{marker}' in response from {endpoint}"
+                assert (
+                    marker not in response_text
+                ), f"Found mock marker '{marker}' in response from {endpoint}"
 
     @pytest.mark.asyncio
     async def test_success_flag_always_true_on_200(self, client: AsyncClient):
@@ -400,12 +423,11 @@ class TestChatRequestsDataIntegrity:
         endpoints = [
             "/api/monitoring/chat-requests/counts",
             "/api/monitoring/chat-requests/models",
-            "/api/monitoring/chat-requests"
+            "/api/monitoring/chat-requests",
         ]
 
         for endpoint in endpoints:
             response = await client.get(endpoint)
             if response.status_code == 200:
                 data = response.json()
-                assert data.get("success") is True, \
-                    f"{endpoint} returned 200 but success != true"
+                assert data.get("success") is True, f"{endpoint} returned 200 but success != true"

@@ -11,17 +11,18 @@ Tests cover:
 - Error handling
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
 from src.security.deps import get_current_user
 
-
 # ============================================================
 # FIXTURES
 # ============================================================
+
 
 @pytest.fixture
 def client():
@@ -36,55 +37,35 @@ def client():
 @pytest.fixture
 def mock_current_user():
     """Mock authenticated user"""
-    return {
-        'id': 123,
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'role': 'user'
-    }
+    return {"id": 123, "username": "testuser", "email": "test@example.com", "role": "user"}
 
 
 @pytest.fixture
 def mock_activity_stats():
     """Mock activity statistics"""
     return {
-        'total_requests': 150,
-        'total_tokens': 45000,
-        'total_spend': 2.35,
-        'total_cost': 2.35,
-        'daily_stats': [
-            {
-                'date': '2024-01-15',
-                'spend': 0.75,
-                'tokens': 15000,
-                'requests': 50
-            },
-            {
-                'date': '2024-01-16',
-                'spend': 0.80,
-                'tokens': 16000,
-                'requests': 50
-            },
-            {
-                'date': '2024-01-17',
-                'spend': 0.80,
-                'tokens': 14000,
-                'requests': 50
-            }
+        "total_requests": 150,
+        "total_tokens": 45000,
+        "total_spend": 2.35,
+        "total_cost": 2.35,
+        "daily_stats": [
+            {"date": "2024-01-15", "spend": 0.75, "tokens": 15000, "requests": 50},
+            {"date": "2024-01-16", "spend": 0.80, "tokens": 16000, "requests": 50},
+            {"date": "2024-01-17", "spend": 0.80, "tokens": 14000, "requests": 50},
         ],
-        'by_date': [
-            {'date': '2024-01-15', 'requests': 50, 'tokens': 15000, 'cost': 0.75},
-            {'date': '2024-01-16', 'requests': 50, 'tokens': 16000, 'cost': 0.80},
-            {'date': '2024-01-17', 'requests': 50, 'tokens': 14000, 'cost': 0.80}
+        "by_date": [
+            {"date": "2024-01-15", "requests": 50, "tokens": 15000, "cost": 0.75},
+            {"date": "2024-01-16", "requests": 50, "tokens": 16000, "cost": 0.80},
+            {"date": "2024-01-17", "requests": 50, "tokens": 14000, "cost": 0.80},
         ],
-        'by_model': {
-            'gpt-4': {'requests': 100, 'tokens': 30000, 'cost': 1.50},
-            'claude-3-sonnet': {'requests': 50, 'tokens': 15000, 'cost': 0.85}
+        "by_model": {
+            "gpt-4": {"requests": 100, "tokens": 30000, "cost": 1.50},
+            "claude-3-sonnet": {"requests": 50, "tokens": 15000, "cost": 0.85},
         },
-        'by_provider': {
-            'OpenAI': {'requests': 100, 'tokens': 30000, 'cost': 1.50},
-            'Anthropic': {'requests': 50, 'tokens': 15000, 'cost': 0.85}
-        }
+        "by_provider": {
+            "OpenAI": {"requests": 100, "tokens": 30000, "cost": 1.50},
+            "Anthropic": {"requests": 50, "tokens": 15000, "cost": 0.85},
+        },
     }
 
 
@@ -93,31 +74,31 @@ def mock_activity_logs():
     """Mock activity log entries"""
     return [
         {
-            'id': 1,
-            'user_id': 123,
-            'timestamp': '2024-01-17T10:00:00Z',
-            'model': 'gpt-4',
-            'provider': 'OpenAI',
-            'tokens': 1500,
-            'cost': 0.045,
-            'speed': 45.5,
-            'finish_reason': 'stop',
-            'app': 'API',
-            'metadata': {}
+            "id": 1,
+            "user_id": 123,
+            "timestamp": "2024-01-17T10:00:00Z",
+            "model": "gpt-4",
+            "provider": "OpenAI",
+            "tokens": 1500,
+            "cost": 0.045,
+            "speed": 45.5,
+            "finish_reason": "stop",
+            "app": "API",
+            "metadata": {},
         },
         {
-            'id': 2,
-            'user_id': 123,
-            'timestamp': '2024-01-17T11:00:00Z',
-            'model': 'claude-3-sonnet',
-            'provider': 'Anthropic',
-            'tokens': 2000,
-            'cost': 0.060,
-            'speed': 50.0,
-            'finish_reason': 'stop',
-            'app': 'API',
-            'metadata': {}
-        }
+            "id": 2,
+            "user_id": 123,
+            "timestamp": "2024-01-17T11:00:00Z",
+            "model": "claude-3-sonnet",
+            "provider": "Anthropic",
+            "tokens": 2000,
+            "cost": 0.060,
+            "speed": 50.0,
+            "finish_reason": "stop",
+            "app": "API",
+            "metadata": {},
+        },
     ]
 
 
@@ -125,18 +106,16 @@ def mock_activity_logs():
 # TEST CLASS: Activity Statistics Endpoint
 # ============================================================
 
+
 class TestActivityStatsEndpoint:
     """Test /user/activity/stats endpoint"""
 
-    @patch('src.routes.activity.get_user_activity_stats')
+    @patch("src.routes.activity.get_user_activity_stats")
     def test_get_activity_stats_default(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user,
-        mock_activity_stats
+        self, mock_get_stats, client, mock_current_user, mock_activity_stats
     ):
         """Test getting activity stats with defaults"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -144,35 +123,27 @@ class TestActivityStatsEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_stats.return_value = mock_activity_stats
 
-        response = client.get('/user/activity/stats')
+        response = client.get("/user/activity/stats")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert data['total_requests'] == 150
-        assert data['total_tokens'] == 45000
-        assert data['total_spend'] == 2.35
-        assert len(data['daily_stats']) == 3
-        assert 'gpt-4' in data['by_model']
-        assert 'OpenAI' in data['by_provider']
+        assert data["total_requests"] == 150
+        assert data["total_tokens"] == 45000
+        assert data["total_spend"] == 2.35
+        assert len(data["daily_stats"]) == 3
+        assert "gpt-4" in data["by_model"]
+        assert "OpenAI" in data["by_provider"]
 
         # Verify get_user_activity_stats was called
-        mock_get_stats.assert_called_once_with(
-            123,
-            from_date=None,
-            to_date=None,
-            days=None
-        )
+        mock_get_stats.assert_called_once_with(123, from_date=None, to_date=None, days=None)
 
-    @patch('src.routes.activity.get_user_activity_stats')
+    @patch("src.routes.activity.get_user_activity_stats")
     def test_get_activity_stats_with_days(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user,
-        mock_activity_stats
+        self, mock_get_stats, client, mock_current_user, mock_activity_stats
     ):
         """Test getting activity stats with days parameter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -180,27 +151,19 @@ class TestActivityStatsEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_stats.return_value = mock_activity_stats
 
-        response = client.get('/user/activity/stats?days=7')
+        response = client.get("/user/activity/stats?days=7")
 
         assert response.status_code == 200
 
         # Verify days parameter was passed
-        mock_get_stats.assert_called_once_with(
-            123,
-            from_date=None,
-            to_date=None,
-            days=7
-        )
+        mock_get_stats.assert_called_once_with(123, from_date=None, to_date=None, days=7)
 
-    @patch('src.routes.activity.get_user_activity_stats')
+    @patch("src.routes.activity.get_user_activity_stats")
     def test_get_activity_stats_with_date_range(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user,
-        mock_activity_stats
+        self, mock_get_stats, client, mock_current_user, mock_activity_stats
     ):
         """Test getting activity stats with date range"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -208,61 +171,48 @@ class TestActivityStatsEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_stats.return_value = mock_activity_stats
 
-        response = client.get(
-            '/user/activity/stats?from=2024-01-01&to=2024-01-31'
-        )
+        response = client.get("/user/activity/stats?from=2024-01-01&to=2024-01-31")
 
         assert response.status_code == 200
 
         # Verify date range was passed
         mock_get_stats.assert_called_once_with(
-            123,
-            from_date='2024-01-01',
-            to_date='2024-01-31',
-            days=None
+            123, from_date="2024-01-01", to_date="2024-01-31", days=None
         )
 
-    @patch('src.routes.activity.get_user_activity_stats')
-    def test_get_activity_stats_empty(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user
-    ):
+    @patch("src.routes.activity.get_user_activity_stats")
+    def test_get_activity_stats_empty(self, mock_get_stats, client, mock_current_user):
         """Test getting stats when no activity exists"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
 
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_stats.return_value = {
-            'total_requests': 0,
-            'total_tokens': 0,
-            'total_spend': 0.0,
-            'total_cost': 0.0,
-            'daily_stats': [],
-            'by_date': [],
-            'by_model': {},
-            'by_provider': {}
+            "total_requests": 0,
+            "total_tokens": 0,
+            "total_spend": 0.0,
+            "total_cost": 0.0,
+            "daily_stats": [],
+            "by_date": [],
+            "by_model": {},
+            "by_provider": {},
         }
 
-        response = client.get('/user/activity/stats')
+        response = client.get("/user/activity/stats")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert data['total_requests'] == 0
-        assert data['total_tokens'] == 0
-        assert data['daily_stats'] == []
+        assert data["total_requests"] == 0
+        assert data["total_tokens"] == 0
+        assert data["daily_stats"] == []
 
-    @patch('src.routes.activity.get_user_activity_stats')
-    def test_get_activity_stats_error(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user
-    ):
+    @patch("src.routes.activity.get_user_activity_stats")
+    def test_get_activity_stats_error(self, mock_get_stats, client, mock_current_user):
         """Test error handling in stats endpoint"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -270,13 +220,14 @@ class TestActivityStatsEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_stats.side_effect = Exception("Database error")
 
-        response = client.get('/user/activity/stats')
+        response = client.get("/user/activity/stats")
 
         assert response.status_code == 500
-        assert 'Failed to retrieve activity statistics' in response.json()['detail']
+        assert "Failed to retrieve activity statistics" in response.json()["detail"]
 
     def test_get_activity_stats_days_validation(self, client, mock_current_user):
         """Test validation for days parameter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -284,11 +235,11 @@ class TestActivityStatsEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
 
         # Days must be >= 1
-        response = client.get('/user/activity/stats?days=0')
+        response = client.get("/user/activity/stats?days=0")
         assert response.status_code == 422
 
         # Days must be <= 365
-        response = client.get('/user/activity/stats?days=366')
+        response = client.get("/user/activity/stats?days=366")
         assert response.status_code == 422
 
 
@@ -296,18 +247,16 @@ class TestActivityStatsEndpoint:
 # TEST CLASS: Activity Log Endpoint
 # ============================================================
 
+
 class TestActivityLogEndpoint:
     """Test /user/activity/log endpoint"""
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_default(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test getting activity log with defaults"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -315,17 +264,17 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = mock_activity_logs
 
-        response = client.get('/user/activity/log')
+        response = client.get("/user/activity/log")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert 'logs' in data
-        assert len(data['logs']) == 2
-        assert data['logs'][0]['model'] == 'gpt-4'
-        assert data['total'] == 2
-        assert data['limit'] == 10
-        assert data['page'] == 1
+        assert "logs" in data
+        assert len(data["logs"]) == 2
+        assert data["logs"][0]["model"] == "gpt-4"
+        assert data["total"] == 2
+        assert data["limit"] == 10
+        assert data["page"] == 1
 
         # Verify default parameters
         mock_get_log.assert_called_once_with(
@@ -335,18 +284,15 @@ class TestActivityLogEndpoint:
             from_date=None,
             to_date=None,
             model_filter=None,
-            provider_filter=None
+            provider_filter=None,
         )
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_with_pagination(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with pagination"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -354,29 +300,26 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = mock_activity_logs
 
-        response = client.get('/user/activity/log?limit=20&offset=40')
+        response = client.get("/user/activity/log?limit=20&offset=40")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert data['limit'] == 20
-        assert data['page'] == 3  # (offset // limit) + 1 = (40 // 20) + 1 = 3
+        assert data["limit"] == 20
+        assert data["page"] == 3  # (offset // limit) + 1 = (40 // 20) + 1 = 3
 
         # Verify pagination parameters
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['limit'] == 20
-        assert call_args['offset'] == 40
+        assert call_args["limit"] == 20
+        assert call_args["offset"] == 40
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_with_page_number(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with page number"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -384,27 +327,24 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = mock_activity_logs
 
-        response = client.get('/user/activity/log?limit=10&page=3')
+        response = client.get("/user/activity/log?limit=10&page=3")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert data['page'] == 3
+        assert data["page"] == 3
 
         # Verify offset was calculated from page
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['offset'] == 20  # (page - 1) * limit = (3 - 1) * 10 = 20
+        assert call_args["offset"] == 20  # (page - 1) * limit = (3 - 1) * 10 = 20
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_with_date_filters(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with date filtering"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -412,27 +352,22 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = mock_activity_logs
 
-        response = client.get(
-            '/user/activity/log?from=2024-01-01&to=2024-01-31'
-        )
+        response = client.get("/user/activity/log?from=2024-01-01&to=2024-01-31")
 
         assert response.status_code == 200
 
         # Verify date filters were passed
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['from_date'] == '2024-01-01'
-        assert call_args['to_date'] == '2024-01-31'
+        assert call_args["from_date"] == "2024-01-01"
+        assert call_args["to_date"] == "2024-01-31"
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_with_model_filter(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with model filter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -440,28 +375,25 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = [mock_activity_logs[0]]  # Only gpt-4
 
-        response = client.get('/user/activity/log?model=gpt-4')
+        response = client.get("/user/activity/log?model=gpt-4")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert len(data['logs']) == 1
-        assert data['logs'][0]['model'] == 'gpt-4'
+        assert len(data["logs"]) == 1
+        assert data["logs"][0]["model"] == "gpt-4"
 
         # Verify model filter was passed
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['model_filter'] == 'gpt-4'
+        assert call_args["model_filter"] == "gpt-4"
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_with_provider_filter(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with provider filter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -469,28 +401,25 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = [mock_activity_logs[1]]  # Only Anthropic
 
-        response = client.get('/user/activity/log?provider=Anthropic')
+        response = client.get("/user/activity/log?provider=Anthropic")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert len(data['logs']) == 1
-        assert data['logs'][0]['provider'] == 'Anthropic'
+        assert len(data["logs"]) == 1
+        assert data["logs"][0]["provider"] == "Anthropic"
 
         # Verify provider filter was passed
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['provider_filter'] == 'Anthropic'
+        assert call_args["provider_filter"] == "Anthropic"
 
-    @patch('src.routes.activity.get_user_activity_log')
+    @patch("src.routes.activity.get_user_activity_log")
     def test_get_activity_log_combined_filters(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
+        self, mock_get_log, client, mock_current_user, mock_activity_logs
     ):
         """Test activity log with multiple filters"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -499,7 +428,7 @@ class TestActivityLogEndpoint:
         mock_get_log.return_value = mock_activity_logs
 
         response = client.get(
-            '/user/activity/log?limit=50&from=2024-01-01&to=2024-01-31&model=gpt-4&provider=OpenAI'
+            "/user/activity/log?limit=50&from=2024-01-01&to=2024-01-31&model=gpt-4&provider=OpenAI"
         )
 
         assert response.status_code == 200
@@ -507,20 +436,16 @@ class TestActivityLogEndpoint:
         # Verify all filters were passed
         mock_get_log.assert_called_once()
         call_args = mock_get_log.call_args[1]
-        assert call_args['limit'] == 50
-        assert call_args['from_date'] == '2024-01-01'
-        assert call_args['to_date'] == '2024-01-31'
-        assert call_args['model_filter'] == 'gpt-4'
-        assert call_args['provider_filter'] == 'OpenAI'
+        assert call_args["limit"] == 50
+        assert call_args["from_date"] == "2024-01-01"
+        assert call_args["to_date"] == "2024-01-31"
+        assert call_args["model_filter"] == "gpt-4"
+        assert call_args["provider_filter"] == "OpenAI"
 
-    @patch('src.routes.activity.get_user_activity_log')
-    def test_get_activity_log_empty(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user
-    ):
+    @patch("src.routes.activity.get_user_activity_log")
+    def test_get_activity_log_empty(self, mock_get_log, client, mock_current_user):
         """Test getting empty activity log"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -528,22 +453,18 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.return_value = []
 
-        response = client.get('/user/activity/log')
+        response = client.get("/user/activity/log")
 
         assert response.status_code == 200
         data = response.json()
 
-        assert data['logs'] == []
-        assert data['total'] == 0
+        assert data["logs"] == []
+        assert data["total"] == 0
 
-    @patch('src.routes.activity.get_user_activity_log')
-    def test_get_activity_log_error(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user
-    ):
+    @patch("src.routes.activity.get_user_activity_log")
+    def test_get_activity_log_error(self, mock_get_log, client, mock_current_user):
         """Test error handling in log endpoint"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -551,13 +472,14 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
         mock_get_log.side_effect = Exception("Database error")
 
-        response = client.get('/user/activity/log')
+        response = client.get("/user/activity/log")
 
         assert response.status_code == 500
-        assert 'Failed to retrieve activity log' in response.json()['detail']
+        assert "Failed to retrieve activity log" in response.json()["detail"]
 
     def test_get_activity_log_limit_validation(self, client, mock_current_user):
         """Test validation for limit parameter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -565,15 +487,16 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
 
         # Limit must be >= 1
-        response = client.get('/user/activity/log?limit=0')
+        response = client.get("/user/activity/log?limit=0")
         assert response.status_code == 422
 
         # Limit must be <= 1000
-        response = client.get('/user/activity/log?limit=1001')
+        response = client.get("/user/activity/log?limit=1001")
         assert response.status_code == 422
 
     def test_get_activity_log_offset_validation(self, client, mock_current_user):
         """Test validation for offset parameter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -581,11 +504,12 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
 
         # Offset must be >= 0
-        response = client.get('/user/activity/log?offset=-1')
+        response = client.get("/user/activity/log?offset=-1")
         assert response.status_code == 422
 
     def test_get_activity_log_page_validation(self, client, mock_current_user):
         """Test validation for page parameter"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -593,7 +517,7 @@ class TestActivityLogEndpoint:
         app.dependency_overrides[get_current_user] = mock_get_current_user_dep
 
         # Page must be >= 1
-        response = client.get('/user/activity/log?page=0')
+        response = client.get("/user/activity/log?page=0")
         assert response.status_code == 422
 
 
@@ -601,49 +525,40 @@ class TestActivityLogEndpoint:
 # TEST CLASS: Authentication
 # ============================================================
 
+
 class TestActivityAuthentication:
     """Test authentication requirements"""
 
-    def test_stats_requires_authentication(
-        self,
-        client
-    ):
+    def test_stats_requires_authentication(self, client):
         """Test that stats endpoint requires authentication"""
         from fastapi import HTTPException
+
         from src.security.deps import get_current_user
 
         async def mock_get_current_user():
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated"
-            )
+            raise HTTPException(status_code=401, detail="Not authenticated")
 
         app.dependency_overrides[get_current_user] = mock_get_current_user
 
-        response = client.get('/user/activity/stats')
+        response = client.get("/user/activity/stats")
 
         # Cleanup
         app.dependency_overrides = {}
 
         assert response.status_code == 401
 
-    def test_log_requires_authentication(
-        self,
-        client
-    ):
+    def test_log_requires_authentication(self, client):
         """Test that log endpoint requires authentication"""
         from fastapi import HTTPException
+
         from src.security.deps import get_current_user
 
         async def mock_get_current_user():
-            raise HTTPException(
-                status_code=401,
-                detail="Not authenticated"
-            )
+            raise HTTPException(status_code=401, detail="Not authenticated")
 
         app.dependency_overrides[get_current_user] = mock_get_current_user
 
-        response = client.get('/user/activity/log')
+        response = client.get("/user/activity/log")
 
         # Cleanup
         app.dependency_overrides = {}
@@ -655,11 +570,12 @@ class TestActivityAuthentication:
 # TEST CLASS: Integration Tests
 # ============================================================
 
+
 class TestActivityIntegration:
     """Test activity endpoint integration scenarios"""
 
-    @patch('src.routes.activity.get_user_activity_log')
-    @patch('src.routes.activity.get_user_activity_stats')
+    @patch("src.routes.activity.get_user_activity_log")
+    @patch("src.routes.activity.get_user_activity_stats")
     def test_stats_and_log_consistency(
         self,
         mock_get_stats,
@@ -667,9 +583,10 @@ class TestActivityIntegration:
         client,
         mock_current_user,
         mock_activity_stats,
-        mock_activity_logs
+        mock_activity_logs,
     ):
         """Test that stats and log endpoints return consistent data"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -679,27 +596,22 @@ class TestActivityIntegration:
         mock_get_log.return_value = mock_activity_logs
 
         # Get stats
-        stats_response = client.get('/user/activity/stats?days=7')
+        stats_response = client.get("/user/activity/stats?days=7")
         assert stats_response.status_code == 200
         stats = stats_response.json()
 
         # Get log
-        log_response = client.get('/user/activity/log?limit=100')
+        log_response = client.get("/user/activity/log?limit=100")
         assert log_response.status_code == 200
         log = log_response.json()
 
         # Both should be for the same user
-        assert mock_get_stats.call_args[0][0] == mock_get_log.call_args[1]['user_id']
+        assert mock_get_stats.call_args[0][0] == mock_get_log.call_args[1]["user_id"]
 
-    @patch('src.routes.activity.get_user_activity_log')
-    def test_pagination_workflow(
-        self,
-        mock_get_log,
-        client,
-        mock_current_user,
-        mock_activity_logs
-    ):
+    @patch("src.routes.activity.get_user_activity_log")
+    def test_pagination_workflow(self, mock_get_log, client, mock_current_user, mock_activity_logs):
         """Test pagination workflow across multiple pages"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -708,29 +620,26 @@ class TestActivityIntegration:
 
         # Page 1
         mock_get_log.return_value = mock_activity_logs
-        response1 = client.get('/user/activity/log?limit=10&page=1')
-        assert response1.json()['page'] == 1
+        response1 = client.get("/user/activity/log?limit=10&page=1")
+        assert response1.json()["page"] == 1
 
         # Page 2
-        response2 = client.get('/user/activity/log?limit=10&page=2')
-        assert response2.json()['page'] == 2
+        response2 = client.get("/user/activity/log?limit=10&page=2")
+        assert response2.json()["page"] == 2
 
         # Verify offset calculation
         call_args_1 = mock_get_log.call_args_list[0][1]
         call_args_2 = mock_get_log.call_args_list[1][1]
 
-        assert call_args_1['offset'] == 0   # Page 1
-        assert call_args_2['offset'] == 10  # Page 2
+        assert call_args_1["offset"] == 0  # Page 1
+        assert call_args_2["offset"] == 10  # Page 2
 
-    @patch('src.routes.activity.get_user_activity_stats')
+    @patch("src.routes.activity.get_user_activity_stats")
     def test_date_range_filtering(
-        self,
-        mock_get_stats,
-        client,
-        mock_current_user,
-        mock_activity_stats
+        self, mock_get_stats, client, mock_current_user, mock_activity_stats
     ):
         """Test date range filtering across stats endpoint"""
+
         # Override dependency
         async def mock_get_current_user_dep():
             return mock_current_user
@@ -739,9 +648,9 @@ class TestActivityIntegration:
         mock_get_stats.return_value = mock_activity_stats
 
         # Test different date ranges
-        response1 = client.get('/user/activity/stats?days=7')
-        response2 = client.get('/user/activity/stats?days=30')
-        response3 = client.get('/user/activity/stats?from=2024-01-01&to=2024-01-31')
+        response1 = client.get("/user/activity/stats?days=7")
+        response2 = client.get("/user/activity/stats?days=30")
+        response3 = client.get("/user/activity/stats?from=2024-01-01&to=2024-01-31")
 
         # All should succeed
         assert response1.status_code == 200
@@ -750,7 +659,7 @@ class TestActivityIntegration:
 
         # Verify different parameters were passed
         calls = mock_get_stats.call_args_list
-        assert calls[0][1]['days'] == 7
-        assert calls[1][1]['days'] == 30
-        assert calls[2][1]['from_date'] == '2024-01-01'
-        assert calls[2][1]['to_date'] == '2024-01-31'
+        assert calls[0][1]["days"] == 7
+        assert calls[1][1]["days"] == 30
+        assert calls[2][1]["from_date"] == "2024-01-01"
+        assert calls[2][1]["to_date"] == "2024-01-31"

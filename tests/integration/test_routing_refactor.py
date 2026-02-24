@@ -11,18 +11,19 @@ This test suite verifies:
 6. Health tracking works correctly
 """
 
-import pytest
 import logging
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.services.provider_selector import ProviderSelector, get_selector
 from src.services.multi_provider_registry import (
     MultiProviderModel,
     ProviderConfig,
     get_registry,
 )
+from src.services.provider_selector import ProviderSelector, get_selector
 
 logger = logging.getLogger(__name__)
 client = TestClient(app)
@@ -278,9 +279,7 @@ class TestModelPrompting:
             "/v1/chat/completions",
             json={
                 "model": "gpt-4",
-                "messages": [
-                    {"role": "user", "content": "Say 'routing test successful'"}
-                ],
+                "messages": [{"role": "user", "content": "Say 'routing test successful'"}],
                 "max_tokens": 20,
             },
             headers={
@@ -327,9 +326,7 @@ class TestModelPrompting:
                 "/v1/chat/completions",
                 json={
                     "model": "gpt-4",
-                    "messages": [
-                        {"role": "user", "content": "Test"}
-                    ],
+                    "messages": [{"role": "user", "content": "Test"}],
                 },
                 headers={
                     "Authorization": "Bearer test-key",
@@ -395,7 +392,10 @@ class TestModelTransformation:
         from src.services.model_transformations import detect_provider_from_model_id
 
         test_cases = [
-            ("google/gemini-2.0-flash-001", "google-vertex"),  # Gemini models route to Google Vertex
+            (
+                "google/gemini-2.0-flash-001",
+                "google-vertex",
+            ),  # Gemini models route to Google Vertex
             ("gpt-4", None),  # No specific provider
             ("openai/gpt-4", "openrouter"),
         ]
@@ -440,8 +440,7 @@ class TestCatalogIntegration:
 
             # Check if any models have provider information
             models_with_providers = [
-                m for m in models
-                if m.get("provider_slug") or m.get("providers")
+                m for m in models if m.get("provider_slug") or m.get("providers")
             ]
 
             logger.info(f"Found {len(models_with_providers)} models with provider info")

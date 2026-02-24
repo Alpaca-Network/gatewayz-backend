@@ -5,10 +5,11 @@ This test suite verifies that the automatic Sentry error capture middleware
 correctly captures exceptions, extracts context, and adds appropriate tags.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
 
 from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
 
@@ -96,9 +97,7 @@ class TestAutoSentryMiddleware:
 
         # Find the request context call
         calls = mock_scope.set_context.call_args_list
-        request_context_call = next(
-            (call for call in calls if call[0][0] == "request"), None
-        )
+        request_context_call = next((call for call in calls if call[0][0] == "request"), None)
 
         assert request_context_call is not None
         context = request_context_call[0][1]
@@ -183,9 +182,7 @@ class TestAutoSentryMiddleware:
 
         # Find the request context
         calls = mock_scope.set_context.call_args_list
-        request_context_call = next(
-            (call for call in calls if call[0][0] == "request"), None
-        )
+        request_context_call = next((call for call in calls if call[0][0] == "request"), None)
 
         assert request_context_call is not None
         context = request_context_call[0][1]
@@ -236,8 +233,9 @@ class TestAutoSentryMiddleware:
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     async def test_http_exception_filtering_in_middleware(self, mock_sentry):
         """Test that 4xx HTTPException is filtered in middleware exception handler"""
-        from fastapi import Request, Response
         from unittest.mock import AsyncMock
+
+        from fastapi import Request, Response
 
         mock_scope = MagicMock()
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
@@ -274,8 +272,9 @@ class TestAutoSentryMiddleware:
     @patch("src.middleware.auto_sentry_middleware.sentry_sdk")
     async def test_http_exception_various_status_codes(self, mock_sentry):
         """Test that all HTTPExceptions (4xx and 5xx) are filtered to avoid duplicates"""
-        from fastapi import Request
         from unittest.mock import AsyncMock
+
+        from fastapi import Request
 
         mock_scope = MagicMock()
         mock_sentry.push_scope.return_value.__enter__.return_value = mock_scope
@@ -358,6 +357,7 @@ class TestAutoSentryMiddleware:
         # Mock time.time to simulate slow request (>5 seconds)
         # Use a counter to return incrementing values
         call_count = [0]
+
         def mock_time_func():
             result = call_count[0]
             call_count[0] += 6  # Each call adds 6 seconds
@@ -382,17 +382,9 @@ class TestAutoSentryMiddleware:
         middleware = AutoSentryMiddleware(app=Mock())
 
         # Test inference endpoints
-        assert (
-            middleware._determine_endpoint_type("/v1/chat/completions")
-            == "inference_chat"
-        )
-        assert (
-            middleware._determine_endpoint_type("/v1/messages") == "inference_messages"
-        )
-        assert (
-            middleware._determine_endpoint_type("/v1/images/generations")
-            == "inference_images"
-        )
+        assert middleware._determine_endpoint_type("/v1/chat/completions") == "inference_chat"
+        assert middleware._determine_endpoint_type("/v1/messages") == "inference_messages"
+        assert middleware._determine_endpoint_type("/v1/images/generations") == "inference_images"
 
         # Test payment endpoints
         assert middleware._determine_endpoint_type("/api/payments/webhook") == "payment"
@@ -400,10 +392,7 @@ class TestAutoSentryMiddleware:
 
         # Test auth endpoints
         assert middleware._determine_endpoint_type("/auth/login") == "authentication"
-        assert (
-            middleware._determine_endpoint_type("/api/keys/create")
-            == "api_key_management"
-        )
+        assert middleware._determine_endpoint_type("/api/keys/create") == "api_key_management"
 
         # Test admin endpoints
         assert middleware._determine_endpoint_type("/admin/users") == "admin"

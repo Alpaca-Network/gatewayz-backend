@@ -1,6 +1,6 @@
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 # Add src to path
 # Assuming backend is the root for running tests, we need to add src to path so 'from src...' works
@@ -12,10 +12,12 @@ sys.path.append(os.getcwd())
 
 from src.services.stream_normalizer import StreamNormalizer
 
+
 class MockChunk:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
             setattr(self, k, v)
+
 
 class TestStreamNormalizer(unittest.TestCase):
     def test_initialization(self):
@@ -33,9 +35,9 @@ class TestStreamNormalizer(unittest.TestCase):
                 {
                     "index": 0,
                     "delta": {"role": "assistant", "content": "Hello"},
-                    "finish_reason": None
+                    "finish_reason": None,
                 }
-            ]
+            ],
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertEqual(normalized.id, "test-id")
@@ -46,10 +48,7 @@ class TestStreamNormalizer(unittest.TestCase):
         normalizer = StreamNormalizer("google", "gemini-pro")
         chunk = {
             "candidates": [
-                {
-                    "content": {"parts": [{"text": "Gemini content"}]},
-                    "finishReason": "STOP"
-                }
+                {"content": {"parts": [{"text": "Gemini content"}]}, "finishReason": "STOP"}
             ]
         }
         normalized = normalizer.normalize_chunk(chunk)
@@ -61,7 +60,7 @@ class TestStreamNormalizer(unittest.TestCase):
         normalizer = StreamNormalizer("anthropic", "claude-3")
         chunk = {
             "type": "content_block_delta",
-            "delta": {"type": "text_delta", "text": "Claude content"}
+            "delta": {"type": "text_delta", "text": "Claude content"},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertEqual(normalized.choices[0]["delta"]["content"], "Claude content")
@@ -69,13 +68,7 @@ class TestStreamNormalizer(unittest.TestCase):
 
     def test_reasoning_extraction(self):
         normalizer = StreamNormalizer("deepseek", "deepseek-r1")
-        chunk = {
-            "choices": [
-                {
-                    "delta": {"content": "Answer", "reasoning": "Thinking process"}
-                }
-            ]
-        }
+        chunk = {"choices": [{"delta": {"content": "Answer", "reasoning": "Thinking process"}}]}
         normalized = normalizer.normalize_chunk(chunk)
         self.assertEqual(normalized.choices[0]["delta"]["content"], "Answer")
         self.assertEqual(normalized.choices[0]["delta"]["reasoning_content"], "Thinking process")
@@ -91,8 +84,8 @@ class TestStreamNormalizer(unittest.TestCase):
                         "content": "The answer is 42.",
                         "reasoning_details": [
                             {"content": "First, let me analyze the question."},
-                            {"content": "Now I'll compute the result."}
-                        ]
+                            {"content": "Now I'll compute the result."},
+                        ],
                     }
                 }
             ]
@@ -111,7 +104,7 @@ class TestStreamNormalizer(unittest.TestCase):
                 {
                     "delta": {
                         "content": "Result",
-                        "reasoning_details": ["Step 1", "Step 2", "Step 3"]
+                        "reasoning_details": ["Step 1", "Step 2", "Step 3"],
                     }
                 }
             ]
@@ -132,8 +125,8 @@ class TestStreamNormalizer(unittest.TestCase):
                         "content": "Answer",
                         "reasoning_details": [
                             {"text": "Thinking step 1"},
-                            {"text": "Thinking step 2"}
-                        ]
+                            {"text": "Thinking step 2"},
+                        ],
                     }
                 }
             ]
@@ -149,12 +142,17 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "thinking_delta", "thinking": "Let me analyze this step by step..."}
+            "delta": {"type": "thinking_delta", "thinking": "Let me analyze this step by step..."},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
-        self.assertEqual(normalized.choices[0]["delta"]["reasoning_content"], "Let me analyze this step by step...")
-        self.assertEqual(normalizer.get_accumulated_reasoning(), "Let me analyze this step by step...")
+        self.assertEqual(
+            normalized.choices[0]["delta"]["reasoning_content"],
+            "Let me analyze this step by step...",
+        )
+        self.assertEqual(
+            normalizer.get_accumulated_reasoning(), "Let me analyze this step by step..."
+        )
 
     def test_anthropic_text_delta(self):
         """Test Anthropic text_delta events with type field"""
@@ -162,7 +160,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "text_delta", "text": "Here is my response."}
+            "delta": {"type": "text_delta", "text": "Here is my response."},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
@@ -175,7 +173,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "signature_delta", "signature": "abc123sig"}
+            "delta": {"type": "signature_delta", "signature": "abc123sig"},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
@@ -187,7 +185,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_start",
             "index": 0,
-            "content_block": {"type": "thinking", "thinking": "Initial thought..."}
+            "content_block": {"type": "thinking", "thinking": "Initial thought..."},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
@@ -199,7 +197,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_start",
             "index": 0,
-            "content_block": {"type": "text", "text": ""}
+            "content_block": {"type": "text", "text": ""},
         }
         normalized = normalizer.normalize_chunk(chunk)
         # Empty text should return None
@@ -211,7 +209,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "message_delta",
             "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 100}
+            "usage": {"output_tokens": 100},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
@@ -220,9 +218,7 @@ class TestStreamNormalizer(unittest.TestCase):
     def test_anthropic_message_stop(self):
         """Test Anthropic message_stop event"""
         normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
-        chunk = {
-            "type": "message_stop"
-        }
+        chunk = {"type": "message_stop"}
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
         self.assertEqual(normalized.choices[0]["finish_reason"], "stop")
@@ -233,7 +229,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "input_json_delta", "partial_json": '{"query": "test'}
+            "delta": {"type": "input_json_delta", "partial_json": '{"query": "test'},
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNotNone(normalized)
@@ -242,9 +238,7 @@ class TestStreamNormalizer(unittest.TestCase):
     def test_anthropic_ping_ignored(self):
         """Test that Anthropic ping events are ignored"""
         normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
-        chunk = {
-            "type": "ping"
-        }
+        chunk = {"type": "ping"}
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNone(normalized)
 
@@ -257,8 +251,8 @@ class TestStreamNormalizer(unittest.TestCase):
                 "id": "msg_123",
                 "type": "message",
                 "role": "assistant",
-                "model": "claude-sonnet-4"
-            }
+                "model": "claude-sonnet-4",
+            },
         }
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNone(normalized)
@@ -266,10 +260,7 @@ class TestStreamNormalizer(unittest.TestCase):
     def test_anthropic_content_block_stop_ignored(self):
         """Test that Anthropic content_block_stop events are ignored"""
         normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
-        chunk = {
-            "type": "content_block_stop",
-            "index": 0
-        }
+        chunk = {"type": "content_block_stop", "index": 0}
         normalized = normalizer.normalize_chunk(chunk)
         self.assertIsNone(normalized)
 
@@ -281,7 +272,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk1 = {
             "type": "content_block_start",
             "index": 0,
-            "content_block": {"type": "thinking", "thinking": ""}
+            "content_block": {"type": "thinking", "thinking": ""},
         }
         normalized1 = normalizer.normalize_chunk(chunk1)
         # Empty thinking block start returns None
@@ -291,7 +282,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk2 = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "thinking_delta", "thinking": "Step 1: "}
+            "delta": {"type": "thinking_delta", "thinking": "Step 1: "},
         }
         normalized2 = normalizer.normalize_chunk(chunk2)
         self.assertIsNotNone(normalized2)
@@ -300,7 +291,7 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk3 = {
             "type": "content_block_delta",
             "index": 0,
-            "delta": {"type": "thinking_delta", "thinking": "Step 2"}
+            "delta": {"type": "thinking_delta", "thinking": "Step 2"},
         }
         normalizer.normalize_chunk(chunk3)
 
@@ -308,14 +299,12 @@ class TestStreamNormalizer(unittest.TestCase):
         chunk4 = {
             "type": "content_block_delta",
             "index": 1,
-            "delta": {"type": "text_delta", "text": "Here is the answer."}
+            "delta": {"type": "text_delta", "text": "Here is the answer."},
         }
         normalizer.normalize_chunk(chunk4)
 
         # 5. Message stop
-        chunk5 = {
-            "type": "message_stop"
-        }
+        chunk5 = {"type": "message_stop"}
         normalized5 = normalizer.normalize_chunk(chunk5)
 
         # Verify accumulated content
@@ -331,11 +320,13 @@ class TestStreamNormalizer(unittest.TestCase):
 
     def test_object_chunk(self):
         normalizer = StreamNormalizer("openai", "gpt-4")
+
         class Choice:
             def __init__(self, delta, finish_reason, index):
                 self.delta = delta
                 self.finish_reason = finish_reason
                 self.index = index
+
         class Delta:
             def __init__(self, content):
                 self.content = content
@@ -344,10 +335,11 @@ class TestStreamNormalizer(unittest.TestCase):
             id="test-obj",
             created=123,
             model="gpt-4",
-            choices=[Choice(Delta("Object Content"), None, 0)]
+            choices=[Choice(Delta("Object Content"), None, 0)],
         )
         normalized = normalizer.normalize_chunk(chunk)
         self.assertEqual(normalized.choices[0]["delta"]["content"], "Object Content")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

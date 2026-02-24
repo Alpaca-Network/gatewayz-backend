@@ -16,6 +16,7 @@ Example: $1.25/1K tokens -> stored as 0.00125 (per-token)
 
 import logging
 from unittest.mock import patch
+
 from src.services.models import normalize_aihubmix_model_with_pricing
 
 
@@ -32,7 +33,7 @@ class TestAiHubMixNormalizationWithPricing:
             "context_length": 128000,
             "pricing": {
                 "input": 1.25,  # $1.25 per 1K tokens
-                "output": 10,   # $10 per 1K tokens
+                "output": 10,  # $10 per 1K tokens
             },
         }
 
@@ -115,6 +116,7 @@ class TestAiHubMixNormalizationWithPricing:
         normalized = normalize_aihubmix_model_with_pricing(aihubmix_model)
 
         import math
+
         assert normalized is not None
         # $0.0001 per 1K tokens = $0.0000001 per token
         # Using math.isclose due to floating point precision
@@ -227,8 +229,7 @@ class TestAiHubMixNormalizationWithPricing:
 
         # Should NOT log at WARNING level
         assert not any(
-            record.levelname == "WARNING"
-            for record in caplog.records
+            record.levelname == "WARNING" for record in caplog.records
         ), "Should not log at WARNING level to avoid excessive logging"
 
     def test_model_id_field_works_without_warnings(self, caplog):

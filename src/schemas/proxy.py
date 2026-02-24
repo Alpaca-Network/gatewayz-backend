@@ -64,9 +64,7 @@ class Message(BaseModel):
 
         # Assistant messages can have null content only if tool_calls is present
         if role == "assistant" and is_empty_content(content) and not tool_calls:
-            raise ValueError(
-                "Assistant messages must have either non-empty content or tool_calls."
-            )
+            raise ValueError("Assistant messages must have either non-empty content or tool_calls.")
 
         return self
 
@@ -142,9 +140,7 @@ class ProxyRequest(BaseModel):
     )
 
     # Tool/function calling parameters
-    tools: list[dict] | None = Field(
-        default=None, description="A list of tools the model may call"
-    )
+    tools: list[dict] | None = Field(default=None, description="A list of tools the model may call")
     tool_choice: str | dict | None = Field(
         default=None,
         description="Controls which tool is called. 'none', 'auto', 'required', or specific tool",
@@ -419,7 +415,9 @@ class ContentBlock(BaseModel):
 
     # Tool result block fields (from user)
     tool_use_id: str | None = None  # References the tool_use id
-    content: str | list[ToolResultContentBlock] | None = None  # Tool result content (string or content blocks)
+    content: str | list[ToolResultContentBlock] | None = (
+        None  # Tool result content (string or content blocks)
+    )
     is_error: bool | None = None  # Whether the tool call resulted in an error
 
     class Config:
@@ -448,9 +446,7 @@ class AnthropicMessage(BaseModel):
 
     @field_validator("content")
     @classmethod
-    def validate_content(
-        cls, content: str | list[ContentBlock]
-    ) -> str | list[ContentBlock]:
+    def validate_content(cls, content: str | list[ContentBlock]) -> str | list[ContentBlock]:
         if isinstance(content, str):
             if not content.strip():
                 raise ValueError("Message content must be a non-empty string.")
@@ -640,7 +636,9 @@ class UsageResponse(BaseModel):
     output_tokens: int
     cache_creation_input_tokens: int | None = None
     cache_read_input_tokens: int | None = None
-    cache_creation: dict[str, int] | None = None  # ephemeral_5m_input_tokens, ephemeral_1h_input_tokens
+    cache_creation: dict[str, int] | None = (
+        None  # ephemeral_5m_input_tokens, ephemeral_1h_input_tokens
+    )
     server_tool_use: dict[str, int] | None = None  # web_search_requests
 
     class Config:
@@ -693,7 +691,10 @@ class MessagesResponse(BaseModel):
     role: Literal["assistant"] = "assistant"
     model: str
     content: list[TextBlockResponse | ThinkingBlockResponse | ToolUseBlockResponse | dict[str, Any]]
-    stop_reason: Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"] | None
+    stop_reason: (
+        Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"]
+        | None
+    )
     stop_sequence: str | None = None  # The stop sequence that was generated, if applicable
     usage: UsageResponse
 

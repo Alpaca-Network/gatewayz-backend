@@ -4,15 +4,16 @@ Tests for Partner Trial Service
 Tests the partner-specific trial functionality used for partners like Redbeard.
 """
 
-import pytest
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.partner_trial_service import (
     PartnerTrialService,
     get_partner_config,
-    is_partner_code,
     get_user_daily_limit,
+    is_partner_code,
 )
 
 

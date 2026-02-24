@@ -11,9 +11,7 @@ Usage:
     suggestions = get_suggestions(ErrorCode.MODEL_NOT_FOUND)
 """
 
-
 from src.utils.error_codes import ErrorCode
-
 
 # Error message templates with placeholders
 ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -24,7 +22,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INVALID_MODEL_FORMAT: "Invalid model ID format: '{model_id}'",
     ErrorCode.PROVIDER_MISMATCH: "Model '{model_id}' is not available on provider '{provider}'",
     ErrorCode.MODEL_REGION_RESTRICTED: "Model '{model_id}' is not available in your region",
-
     # Validation errors
     ErrorCode.MISSING_REQUIRED_FIELD: "Missing required field: '{field_name}'",
     ErrorCode.INVALID_PARAMETER_TYPE: "Invalid type for parameter '{parameter_name}': expected {expected_type}, got {actual_type}",
@@ -41,7 +38,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.UNSUPPORTED_PARAMETER: "Parameter '{parameter_name}' is not supported for this endpoint",
     ErrorCode.INVALID_CONTENT_TYPE: "Invalid Content-Type: expected application/json",
     ErrorCode.INVALID_REQUEST_BODY: "Invalid request body: {reason}",
-
     # Authentication errors
     ErrorCode.INVALID_API_KEY: "Invalid API key",
     ErrorCode.API_KEY_EXPIRED: "API key has expired",
@@ -49,7 +45,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.API_KEY_MISSING: "API key is required. Please provide an API key in the Authorization header",
     ErrorCode.API_KEY_MALFORMED: "API key format is invalid",
     ErrorCode.AUTHENTICATION_REQUIRED: "Authentication is required for this endpoint",
-
     # Authorization errors
     ErrorCode.IP_RESTRICTED: "Access denied: IP address {ip_address} is not in the allowed list",
     ErrorCode.DOMAIN_RESTRICTED: "Access denied: Domain is not in the allowed list",
@@ -58,7 +53,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INSUFFICIENT_PERMISSIONS: "Insufficient permissions to access this resource",
     ErrorCode.ACCESS_DENIED: "Access denied",
     ErrorCode.FEATURE_NOT_AVAILABLE: "This feature is not available on your current plan",
-
     # Payment & credit errors
     ErrorCode.INSUFFICIENT_CREDITS: "Insufficient credits. Required: ${required_credits:.4f}, Current: ${current_credits:.4f}",
     ErrorCode.CREDIT_BELOW_MINIMUM: "Credit balance (${current_credits:.4f}) is below the minimum required amount (${minimum:.4f})",
@@ -66,7 +60,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.PAYMENT_FAILED: "Payment processing failed: {reason}",
     ErrorCode.INVOICE_OVERDUE: "Your account has overdue invoices. Please settle your balance to continue",
     ErrorCode.BILLING_ERROR: "Billing error: {reason}",
-
     # Rate limiting errors
     ErrorCode.RATE_LIMIT_EXCEEDED: "Rate limit exceeded: {limit_type}",
     ErrorCode.TOKEN_RATE_LIMIT: "Token rate limit exceeded. Please slow down your requests",
@@ -74,7 +67,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.DAILY_QUOTA_EXCEEDED: "Daily quota exceeded. Limit: {limit}, Used: {used}",
     ErrorCode.MONTHLY_QUOTA_EXCEEDED: "Monthly quota exceeded. Limit: {limit}, Used: {used}",
     ErrorCode.HOURLY_QUOTA_EXCEEDED: "Hourly quota exceeded. Limit: {limit}, Used: {used}",
-
     # Provider errors
     ErrorCode.PROVIDER_ERROR: "Provider '{provider}' returned an error for model '{model_id}': {error_message}",
     ErrorCode.PROVIDER_TIMEOUT: "Request to provider '{provider}' timed out",
@@ -83,7 +75,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.PROVIDER_AUTHENTICATION_ERROR: "Provider '{provider}' authentication failed",
     ErrorCode.PROVIDER_INVALID_RESPONSE: "Provider '{provider}' returned an invalid response",
     ErrorCode.ALL_PROVIDERS_FAILED: "All providers failed for model '{model_id}'. Please try again later",
-
     # Service errors
     ErrorCode.INTERNAL_ERROR: "Internal server error",
     ErrorCode.DATABASE_ERROR: "Database error occurred",
@@ -91,7 +82,6 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.MAINTENANCE_MODE: "Service is currently in maintenance mode",
     ErrorCode.CONFIGURATION_ERROR: "Service configuration error",
     ErrorCode.UNEXPECTED_ERROR: "An unexpected error occurred",
-
     # Resource errors
     ErrorCode.RESOURCE_NOT_FOUND: "Resource not found: {resource_type} '{resource_id}'",
     ErrorCode.ENDPOINT_NOT_FOUND: "Endpoint not found: {method} {path}",
@@ -109,7 +99,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.INVALID_MODEL_FORMAT: "The model ID format is invalid. Model IDs should follow the pattern 'provider/model-name' or use a canonical model name.",
     ErrorCode.PROVIDER_MISMATCH: "The specified model is not available through the requested provider. The model may be exclusive to a different provider.",
     ErrorCode.MODEL_REGION_RESTRICTED: "This model is not available in your geographic region due to provider restrictions.",
-
     # Validation errors
     ErrorCode.MISSING_REQUIRED_FIELD: "A required field is missing from your request. Please include all required parameters and try again.",
     ErrorCode.INVALID_PARAMETER_TYPE: "One of your request parameters has an incorrect type. Please check the API documentation for the correct parameter types.",
@@ -126,7 +115,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.UNSUPPORTED_PARAMETER: "This parameter is not supported for the current endpoint or model. Please refer to the API documentation for supported parameters.",
     ErrorCode.INVALID_CONTENT_TYPE: "Requests must use Content-Type: application/json. Please set the correct content type header.",
     ErrorCode.INVALID_REQUEST_BODY: "The request body is invalid. Please check the request format and ensure all required fields are present.",
-
     # Authentication errors
     ErrorCode.INVALID_API_KEY: "The provided API key is invalid or not found. Please check your API key and try again.",
     ErrorCode.API_KEY_EXPIRED: "Your API key has expired. Please generate a new API key from your dashboard.",
@@ -134,7 +122,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.API_KEY_MISSING: "No API key was provided. Please include your API key in the Authorization header as 'Bearer YOUR_API_KEY'.",
     ErrorCode.API_KEY_MALFORMED: "The API key format is invalid. API keys should start with 'gw_live_' or 'gw_test_'.",
     ErrorCode.AUTHENTICATION_REQUIRED: "This endpoint requires authentication. Please provide a valid API key.",
-
     # Authorization errors
     ErrorCode.IP_RESTRICTED: "Your IP address is not authorized to use this API key. Please add your IP to the allowed list in your dashboard.",
     ErrorCode.DOMAIN_RESTRICTED: "Your domain is not authorized to use this API key. Please add your domain to the allowed list.",
@@ -143,7 +130,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.INSUFFICIENT_PERMISSIONS: "Your account does not have permission to perform this action. Please contact support if you believe this is an error.",
     ErrorCode.ACCESS_DENIED: "Access to this resource is denied. Please check your permissions.",
     ErrorCode.FEATURE_NOT_AVAILABLE: "This feature is not included in your current plan. Please upgrade to access this feature.",
-
     # Payment & credit errors
     ErrorCode.INSUFFICIENT_CREDITS: "You do not have enough credits to complete this request. Please add credits to your account to continue.",
     ErrorCode.CREDIT_BELOW_MINIMUM: "Your credit balance has fallen below the minimum required amount. Please add credits to continue making requests.",
@@ -151,7 +137,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.PAYMENT_FAILED: "We were unable to process your payment. Please check your payment method and try again.",
     ErrorCode.INVOICE_OVERDUE: "Your account has outstanding invoices that must be paid before you can continue using the service.",
     ErrorCode.BILLING_ERROR: "A billing error occurred while processing your request. Please contact support for assistance.",
-
     # Rate limiting errors
     ErrorCode.RATE_LIMIT_EXCEEDED: "You have exceeded the rate limit. Please slow down your requests and try again later.",
     ErrorCode.TOKEN_RATE_LIMIT: "You are sending tokens too quickly. Please reduce your token throughput.",
@@ -159,7 +144,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.DAILY_QUOTA_EXCEEDED: "You have exceeded your daily usage quota. The quota will reset at midnight UTC.",
     ErrorCode.MONTHLY_QUOTA_EXCEEDED: "You have exceeded your monthly usage quota. Please wait for the monthly reset or upgrade your plan.",
     ErrorCode.HOURLY_QUOTA_EXCEEDED: "You have exceeded your hourly usage quota. The quota will reset at the top of the hour.",
-
     # Provider errors
     ErrorCode.PROVIDER_ERROR: "The upstream AI provider encountered an error while processing your request. This is usually temporary.",
     ErrorCode.PROVIDER_TIMEOUT: "The request to the AI provider timed out. Please try again.",
@@ -168,7 +152,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.PROVIDER_AUTHENTICATION_ERROR: "There was an authentication error with the AI provider. Please contact support.",
     ErrorCode.PROVIDER_INVALID_RESPONSE: "The AI provider returned an invalid response. Please try again or contact support if the issue persists.",
     ErrorCode.ALL_PROVIDERS_FAILED: "All available providers failed to process your request. This may be due to widespread provider issues. Please try again later.",
-
     # Service errors
     ErrorCode.INTERNAL_ERROR: "An internal server error occurred. Our team has been notified and is working on a fix.",
     ErrorCode.DATABASE_ERROR: "A database error occurred while processing your request. Please try again later.",
@@ -176,7 +159,6 @@ ERROR_DETAILS: dict[ErrorCode, str] = {
     ErrorCode.MAINTENANCE_MODE: "The service is currently undergoing scheduled maintenance. Please check our status page for updates.",
     ErrorCode.CONFIGURATION_ERROR: "A service configuration error occurred. Our team has been notified.",
     ErrorCode.UNEXPECTED_ERROR: "An unexpected error occurred. Please try again or contact support if the problem persists.",
-
     # Resource errors
     ErrorCode.RESOURCE_NOT_FOUND: "The requested resource was not found. Please check the resource ID and try again.",
     ErrorCode.ENDPOINT_NOT_FOUND: "The requested endpoint does not exist. Please check the URL and try again.",
@@ -218,7 +200,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Use an alternative model that's available in your region",
         "Contact support for region-specific model availability",
     ],
-
     # Validation errors
     ErrorCode.MISSING_REQUIRED_FIELD: [
         "Check the API documentation for required fields",
@@ -264,7 +245,7 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
     ],
     ErrorCode.INVALID_STREAM_PARAMETER: [
         "Set stream to true or false (boolean value)",
-        "Remove quotes if you're sending \"true\" or \"false\" as strings",
+        'Remove quotes if you\'re sending "true" or "false" as strings',
     ],
     ErrorCode.INVALID_JSON: [
         "Validate your JSON using a JSON validator",
@@ -287,7 +268,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Validate your request body against the API schema",
         "Check the API docs for the correct request format",
     ],
-
     # Authentication errors
     ErrorCode.INVALID_API_KEY: [
         "Verify your API key in your dashboard at https://gatewayz.ai/dashboard",
@@ -316,7 +296,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Provide a valid API key in the Authorization header",
         "Sign up at https://gatewayz.ai to get an API key",
     ],
-
     # Authorization errors
     ErrorCode.IP_RESTRICTED: [
         "Add your IP address to the allowed list in your dashboard",
@@ -349,7 +328,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Upgrade your plan to access this feature",
         "Visit https://gatewayz.ai/pricing to see plan features",
     ],
-
     # Payment & credit errors
     ErrorCode.INSUFFICIENT_CREDITS: [
         "Add credits at https://gatewayz.ai/billing",
@@ -378,7 +356,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Try your request again",
         "Contact support at https://gatewayz.ai/support for assistance",
     ],
-
     # Rate limiting errors
     ErrorCode.RATE_LIMIT_EXCEEDED: [
         "Wait before making additional requests",
@@ -408,7 +385,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Wait until the top of the hour for your quota to reset",
         "Upgrade your plan for higher hourly limits",
     ],
-
     # Provider errors
     ErrorCode.PROVIDER_ERROR: [
         "Try your request again",
@@ -443,7 +419,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Check https://status.gatewayz.ai for provider status",
         "Contact support if the issue persists",
     ],
-
     # Service errors
     ErrorCode.INTERNAL_ERROR: [
         "Try your request again",
@@ -470,7 +445,6 @@ ERROR_SUGGESTIONS: dict[ErrorCode, list[str]] = {
         "Try your request again",
         "Contact support if the problem persists",
     ],
-
     # Resource errors
     ErrorCode.RESOURCE_NOT_FOUND: [
         "Verify the resource ID is correct",
@@ -545,7 +519,9 @@ def get_suggestions(error_code: ErrorCode) -> list[str]:
     Returns:
         List of suggestions
     """
-    return ERROR_SUGGESTIONS.get(error_code, ["Try again later", "Contact support if the issue persists"])
+    return ERROR_SUGGESTIONS.get(
+        error_code, ["Try again later", "Contact support if the issue persists"]
+    )
 
 
 def get_docs_url(error_code: ErrorCode) -> str | None:

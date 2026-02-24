@@ -14,21 +14,21 @@ import time
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from src.db.models_catalog_db import (
+    flush_models_table,
+    flush_providers_table,
+)
+from src.services.incremental_sync import (
+    sync_all_providers_incremental,
+)
 from src.services.model_catalog_sync import (
     PROVIDER_FETCH_FUNCTIONS,
     sync_all_providers,
     sync_provider_models,
 )
-from src.services.incremental_sync import (
-    sync_all_providers_incremental,
-)
 from src.services.provider_model_sync_service import (
     sync_providers_to_database,
     trigger_full_sync,
-)
-from src.db.models_catalog_db import (
-    flush_models_table,
-    flush_providers_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,7 @@ router = APIRouter(
 
 class SyncResponse(BaseModel):
     """Response from sync operation"""
+
     success: bool = Field(..., description="Whether sync was successful")
     message: str = Field(..., description="Human-readable summary message")
     details: dict = Field(..., description="Detailed sync results")
@@ -48,6 +49,7 @@ class SyncResponse(BaseModel):
 
 class ProviderListResponse(BaseModel):
     """Response with list of available providers"""
+
     providers: list[str] = Field(..., description="List of provider slugs")
     count: int = Field(..., description="Number of providers")
 
@@ -60,16 +62,13 @@ async def list_available_providers():
     Returns list of all provider slugs that have fetch functions configured.
     """
     providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
-    return ProviderListResponse(
-        providers=sorted(providers),
-        count=len(providers)
-    )
+    return ProviderListResponse(providers=sorted(providers), count=len(providers))
 
 
 @router.post("/provider/{provider_slug}", response_model=SyncResponse)
 async def sync_single_provider(
     provider_slug: str,
-    dry_run: bool = Query(False, description="Fetch but don't write to database")
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
 ):
     """
     Sync models from a specific provider's API to database
@@ -105,7 +104,7 @@ async def sync_single_provider(
             )
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider '{provider_slug}' not found. Available providers: {', '.join(available)}"
+                detail=f"Provider '{provider_slug}' not found. Available providers: {', '.join(available)}",
             )
 
         logger.info(f"[SYNC-VALIDATE] ✓ Provider '{provider_slug}' validated")
@@ -143,10 +142,7 @@ async def sync_single_provider(
                 f"[SYNC-FAILED] Sync operation failed | "
                 f"provider={provider_slug} | error={error_msg}"
             )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
-            )
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
         logger.info(f"[SYNC-RESULT] ✓ Sync successful | provider={provider_slug}")
 
@@ -155,6 +151,7 @@ async def sync_single_provider(
             logger.debug(f"[SYNC-CACHE] Starting cache invalidation | provider={provider_slug}")
             try:
                 from src.services.catalog_response_cache import invalidate_catalog_cache
+
                 cache_start = time.time()
                 deleted_count = invalidate_catalog_cache(provider_slug)
                 cache_duration = time.time() - cache_start
@@ -189,11 +186,7 @@ async def sync_single_provider(
             f"dry_run={dry_run}"
         )
 
-        return SyncResponse(
-            success=True,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=True, message=message, details=result)
 
     except HTTPException:
         total_duration = time.time() - start_time
@@ -208,21 +201,18 @@ async def sync_single_provider(
             f"❌ [SYNC-EXCEPTION] Unexpected error in sync endpoint | "
             f"provider={provider_slug} | duration={total_duration:.2f}s | "
             f"error_type={type(e).__name__} | error={str(e)}",
-            exc_info=True
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/all", response_model=SyncResponse)
 async def sync_all_provider_models(
     providers: list[str] | None = Query(
         None,
-        description="Specific providers to sync (comma-separated). If not provided, syncs all providers."
+        description="Specific providers to sync (comma-separated). If not provided, syncs all providers.",
     ),
-    dry_run: bool = Query(False, description="Fetch but don't write to database")
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
 ):
     """
     Sync models from all providers (or specified list)
@@ -257,8 +247,7 @@ async def sync_all_provider_models(
         # TRACE: Validation phase
         if providers:
             logger.debug(
-                f"[BULK-SYNC-VALIDATE] Validating provider list | "
-                f"requested={providers}"
+                f"[BULK-SYNC-VALIDATE] Validating provider list | " f"requested={providers}"
             )
             invalid_providers = [p for p in providers if p not in PROVIDER_FETCH_FUNCTIONS]
             if invalid_providers:
@@ -270,7 +259,7 @@ async def sync_all_provider_models(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid providers: {', '.join(invalid_providers)}. "
-                           f"Available: {', '.join(available)}"
+                    f"Available: {', '.join(available)}",
                 )
             logger.info(f"[BULK-SYNC-VALIDATE] ✓ All providers validated | count={len(providers)}")
         else:
@@ -284,7 +273,9 @@ async def sync_all_provider_models(
         thread_start = time.time()
 
         # Run blocking sync function in thread pool to avoid blocking event loop
-        result = await asyncio.to_thread(sync_all_providers, provider_slugs=providers, dry_run=dry_run)
+        result = await asyncio.to_thread(
+            sync_all_providers, provider_slugs=providers, dry_run=dry_run
+        )
 
         thread_duration = time.time() - thread_start
         logger.info(
@@ -310,6 +301,7 @@ async def sync_all_provider_models(
             logger.debug("[BULK-SYNC-CACHE] Starting bulk cache invalidation")
             try:
                 from src.services.catalog_response_cache import invalidate_catalog_cache
+
                 cache_start = time.time()
                 deleted_count = invalidate_catalog_cache()  # None = invalidate all
                 cache_duration = time.time() - cache_start
@@ -329,14 +321,8 @@ async def sync_all_provider_models(
         # TRACE: Catastrophic failure check
         if not result.get("providers_processed"):
             error_msg = result.get("error", "Sync failed completely")
-            logger.error(
-                f"[BULK-SYNC-CATASTROPHIC] Complete sync failure | "
-                f"error={error_msg}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
-            )
+            logger.error(f"[BULK-SYNC-CATASTROPHIC] Complete sync failure | " f"error={error_msg}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
         # TRACE: Build response
         total_duration = time.time() - start_time
@@ -360,11 +346,7 @@ async def sync_all_provider_models(
             f"dry_run={dry_run}"
         )
 
-        return SyncResponse(
-            success=result.get("success", False),
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=result.get("success", False), message=message, details=result)
 
     except HTTPException:
         total_duration = time.time() - start_time
@@ -379,12 +361,9 @@ async def sync_all_provider_models(
             f"❌ [BULK-SYNC-EXCEPTION] Unexpected error in bulk sync endpoint | "
             f"duration={total_duration:.2f}s | "
             f"error_type={type(e).__name__} | error={str(e)}",
-            exc_info=True
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get("/status", response_model=dict)
@@ -434,10 +413,7 @@ async def get_sync_status():
 
     except Exception as e:
         logger.error(f"Error getting sync status: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/full", response_model=SyncResponse)
@@ -484,7 +460,7 @@ async def trigger_full_provider_and_model_sync(
                 "success": True,
                 "providers": provider_result,
                 "models": model_result,
-                "dry_run": True
+                "dry_run": True,
             }
         else:
             # Use the existing full sync function
@@ -507,18 +483,11 @@ async def trigger_full_provider_and_model_sync(
             f"Model sync: {'✓' if model_success else '✗'}"
         )
 
-        return SyncResponse(
-            success=overall_success,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=overall_success, message=message, details=result)
 
     except Exception as e:
         logger.error(f"Error in full sync endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/providers-only", response_model=SyncResponse)
@@ -553,18 +522,11 @@ async def sync_providers_only():
             f"Status: {'✓ Success' if success else '✗ Failed'}"
         )
 
-        return SyncResponse(
-            success=success,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=success, message=message, details=result)
 
     except Exception as e:
         logger.error(f"Error in provider sync endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.delete("/flush-models", response_model=SyncResponse)
@@ -615,7 +577,7 @@ async def flush_models(
         if confirm != "DELETE_ALL_MODELS":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Confirmation failed. Must provide confirm=DELETE_ALL_MODELS to proceed with deletion."
+                detail="Confirmation failed. Must provide confirm=DELETE_ALL_MODELS to proceed with deletion.",
             )
 
         logger.warning("🚨 Flush models endpoint called - proceeding with deletion")
@@ -626,7 +588,7 @@ async def flush_models(
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("message", "Failed to flush models table")
+                detail=result.get("message", "Failed to flush models table"),
             )
 
         deleted_count = result.get("deleted_count", 0)
@@ -634,20 +596,13 @@ async def flush_models(
 
         logger.info(f"✅ {message}")
 
-        return SyncResponse(
-            success=True,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=True, message=message, details=result)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in flush models endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.delete("/flush-providers", response_model=SyncResponse)
@@ -703,10 +658,12 @@ async def flush_providers(
         if confirm != "DELETE_EVERYTHING":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Confirmation failed. Must provide confirm=DELETE_EVERYTHING to proceed with deletion."
+                detail="Confirmation failed. Must provide confirm=DELETE_EVERYTHING to proceed with deletion.",
             )
 
-        logger.warning("🚨🚨 Flush providers endpoint called - proceeding with deletion of ALL data")
+        logger.warning(
+            "🚨🚨 Flush providers endpoint called - proceeding with deletion of ALL data"
+        )
 
         # Perform flush (run in thread pool to avoid blocking event loop)
         result = await asyncio.to_thread(flush_providers_table)
@@ -714,7 +671,7 @@ async def flush_providers(
         if not result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=result.get("message", "Failed to flush providers table")
+                detail=result.get("message", "Failed to flush providers table"),
             )
 
         providers_count = result.get("deleted_providers_count", 0)
@@ -726,20 +683,13 @@ async def flush_providers(
 
         logger.info(f"✅ {message}")
 
-        return SyncResponse(
-            success=True,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=True, message=message, details=result)
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in flush providers endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.post("/reset-and-resync", response_model=SyncResponse)
@@ -802,7 +752,7 @@ async def reset_and_resync():
         if not flush_result.get("success"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to flush models: {flush_result.get('message')}"
+                detail=f"Failed to flush models: {flush_result.get('message')}",
             )
 
         deleted_count = flush_result.get("deleted_count", 0)
@@ -837,20 +787,14 @@ async def reset_and_resync():
         return SyncResponse(
             success=overall_success,
             message=message,
-            details={
-                "flush": flush_result,
-                "sync": sync_result
-            }
+            details={"flush": flush_result, "sync": sync_result},
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in reset and resync endpoint: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 # ============================================================================
@@ -928,17 +872,16 @@ async def trigger_manual_sync():
         logger.error(f"Error triggering manual sync: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to trigger manual sync: {str(e)}"
+            detail=f"Failed to trigger manual sync: {str(e)}",
         )
 
 
 @router.post("/incremental", response_model=SyncResponse, tags=["Admin"])
 async def sync_incremental(
     providers: list[str] | None = Query(
-        None,
-        description="Specific providers to sync. If not provided, syncs all providers."
+        None, description="Specific providers to sync. If not provided, syncs all providers."
     ),
-    dry_run: bool = Query(False, description="Detect changes but don't write to database")
+    dry_run: bool = Query(False, description="Detect changes but don't write to database"),
 ):
     """
     🚀 **Incremental Sync with Change Detection** (Recommended)
@@ -999,21 +942,13 @@ async def sync_incremental(
         # Run incremental sync in background thread to avoid blocking event loop
         logger.debug("[INCREMENTAL-SYNC] Starting sync in executor thread")
         result = await asyncio.to_thread(
-            sync_all_providers_incremental,
-            provider_slugs=providers,
-            dry_run=dry_run
+            sync_all_providers_incremental, provider_slugs=providers, dry_run=dry_run
         )
 
         if not result.get("success"):
             error_msg = result.get("error", "Incremental sync failed")
-            logger.error(
-                f"[INCREMENTAL-SYNC-FAILED] Sync operation failed | "
-                f"error={error_msg}"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=error_msg
-            )
+            logger.error(f"[INCREMENTAL-SYNC-FAILED] Sync operation failed | " f"error={error_msg}")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
         # Log detailed results
         total_duration = time.time() - start_time
@@ -1038,11 +973,7 @@ async def sync_incremental(
             f"Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%"
         )
 
-        return SyncResponse(
-            success=True,
-            message=message,
-            details=result
-        )
+        return SyncResponse(success=True, message=message, details=result)
 
     except HTTPException:
         raise
@@ -1052,9 +983,6 @@ async def sync_incremental(
             f"❌ [INCREMENTAL-SYNC-EXCEPTION] Unexpected error | "
             f"duration={total_duration:.2f}s | "
             f"error_type={type(e).__name__} | error={str(e)}",
-            exc_info=True
+            exc_info=True,
         )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))

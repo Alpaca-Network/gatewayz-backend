@@ -269,6 +269,7 @@ OPENROUTER_AUTO_FALLBACKS = {
     "simplismart": "meta-llama/Llama-3.3-70B-Instruct",
 }
 
+
 # Shared helper for resolving aliases before any downstream routing logic runs.
 # Normalization is idempotent: applying twice yields same result as once.
 def apply_model_alias(model_id: str | None) -> str | None:
@@ -295,6 +296,7 @@ def apply_model_alias(model_id: str | None) -> str | None:
         logger.debug("Resolved model alias '%s' -> '%s'", model_id, canonical)
         return canonical
     return model_id
+
 
 # Gemini model name constants to reduce duplication
 GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
@@ -429,7 +431,9 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
             )
             model_id = stripped
         else:
-            logger.info(f"Preserving '{model_id}' - this OpenRouter meta-model requires the full ID")
+            logger.info(
+                f"Preserving '{model_id}' - this OpenRouter meta-model requires the full ID"
+            )
 
     # Special handling for Near: strip 'near/' prefix if present
     if provider_lower == "near" and model_id.startswith("near/"):
@@ -867,437 +871,420 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         # Near AI uses HuggingFace-style model naming with proper case
         # Maps lowercase input variants to actual NEAR model IDs
         # Reference: https://cloud.near.ai/models for current available models
-
-            # DeepSeek models - only DeepSeek-V3.1 is currently available on Near AI
-            "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1 (only available)
-            "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-            "deepseek-v3": "deepseek-ai/DeepSeek-V3.1",
-            "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
-
-            # GPT-OSS models - requires openai/ prefix
-            "gpt-oss/gpt-oss-120b": "openai/gpt-oss-120b",
-            "gpt-oss-120b": "openai/gpt-oss-120b",
-
-            # Qwen models
-            "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
-            "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            # Qwen3 models - proper case required
-            "qwen/qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen/qwen-3-30b-instruct": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen/qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-            "qwen/qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
-            "qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
-
-            # GLM models from Zhipu AI
-            "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
-            "zai-org/glm-4.6": "zai-org/GLM-4.6",
-            "glm-4.6-fp8": "zai-org/GLM-4.6",
-            "glm-4.6": "zai-org/GLM-4.6",
-
-            # Note: Kimi-K2-Thinking model is NOT available on Near AI
-            # Users requesting moonshotai/kimi-k2-thinking should use OpenRouter instead
-            # Near AI only has DeepSeek, Qwen, and GLM models currently
-        },
-        "alpaca-network": {
-            # Alpaca Network uses Anyscale infrastructure with DeepSeek models
-            # Service: deepseek-v3-1 via https://deepseek-v3-1-b18ty.cld-kvytpjjrw13e2gvq.s.anyscaleuserdata.com
-
-            # DeepSeek V3.1 models
-            "deepseek-ai/deepseek-v3.1": "deepseek-v3-1",
-            "deepseek-ai/deepseek-v3": "deepseek-v3-1",  # Map v3 to v3.1
-            "deepseek/deepseek-v3.1": "deepseek-v3-1",
-            "deepseek/deepseek-v3": "deepseek-v3-1",
-            "deepseek-v3.1": "deepseek-v3-1",
-            "deepseek-v3": "deepseek-v3-1",
-            "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
-        },
-        "alibaba-cloud": {
-            # Alibaba Cloud / DashScope models
-            # Uses OpenAI-compatible API with direct model IDs
-            # Reference: https://dashscope.aliyuncs.com/compatible-mode/v1
-
-            # Qwen commercial models
-            "qwen/qwen-plus": "qwen-plus",
-            "qwen/qwen-max": "qwen-max",
-            "qwen/qwen-flash": "qwen-flash",
-            "qwen-plus": "qwen-plus",
-            "qwen-max": "qwen-max",
-            "qwen-flash": "qwen-flash",
-
-            # Qwen specialized models
-            "qwen/qwq-plus": "qwq-plus",
-            "qwen/qwen-long": "qwen-long",
-            "qwen/qwen-omni": "qwen-omni",
-            "qwen/qwen-vl": "qwen-vl",
-            "qwen/qwen-math": "qwen-math",
-            "qwen/qwen-mt": "qwen-mt",
-            "qwen/qvq": "qvq",
-            "qwq-plus": "qwq-plus",
-            "qwen-long": "qwen-long",
-            "qwen-omni": "qwen-omni",
-            "qwen-vl": "qwen-vl",
-            "qwen-math": "qwen-math",
-            "qwen-mt": "qwen-mt",
-            "qvq": "qvq",
-
-            # Qwen Coder models
-            "qwen/qwen-coder": "qwen-coder",
-            "qwen-coder": "qwen-coder",
-            # Qwen 2.5 Coder models (specific versions)
-            "qwen/qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
-            "qwen/qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
-            "qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
-            "qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
-            "qwen/qwen-2.5-coder-32b": "qwen2.5-coder-32b-instruct",
-            "qwen/qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
-            "qwen/qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
-            "qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
-            "qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
-            "qwen/qwen-2.5-coder-7b": "qwen2.5-coder-7b-instruct",
-            "qwen/qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
-            "qwen/qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
-            "qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
-            "qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
-            "qwen/qwen-2.5-coder-14b": "qwen2.5-coder-14b-instruct",
-
-            # Qwen reasoning models
-            "qwen/qwq-32b-preview": "qwq-32b-preview",
-            "qwq-32b-preview": "qwq-32b-preview",
-
-            # Qwen thinking models
-            "qwen/qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
-            "qwen/qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
-            "qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
-            "qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
-
-            # Qwen 3 series
-            "qwen/qwen-3-30b": "qwen-3-30b-a3b-instruct",
-            "qwen/qwen-3-80b": "qwen-3-80b-a3b-instruct",
-            "qwen/qwen3-32b": "qwen-3-32b-a3b-instruct",
-            "qwen3-30b": "qwen-3-30b-a3b-instruct",
-            "qwen3-80b": "qwen-3-80b-a3b-instruct",
-            "qwen3-32b": "qwen-3-32b-a3b-instruct",
-
-            # Qwen 2.5 series
-            "qwen/qwen-2.5-72b": "qwen-2.5-72b-instruct",
-            "qwen/qwen-2.5-7b": "qwen-2.5-7b-instruct",
-            "qwen-2.5-72b": "qwen-2.5-72b-instruct",
-            "qwen-2.5-7b": "qwen-2.5-7b-instruct",
-
-            # Qwen 2 series
-            "qwen/qwen-2-72b": "qwen-2-72b-instruct",
-            "qwen/qwen-2-7b": "qwen-2-7b-instruct",
-            "qwen-2-72b": "qwen-2-72b-instruct",
-            "qwen-2-7b": "qwen-2-7b-instruct",
-
-            # Qwen 1.5 models
-            "qwen/qwen-1.5-72b": "qwen-1.5-72b-chat",
-            "qwen/qwen-1.5-14b": "qwen-1.5-14b-chat",
-            "qwen-1.5-72b": "qwen-1.5-72b-chat",
-            "qwen-1.5-14b": "qwen-1.5-14b-chat",
-
-            # Alternative naming formats (shorthand)
-            "qwen": "qwen-plus",  # Default to Plus for unspecified qwen
-            "qwen-max-latest": "qwen-max",
-            "qwen-plus-latest": "qwen-plus",
-        },
-        "clarifai": {
-            # Clarifai OpenAI-compatible API requires full model URLs or abbreviated paths
-            # Format: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
-            # Or abbreviated: {user_id}/{app_id}/models/{model_id}
-            # See: https://docs.clarifai.com/compute/inference/open-ai/
-            #
-            # OpenAI models (via Clarifai)
-            "openai/gpt-4o": "openai/chat-completion/models/gpt-4o",
-            "openai/gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
-            "openai/gpt-4": "openai/chat-completion/models/gpt-4",
-            "gpt-4o": "openai/chat-completion/models/gpt-4o",
-            "gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
-            "gpt-4": "openai/chat-completion/models/gpt-4",
-            # GPT-OSS (Clarifai's open-source GPT)
-            "gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
-            "openai/gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
-            # Anthropic Claude models (via Clarifai)
-            "anthropic/claude-3-opus": "anthropic/completion/models/claude-3-opus",
-            "anthropic/claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
-            "anthropic/claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
-            "claude-3-opus": "anthropic/completion/models/claude-3-opus",
-            "claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
-            "claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
-            # Meta Llama models (via Clarifai)
-            "meta-llama/llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
-            "meta-llama/llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
-            "llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
-            "llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
-            # Mistral models (via Clarifai)
-            "mistralai/mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
-            "mistralai/mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
-            "mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
-            "mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
-        },
-        "xai": {
-            # XAI Grok models - pass-through format
-            # Models are referenced by their simple names (e.g., "grok-2", "grok-3")
-            # Can also use xai/grok-* format
-            # Note: grok-beta was deprecated on 2025-09-15, now redirected to grok-3
-            "grok-beta": "grok-3",
-            "grok-2": "grok-2",
-            "grok-2-1212": "grok-2-1212",
-            "grok-3": "grok-3",
-            "grok-vision-beta": "grok-3",  # grok-vision-beta also deprecated
-            "xai/grok-beta": "grok-3",
-            "xai/grok-2": "grok-2",
-            "xai/grok-2-1212": "grok-2-1212",
-            "xai/grok-3": "grok-3",
-            "xai/grok-vision-beta": "grok-3",
-        },
-        "cerebras": {
-            # Cerebras API expects model IDs without the "cerebras/" prefix
-            # Transform: "cerebras/llama-3.3-70b" → "llama-3.3-70b"
-            "cerebras/llama-3.3-70b": "llama-3.3-70b",
-            "cerebras/llama-3.3-70b-instruct": "llama-3.3-70b",
-            "cerebras/llama-3.3-405b": "llama-3.3-405b",
-            "cerebras/llama-3.1-70b": "llama3.1-70b",
-            "cerebras/llama-3.1-70b-instruct": "llama3.1-70b",
-            "cerebras/llama-3.1-8b": "llama3.1-8b",
-            "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
-            "cerebras/llama-3.1-405b": "llama3.1-405b",
-            # Qwen models
-            "cerebras/qwen-3-32b": "qwen-3-32b",
-            "cerebras/qwen-3-32b-instruct": "qwen-3-32b",
-            "cerebras/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
-            "cerebras/qwen-3-235b-instruct": "qwen-3-235b-a22b-instruct-2507",
-            "qwen-3-32b": "qwen-3-32b",
-            "qwen3-32b": "qwen-3-32b",
-            "qwen/qwen3-32b": "qwen-3-32b",
-            "qwen/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
-            "qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
-            # Z.ai GLM models
-            "cerebras/zai-glm-4.6": "zai-glm-4.6",
-            "zai-glm-4.6": "zai-glm-4.6",
-            "zai/glm-4.6": "zai-glm-4.6",
-            # Support direct model names (passthrough)
-            "llama-3.3-70b": "llama-3.3-70b",
-            "llama-3.3-405b": "llama-3.3-405b",
-            "llama3.1-70b": "llama3.1-70b",
-            "llama3.1-8b": "llama3.1-8b",
-            "llama3.1-405b": "llama3.1-405b",
-        },
-        "cloudflare-workers-ai": {
-            # Cloudflare Workers AI uses @cf/ prefix for model names
-            # OpenAI-compatible API: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
-            # Documentation: https://developers.cloudflare.com/workers-ai/
-            #
-            # ======== OpenAI GPT-OSS models ========
-            "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
-            "openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
-            "gpt-oss-120b": "@cf/openai/gpt-oss-120b",
-            "gpt-oss-20b": "@cf/openai/gpt-oss-20b",
-            "gpt-oss/gpt-120b": "@cf/openai/gpt-oss-120b",
-            "gpt-oss/gpt-20b": "@cf/openai/gpt-oss-20b",
-            #
-            # ======== Meta Llama 4 models ========
-            "meta-llama/llama-4-scout-17b": "@cf/meta/llama-4-scout-17b-16e-instruct",
-            "meta-llama/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
-            "llama-4-scout": "@cf/meta/llama-4-scout-17b-16e-instruct",
-            #
-            # ======== Meta Llama 3.3 models ========
-            "meta-llama/llama-3.3-70b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "meta-llama/llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            #
-            # ======== Meta Llama 3.2 models ========
-            "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
-            "meta-llama/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
-            "meta-llama/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
-            "llama-3.2-11b-vision": "@cf/meta/llama-3.2-11b-vision-instruct",
-            "llama-3.2-3b": "@cf/meta/llama-3.2-3b-instruct",
-            "llama-3.2-1b": "@cf/meta/llama-3.2-1b-instruct",
-            #
-            # ======== Meta Llama 3.1 models ========
-            "meta-llama/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
-            "meta-llama/llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
-            "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
-            "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
-            "llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
-            "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
-            "llama-3.1-8b-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
-            #
-            # ======== Meta Llama 3 models ========
-            "meta-llama/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
-            "meta-llama/llama-3-8b": "@cf/meta/llama-3-8b-instruct",
-            "llama-3-8b": "@cf/meta/llama-3-8b-instruct",
-            #
-            # ======== Meta Llama 2 models (Legacy) ========
-            "meta-llama/llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
-            "llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
-            "llama-2-7b": "@cf/meta/llama-2-7b-chat-fp16",
-            #
-            # ======== Meta Llama Guard ========
-            "meta-llama/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
-            "llama-guard-3": "@cf/meta/llama-guard-3-8b",
-            #
-            # ======== Qwen models ========
-            "qwen/qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
-            "qwen/qwq-32b": "@cf/qwen/qwq-32b",
-            "qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
-            "qwen/qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
-            "qwq-32b": "@cf/qwen/qwq-32b",
-            "qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
-            "qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
-            #
-            # ======== Google Gemma models ========
-            "google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
-            "google/gemma-7b-it": "@cf/google/gemma-7b-it",
-            "google/gemma-2b-it": "@cf/google/gemma-2b-it-lora",
-            "gemma-3-12b": "@cf/google/gemma-3-12b-it",
-            "gemma-7b": "@cf/google/gemma-7b-it",
-            "gemma-2b": "@cf/google/gemma-2b-it-lora",
-            #
-            # ======== Mistral models ========
-            "mistralai/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
-            "mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
-            "mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
-            "mistral-small-3.1-24b": "@cf/mistral/mistral-small-3.1-24b-instruct",
-            "mistral-7b-instruct": "@cf/mistralai/mistral-7b-instruct-v0.2",
-            "mistral-7b": "@cf/mistralai/mistral-7b-instruct-v0.2",
-            #
-            # ======== DeepSeek models ========
-            "deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
-            "deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
-            "deepseek-r1-distill": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
-            #
-            # ======== IBM Granite models ========
-            "ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
-            "granite-4.0-micro": "@cf/ibm/granite-4.0-h-micro",
-            #
-            # ======== AI Singapore models ========
-            "aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
-            "sea-lion-27b": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
-            #
-            # ======== NousResearch models ========
-            "nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
-            "hermes-2-pro": "@cf/nousresearch/hermes-2-pro-mistral-7b",
-            #
-            # ======== Microsoft models ========
-            "microsoft/phi-2": "@cf/microsoft/phi-2",
-            "phi-2": "@cf/microsoft/phi-2",
-            #
-            # ======== Direct @cf/ model names (passthrough) ========
-            "@cf/openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
-            "@cf/openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
-            "@cf/meta/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
-            "@cf/meta/llama-3.3-70b-instruct-fp8-fast": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-            "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
-            "@cf/meta/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
-            "@cf/meta/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
-            "@cf/meta/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
-            "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
-            "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
-            "@cf/meta/llama-3.1-8b-instruct-fp8": "@cf/meta/llama-3.1-8b-instruct-fp8",
-            "@cf/meta/llama-3.1-8b-instruct-awq": "@cf/meta/llama-3.1-8b-instruct-awq",
-            "@cf/meta/meta-llama-3-8b-instruct": "@cf/meta/meta-llama-3-8b-instruct",
-            "@cf/meta/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
-            "@cf/meta/llama-3-8b-instruct-awq": "@cf/meta/llama-3-8b-instruct-awq",
-            "@cf/meta/llama-2-7b-chat-fp16": "@cf/meta/llama-2-7b-chat-fp16",
-            "@cf/meta/llama-2-7b-chat-int8": "@cf/meta/llama-2-7b-chat-int8",
-            "@cf/meta-llama/llama-2-7b-chat-hf-lora": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
-            "@cf/meta/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
-            "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
-            "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
-            "@cf/qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
-            "@cf/google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
-            "@cf/google/gemma-7b-it": "@cf/google/gemma-7b-it",
-            "@cf/google/gemma-7b-it-lora": "@cf/google/gemma-7b-it-lora",
-            "@cf/google/gemma-2b-it-lora": "@cf/google/gemma-2b-it-lora",
-            "@cf/mistral/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
-            "@cf/mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
-            "@cf/mistralai/mistral-7b-instruct-v0.2-lora": "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
-            "@cf/mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
-            "@cf/deepseek/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
-            "@cf/ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
-            "@cf/aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
-            "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
-            "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
-        },
-        "morpheus": {
-            # Morpheus AI Gateway uses OpenAI-compatible model identifiers
-            # Models are dynamically fetched from the Morpheus API
-            # Pass-through format - model IDs from the Morpheus /models endpoint
-            # Strip morpheus/ prefix for actual API calls
-            "morpheus/llama-3.1-8b": "llama-3.1-8b",
-            "morpheus/llama-3.1-70b": "llama-3.1-70b",
-            "morpheus/mistral-7b": "mistral-7b",
-            "morpheus/deepseek-r1": "deepseek-r1",
-            # Direct model names (passthrough)
-            "llama-3.1-8b": "llama-3.1-8b",
-            "llama-3.1-70b": "llama-3.1-70b",
-            "mistral-7b": "mistral-7b",
-            "deepseek-r1": "deepseek-r1",
-        },
-        "onerouter": {
-            # Infron AI uses OpenAI-compatible model identifiers with @ versioning
-            # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
-            # Models are dynamically fetched from Infron AI's /v1/models endpoint
-            # Strip onerouter/ prefix for actual API calls
-            "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
-            "onerouter/gpt-4": "gpt-4@latest",
-            "onerouter/gpt-4o": "gpt-4o@latest",
-            "onerouter/gpt-3.5-turbo": "gpt-3.5-turbo@latest",
-            # Direct model names (passthrough with @ version suffix)
-            "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20240620",
-            "gpt-4@latest": "gpt-4@latest",
-            "gpt-4o@latest": "gpt-4o@latest",
-            "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
-            # Models can also use simpler names - Infron AI handles routing
-            "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
-            "gpt-4": "gpt-4@latest",
-            "gpt-4o": "gpt-4o@latest",
-            "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
-        },
-        "simplismart": {
-            # Simplismart uses org/model format, supports various LLM models
-            # Llama 3.1 models
-            "simplismart/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "simplismart/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "simplismart/llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
-            "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
-            "llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
-            "llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
-            # Llama 3.3 models
-            "simplismart/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
-            # Llama 4 models
-            "simplismart/llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
-            "llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
-            # DeepSeek models
-            "simplismart/deepseek-r1": "deepseek-ai/DeepSeek-R1",
-            "simplismart/deepseek-v3": "deepseek-ai/DeepSeek-V3",
-            "deepseek-r1": "deepseek-ai/DeepSeek-R1",
-            "deepseek-v3": "deepseek-ai/DeepSeek-V3",
-            # Gemma models
-            "simplismart/gemma-3-1b": "google/gemma-3-1b-it",
-            "simplismart/gemma-3-4b": "google/gemma-3-4b-it",
-            "simplismart/gemma-3-27b": "google/gemma-3-27b-it",
-            "gemma-3-1b": "google/gemma-3-1b-it",
-            "gemma-3-4b": "google/gemma-3-4b-it",
-            "gemma-3-27b": "google/gemma-3-27b-it",
-            # Qwen models
-            "simplismart/qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
-            "simplismart/qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
-            "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
-            "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
-            # Mixtral models
-            "simplismart/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
-            "mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
-            # Devstral
-            "simplismart/devstral-small": "mistralai/Devstral-Small-2505",
-            "devstral-small": "mistralai/Devstral-Small-2505",
-        },
-    }
-
+        # DeepSeek models - only DeepSeek-V3.1 is currently available on Near AI
+        "deepseek-ai/deepseek-v3": "deepseek-ai/DeepSeek-V3.1",  # Map v3 to v3.1 (only available)
+        "deepseek-ai/deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+        "deepseek-v3": "deepseek-ai/DeepSeek-V3.1",
+        "deepseek-v3.1": "deepseek-ai/DeepSeek-V3.1",
+        # GPT-OSS models - requires openai/ prefix
+        "gpt-oss/gpt-oss-120b": "openai/gpt-oss-120b",
+        "gpt-oss-120b": "openai/gpt-oss-120b",
+        # Qwen models
+        "qwen/qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",  # Map old qwen-2-72b to qwen-3-30b
+        "qwen-2-72b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        # Qwen3 models - proper case required
+        "qwen/qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "qwen/qwen-3-30b-instruct": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "qwen-3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "qwen/qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "qwen3-30b-a3b-instruct-2507": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "qwen/qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        "qwen3-30b-a3b-thinking-2507": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        # GLM models from Zhipu AI
+        "zai-org/glm-4.6-fp8": "zai-org/GLM-4.6",
+        "zai-org/glm-4.6": "zai-org/GLM-4.6",
+        "glm-4.6-fp8": "zai-org/GLM-4.6",
+        "glm-4.6": "zai-org/GLM-4.6",
+        # Note: Kimi-K2-Thinking model is NOT available on Near AI
+        # Users requesting moonshotai/kimi-k2-thinking should use OpenRouter instead
+        # Near AI only has DeepSeek, Qwen, and GLM models currently
+    },
+    "alpaca-network": {
+        # Alpaca Network uses Anyscale infrastructure with DeepSeek models
+        # Service: deepseek-v3-1 via https://deepseek-v3-1-b18ty.cld-kvytpjjrw13e2gvq.s.anyscaleuserdata.com
+        # DeepSeek V3.1 models
+        "deepseek-ai/deepseek-v3.1": "deepseek-v3-1",
+        "deepseek-ai/deepseek-v3": "deepseek-v3-1",  # Map v3 to v3.1
+        "deepseek/deepseek-v3.1": "deepseek-v3-1",
+        "deepseek/deepseek-v3": "deepseek-v3-1",
+        "deepseek-v3.1": "deepseek-v3-1",
+        "deepseek-v3": "deepseek-v3-1",
+        "deepseek-v3-1": "deepseek-v3-1",  # Direct service name
+    },
+    "alibaba-cloud": {
+        # Alibaba Cloud / DashScope models
+        # Uses OpenAI-compatible API with direct model IDs
+        # Reference: https://dashscope.aliyuncs.com/compatible-mode/v1
+        # Qwen commercial models
+        "qwen/qwen-plus": "qwen-plus",
+        "qwen/qwen-max": "qwen-max",
+        "qwen/qwen-flash": "qwen-flash",
+        "qwen-plus": "qwen-plus",
+        "qwen-max": "qwen-max",
+        "qwen-flash": "qwen-flash",
+        # Qwen specialized models
+        "qwen/qwq-plus": "qwq-plus",
+        "qwen/qwen-long": "qwen-long",
+        "qwen/qwen-omni": "qwen-omni",
+        "qwen/qwen-vl": "qwen-vl",
+        "qwen/qwen-math": "qwen-math",
+        "qwen/qwen-mt": "qwen-mt",
+        "qwen/qvq": "qvq",
+        "qwq-plus": "qwq-plus",
+        "qwen-long": "qwen-long",
+        "qwen-omni": "qwen-omni",
+        "qwen-vl": "qwen-vl",
+        "qwen-math": "qwen-math",
+        "qwen-mt": "qwen-mt",
+        "qvq": "qvq",
+        # Qwen Coder models
+        "qwen/qwen-coder": "qwen-coder",
+        "qwen-coder": "qwen-coder",
+        # Qwen 2.5 Coder models (specific versions)
+        "qwen/qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+        "qwen/qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+        "qwen-2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+        "qwen2.5-coder-32b-instruct": "qwen2.5-coder-32b-instruct",
+        "qwen/qwen-2.5-coder-32b": "qwen2.5-coder-32b-instruct",
+        "qwen/qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+        "qwen/qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+        "qwen-2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+        "qwen2.5-coder-7b-instruct": "qwen2.5-coder-7b-instruct",
+        "qwen/qwen-2.5-coder-7b": "qwen2.5-coder-7b-instruct",
+        "qwen/qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+        "qwen/qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+        "qwen-2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+        "qwen2.5-coder-14b-instruct": "qwen2.5-coder-14b-instruct",
+        "qwen/qwen-2.5-coder-14b": "qwen2.5-coder-14b-instruct",
+        # Qwen reasoning models
+        "qwen/qwq-32b-preview": "qwq-32b-preview",
+        "qwq-32b-preview": "qwq-32b-preview",
+        # Qwen thinking models
+        "qwen/qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+        "qwen/qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+        "qwen-3-30b-a3b-thinking": "qwen-3-30b-a3b-thinking",
+        "qwen-3-80b-a3b-thinking": "qwen-3-80b-a3b-thinking",
+        # Qwen 3 series
+        "qwen/qwen-3-30b": "qwen-3-30b-a3b-instruct",
+        "qwen/qwen-3-80b": "qwen-3-80b-a3b-instruct",
+        "qwen/qwen3-32b": "qwen-3-32b-a3b-instruct",
+        "qwen3-30b": "qwen-3-30b-a3b-instruct",
+        "qwen3-80b": "qwen-3-80b-a3b-instruct",
+        "qwen3-32b": "qwen-3-32b-a3b-instruct",
+        # Qwen 2.5 series
+        "qwen/qwen-2.5-72b": "qwen-2.5-72b-instruct",
+        "qwen/qwen-2.5-7b": "qwen-2.5-7b-instruct",
+        "qwen-2.5-72b": "qwen-2.5-72b-instruct",
+        "qwen-2.5-7b": "qwen-2.5-7b-instruct",
+        # Qwen 2 series
+        "qwen/qwen-2-72b": "qwen-2-72b-instruct",
+        "qwen/qwen-2-7b": "qwen-2-7b-instruct",
+        "qwen-2-72b": "qwen-2-72b-instruct",
+        "qwen-2-7b": "qwen-2-7b-instruct",
+        # Qwen 1.5 models
+        "qwen/qwen-1.5-72b": "qwen-1.5-72b-chat",
+        "qwen/qwen-1.5-14b": "qwen-1.5-14b-chat",
+        "qwen-1.5-72b": "qwen-1.5-72b-chat",
+        "qwen-1.5-14b": "qwen-1.5-14b-chat",
+        # Alternative naming formats (shorthand)
+        "qwen": "qwen-plus",  # Default to Plus for unspecified qwen
+        "qwen-max-latest": "qwen-max",
+        "qwen-plus-latest": "qwen-plus",
+    },
+    "clarifai": {
+        # Clarifai OpenAI-compatible API requires full model URLs or abbreviated paths
+        # Format: https://clarifai.com/{user_id}/{app_id}/models/{model_id}
+        # Or abbreviated: {user_id}/{app_id}/models/{model_id}
+        # See: https://docs.clarifai.com/compute/inference/open-ai/
+        #
+        # OpenAI models (via Clarifai)
+        "openai/gpt-4o": "openai/chat-completion/models/gpt-4o",
+        "openai/gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+        "openai/gpt-4": "openai/chat-completion/models/gpt-4",
+        "gpt-4o": "openai/chat-completion/models/gpt-4o",
+        "gpt-4-turbo": "openai/chat-completion/models/gpt-4-turbo",
+        "gpt-4": "openai/chat-completion/models/gpt-4",
+        # GPT-OSS (Clarifai's open-source GPT)
+        "gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+        "openai/gpt-oss-120b": "openai/chat-completion/models/gpt-oss-120b",
+        # Anthropic Claude models (via Clarifai)
+        "anthropic/claude-3-opus": "anthropic/completion/models/claude-3-opus",
+        "anthropic/claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+        "anthropic/claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+        "claude-3-opus": "anthropic/completion/models/claude-3-opus",
+        "claude-3.5-sonnet": "anthropic/completion/models/claude-3-5-sonnet",
+        "claude-3-sonnet": "anthropic/completion/models/claude-3-sonnet",
+        # Meta Llama models (via Clarifai)
+        "meta-llama/llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+        "meta-llama/llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+        "llama-3.1-70b": "meta/llama-2/models/llama-3-1-70b-instruct",
+        "llama-3-70b": "meta/llama-2/models/llama-3-70b-instruct",
+        # Mistral models (via Clarifai)
+        "mistralai/mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+        "mistralai/mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
+        "mistral-7b": "mistralai/completion/models/mistral-7b-instruct",
+        "mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
+    },
+    "xai": {
+        # XAI Grok models - pass-through format
+        # Models are referenced by their simple names (e.g., "grok-2", "grok-3")
+        # Can also use xai/grok-* format
+        # Note: grok-beta was deprecated on 2025-09-15, now redirected to grok-3
+        "grok-beta": "grok-3",
+        "grok-2": "grok-2",
+        "grok-2-1212": "grok-2-1212",
+        "grok-3": "grok-3",
+        "grok-vision-beta": "grok-3",  # grok-vision-beta also deprecated
+        "xai/grok-beta": "grok-3",
+        "xai/grok-2": "grok-2",
+        "xai/grok-2-1212": "grok-2-1212",
+        "xai/grok-3": "grok-3",
+        "xai/grok-vision-beta": "grok-3",
+    },
+    "cerebras": {
+        # Cerebras API expects model IDs without the "cerebras/" prefix
+        # Transform: "cerebras/llama-3.3-70b" → "llama-3.3-70b"
+        "cerebras/llama-3.3-70b": "llama-3.3-70b",
+        "cerebras/llama-3.3-70b-instruct": "llama-3.3-70b",
+        "cerebras/llama-3.3-405b": "llama-3.3-405b",
+        "cerebras/llama-3.1-70b": "llama3.1-70b",
+        "cerebras/llama-3.1-70b-instruct": "llama3.1-70b",
+        "cerebras/llama-3.1-8b": "llama3.1-8b",
+        "cerebras/llama-3.1-8b-instruct": "llama3.1-8b",
+        "cerebras/llama-3.1-405b": "llama3.1-405b",
+        # Qwen models
+        "cerebras/qwen-3-32b": "qwen-3-32b",
+        "cerebras/qwen-3-32b-instruct": "qwen-3-32b",
+        "cerebras/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+        "cerebras/qwen-3-235b-instruct": "qwen-3-235b-a22b-instruct-2507",
+        "qwen-3-32b": "qwen-3-32b",
+        "qwen3-32b": "qwen-3-32b",
+        "qwen/qwen3-32b": "qwen-3-32b",
+        "qwen/qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+        "qwen-3-235b": "qwen-3-235b-a22b-instruct-2507",
+        # Z.ai GLM models
+        "cerebras/zai-glm-4.6": "zai-glm-4.6",
+        "zai-glm-4.6": "zai-glm-4.6",
+        "zai/glm-4.6": "zai-glm-4.6",
+        # Support direct model names (passthrough)
+        "llama-3.3-70b": "llama-3.3-70b",
+        "llama-3.3-405b": "llama-3.3-405b",
+        "llama3.1-70b": "llama3.1-70b",
+        "llama3.1-8b": "llama3.1-8b",
+        "llama3.1-405b": "llama3.1-405b",
+    },
+    "cloudflare-workers-ai": {
+        # Cloudflare Workers AI uses @cf/ prefix for model names
+        # OpenAI-compatible API: https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1
+        # Documentation: https://developers.cloudflare.com/workers-ai/
+        #
+        # ======== OpenAI GPT-OSS models ========
+        "openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+        "openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+        "gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+        "gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+        "gpt-oss/gpt-120b": "@cf/openai/gpt-oss-120b",
+        "gpt-oss/gpt-20b": "@cf/openai/gpt-oss-20b",
+        #
+        # ======== Meta Llama 4 models ========
+        "meta-llama/llama-4-scout-17b": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "meta-llama/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "llama-4-scout": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        #
+        # ======== Meta Llama 3.3 models ========
+        "meta-llama/llama-3.3-70b-instruct": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "meta-llama/llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "llama-3.3-70b": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        #
+        # ======== Meta Llama 3.2 models ========
+        "meta-llama/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+        "meta-llama/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+        "meta-llama/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+        "llama-3.2-11b-vision": "@cf/meta/llama-3.2-11b-vision-instruct",
+        "llama-3.2-3b": "@cf/meta/llama-3.2-3b-instruct",
+        "llama-3.2-1b": "@cf/meta/llama-3.2-1b-instruct",
+        #
+        # ======== Meta Llama 3.1 models ========
+        "meta-llama/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+        "meta-llama/llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+        "meta-llama/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+        "meta-llama/llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+        "llama-3.1-70b": "@cf/meta/llama-3.1-70b-instruct",
+        "llama-3.1-8b": "@cf/meta/llama-3.1-8b-instruct",
+        "llama-3.1-8b-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+        #
+        # ======== Meta Llama 3 models ========
+        "meta-llama/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+        "meta-llama/llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+        "llama-3-8b": "@cf/meta/llama-3-8b-instruct",
+        #
+        # ======== Meta Llama 2 models (Legacy) ========
+        "meta-llama/llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+        "llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
+        "llama-2-7b": "@cf/meta/llama-2-7b-chat-fp16",
+        #
+        # ======== Meta Llama Guard ========
+        "meta-llama/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
+        "llama-guard-3": "@cf/meta/llama-guard-3-8b",
+        #
+        # ======== Qwen models ========
+        "qwen/qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "qwen/qwq-32b": "@cf/qwen/qwq-32b",
+        "qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+        "qwen/qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
+        "qwq-32b": "@cf/qwen/qwq-32b",
+        "qwen3-30b": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "qwen2.5-coder-32b": "@cf/qwen/qwen2.5-coder-32b-instruct",
+        #
+        # ======== Google Gemma models ========
+        "google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+        "google/gemma-7b-it": "@cf/google/gemma-7b-it",
+        "google/gemma-2b-it": "@cf/google/gemma-2b-it-lora",
+        "gemma-3-12b": "@cf/google/gemma-3-12b-it",
+        "gemma-7b": "@cf/google/gemma-7b-it",
+        "gemma-2b": "@cf/google/gemma-2b-it-lora",
+        #
+        # ======== Mistral models ========
+        "mistralai/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+        "mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+        "mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
+        "mistral-small-3.1-24b": "@cf/mistral/mistral-small-3.1-24b-instruct",
+        "mistral-7b-instruct": "@cf/mistralai/mistral-7b-instruct-v0.2",
+        "mistral-7b": "@cf/mistralai/mistral-7b-instruct-v0.2",
+        #
+        # ======== DeepSeek models ========
+        "deepseek-ai/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+        "deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+        "deepseek-r1-distill": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+        #
+        # ======== IBM Granite models ========
+        "ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+        "granite-4.0-micro": "@cf/ibm/granite-4.0-h-micro",
+        #
+        # ======== AI Singapore models ========
+        "aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+        "sea-lion-27b": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+        #
+        # ======== NousResearch models ========
+        "nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+        "hermes-2-pro": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+        #
+        # ======== Microsoft models ========
+        "microsoft/phi-2": "@cf/microsoft/phi-2",
+        "phi-2": "@cf/microsoft/phi-2",
+        #
+        # ======== Direct @cf/ model names (passthrough) ========
+        "@cf/openai/gpt-oss-120b": "@cf/openai/gpt-oss-120b",
+        "@cf/openai/gpt-oss-20b": "@cf/openai/gpt-oss-20b",
+        "@cf/meta/llama-4-scout-17b-16e-instruct": "@cf/meta/llama-4-scout-17b-16e-instruct",
+        "@cf/meta/llama-3.3-70b-instruct-fp8-fast": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        "@cf/meta/llama-3.2-11b-vision-instruct": "@cf/meta/llama-3.2-11b-vision-instruct",
+        "@cf/meta/llama-3.2-3b-instruct": "@cf/meta/llama-3.2-3b-instruct",
+        "@cf/meta/llama-3.2-1b-instruct": "@cf/meta/llama-3.2-1b-instruct",
+        "@cf/meta/llama-3.1-70b-instruct": "@cf/meta/llama-3.1-70b-instruct",
+        "@cf/meta/llama-3.1-8b-instruct-fast": "@cf/meta/llama-3.1-8b-instruct-fast",
+        "@cf/meta/llama-3.1-8b-instruct": "@cf/meta/llama-3.1-8b-instruct",
+        "@cf/meta/llama-3.1-8b-instruct-fp8": "@cf/meta/llama-3.1-8b-instruct-fp8",
+        "@cf/meta/llama-3.1-8b-instruct-awq": "@cf/meta/llama-3.1-8b-instruct-awq",
+        "@cf/meta/meta-llama-3-8b-instruct": "@cf/meta/meta-llama-3-8b-instruct",
+        "@cf/meta/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
+        "@cf/meta/llama-3-8b-instruct-awq": "@cf/meta/llama-3-8b-instruct-awq",
+        "@cf/meta/llama-2-7b-chat-fp16": "@cf/meta/llama-2-7b-chat-fp16",
+        "@cf/meta/llama-2-7b-chat-int8": "@cf/meta/llama-2-7b-chat-int8",
+        "@cf/meta-llama/llama-2-7b-chat-hf-lora": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+        "@cf/meta/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
+        "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
+        "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
+        "@cf/qwen/qwen2.5-coder-32b-instruct": "@cf/qwen/qwen2.5-coder-32b-instruct",
+        "@cf/google/gemma-3-12b-it": "@cf/google/gemma-3-12b-it",
+        "@cf/google/gemma-7b-it": "@cf/google/gemma-7b-it",
+        "@cf/google/gemma-7b-it-lora": "@cf/google/gemma-7b-it-lora",
+        "@cf/google/gemma-2b-it-lora": "@cf/google/gemma-2b-it-lora",
+        "@cf/mistral/mistral-small-3.1-24b-instruct": "@cf/mistral/mistral-small-3.1-24b-instruct",
+        "@cf/mistralai/mistral-7b-instruct-v0.2": "@cf/mistralai/mistral-7b-instruct-v0.2",
+        "@cf/mistralai/mistral-7b-instruct-v0.2-lora": "@cf/mistralai/mistral-7b-instruct-v0.2-lora",
+        "@cf/mistralai/mistral-7b-instruct-v0.1": "@cf/mistralai/mistral-7b-instruct-v0.1",
+        "@cf/deepseek/deepseek-r1-distill-qwen-32b": "@cf/deepseek/deepseek-r1-distill-qwen-32b",
+        "@cf/ibm/granite-4.0-h-micro": "@cf/ibm/granite-4.0-h-micro",
+        "@cf/aisingapore/gemma-sea-lion-v4-27b-it": "@cf/aisingapore/gemma-sea-lion-v4-27b-it",
+        "@cf/nousresearch/hermes-2-pro-mistral-7b": "@cf/nousresearch/hermes-2-pro-mistral-7b",
+        "@cf/microsoft/phi-2": "@cf/microsoft/phi-2",
+    },
+    "morpheus": {
+        # Morpheus AI Gateway uses OpenAI-compatible model identifiers
+        # Models are dynamically fetched from the Morpheus API
+        # Pass-through format - model IDs from the Morpheus /models endpoint
+        # Strip morpheus/ prefix for actual API calls
+        "morpheus/llama-3.1-8b": "llama-3.1-8b",
+        "morpheus/llama-3.1-70b": "llama-3.1-70b",
+        "morpheus/mistral-7b": "mistral-7b",
+        "morpheus/deepseek-r1": "deepseek-r1",
+        # Direct model names (passthrough)
+        "llama-3.1-8b": "llama-3.1-8b",
+        "llama-3.1-70b": "llama-3.1-70b",
+        "mistral-7b": "mistral-7b",
+        "deepseek-r1": "deepseek-r1",
+    },
+    "onerouter": {
+        # Infron AI uses OpenAI-compatible model identifiers with @ versioning
+        # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
+        # Models are dynamically fetched from Infron AI's /v1/models endpoint
+        # Strip onerouter/ prefix for actual API calls
+        "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+        "onerouter/gpt-4": "gpt-4@latest",
+        "onerouter/gpt-4o": "gpt-4o@latest",
+        "onerouter/gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+        # Direct model names (passthrough with @ version suffix)
+        "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20240620",
+        "gpt-4@latest": "gpt-4@latest",
+        "gpt-4o@latest": "gpt-4o@latest",
+        "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
+        # Models can also use simpler names - Infron AI handles routing
+        "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+        "gpt-4": "gpt-4@latest",
+        "gpt-4o": "gpt-4o@latest",
+        "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+    },
+    "simplismart": {
+        # Simplismart uses org/model format, supports various LLM models
+        # Llama 3.1 models
+        "simplismart/llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "simplismart/llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "simplismart/llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+        "llama-3.1-8b": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "llama-3.1-70b": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "llama-3.1-405b": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+        # Llama 3.3 models
+        "simplismart/llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        "llama-3.3-70b": "meta-llama/Llama-3.3-70B-Instruct",
+        # Llama 4 models
+        "simplismart/llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
+        "llama-4-maverick": "meta-llama/Llama-4-Maverick-17B-Instruct",
+        # DeepSeek models
+        "simplismart/deepseek-r1": "deepseek-ai/DeepSeek-R1",
+        "simplismart/deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        "deepseek-r1": "deepseek-ai/DeepSeek-R1",
+        "deepseek-v3": "deepseek-ai/DeepSeek-V3",
+        # Gemma models
+        "simplismart/gemma-3-1b": "google/gemma-3-1b-it",
+        "simplismart/gemma-3-4b": "google/gemma-3-4b-it",
+        "simplismart/gemma-3-27b": "google/gemma-3-27b-it",
+        "gemma-3-1b": "google/gemma-3-1b-it",
+        "gemma-3-4b": "google/gemma-3-4b-it",
+        "gemma-3-27b": "google/gemma-3-27b-it",
+        # Qwen models
+        "simplismart/qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
+        "simplismart/qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+        "qwen-2.5-14b": "Qwen/Qwen2.5-14B-Instruct",
+        "qwen-2.5-32b": "Qwen/Qwen2.5-32B-Instruct",
+        # Mixtral models
+        "simplismart/mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
+        "mixtral-8x7b": "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8",
+        # Devstral
+        "simplismart/devstral-small": "mistralai/Devstral-Small-2505",
+        "devstral-small": "mistralai/Devstral-Small-2505",
+    },
+}
 
 
 # Pre-built reverse lookup: for each provider, the set of native model IDs (values)
@@ -1390,7 +1377,9 @@ def get_simplified_model_id(native_id: str, provider: str) -> str:
     return native_id
 
 
-def detect_provider_from_model_id(model_id: str, preferred_provider: str | None = None) -> str | None:
+def detect_provider_from_model_id(
+    model_id: str, preferred_provider: str | None = None
+) -> str | None:
     """
     Try to detect which provider a model belongs to based on its ID.
 
@@ -1643,9 +1632,13 @@ def detect_provider_from_model_id(model_id: str, preferred_provider: str | None 
         if org == "qwen" or org == "alibaba-cloud" or org == "alibaba":
             # Check if this specific qwen model is available on Cerebras
             cerebras_qwen_models = ["qwen-3-32b", "qwen3-32b", "qwen-3-235b"]
-            model_base = model_name.lower().replace("-instruct", "").replace("-a22b-instruct-2507", "")
+            model_base = (
+                model_name.lower().replace("-instruct", "").replace("-a22b-instruct-2507", "")
+            )
             if model_base in cerebras_qwen_models:
-                logger.info(f"Routing qwen model '{model_id}' to cerebras (model supported by both)")
+                logger.info(
+                    f"Routing qwen model '{model_id}' to cerebras (model supported by both)"
+                )
                 return "cerebras"
             return "alibaba-cloud"
 

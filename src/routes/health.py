@@ -11,7 +11,7 @@ See: health-service/main.py
 
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -198,9 +198,13 @@ async def health_railway():
             # Database check: If there's an error, log it but don't fail the health check
             # during startup. The app can still serve traffic in degraded mode.
             if db_has_error:
-                error_type = db_status.get('error_type', 'unknown')
+                error_type = db_status.get("error_type", "unknown")
                 # TRANSIENT FAILURE FIX: Check if database error is transient
-                is_transient = error_type in ["TimeoutError", "ConnectionError", "ConnectionResetError"]
+                is_transient = error_type in [
+                    "TimeoutError",
+                    "ConnectionError",
+                    "ConnectionResetError",
+                ]
 
                 if is_transient and attempt < HEALTH_CHECK_MAX_RETRIES - 1:
                     logger.warning(
@@ -265,15 +269,19 @@ async def health_railway():
                 "status": status,
                 "database": database_status,
                 "health_cache": cache_status,
-                "gateways": {
-                    "healthy": healthy_gateways,
-                    "total": total_gateways,
-                    "health_rate": f"{(healthy_gateways / total_gateways * 100):.1f}%"
-                    if total_gateways > 0
-                    else "n/a",
-                }
-                if health_cache_available
-                else {"status": "warming_up"},
+                "gateways": (
+                    {
+                        "healthy": healthy_gateways,
+                        "total": total_gateways,
+                        "health_rate": (
+                            f"{(healthy_gateways / total_gateways * 100):.1f}%"
+                            if total_gateways > 0
+                            else "n/a"
+                        ),
+                    }
+                    if health_cache_available
+                    else {"status": "warming_up"}
+                ),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
 
@@ -946,9 +954,9 @@ async def get_health_summary(
 
         return HealthSummaryResponse(
             system=system_health,
-            providers=[ProviderHealthResponse(**p) for p in cached_providers]
-            if cached_providers
-            else [],
+            providers=(
+                [ProviderHealthResponse(**p) for p in cached_providers] if cached_providers else []
+            ),
             models=[ModelHealthResponse(**m) for m in cached_models] if cached_models else [],
             monitoring_active=monitoring_active,
             last_check=datetime.now(UTC),
@@ -999,9 +1007,9 @@ async def perform_immediate_health_check(api_key: str = Depends(get_api_key)):
         "timestamp": datetime.now(UTC).isoformat(),
         "models_in_cache": len(cached_models),
         "providers_in_cache": len(cached_providers),
-        "system_status": cached_system.get("overall_status", "unknown")
-        if cached_system
-        else "unknown",
+        "system_status": (
+            cached_system.get("overall_status", "unknown") if cached_system else "unknown"
+        ),
         "cache_available": cached_system is not None,
     }
 
@@ -1563,6 +1571,7 @@ async def database_health():
             # Capture to Sentry only on final failure
             try:
                 import sentry_sdk
+
                 sentry_sdk.capture_exception(e)
             except (ImportError, Exception):
                 pass
@@ -1810,9 +1819,9 @@ async def get_models_health_stats(
                 "healthy_models": healthy_models,
                 "degraded_models": degraded_models,
                 "unhealthy_models": unhealthy_models,
-                "health_rate": round(healthy_models / total_models * 100, 2)
-                if total_models > 0
-                else 0,
+                "health_rate": (
+                    round(healthy_models / total_models * 100, 2) if total_models > 0 else 0
+                ),
                 "avg_response_time_ms": (
                     round(total_response_time / response_time_count, 2)
                     if response_time_count > 0
@@ -1901,9 +1910,9 @@ async def get_providers_health_stats(
                     else 0
                 ),
                 "total_models": total_models,
-                "avg_uptime": round(total_uptime / total_providers, 2)
-                if total_providers > 0
-                else 0,
+                "avg_uptime": (
+                    round(total_uptime / total_providers, 2) if total_providers > 0 else 0
+                ),
             },
             "providers": provider_details,
         }
@@ -1953,9 +1962,7 @@ async def get_health_insights(api_key: str = Depends(get_api_key)):
             }
 
         # Group unhealthy models by provider
-        unhealthy_models = [
-            m for m in models_health if m.get("status", "").lower() == "unhealthy"
-        ]
+        unhealthy_models = [m for m in models_health if m.get("status", "").lower() == "unhealthy"]
 
         unhealthy_by_provider = {}
         for model in unhealthy_models:

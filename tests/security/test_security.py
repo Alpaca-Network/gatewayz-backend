@@ -10,23 +10,24 @@ Covers:
 """
 
 import os
-import pytest
 from unittest.mock import patch
 
+import pytest
+
 # Set test environment
-os.environ['APP_ENV'] = 'testing'
-os.environ['API_GATEWAY_SALT'] = 'test-salt-for-hashing-keys-minimum-16-chars'
+os.environ["APP_ENV"] = "testing"
+os.environ["API_GATEWAY_SALT"] = "test-salt-for-hashing-keys-minimum-16-chars"
 
 from src.security.security import (
-    SecurityManager,
     AuditLogger,
-    hash_api_key,
+    SecurityManager,
     generate_secure_api_key,
-    validate_ip_allowlist,
-    validate_domain_referrers,
-    validate_api_key_security,
-    get_security_manager,
     get_audit_logger,
+    get_security_manager,
+    hash_api_key,
+    validate_api_key_security,
+    validate_domain_referrers,
+    validate_ip_allowlist,
 )
 
 # Note: encrypt/decrypt are SecurityManager methods, not tested here
@@ -73,7 +74,7 @@ class TestAPIKeyHashing:
         api_key = "gw_test_key_123"
 
         # With proper salt, should work
-        with patch.dict(os.environ, {'API_GATEWAY_SALT': 'test-salt-16chars'}):
+        with patch.dict(os.environ, {"API_GATEWAY_SALT": "test-salt-16chars"}):
             hashed = hash_api_key(api_key)
             assert hashed is not None
 
@@ -81,7 +82,7 @@ class TestAPIKeyHashing:
         """Hashing should reject salt shorter than 16 characters"""
         api_key = "gw_test_key_123"
 
-        with patch.dict(os.environ, {'API_GATEWAY_SALT': 'short'}):
+        with patch.dict(os.environ, {"API_GATEWAY_SALT": "short"}):
             with pytest.raises(RuntimeError, match="at least 16 characters"):
                 hash_api_key(api_key)
 
@@ -109,19 +110,19 @@ class TestAPIKeyGeneration:
 
     def test_generate_api_key_test_environment(self):
         """Generate test environment API key"""
-        api_key = generate_secure_api_key(environment_tag='test')
+        api_key = generate_secure_api_key(environment_tag="test")
 
         assert api_key.startswith("gw_test_")
 
     def test_generate_api_key_staging_environment(self):
         """Generate staging environment API key"""
-        api_key = generate_secure_api_key(environment_tag='staging')
+        api_key = generate_secure_api_key(environment_tag="staging")
 
         assert api_key.startswith("gw_staging_")
 
     def test_generate_api_key_development_environment(self):
         """Generate development environment API key"""
-        api_key = generate_secure_api_key(environment_tag='development')
+        api_key = generate_secure_api_key(environment_tag="development")
 
         assert api_key.startswith("gw_dev_")
 
@@ -138,7 +139,7 @@ class TestAPIKeyGeneration:
 
         assert api_key.startswith("gw_")
         # Should contain URL-safe characters
-        assert all(c.isalnum() or c in ('_', '-') for c in api_key)
+        assert all(c.isalnum() or c in ("_", "-") for c in api_key)
 
 
 class TestIPAllowlist:
@@ -261,7 +262,7 @@ class TestSecurityConstants:
 
     def test_salt_minimum_length(self):
         """Salt should meet minimum length requirements"""
-        salt = os.getenv('API_GATEWAY_SALT')
+        salt = os.getenv("API_GATEWAY_SALT")
         assert len(salt) >= 16
 
 
@@ -356,8 +357,7 @@ class TestAuditLoggerFormat:
             info_pos = output.find("INFO")
             audit_pos = output.find("AUDIT")
             assert info_pos < audit_pos, (
-                f"Level (INFO) must come before AUDIT in output. "
-                f"Output: {output}"
+                f"Level (INFO) must come before AUDIT in output. " f"Output: {output}"
             )
         finally:
             # Remove our test handler
@@ -368,14 +368,14 @@ class TestAuditLoggerFormat:
         logger = get_audit_logger()
 
         # Check all expected methods exist
-        assert hasattr(logger, 'log_api_key_creation')
-        assert hasattr(logger, 'log_api_key_deletion')
-        assert hasattr(logger, 'log_api_key_usage')
-        assert hasattr(logger, 'log_security_violation')
-        assert hasattr(logger, 'log_plan_assignment')
-        assert hasattr(logger, 'log_rate_limit_exceeded')
-        assert hasattr(logger, 'log_authentication_failure')
-        assert hasattr(logger, 'log_payment_event')
+        assert hasattr(logger, "log_api_key_creation")
+        assert hasattr(logger, "log_api_key_deletion")
+        assert hasattr(logger, "log_api_key_usage")
+        assert hasattr(logger, "log_security_violation")
+        assert hasattr(logger, "log_plan_assignment")
+        assert hasattr(logger, "log_rate_limit_exceeded")
+        assert hasattr(logger, "log_authentication_failure")
+        assert hasattr(logger, "log_payment_event")
 
     def test_audit_logger_uses_info_level_for_normal_events(self):
         """Normal events should use INFO level"""
@@ -392,9 +392,9 @@ class TestAuditLoggerFormat:
             test_logger.logger.handlers.clear()
             stream = io.StringIO()
             handler = logging.StreamHandler(stream)
-            handler.setFormatter(logging.Formatter(
-                "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
-            ))
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s - %(levelname)s - [AUDIT] - %(message)s")
+            )
             test_logger.logger.addHandler(handler)
 
             # Log a normal event
@@ -427,13 +427,15 @@ class TestAuditLoggerFormat:
             test_logger.logger.handlers.clear()
             stream = io.StringIO()
             handler = logging.StreamHandler(stream)
-            handler.setFormatter(logging.Formatter(
-                "%(asctime)s - %(levelname)s - [AUDIT] - %(message)s"
-            ))
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s - %(levelname)s - [AUDIT] - %(message)s")
+            )
             test_logger.logger.addHandler(handler)
 
             # Log a security violation
-            test_logger.log_security_violation("TEST_VIOLATION", 1, 100, "test details", "127.0.0.1")
+            test_logger.log_security_violation(
+                "TEST_VIOLATION", 1, 100, "test details", "127.0.0.1"
+            )
 
             # Get the output
             output = stream.getvalue()

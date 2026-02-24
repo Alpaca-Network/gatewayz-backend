@@ -51,21 +51,27 @@ RedisInstrumentor = None  # type: ignore
 
 if OPENTELEMETRY_AVAILABLE:
     try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore[no-redef]
+        from opentelemetry.instrumentation.fastapi import (
+            FastAPIInstrumentor,  # type: ignore[no-redef]
+        )
 
         FASTAPI_INSTRUMENTATION_AVAILABLE = True
     except ImportError:
         pass
 
     try:
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor  # type: ignore[no-redef]
+        from opentelemetry.instrumentation.httpx import (
+            HTTPXClientInstrumentor,  # type: ignore[no-redef]
+        )
 
         HTTPX_INSTRUMENTATION_AVAILABLE = True
     except ImportError:
         pass
 
     try:
-        from opentelemetry.instrumentation.requests import RequestsInstrumentor  # type: ignore[no-redef]
+        from opentelemetry.instrumentation.requests import (
+            RequestsInstrumentor,  # type: ignore[no-redef]
+        )
 
         REQUESTS_INSTRUMENTATION_AVAILABLE = True
     except ImportError:
@@ -325,9 +331,7 @@ class OpenTelemetryConfig:
                         "(peer.service will be added to AI provider HTTP spans)"
                     )
                 except Exception as enricher_e:
-                    logger.warning(
-                        f"   ProviderSpanEnricher unavailable (non-fatal): {enricher_e}"
-                    )
+                    logger.warning(f"   ProviderSpanEnricher unavailable (non-fatal): {enricher_e}")
 
                 cls._tracer_provider.add_span_processor(resilient_processor)
                 logger.info(

@@ -27,8 +27,8 @@ import time
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.config import Config
+from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.services.pricing_lookup import enrich_model_with_pricing
 
 logger = logging.getLogger(__name__)
@@ -91,15 +91,14 @@ def fetch_models_from_huggingface_api(
         # fall back to the registry-configured timeout for huggingface (default 60 s).
         if timeout is None:
             from src.routes.catalog import get_provider_fetch_timeout
+
             timeout = float(get_provider_fetch_timeout("huggingface"))
 
         # Check cache first (Redis cache handles TTL internally)
         if use_cache:
             cached_models = get_cached_gateway_catalog("huggingface")
             if cached_models:
-                logger.info(
-                    f"Using cached Hugging Face models ({len(cached_models)} models)"
-                )
+                logger.info(f"Using cached Hugging Face models ({len(cached_models)} models)")
                 return cached_models
 
         logger.info("Fetching models from Hugging Face Models API Hub using multi-sort strategy")
@@ -267,9 +266,7 @@ def fetch_models_from_huggingface_api(
         # Cache the results (Redis cache handles TTL internally)
         if use_cache:
             cache_gateway_catalog("huggingface", normalized_models)
-            logger.info(
-                f"Cached {len(normalized_models)} Hugging Face models"
-            )
+            logger.info(f"Cached {len(normalized_models)} Hugging Face models")
 
         return normalized_models
 
@@ -574,7 +571,9 @@ def create_fallback_models() -> list:
                 if not model_id:
                     continue
 
-                display_name = db_model.get("name") or model_id.split("/")[-1].replace("-", " ").title()
+                display_name = (
+                    db_model.get("name") or model_id.split("/")[-1].replace("-", " ").title()
+                )
 
                 model = {
                     "id": model_id,
@@ -591,9 +590,14 @@ def create_fallback_models() -> list:
                         "tokenizer": None,
                         "instruct_type": None,
                     },
-                    "pricing": db_model.get("pricing") or {
-                        "prompt": None, "completion": None, "request": None,
-                        "image": None, "web_search": None, "internal_reasoning": None,
+                    "pricing": db_model.get("pricing")
+                    or {
+                        "prompt": None,
+                        "completion": None,
+                        "request": None,
+                        "image": None,
+                        "web_search": None,
+                        "internal_reasoning": None,
                     },
                     "per_request_limits": None,
                     "supported_parameters": [],
@@ -607,7 +611,9 @@ def create_fallback_models() -> list:
                 fallback_models.append(enriched)
 
             if fallback_models:
-                logger.info(f"Using {len(fallback_models)} HuggingFace models from database fallback")
+                logger.info(
+                    f"Using {len(fallback_models)} HuggingFace models from database fallback"
+                )
                 return fallback_models
     except Exception as e:
         logger.warning(f"Failed to get database fallback for HuggingFace: {e}")

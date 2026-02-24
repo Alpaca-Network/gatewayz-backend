@@ -9,9 +9,10 @@ Tests for the circuit breaker improvements implemented to fix:
 Related: https://github.com/Alpaca-Network/gatewayz-backend/issues/1089
 """
 
-import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from src.services.circuit_breaker import (
     CircuitBreaker,
@@ -60,7 +61,9 @@ class TestCircuitBreakerHalfOpenBehavior:
         except Exception:
             pass
 
-        assert breaker._state == CircuitState.HALF_OPEN, "Circuit should still be HALF_OPEN after 1 failure"
+        assert (
+            breaker._state == CircuitState.HALF_OPEN
+        ), "Circuit should still be HALF_OPEN after 1 failure"
 
         # Second failure should reopen circuit
         try:
@@ -68,7 +71,9 @@ class TestCircuitBreakerHalfOpenBehavior:
         except Exception:
             pass
 
-        assert breaker._state == CircuitState.OPEN, "Circuit should be OPEN after 2 failures in HALF_OPEN"
+        assert (
+            breaker._state == CircuitState.OPEN
+        ), "Circuit should be OPEN after 2 failures in HALF_OPEN"
 
     @patch("src.services.circuit_breaker.get_redis_client")
     def test_half_open_closes_after_success(self, mock_redis):
@@ -281,8 +286,12 @@ class TestOpenRouterCircuitConfig:
         from src.services.openrouter_client import OPENROUTER_CIRCUIT_CONFIG
 
         # Check optimized values
-        assert OPENROUTER_CIRCUIT_CONFIG.success_threshold == 1, "Should only need 1 success to recover"
-        assert OPENROUTER_CIRCUIT_CONFIG.half_open_max_failures == 2, "Should allow 2 failures in HALF_OPEN"
+        assert (
+            OPENROUTER_CIRCUIT_CONFIG.success_threshold == 1
+        ), "Should only need 1 success to recover"
+        assert (
+            OPENROUTER_CIRCUIT_CONFIG.half_open_max_failures == 2
+        ), "Should allow 2 failures in HALF_OPEN"
 
         # Check other important values
         assert OPENROUTER_CIRCUIT_CONFIG.failure_threshold == 5
@@ -314,9 +323,7 @@ class TestRedisStatePersistence:
 
         # Check that setex was called with consecutive_opens key
         calls = pipeline.setex.call_args_list
-        consecutive_opens_saved = any(
-            "consecutive_opens" in str(call) for call in calls
-        )
+        consecutive_opens_saved = any("consecutive_opens" in str(call) for call in calls)
         assert consecutive_opens_saved, "consecutive_opens should be saved to Redis"
 
     @patch("src.services.circuit_breaker.get_redis_client")
@@ -338,8 +345,9 @@ class TestCircuitBreakerIntegration:
     @patch("src.handlers.chat_handler.make_openrouter_request_openai")
     def test_chat_handler_catches_circuit_breaker_error(self, mock_openrouter):
         """Test that chat handler catches CircuitBreakerError and returns 503"""
-        from src.handlers.chat_handler import ChatInferenceHandler
         from fastapi import HTTPException
+
+        from src.handlers.chat_handler import ChatInferenceHandler
 
         # Simulate circuit breaker error
         mock_openrouter.side_effect = CircuitBreakerError(

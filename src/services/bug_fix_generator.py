@@ -17,7 +17,7 @@ import json
 import logging
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -379,7 +379,9 @@ Format your response as JSON:
             fix_prompt = self._prepare_prompt(fix_prompt)
 
             logger.info(f"[{request_id}] Generating fix with Claude API...")
-            data = await self._make_claude_request(fix_prompt, max_tokens=2048, request_id=request_id)
+            data = await self._make_claude_request(
+                fix_prompt, max_tokens=2048, request_id=request_id
+            )
 
             if not data.get("content"):
                 logger.error(f"[{request_id}] No content in Claude response")

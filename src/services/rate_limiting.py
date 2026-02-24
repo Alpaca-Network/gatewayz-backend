@@ -9,7 +9,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -148,8 +148,7 @@ class SlidingWindowRateLimiter:
                     allowed=False,
                     remaining_requests=0,
                     remaining_tokens=0,
-                    reset_time=datetime.now(UTC)
-                    + timedelta(seconds=burst_check["retry_after"]),
+                    reset_time=datetime.now(UTC) + timedelta(seconds=burst_check["retry_after"]),
                     retry_after=burst_check["retry_after"],
                     reason="Burst limit exceeded",
                     burst_remaining=burst_check["remaining"],
@@ -184,7 +183,9 @@ class SlidingWindowRateLimiter:
             # Build result from our own sliding window check data
             limit_result = RateLimitResult(
                 allowed=True,
-                remaining_requests=window_check.get("remaining_requests", config.requests_per_minute),
+                remaining_requests=window_check.get(
+                    "remaining_requests", config.requests_per_minute
+                ),
                 remaining_tokens=window_check.get("remaining_tokens", config.tokens_per_minute),
                 reset_time=(
                     window_check.get("reset_time")
@@ -249,6 +250,7 @@ class SlidingWindowRateLimiter:
         Used asyncio.to_thread() to wrap the blocking execute() call.
         """
         import asyncio
+
         now = time.time()
         key = f"burst:{api_key}"
 
@@ -552,7 +554,9 @@ class RateLimitManager:
         self.fallback_manager = get_fallback_rate_limit_manager()
         # OPTIMIZATION: Short-lived cache for rate limit results (15-30ms faster per cached request)
         self._result_cache: dict[str, tuple[RateLimitResult, float]] = {}
-        self._cache_ttl = 15.0  # Cache results for 15 seconds (increased from 5s for better performance)
+        self._cache_ttl = (
+            15.0  # Cache results for 15 seconds (increased from 5s for better performance)
+        )
 
     async def get_key_config(self, api_key: str) -> RateLimitConfig:
         """Get rate limit configuration for a specific API key"""
@@ -571,6 +575,7 @@ class RateLimitManager:
         the event loop. This was a major cause of 499/500 errors.
         """
         import asyncio
+
         try:
             config_data = await asyncio.to_thread(get_rate_limit_config, api_key)
             if config_data:
@@ -617,7 +622,9 @@ class RateLimitManager:
         if cache_key in self._result_cache:
             cached_result, cached_time = self._result_cache[cache_key]
             if now - cached_time < self._cache_ttl:
-                logger.debug(f"Rate limit cache HIT for {api_key[:10]}... (age: {now - cached_time:.2f}s)")
+                logger.debug(
+                    f"Rate limit cache HIT for {api_key[:10]}... (age: {now - cached_time:.2f}s)"
+                )
                 return cached_result
             else:
                 # Expired, remove from cache
@@ -629,6 +636,7 @@ class RateLimitManager:
         user = None
         try:
             from src.services.user_lookup_cache import get_user
+
             user = await asyncio.to_thread(get_user, api_key)
         except Exception as e:
             logger.debug(f"Error fetching user for rate limiting: {e}")
@@ -637,6 +645,7 @@ class RateLimitManager:
         if user:
             try:
                 from src.db.plans import is_admin_tier_user
+
                 is_admin = await asyncio.to_thread(is_admin_tier_user, user.get("id"))
                 if is_admin:
                     logger.info("Admin tier user - bypassing rate limit checks")
@@ -652,8 +661,12 @@ class RateLimitManager:
                         concurrency_remaining=1000,
                         ratelimit_limit_requests=2147483647,
                         ratelimit_limit_tokens=2147483647,
-                        ratelimit_reset_requests=int((datetime.now(UTC) + timedelta(days=365)).timestamp()),
-                        ratelimit_reset_tokens=int((datetime.now(UTC) + timedelta(days=365)).timestamp()),
+                        ratelimit_reset_requests=int(
+                            (datetime.now(UTC) + timedelta(days=365)).timestamp()
+                        ),
+                        ratelimit_reset_tokens=int(
+                            (datetime.now(UTC) + timedelta(days=365)).timestamp()
+                        ),
                         burst_window_description="unlimited",
                     )
             except Exception as e:
@@ -681,7 +694,9 @@ class RateLimitManager:
             # Clean up old cache entries (keep cache size bounded)
             if len(self._result_cache) > 1000:
                 # Remove oldest 200 entries
-                sorted_keys = sorted(self._result_cache.keys(), key=lambda k: self._result_cache[k][1])
+                sorted_keys = sorted(
+                    self._result_cache.keys(), key=lambda k: self._result_cache[k][1]
+                )
                 for old_key in sorted_keys[:200]:
                     del self._result_cache[old_key]
 
@@ -748,8 +763,10 @@ class RateLimitManager:
         _get_severe_rate_limit_config_with_user() when user is already available.
         """
         import asyncio
+
         try:
             from src.services.user_lookup_cache import get_user
+
             user = await asyncio.to_thread(get_user, api_key)
             return await self._get_severe_rate_limit_config_with_user(user)
         except Exception as e:
@@ -852,27 +869,27 @@ ENTERPRISE_CONFIG = RateLimitConfig(
 # Severe rate limiting for suspicious/abusive accounts
 # Applied to: temporary email domains, blocked email domains, flagged accounts
 SEVERE_RATE_LIMIT_CONFIG = RateLimitConfig(
-    requests_per_minute=5,      # 5 requests per minute (vs 250 default)
-    requests_per_hour=20,       # 20 requests per hour (vs 1000 default)
-    requests_per_day=50,        # 50 requests per day (vs 10000 default)
-    tokens_per_minute=500,      # 500 tokens per minute (vs 10000 default)
-    tokens_per_hour=2000,       # 2000 tokens per hour (vs 100000 default)
-    tokens_per_day=5000,        # 5000 tokens per day (vs 1000000 default)
-    burst_limit=3,              # 3 burst requests (vs 100 default)
-    concurrency_limit=1,        # 1 concurrent request (vs 50 default)
+    requests_per_minute=5,  # 5 requests per minute (vs 250 default)
+    requests_per_hour=20,  # 20 requests per hour (vs 1000 default)
+    requests_per_day=50,  # 50 requests per day (vs 10000 default)
+    tokens_per_minute=500,  # 500 tokens per minute (vs 10000 default)
+    tokens_per_hour=2000,  # 2000 tokens per hour (vs 100000 default)
+    tokens_per_day=5000,  # 5000 tokens per day (vs 1000000 default)
+    burst_limit=3,  # 3 burst requests (vs 100 default)
+    concurrency_limit=1,  # 1 concurrent request (vs 50 default)
     window_size_seconds=60,
 )
 
 # Blocked accounts - even more restrictive (essentially read-only/denied)
 BLOCKED_ACCOUNT_CONFIG = RateLimitConfig(
-    requests_per_minute=1,      # 1 request per minute - essentially blocked
-    requests_per_hour=5,        # 5 requests per hour
-    requests_per_day=10,        # 10 requests per day
-    tokens_per_minute=100,      # 100 tokens per minute
-    tokens_per_hour=500,        # 500 tokens per hour
-    tokens_per_day=1000,        # 1000 tokens per day
-    burst_limit=1,              # 1 burst request
-    concurrency_limit=1,        # 1 concurrent request
+    requests_per_minute=1,  # 1 request per minute - essentially blocked
+    requests_per_hour=5,  # 5 requests per hour
+    requests_per_day=10,  # 10 requests per day
+    tokens_per_minute=100,  # 100 tokens per minute
+    tokens_per_hour=500,  # 500 tokens per hour
+    tokens_per_day=1000,  # 1000 tokens per day
+    burst_limit=1,  # 1 burst request
+    concurrency_limit=1,  # 1 concurrent request
     window_size_seconds=60,
 )
 

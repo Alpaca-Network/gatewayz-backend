@@ -11,28 +11,31 @@ Covers:
 - Memory management
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta
 import hashlib
 import json
 import os
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
 
-os.environ['APP_ENV'] = 'testing'
+import pytest
+
+os.environ["APP_ENV"] = "testing"
 
 # Import after setting environment
 try:
     from src.services.response_cache import (
         ResponseCache,
+        cache_response,
+        clear_all_cache,
         generate_cache_key,
         get_cached_response,
-        cache_response,
         invalidate_cache,
-        clear_all_cache,
     )
+
     CACHE_AVAILABLE = True
 except (ImportError, AttributeError):
     CACHE_AVAILABLE = False
+
     # Create mocks for testing structure
     class ResponseCache:
         pass
@@ -50,10 +53,10 @@ def cache():
 def sample_request():
     """Sample request data"""
     return {
-        'model': 'gpt-3.5-turbo',
-        'messages': [{'role': 'user', 'content': 'Hello'}],
-        'temperature': 0.7,
-        'max_tokens': 100
+        "model": "gpt-3.5-turbo",
+        "messages": [{"role": "user", "content": "Hello"}],
+        "temperature": 0.7,
+        "max_tokens": 100,
     }
 
 
@@ -61,14 +64,11 @@ def sample_request():
 def sample_response():
     """Sample response data"""
     return {
-        'id': 'chatcmpl-123',
-        'choices': [
-            {
-                'message': {'role': 'assistant', 'content': 'Hi there!'},
-                'finish_reason': 'stop'
-            }
+        "id": "chatcmpl-123",
+        "choices": [
+            {"message": {"role": "assistant", "content": "Hi there!"}, "finish_reason": "stop"}
         ],
-        'usage': {'total_tokens': 10}
+        "usage": {"total_tokens": 10},
     }
 
 
@@ -79,13 +79,13 @@ class TestCacheKeyGeneration:
         """Generate cache key from request parameters"""
         # Mock key generation
         key_parts = [
-            sample_request['model'],
-            json.dumps(sample_request['messages'], sort_keys=True),
-            str(sample_request.get('temperature', 0)),
-            str(sample_request.get('max_tokens', 0))
+            sample_request["model"],
+            json.dumps(sample_request["messages"], sort_keys=True),
+            str(sample_request.get("temperature", 0)),
+            str(sample_request.get("max_tokens", 0)),
         ]
 
-        key_string = '|'.join(key_parts)
+        key_string = "|".join(key_parts)
         cache_key = hashlib.md5(key_string.encode()).hexdigest()
 
         assert cache_key is not None
@@ -103,7 +103,7 @@ class TestCacheKeyGeneration:
         key1 = self._generate_key(sample_request)
 
         different_request = sample_request.copy()
-        different_request['temperature'] = 0.9
+        different_request["temperature"] = 0.9
 
         key2 = self._generate_key(different_request)
 
@@ -112,15 +112,15 @@ class TestCacheKeyGeneration:
     def test_cache_key_ignores_irrelevant_params(self):
         """Cache key should ignore irrelevant parameters"""
         request1 = {
-            'model': 'gpt-3.5-turbo',
-            'messages': [{'role': 'user', 'content': 'Hello'}],
-            'user_id': '123'  # Should be ignored
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "user_id": "123",  # Should be ignored
         }
 
         request2 = {
-            'model': 'gpt-3.5-turbo',
-            'messages': [{'role': 'user', 'content': 'Hello'}],
-            'user_id': '456'  # Different but should be ignored
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "user_id": "456",  # Different but should be ignored
         }
 
         # If user_id is not part of cache key, these should match
@@ -134,12 +134,12 @@ class TestCacheKeyGeneration:
     def _generate_key(self, request: dict) -> str:
         """Helper to generate cache key"""
         key_parts = [
-            request.get('model', ''),
-            json.dumps(request.get('messages', []), sort_keys=True),
-            str(request.get('temperature', 0)),
-            str(request.get('max_tokens', 0))
+            request.get("model", ""),
+            json.dumps(request.get("messages", []), sort_keys=True),
+            str(request.get("temperature", 0)),
+            str(request.get("max_tokens", 0)),
         ]
-        key_string = '|'.join(key_parts)
+        key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
 
@@ -179,7 +179,7 @@ class TestCacheOperations:
         result = get_cached_response(cache_key)
 
         if result:
-            assert result['id'] == sample_response['id']
+            assert result["id"] == sample_response["id"]
 
 
 class TestCacheTTL:
@@ -260,48 +260,41 @@ class TestCachingStrategies:
     def test_streaming_responses_not_cached(self):
         """Streaming responses should not be cached"""
         request = {
-            'model': 'gpt-3.5-turbo',
-            'messages': [{'role': 'user', 'content': 'Hello'}],
-            'stream': True
+            "model": "gpt-3.5-turbo",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "stream": True,
         }
 
-        should_cache = not request.get('stream', False)
+        should_cache = not request.get("stream", False)
 
         assert should_cache is False
 
     def test_error_responses_not_cached(self):
         """Error responses should not be cached"""
-        response = {
-            'error': {
-                'message': 'Rate limit exceeded',
-                'type': 'rate_limit_error'
-            }
-        }
+        response = {"error": {"message": "Rate limit exceeded", "type": "rate_limit_error"}}
 
-        should_cache = 'error' not in response
+        should_cache = "error" not in response
 
         assert should_cache is False
 
     def test_successful_responses_cached(self):
         """Successful responses should be cached"""
         response = {
-            'id': 'chatcmpl-123',
-            'choices': [
-                {'message': {'role': 'assistant', 'content': 'Hi'}}
-            ]
+            "id": "chatcmpl-123",
+            "choices": [{"message": {"role": "assistant", "content": "Hi"}}],
         }
 
-        should_cache = 'error' not in response and 'choices' in response
+        should_cache = "error" not in response and "choices" in response
 
         assert should_cache is True
 
     def test_cache_respects_max_tokens(self, sample_request):
         """Different max_tokens should create different cache keys"""
         request1 = sample_request.copy()
-        request1['max_tokens'] = 100
+        request1["max_tokens"] = 100
 
         request2 = sample_request.copy()
-        request2['max_tokens'] = 200
+        request2["max_tokens"] = 200
 
         key1 = self._generate_key(request1)
         key2 = self._generate_key(request2)
@@ -311,10 +304,10 @@ class TestCachingStrategies:
     def test_cache_respects_temperature(self, sample_request):
         """Different temperature should create different cache keys"""
         request1 = sample_request.copy()
-        request1['temperature'] = 0.7
+        request1["temperature"] = 0.7
 
         request2 = sample_request.copy()
-        request2['temperature'] = 0.9
+        request2["temperature"] = 0.9
 
         key1 = self._generate_key(request1)
         key2 = self._generate_key(request2)
@@ -324,12 +317,12 @@ class TestCachingStrategies:
     def _generate_key(self, request: dict) -> str:
         """Helper to generate cache key"""
         key_parts = [
-            request.get('model', ''),
-            json.dumps(request.get('messages', []), sort_keys=True),
-            str(request.get('temperature', 0)),
-            str(request.get('max_tokens', 0))
+            request.get("model", ""),
+            json.dumps(request.get("messages", []), sort_keys=True),
+            str(request.get("temperature", 0)),
+            str(request.get("max_tokens", 0)),
         ]
-        key_string = '|'.join(key_parts)
+        key_string = "|".join(key_parts)
         return hashlib.md5(key_string.encode()).hexdigest()
 
 
@@ -360,16 +353,16 @@ class TestCachePerformance:
         """Least Recently Used (LRU) eviction strategy"""
         # Mock LRU cache behavior
         cache_entries = [
-            {'key': 'entry1', 'last_accessed': datetime.now() - timedelta(hours=2)},
-            {'key': 'entry2', 'last_accessed': datetime.now() - timedelta(hours=1)},
-            {'key': 'entry3', 'last_accessed': datetime.now()},
+            {"key": "entry1", "last_accessed": datetime.now() - timedelta(hours=2)},
+            {"key": "entry2", "last_accessed": datetime.now() - timedelta(hours=1)},
+            {"key": "entry3", "last_accessed": datetime.now()},
         ]
 
         # Sort by last accessed (oldest first)
-        sorted_entries = sorted(cache_entries, key=lambda x: x['last_accessed'])
+        sorted_entries = sorted(cache_entries, key=lambda x: x["last_accessed"])
 
         # Oldest should be evicted first
-        assert sorted_entries[0]['key'] == 'entry1'
+        assert sorted_entries[0]["key"] == "entry1"
 
 
 class TestCacheMonitoring:
@@ -389,12 +382,12 @@ class TestCacheMonitoring:
         """Track cache memory usage"""
         # Mock memory usage
         cached_responses = [
-            {'size': 1024},  # 1KB
-            {'size': 2048},  # 2KB
-            {'size': 512},   # 0.5KB
+            {"size": 1024},  # 1KB
+            {"size": 2048},  # 2KB
+            {"size": 512},  # 0.5KB
         ]
 
-        total_memory = sum(r['size'] for r in cached_responses)
+        total_memory = sum(r["size"] for r in cached_responses)
 
         assert total_memory == 3584  # bytes
 
@@ -403,16 +396,16 @@ class TestCacheMonitoring:
         """Cache metrics should be exposed via API"""
         # Mock metrics
         metrics = {
-            'hits': 100,
-            'misses': 20,
-            'hit_ratio': 0.833,
-            'size': 50,
-            'memory_usage': 1024000
+            "hits": 100,
+            "misses": 20,
+            "hit_ratio": 0.833,
+            "size": 50,
+            "memory_usage": 1024000,
         }
 
-        assert 'hits' in metrics
-        assert 'misses' in metrics
-        assert 'hit_ratio' in metrics
+        assert "hits" in metrics
+        assert "misses" in metrics
+        assert "hit_ratio" in metrics
 
 
 class TestCacheEdgeCases:
@@ -434,10 +427,7 @@ class TestCacheEdgeCases:
     @pytest.mark.skipif(not CACHE_AVAILABLE, reason="Cache not implemented yet")
     def test_cache_large_response(self, cache):
         """Cache should handle large responses"""
-        large_response = {
-            'content': 'x' * 1000000,  # 1MB of data
-            'metadata': {'size': 'large'}
-        }
+        large_response = {"content": "x" * 1000000, "metadata": {"size": "large"}}  # 1MB of data
 
         cache_key = "large_key"
 
@@ -477,6 +467,6 @@ class TestCacheConfiguration:
 
     def test_cache_enabled_configuration(self):
         """Cache should be enable/disable via configuration"""
-        cache_enabled = os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
+        cache_enabled = os.getenv("CACHE_ENABLED", "true").lower() == "true"
 
         assert isinstance(cache_enabled, bool)

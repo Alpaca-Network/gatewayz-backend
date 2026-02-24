@@ -11,20 +11,22 @@ Covers:
 - Sentry error capture for non-functional models
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from datetime import datetime, timedelta
 import os
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
 
-os.environ['APP_ENV'] = 'testing'
+import pytest
+
+os.environ["APP_ENV"] = "testing"
 
 # Import after setting environment
 from src.services.model_health_monitor import (
-    ModelHealthMonitor,
-    ModelHealthMetrics,
     HealthStatus,
+    ModelHealthMetrics,
+    ModelHealthMonitor,
     SystemHealthMetrics,
 )
+
 HEALTH_MONITOR_AVAILABLE = True
 
 
@@ -38,12 +40,12 @@ def health_monitor():
 def sample_model_data():
     """Sample model data for testing"""
     return {
-        'model_id': 'gpt-3.5-turbo',
-        'provider': 'openai',
-        'status': 'healthy',
-        'success_rate': 0.95,
-        'avg_latency': 1.5,
-        'last_check': datetime.now()
+        "model_id": "gpt-3.5-turbo",
+        "provider": "openai",
+        "status": "healthy",
+        "success_rate": 0.95,
+        "avg_latency": 1.5,
+        "last_check": datetime.now(),
     }
 
 
@@ -87,9 +89,9 @@ class TestHealthStatusManagement:
 
     def test_health_data_structure(self, health_monitor):
         """Health data internal structure is initialized"""
-        assert hasattr(health_monitor, 'health_data')
+        assert hasattr(health_monitor, "health_data")
         assert isinstance(health_monitor.health_data, dict)
-        assert hasattr(health_monitor, 'provider_data')
+        assert hasattr(health_monitor, "provider_data")
         assert isinstance(health_monitor.provider_data, dict)
 
 
@@ -267,12 +269,12 @@ class TestHealthMonitorPersistence:
 
     def test_health_data_dict_initialized(self, health_monitor):
         """Health data dictionary is initialized on monitor creation"""
-        assert hasattr(health_monitor, 'health_data')
+        assert hasattr(health_monitor, "health_data")
         assert isinstance(health_monitor.health_data, dict)
-        assert hasattr(health_monitor, 'provider_data')
+        assert hasattr(health_monitor, "provider_data")
         assert isinstance(health_monitor.provider_data, dict)
         # system_data is None until monitoring starts
-        assert hasattr(health_monitor, 'system_data')
+        assert hasattr(health_monitor, "system_data")
 
     def test_model_health_metrics_has_timestamp(self):
         """ModelHealthMetrics includes last_checked timestamp"""
@@ -305,14 +307,10 @@ class TestHealthMonitorIntegration:
     def test_health_check_integration(self):
         """Health monitor should integrate with health check endpoint"""
         # Mock health check response
-        health_status = {
-            'status': 'healthy',
-            'models_monitored': 10,
-            'unhealthy_models': 2
-        }
+        health_status = {"status": "healthy", "models_monitored": 10, "unhealthy_models": 2}
 
-        assert health_status['status'] == 'healthy'
-        assert health_status['unhealthy_models'] < health_status['models_monitored']
+        assert health_status["status"] == "healthy"
+        assert health_status["unhealthy_models"] < health_status["models_monitored"]
 
 
 class TestPerformanceMetrics:
@@ -346,7 +344,7 @@ class TestSentryErrorCapture:
     """Test Sentry error capture for model failures"""
 
     @pytest.mark.asyncio
-    @patch('src.utils.sentry_context.capture_exception')
+    @patch("src.utils.sentry_context.capture_exception")
     async def test_sentry_capture_on_model_failure(self, mock_capture):
         """Test that Sentry captures errors when models fail health checks"""
         from src.services.model_health_monitor import ModelHealthMonitor
@@ -355,19 +353,19 @@ class TestSentryErrorCapture:
 
         # Mock model data
         model = {
-            'id': 'gpt-3.5-turbo',
-            'provider': 'openai',
-            'gateway': 'openrouter',
-            'name': 'GPT-3.5 Turbo'
+            "id": "gpt-3.5-turbo",
+            "provider": "openai",
+            "gateway": "openrouter",
+            "name": "GPT-3.5 Turbo",
         }
 
         # Mock the health check to fail
-        with patch.object(monitor, '_perform_model_request') as mock_request:
+        with patch.object(monitor, "_perform_model_request") as mock_request:
             mock_request.return_value = {
-                'success': False,
-                'error': 'Connection timeout',
-                'status_code': 408,
-                'response_time': 5000
+                "success": False,
+                "error": "Connection timeout",
+                "status_code": 408,
+                "response_time": 5000,
             }
 
             # Perform health check
@@ -375,14 +373,16 @@ class TestSentryErrorCapture:
 
             # Verify result shows unhealthy status
             assert result is not None
-            assert result.status.value == 'unhealthy'
-            assert result.error_message == 'Connection timeout'
+            assert result.status.value == "unhealthy"
+            assert result.error_message == "Connection timeout"
 
             # Verify Sentry capture was called
-            assert mock_capture.called, "Sentry capture_exception should be called for model failures"
+            assert (
+                mock_capture.called
+            ), "Sentry capture_exception should be called for model failures"
 
     @pytest.mark.asyncio
-    @patch('src.utils.sentry_context.capture_exception')
+    @patch("src.utils.sentry_context.capture_exception")
     async def test_sentry_capture_on_exception(self, mock_capture):
         """Test that Sentry captures exceptions during health checks"""
         from src.services.model_health_monitor import ModelHealthMonitor
@@ -391,14 +391,14 @@ class TestSentryErrorCapture:
 
         # Mock model data
         model = {
-            'id': 'claude-3-opus',
-            'provider': 'anthropic',
-            'gateway': 'openrouter',
-            'name': 'Claude 3 Opus'
+            "id": "claude-3-opus",
+            "provider": "anthropic",
+            "gateway": "openrouter",
+            "name": "Claude 3 Opus",
         }
 
         # Mock the health check to raise an exception
-        with patch.object(monitor, '_perform_model_request') as mock_request:
+        with patch.object(monitor, "_perform_model_request") as mock_request:
             mock_request.side_effect = Exception("Network error")
 
             # Perform health check
@@ -406,14 +406,14 @@ class TestSentryErrorCapture:
 
             # Verify result shows unhealthy status
             assert result is not None
-            assert result.status.value == 'unhealthy'
-            assert 'Network error' in result.error_message
+            assert result.status.value == "unhealthy"
+            assert "Network error" in result.error_message
 
             # Verify Sentry capture was called
             assert mock_capture.called, "Sentry capture_exception should be called for exceptions"
 
     @pytest.mark.asyncio
-    @patch('src.utils.sentry_context.capture_exception')
+    @patch("src.utils.sentry_context.capture_exception")
     async def test_sentry_not_captured_on_success(self, mock_capture):
         """Test that Sentry does not capture errors when models are healthy"""
         from src.services.model_health_monitor import ModelHealthMonitor
@@ -421,27 +421,18 @@ class TestSentryErrorCapture:
         monitor = ModelHealthMonitor()
 
         # Mock model data
-        model = {
-            'id': 'gpt-4',
-            'provider': 'openai',
-            'gateway': 'openrouter',
-            'name': 'GPT-4'
-        }
+        model = {"id": "gpt-4", "provider": "openai", "gateway": "openrouter", "name": "GPT-4"}
 
         # Mock the health check to succeed
-        with patch.object(monitor, '_perform_model_request') as mock_request:
-            mock_request.return_value = {
-                'success': True,
-                'status_code': 200,
-                'response_time': 1200
-            }
+        with patch.object(monitor, "_perform_model_request") as mock_request:
+            mock_request.return_value = {"success": True, "status_code": 200, "response_time": 1200}
 
             # Perform health check
             result = await monitor._check_model_health(model)
 
             # Verify result shows healthy status
             assert result is not None
-            assert result.status.value == 'healthy'
+            assert result.status.value == "healthy"
 
             # Verify Sentry capture was NOT called
             assert not mock_capture.called, "Sentry should not capture errors for healthy models"
@@ -457,7 +448,7 @@ class TestApiKeyForGateway:
         monitor = ModelHealthMonitor()
 
         # Test with mock config values
-        with patch('src.services.model_health_monitor.Config') as mock_config:
+        with patch("src.services.model_health_monitor.Config") as mock_config:
             mock_config.OPENROUTER_API_KEY = "test-openrouter-key"
             mock_config.FEATHERLESS_API_KEY = "test-featherless-key"
             mock_config.DEEPINFRA_API_KEY = "test-deepinfra-key"
@@ -511,7 +502,7 @@ class TestPerformModelRequestAuthentication:
 
         # Mock environment to disable TESTING mode, and mock _get_api_key_for_gateway to return None
         with patch.dict(os.environ, {"TESTING": "false"}, clear=False):
-            with patch.object(monitor, '_get_api_key_for_gateway', return_value=None):
+            with patch.object(monitor, "_get_api_key_for_gateway", return_value=None):
                 result = await monitor._perform_model_request("test-model", "openrouter")
 
                 assert result["success"] is False
@@ -565,7 +556,12 @@ class TestShouldCaptureError:
 
         # Data policy errors should not be captured
         assert monitor._should_capture_error(404, "Data policy restriction") is False
-        assert monitor._should_capture_error(404, "Your account does not have access due to data policy") is False
+        assert (
+            monitor._should_capture_error(
+                404, "Your account does not have access due to data policy"
+            )
+            is False
+        )
         assert monitor._should_capture_error(404, "DATA POLICY violation") is False
 
     def test_should_capture_other_404_errors(self):
@@ -607,12 +603,16 @@ class TestShouldCaptureError:
         monitor = ModelHealthMonitor()
 
         # Google Vertex AI max_output_tokens validation errors
-        assert monitor._should_capture_error(
-            400, "max_output_tokens must be greater than minimum value of 1"
-        ) is False
-        assert monitor._should_capture_error(
-            400, "Invalid max_output_tokens: minimum value is 10"
-        ) is False
+        assert (
+            monitor._should_capture_error(
+                400, "max_output_tokens must be greater than minimum value of 1"
+            )
+            is False
+        )
+        assert (
+            monitor._should_capture_error(400, "Invalid max_output_tokens: minimum value is 10")
+            is False
+        )
 
     def test_should_not_capture_audio_modality_errors(self):
         """Test that audio modality requirement errors (400) are NOT captured"""
@@ -621,12 +621,12 @@ class TestShouldCaptureError:
         monitor = ModelHealthMonitor()
 
         # Audio-only model requirement errors
-        assert monitor._should_capture_error(
-            400, "This model requires audio input modality"
-        ) is False
-        assert monitor._should_capture_error(
-            400, "Audio modality is required for this model"
-        ) is False
+        assert (
+            monitor._should_capture_error(400, "This model requires audio input modality") is False
+        )
+        assert (
+            monitor._should_capture_error(400, "Audio modality is required for this model") is False
+        )
 
     def test_should_capture_other_400_errors(self):
         """Test that other 400 errors ARE captured"""
@@ -685,7 +685,7 @@ class TestShouldCaptureError:
         assert monitor._should_capture_error(408, "Request timeout") is True
 
     @pytest.mark.asyncio
-    @patch('src.utils.sentry_context.capture_exception')
+    @patch("src.utils.sentry_context.capture_exception")
     async def test_error_filtering_in_check_model_health_rate_limit(self, mock_capture):
         """Test that rate limit errors are not sent to Sentry during health checks"""
         from src.services.model_health_monitor import ModelHealthMonitor
@@ -693,33 +693,33 @@ class TestShouldCaptureError:
         monitor = ModelHealthMonitor()
 
         model = {
-            'id': 'test-model',
-            'provider': 'test-provider',
-            'gateway': 'openrouter',
-            'name': 'Test Model'
+            "id": "test-model",
+            "provider": "test-provider",
+            "gateway": "openrouter",
+            "name": "Test Model",
         }
 
         # Mock health check returning rate limit error
-        with patch.object(monitor, '_perform_model_request') as mock_request:
+        with patch.object(monitor, "_perform_model_request") as mock_request:
             mock_request.return_value = {
-                'success': False,
-                'error': 'Rate limit exceeded',
-                'status_code': 429,
-                'response_time': 100
+                "success": False,
+                "error": "Rate limit exceeded",
+                "status_code": 429,
+                "response_time": 100,
             }
 
             result = await monitor._check_model_health(model)
 
             # Model should be marked unhealthy
             assert result is not None
-            assert result.status.value == 'unhealthy'
-            assert result.error_message == 'Rate limit exceeded'
+            assert result.status.value == "unhealthy"
+            assert result.error_message == "Rate limit exceeded"
 
             # But Sentry should NOT be called for rate limits
             assert not mock_capture.called, "Rate limit errors should not be captured to Sentry"
 
     @pytest.mark.asyncio
-    @patch('src.utils.sentry_context.capture_exception')
+    @patch("src.utils.sentry_context.capture_exception")
     async def test_error_filtering_in_check_model_health_server_error(self, mock_capture):
         """Test that server errors ARE sent to Sentry during health checks"""
         from src.services.model_health_monitor import ModelHealthMonitor
@@ -727,27 +727,27 @@ class TestShouldCaptureError:
         monitor = ModelHealthMonitor()
 
         model = {
-            'id': 'test-model',
-            'provider': 'test-provider',
-            'gateway': 'openrouter',
-            'name': 'Test Model'
+            "id": "test-model",
+            "provider": "test-provider",
+            "gateway": "openrouter",
+            "name": "Test Model",
         }
 
         # Mock health check returning server error
-        with patch.object(monitor, '_perform_model_request') as mock_request:
+        with patch.object(monitor, "_perform_model_request") as mock_request:
             mock_request.return_value = {
-                'success': False,
-                'error': 'Internal server error',
-                'status_code': 500,
-                'response_time': 100
+                "success": False,
+                "error": "Internal server error",
+                "status_code": 500,
+                "response_time": 100,
             }
 
             result = await monitor._check_model_health(model)
 
             # Model should be marked unhealthy
             assert result is not None
-            assert result.status.value == 'unhealthy'
-            assert result.error_message == 'Internal server error'
+            assert result.status.value == "unhealthy"
+            assert result.error_message == "Internal server error"
 
             # Sentry SHOULD be called for server errors
             assert mock_capture.called, "Server errors should be captured to Sentry"

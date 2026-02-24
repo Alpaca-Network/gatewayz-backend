@@ -5,12 +5,13 @@ Tests all factory methods to ensure they create properly structured
 detailed error responses with correct codes, messages, and context.
 """
 
-import pytest
 from datetime import datetime
 
-from src.utils.error_factory import DetailedErrorFactory
-from src.utils.error_codes import ErrorCode
+import pytest
+
 from src.schemas.errors import ErrorResponse
+from src.utils.error_codes import ErrorCode
+from src.utils.error_factory import DetailedErrorFactory
 
 
 class TestDetailedErrorFactory:
@@ -54,7 +55,10 @@ class TestDetailedErrorFactory:
         )
 
         assert error.error.context.provider == "openrouter"
-        assert "openrouter" in error.error.message.lower() or error.error.context.provider == "openrouter"
+        assert (
+            "openrouter" in error.error.message.lower()
+            or error.error.context.provider == "openrouter"
+        )
 
     def test_insufficient_credits(self):
         """Test insufficient credits error."""
@@ -89,7 +93,11 @@ class TestDetailedErrorFactory:
             reason="expired", key_prefix="gw_live_abc", request_id="test_123"
         )
 
-        assert "expired" in error.error.message.lower() or error.error.detail and "expired" in error.error.detail.lower()
+        assert (
+            "expired" in error.error.message.lower()
+            or error.error.detail
+            and "expired" in error.error.detail.lower()
+        )
         assert error.error.context.api_key_prefix == "gw_live_abc"
 
     def test_rate_limit_exceeded_basic(self):
@@ -190,9 +198,7 @@ class TestDetailedErrorFactory:
 
     def test_internal_error_basic(self):
         """Test internal error."""
-        error = DetailedErrorFactory.internal_error(
-            operation="user_lookup", request_id="test_123"
-        )
+        error = DetailedErrorFactory.internal_error(operation="user_lookup", request_id="test_123")
 
         assert error.error.type == "internal_error"
         assert error.error.code == ErrorCode.INTERNAL_ERROR
@@ -277,9 +283,7 @@ class TestDetailedErrorFactory:
 
     def test_error_json_serialization(self):
         """Test error response can be serialized to JSON."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test-model", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test-model", request_id="test_123")
 
         # Should not raise exception
         json_dict = error.dict(exclude_none=True)
@@ -293,9 +297,7 @@ class TestDetailedErrorFactory:
 
     def test_error_excludes_none_values(self):
         """Test that None values are excluded from serialization."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test-model", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test-model", request_id="test_123")
 
         json_dict = error.dict(exclude_none=True)
 
@@ -318,9 +320,7 @@ class TestDetailedErrorFactory:
 
     def test_timestamp_format(self):
         """Test that timestamp is in correct ISO format."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test-model", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test-model", request_id="test_123")
 
         # Should be valid ISO format timestamp
         timestamp = error.error.timestamp
@@ -344,18 +344,17 @@ class TestDetailedErrorFactory:
 
     def test_support_url_for_payment_errors(self):
         """Test that support_url is present for payment errors."""
-        error = DetailedErrorFactory.insufficient_credits(
-            1.0, 2.0, request_id="test_123"
-        )
+        error = DetailedErrorFactory.insufficient_credits(1.0, 2.0, request_id="test_123")
 
         assert error.error.support_url is not None
-        assert "support" in error.error.support_url.lower() or "contact" in error.error.support_url.lower()
+        assert (
+            "support" in error.error.support_url.lower()
+            or "contact" in error.error.support_url.lower()
+        )
 
     def test_suggestions_always_list(self):
         """Test that suggestions are always a list when present."""
-        error = DetailedErrorFactory.model_not_found(
-            model_id="test", request_id="test_123"
-        )
+        error = DetailedErrorFactory.model_not_found(model_id="test", request_id="test_123")
 
         assert isinstance(error.error.suggestions, list)
         assert len(error.error.suggestions) > 0
@@ -418,15 +417,11 @@ class TestDetailedErrorFactory:
                 429,
             ),
             (
-                DetailedErrorFactory.invalid_parameter(
-                    "test", "value", request_id="test"
-                ),
+                DetailedErrorFactory.invalid_parameter("test", "value", request_id="test"),
                 400,
             ),
             (
-                DetailedErrorFactory.provider_error(
-                    "test", "model", request_id="test"
-                ),
+                DetailedErrorFactory.provider_error("test", "model", request_id="test"),
                 502,
             ),
             (DetailedErrorFactory.internal_error("test", request_id="test"), 500),

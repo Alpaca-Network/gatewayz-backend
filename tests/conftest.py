@@ -1,39 +1,53 @@
 """
 Pytest configuration and fixtures for test database setup
 """
+
 import os
-import pytest
 import random
 import string
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime, timezone
+
+import pytest
 
 # Set test environment variables before any imports
 # NOTE: These are MOCK/FAKE placeholder credentials for testing only
-os.environ.setdefault('TESTING', 'true')
-os.environ.setdefault('APP_ENV', 'testing')
-os.environ.setdefault('SUPABASE_URL', 'https://xxxxxxxxxxxxx.supabase.co')
-os.environ.setdefault('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4eHh4eHh4eHh4eHgiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTYwMDAwMDAwMCwiZXhwIjoxOTAwMDAwMDAwfQ.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('OPENROUTER_API_KEY', 'sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('ADMIN_API_KEY', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('ENCRYPTION_KEY', 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('AI_SDK_API_KEY', 'sk-xxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('STRIPE_SECRET_KEY', 'sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('STRIPE_WEBHOOK_SECRET', 'whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')
-os.environ.setdefault('FRONTEND_URL', 'http://localhost:3000')
+os.environ.setdefault("TESTING", "true")
+os.environ.setdefault("APP_ENV", "testing")
+os.environ.setdefault("SUPABASE_URL", "https://xxxxxxxxxxxxx.supabase.co")
+os.environ.setdefault(
+    "SUPABASE_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh4eHh4eHh4eHh4eHgiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTYwMDAwMDAwMCwiZXhwIjoxOTAwMDAwMDAwfQ.xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+)
+os.environ.setdefault(
+    "OPENROUTER_API_KEY",
+    "sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+)
+os.environ.setdefault("ADMIN_API_KEY", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+os.environ.setdefault("ENCRYPTION_KEY", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+os.environ.setdefault(
+    "AI_SDK_API_KEY", "sk-xxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+)
+os.environ.setdefault(
+    "STRIPE_SECRET_KEY", "sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+)
+os.environ.setdefault(
+    "STRIPE_WEBHOOK_SECRET", "whsec_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+)
+os.environ.setdefault("FRONTEND_URL", "http://localhost:3000")
 
 # Disable monitoring services during tests to avoid network calls and async task issues
-os.environ.setdefault('PROMETHEUS_ENABLED', 'false')
-os.environ.setdefault('TEMPO_ENABLED', 'false')
-os.environ.setdefault('LOKI_ENABLED', 'false')
+os.environ.setdefault("PROMETHEUS_ENABLED", "false")
+os.environ.setdefault("TEMPO_ENABLED", "false")
+os.environ.setdefault("LOKI_ENABLED", "false")
 
 from src.config.supabase_config import get_supabase_client
 from tests.factories import (
-    UserFactory,
     ApiKeyFactory,
     ChatCompletionFactory,
     ModelFactory,
     PaymentFactory,
     ReferralFactory,
+    UserFactory,
 )
 
 
@@ -82,7 +96,7 @@ def anyio_backend():
 def generate_test_prefix():
     """Generate unique test prefix for this test run"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    random_suffix = ''.join(random.choices(string.ascii_lowercase, k=4))
+    random_suffix = "".join(random.choices(string.ascii_lowercase, k=4))
     return f"test_{timestamp}_{random_suffix}"
 
 
@@ -130,7 +144,7 @@ def clean_test_user(supabase_client, test_prefix):
 
             if result.data:
                 user = result.data[0]
-                created_users.append(user['id'])
+                created_users.append(user["id"])
                 return user
             return None
 
@@ -159,35 +173,45 @@ def isolated_test_data(supabase_client, test_prefix):
     Tracks and cleans up all created records
     """
     cleanup_data = {
-        'users': [],
-        'api_keys_new': [],
-        'chat_sessions': [],
-        'chat_messages': [],
-        'rate_limit_usage': [],
-        'user_plans': [],
+        "users": [],
+        "api_keys_new": [],
+        "chat_sessions": [],
+        "chat_messages": [],
+        "rate_limit_usage": [],
+        "user_plans": [],
     }
 
     yield cleanup_data
 
     # Cleanup in reverse order of dependencies
     try:
-        if cleanup_data['chat_messages']:
-            supabase_client.table("chat_messages").delete().in_("id", cleanup_data['chat_messages']).execute()
+        if cleanup_data["chat_messages"]:
+            supabase_client.table("chat_messages").delete().in_(
+                "id", cleanup_data["chat_messages"]
+            ).execute()
 
-        if cleanup_data['chat_sessions']:
-            supabase_client.table("chat_sessions").delete().in_("id", cleanup_data['chat_sessions']).execute()
+        if cleanup_data["chat_sessions"]:
+            supabase_client.table("chat_sessions").delete().in_(
+                "id", cleanup_data["chat_sessions"]
+            ).execute()
 
-        if cleanup_data['rate_limit_usage']:
-            supabase_client.table("rate_limit_usage").delete().in_("api_key", cleanup_data['rate_limit_usage']).execute()
+        if cleanup_data["rate_limit_usage"]:
+            supabase_client.table("rate_limit_usage").delete().in_(
+                "api_key", cleanup_data["rate_limit_usage"]
+            ).execute()
 
-        if cleanup_data['user_plans']:
-            supabase_client.table("user_plans").delete().in_("user_id", cleanup_data['user_plans']).execute()
+        if cleanup_data["user_plans"]:
+            supabase_client.table("user_plans").delete().in_(
+                "user_id", cleanup_data["user_plans"]
+            ).execute()
 
-        if cleanup_data['api_keys_new']:
-            supabase_client.table("api_keys_new").delete().in_("id", cleanup_data['api_keys_new']).execute()
+        if cleanup_data["api_keys_new"]:
+            supabase_client.table("api_keys_new").delete().in_(
+                "id", cleanup_data["api_keys_new"]
+            ).execute()
 
-        if cleanup_data['users']:
-            supabase_client.table("users").delete().in_("id", cleanup_data['users']).execute()
+        if cleanup_data["users"]:
+            supabase_client.table("users").delete().in_("id", cleanup_data["users"]).execute()
 
     except Exception as e:
         print(f"Cleanup error in isolated_test_data: {e}")
@@ -197,32 +221,32 @@ def isolated_test_data(supabase_client, test_prefix):
 def skip_if_no_database(request):
     """Skip tests that require database if credentials are not available"""
     # Skip if test uses in-memory stub (sb fixture or fake_supabase fixture)
-    if 'sb' in request.fixturenames or 'fake_supabase' in request.fixturenames:
+    if "sb" in request.fixturenames or "fake_supabase" in request.fixturenames:
         return  # Don't skip tests that use the in-memory stub
 
     # Don't skip health check and ping tests - they don't require a database
-    if 'TestHealthEndpoints' in str(request.cls) or 'test_ping' in str(request.function):
+    if "TestHealthEndpoints" in str(request.cls) or "test_ping" in str(request.function):
         return
 
     # Check if this is a database, integration, or routes test that uses FastAPI TestClient
     # Routes tests may fail if database is unavailable due to dependency injection
     test_path = str(request.fspath).lower()
-    test_cls = str(request.cls or '') if request.cls else ''
-    test_func = str(request.function or '') if request.function else ''
+    test_cls = str(request.cls or "") if request.cls else ""
+    test_func = str(request.function or "") if request.function else ""
 
     # Check if this test needs database access
     needs_db = (
-        'db' in test_path or
-        'integration' in test_path or
-        'test_generate_image' in test_func or
-        'test_messages_endpoint' in test_func or
-        'TestImageGeneration' in test_cls or
-        'TestMessagesEndpoint' in test_cls
+        "db" in test_path
+        or "integration" in test_path
+        or "test_generate_image" in test_func
+        or "test_messages_endpoint" in test_func
+        or "TestImageGeneration" in test_cls
+        or "TestMessagesEndpoint" in test_cls
     )
 
     if needs_db:
         # Cache the database check result
-        if not hasattr(skip_if_no_database, '_db_available'):
+        if not hasattr(skip_if_no_database, "_db_available"):
             try:
                 client = get_supabase_client()
                 # Quick connection test
@@ -240,11 +264,11 @@ def skip_if_no_database(request):
 def mock_env_vars(monkeypatch):
     """Mock environment variables for testing"""
     test_env = {
-        'SUPABASE_URL': os.getenv('SUPABASE_URL', 'https://test.supabase.co'),
-        'SUPABASE_KEY': os.getenv('SUPABASE_KEY', 'test-key'),
-        'OPENROUTER_API_KEY': os.getenv('OPENROUTER_API_KEY', 'test-openrouter-key'),
-        'ENCRYPTION_KEY': os.getenv('ENCRYPTION_KEY', 'test-encryption-key-32-bytes-long!'),
-        'ADMIN_API_KEY': os.getenv('ADMIN_API_KEY', 'test-admin-key'),
+        "SUPABASE_URL": os.getenv("SUPABASE_URL", "https://test.supabase.co"),
+        "SUPABASE_KEY": os.getenv("SUPABASE_KEY", "test-key"),
+        "OPENROUTER_API_KEY": os.getenv("OPENROUTER_API_KEY", "test-openrouter-key"),
+        "ENCRYPTION_KEY": os.getenv("ENCRYPTION_KEY", "test-encryption-key-32-bytes-long!"),
+        "ADMIN_API_KEY": os.getenv("ADMIN_API_KEY", "test-admin-key"),
     }
 
     for key, value in test_env.items():
@@ -259,9 +283,5 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "db: marks tests as database tests"
-    )
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "db: marks tests as database tests")

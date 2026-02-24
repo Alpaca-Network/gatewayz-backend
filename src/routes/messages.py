@@ -24,7 +24,11 @@ import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
+from src.adapters.chat import AnthropicChatAdapter
 from src.config import Config
+
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
 from src.services.anthropic_transformer import (
@@ -38,10 +42,6 @@ from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.token_estimator import estimate_message_tokens
-
-# Unified chat handler and adapters for chat unification
-from src.handlers.chat_handler import ChatInferenceHandler
-from src.adapters.chat import AnthropicChatAdapter
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -216,7 +216,9 @@ async def anthropic_messages(
             if len(parts) == 2:
                 api_key = parts[1].strip()
             else:
-                logger.warning(f"Malformed Authorization header in testing mode: {auth_header[:20]}...")
+                logger.warning(
+                    f"Malformed Authorization header in testing mode: {auth_header[:20]}..."
+                )
 
     logger.info(
         "anthropic_messages start (request_id=%s, api_key=%s, model=%s)",
@@ -308,8 +310,7 @@ async def anthropic_messages(
         pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
         if not pre_plan.get("allowed", False):
             raise HTTPException(
-                status_code=429,
-                detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
+                status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
             )
 
         # Rate limit precheck (before making upstream request)
@@ -320,7 +321,9 @@ async def anthropic_messages(
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers={"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                    headers=(
+                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
+                    ),
                 )
 
         # === 2) Transform Anthropic format to OpenAI format ===
@@ -331,7 +334,7 @@ async def anthropic_messages(
         if isinstance(system_param, list):
             # Convert SystemContentBlock list to list of dicts
             system_param = [
-                block.model_dump() if hasattr(block, 'model_dump') else block
+                block.model_dump() if hasattr(block, "model_dump") else block
                 for block in system_param
             ]
 
@@ -339,13 +342,12 @@ async def anthropic_messages(
         tools_param = req.tools
         if tools_param:
             tools_param = [
-                tool.model_dump() if hasattr(tool, 'model_dump') else tool
-                for tool in tools_param
+                tool.model_dump() if hasattr(tool, "model_dump") else tool for tool in tools_param
             ]
 
         # Convert tool_choice to dict if it's a model
         tool_choice_param = req.tool_choice
-        if tool_choice_param and hasattr(tool_choice_param, 'model_dump'):
+        if tool_choice_param and hasattr(tool_choice_param, "model_dump"):
             tool_choice_param = tool_choice_param.model_dump()
 
         openai_messages, openai_params = transform_anthropic_to_openai(
@@ -390,7 +392,9 @@ async def anthropic_messages(
 
         # === 2.2) Plan limit pre-check with estimated tokens ===
         estimated_tokens = estimate_message_tokens(openai_messages, req.max_tokens)
-        pre_plan = await _to_thread(enforce_plan_limits, user["id"], estimated_tokens, environment_tag)
+        pre_plan = await _to_thread(
+            enforce_plan_limits, user["id"], estimated_tokens, environment_tag
+        )
         if not pre_plan.get("allowed", False):
             raise HTTPException(
                 status_code=429, detail=f"Plan limit exceeded: {pre_plan.get('reason', 'unknown')}"
@@ -438,11 +442,12 @@ async def anthropic_messages(
                     )
                 else:
                     # Fallback to checking cached models
-                    from src.services.models import get_cached_models
-
                     # OPTIMIZATION: Fetch full catalog once instead of making N calls for disjoint providers.
                     # CRITICAL FIX: Run in thread to avoid blocking event loop during DB fetch
                     import asyncio
+
+                    from src.services.models import get_cached_models
+
                     all_models_catalog = await asyncio.to_thread(get_cached_models, "all") or []
                     all_model_ids = {m.get("id") for m in all_models_catalog}
 
@@ -503,6 +508,7 @@ async def anthropic_messages(
 
             # Convert internal response back to OpenAI format (for compatibility with existing postprocessing)
             from src.adapters.chat import OpenAIChatAdapter
+
             openai_adapter = OpenAIChatAdapter()
             processed = openai_adapter.from_internal_response(internal_response)
 
@@ -521,10 +527,11 @@ async def anthropic_messages(
                 raise
             # Map provider-specific errors
             from src.services.provider_failover import map_provider_error
+
             http_exc = map_provider_error(
-                provider if 'provider' in locals() else "onerouter",
-                model if 'model' in locals() else original_model,
-                exc
+                provider if "provider" in locals() else "onerouter",
+                model if "model" in locals() else original_model,
+                exc,
             )
             raise http_exc
 
@@ -899,11 +906,13 @@ async def anthropic_messages(
             )
         except Exception as e:
             logger.error(
-                f"Failed to schedule activity logging for user {user['id']}, model {model}: {e}", exc_info=True
+                f"Failed to schedule activity logging for user {user['id']}, model {model}: {e}",
+                exc_info=True,
             )
 
         # === 5) Save chat history (moved to background for better latency) ===
         if session_id:
+
             def save_chat_history_task():
                 """Background task to save chat history without blocking response."""
                 try:
@@ -1007,22 +1016,22 @@ async def anthropic_messages(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database
                 await _to_thread(
                     chat_completion_requests_module.save_chat_completion_request,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else req.model,
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=model if "model" in dir() else req.model,
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     status="failed",
                     error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
                 )
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
@@ -1034,26 +1043,24 @@ async def anthropic_messages(
         if request_id:
             try:
                 # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if 'start' in dir() else 0
+                error_elapsed = time.monotonic() - start if "start" in dir() else 0
 
                 # Save failed request to database
                 await _to_thread(
                     chat_completion_requests_module.save_chat_completion_request,
                     request_id=request_id,
-                    model_name=model if 'model' in dir() else req.model,
-                    input_tokens=prompt_tokens if 'prompt_tokens' in dir() else 0,
+                    model_name=model if "model" in dir() else req.model,
+                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
                     processing_time_ms=int(error_elapsed * 1000),
                     status="failed",
                     error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user["id"] if user and 'user' in dir() else None,
-                    provider_name=provider if 'provider' in dir() else None,
+                    user_id=user["id"] if user and "user" in dir() else None,
+                    provider_name=provider if "provider" in dir() else None,
                     model_id=None,
-                    api_key_id=api_key_id if 'api_key_id' in dir() else None,
+                    api_key_id=api_key_id if "api_key_id" in dir() else None,
                 )
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
 
         raise HTTPException(status_code=500, detail="Internal server error")
-
-

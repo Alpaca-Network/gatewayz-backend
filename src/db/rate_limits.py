@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -247,13 +247,9 @@ def update_rate_limit_usage(api_key: str, tokens_used: int) -> None:
 
         # Calculate window starts
         minute_start = now.replace(second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
-        hour_start = (
-            now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
-        )
+        hour_start = now.replace(minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
         day_start = (
-            now.replace(hour=0, minute=0, second=0, microsecond=0)
-            .replace(tzinfo=UTC)
-            .isoformat()
+            now.replace(hour=0, minute=0, second=0, microsecond=0).replace(tzinfo=UTC).isoformat()
         )
 
         # Check if this is a new API key (gw_ prefix)

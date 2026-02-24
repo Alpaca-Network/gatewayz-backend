@@ -4,7 +4,7 @@ Tracks and enforces daily usage limits for all users.
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 class DailyUsageLimitExceeded(Exception):
     """Raised when a user exceeds their daily usage limit."""
+
     pass
 
 
@@ -55,9 +56,14 @@ def get_daily_usage(user_id: int) -> float:
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
         # Query credit transactions for today
-        result = client.table("credit_transactions").select("amount").eq(
-            "user_id", user_id
-        ).gte("created_at", start_of_day.isoformat()).lt("amount", 0).execute()
+        result = (
+            client.table("credit_transactions")
+            .select("amount")
+            .eq("user_id", user_id)
+            .gte("created_at", start_of_day.isoformat())
+            .lt("amount", 0)
+            .execute()
+        )
 
         if not result.data:
             return 0.0
@@ -94,9 +100,9 @@ def check_daily_usage_limit(user_id: int, requested_amount: float) -> dict[str, 
     if not ENFORCE_DAILY_LIMITS:
         return {
             "allowed": True,
-            "remaining": float('inf'),
+            "remaining": float("inf"),
             "used": 0.0,
-            "limit": float('inf'),
+            "limit": float("inf"),
             "reset_time": get_daily_reset_time(),
             "warning_level": "ok",
         }

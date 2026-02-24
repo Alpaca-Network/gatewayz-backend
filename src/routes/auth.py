@@ -1,6 +1,6 @@
 import logging
 import secrets
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -31,6 +31,14 @@ from src.services.auth_rate_limiting import (
     check_auth_rate_limit,
     get_client_ip,
 )
+from src.services.email_verification import (
+    EmailVerificationResult,
+)
+from src.services.email_verification import verify_email as emailable_verify_email
+from src.services.partner_trial_service import (
+    PartnerTrialService,
+    is_partner_code,
+)
 from src.services.query_timeout import (
     AUTH_QUERY_TIMEOUT,
     USER_LOOKUP_TIMEOUT,
@@ -43,15 +51,7 @@ from src.utils.security_validators import (
     is_valid_email,
     sanitize_for_logging,
 )
-from src.services.email_verification import (
-    verify_email as emailable_verify_email,
-    EmailVerificationResult,
-)
 from src.utils.sentry_context import capture_error
-from src.services.partner_trial_service import (
-    PartnerTrialService,
-    is_partner_code,
-)
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -78,9 +78,7 @@ def _generate_unique_username(client, base_username: str) -> str:
     attempts = 0
 
     while attempts < 5:
-        existing = (
-            client.table("users").select("id").eq("username", candidate).limit(1).execute()
-        )
+        existing = client.table("users").select("id").eq("username", candidate).limit(1).execute()
         if not existing.data:
             return candidate
 
@@ -176,9 +174,7 @@ def _handle_existing_user(
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
     logger.info(f"Existing Privy user found: {existing_user['id']}")
-    logger.info(
-        f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}"
-    )
+    logger.info(f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}")
     logger.info(
         "User credits at login: %s (type: %s)",
         existing_user.get("credits", "NOT_FOUND"),
@@ -287,7 +283,11 @@ def _handle_existing_user(
     legacy_credits_dollars = float(existing_user.get("credits") or 0)
 
     # If tiered fields are empty but legacy credits exist, use legacy credits
-    if subscription_allowance_dollars == 0 and purchased_credits_dollars == 0 and legacy_credits_dollars > 0:
+    if (
+        subscription_allowance_dollars == 0
+        and purchased_credits_dollars == 0
+        and legacy_credits_dollars > 0
+    ):
         if tier in ("pro", "max") and subscription_status_value == "active":
             # Active Pro/Max subscriber - legacy credits are subscription allowance
             subscription_allowance_dollars = legacy_credits_dollars
@@ -643,7 +643,9 @@ def _process_referral_code_background(
     separately by _apply_partner_trial_background().
     """
     try:
-        logger.info(f"Background task: Processing referral code '{referral_code}' for user {user_id}")
+        logger.info(
+            f"Background task: Processing referral code '{referral_code}' for user {user_id}"
+        )
 
         from src.services.referral import (
             send_referral_signup_notification,
@@ -662,13 +664,12 @@ def _process_referral_code_background(
             try:
                 # Store referral code for the user
                 client = supabase_config.get_supabase_client()
-                client.table("users").update(
-                    {"referred_by_code": referral_code}
-                ).eq("id", user_id).execute()
+                client.table("users").update({"referred_by_code": referral_code}).eq(
+                    "id", user_id
+                ).execute()
 
                 logger.info(
-                    f"Background task: Stored referral code {referral_code} "
-                    f"for user {user_id}"
+                    f"Background task: Stored referral code {referral_code} " f"for user {user_id}"
                 )
 
                 # Send notification to referrer
@@ -701,9 +702,7 @@ def _process_referral_code_background(
                         f"referrer {referrer['id']} has no email address"
                     )
             except Exception as store_error:
-                logger.error(
-                    f"Background task: Failed to store referral code: {store_error}"
-                )
+                logger.error(f"Background task: Failed to store referral code: {store_error}")
         else:
             logger.warning(
                 f"Background task: Invalid referral code provided: {referral_code} - {error_msg}"
@@ -824,7 +823,11 @@ async def privy_auth(
         elif phone_number:
             # Use last 4 digits of phone number as base for username
             clean_phone = "".join(filter(str.isdigit, phone_number))
-            username = f"user_{clean_phone[-4:]}" if len(clean_phone) >= 4 else f"user_{request.user.id[:8]}"
+            username = (
+                f"user_{clean_phone[-4:]}"
+                if len(clean_phone) >= 4
+                else f"user_{request.user.id[:8]}"
+            )
         else:
             username = f"user_{request.user.id[:8]}"
         logger.debug(f"Generated base username for user {request.user.id}: {username}")
@@ -892,9 +895,10 @@ async def privy_auth(
                     safe_query_with_timeout(
                         client,
                         "users",
-                        lambda: client.table("users").update({"privy_user_id": request.user.id}).eq(
-                            "id", existing_user["id"]
-                        ).execute(),
+                        lambda: client.table("users")
+                        .update({"privy_user_id": request.user.id})
+                        .eq("id", existing_user["id"])
+                        .execute(),
                         timeout_seconds=AUTH_QUERY_TIMEOUT,
                         operation_name="update privy_user_id",
                         fallback_value=None,
@@ -918,9 +922,9 @@ async def privy_auth(
                 display_name=display_name,
                 email=email,
                 phone_number=phone_number,
-                auto_create_api_key=request.auto_create_api_key
-                if request.auto_create_api_key is not None
-                else True,
+                auto_create_api_key=(
+                    request.auto_create_api_key if request.auto_create_api_key is not None else True
+                ),
             )
         else:
             # New user - create account
@@ -964,7 +968,11 @@ async def privy_auth(
                 # Use a placeholder email if no valid email is available
                 # Note: We use a safe placeholder instead of the Privy ID because
                 # Privy IDs contain colons which are not valid in email addresses
-                user_email = email if email and is_valid_email(email) else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
+                user_email = (
+                    email
+                    if email and is_valid_email(email)
+                    else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
+                )
                 user_data = users_module.create_enhanced_user(
                     username=username,
                     email=user_email,
@@ -1001,15 +1009,21 @@ async def privy_auth(
                         display_name=display_name,
                         email=email,
                         phone_number=phone_number,
-                        auto_create_api_key=request.auto_create_api_key
-                        if request.auto_create_api_key is not None
-                        else True,
+                        auto_create_api_key=(
+                            request.auto_create_api_key
+                            if request.auto_create_api_key is not None
+                            else True
+                        ),
                     )
 
                 # Use a safe placeholder email if no valid email is available
                 # Note: We use a safe placeholder instead of the Privy ID because
                 # Privy IDs contain colons which are not valid in email addresses
-                fallback_email = email if email and is_valid_email(email) else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
+                fallback_email = (
+                    email
+                    if email and is_valid_email(email)
+                    else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
+                )
 
                 resolved_username = _generate_unique_username(client, username)
                 if resolved_username != username:
@@ -1090,9 +1104,11 @@ async def privy_auth(
                             if getattr(insert_error, "code", None) == "23505":
                                 logger.warning(
                                     "Fallback user insert encountered duplicate username/email (%s); retrieving existing record instead",
-                                    insert_error.message
-                                    if hasattr(insert_error, "message")
-                                    else str(insert_error),
+                                    (
+                                        insert_error.message
+                                        if hasattr(insert_error, "message")
+                                        else str(insert_error)
+                                    ),
                                 )
                                 existing_user = (
                                     client.table("users")
@@ -1227,7 +1243,9 @@ async def privy_auth(
                     partner_trial_applied = True
                 else:
                     # User-to-user referral code - process normally
-                    logger.info(f"Queuing referral code processing for new user: {request.referral_code}")
+                    logger.info(
+                        f"Queuing referral code processing for new user: {request.referral_code}"
+                    )
                     background_tasks.add_task(
                         _process_referral_code_background,
                         referral_code=request.referral_code,
@@ -1355,7 +1373,9 @@ async def privy_auth(
                 status_code=503,
                 detail="Service configuration error: Database URL is misconfigured. Please contact support.",
             ) from e
-        raise HTTPException(status_code=500, detail=f"Authentication failed: {error_message}") from e
+        raise HTTPException(
+            status_code=500, detail=f"Authentication failed: {error_message}"
+        ) from e
 
 
 @router.post("/auth/register", response_model=UserRegistrationResponse, tags=["authentication"])
@@ -1385,17 +1405,13 @@ async def register_user(
         # Verify email using Emailable API + local checks
         subscription_status, should_block = await _get_subscription_status_for_email(request.email)
         if should_block:
-            logger.warning(
-                f"Registration blocked for email: {sanitize_for_logging(request.email)}"
-            )
+            logger.warning(f"Registration blocked for email: {sanitize_for_logging(request.email)}")
             raise HTTPException(
                 status_code=400,
                 detail="This email address is not allowed. Please use a valid email.",
             )
         if subscription_status == "bot":
-            logger.warning(
-                f"Email marked as bot: {sanitize_for_logging(request.email)}"
-            )
+            logger.warning(f"Email marked as bot: {sanitize_for_logging(request.email)}")
 
         # Legacy variable for backwards compatibility
         is_temp_email = subscription_status == "bot"
@@ -1424,7 +1440,10 @@ async def register_user(
             existing_username = safe_query_with_timeout(
                 client,
                 "users",
-                lambda: client.table("users").select("id").eq("username", request.username).execute(),
+                lambda: client.table("users")
+                .select("id")
+                .eq("username", request.username)
+                .execute(),
                 timeout_seconds=AUTH_QUERY_TIMEOUT,
                 operation_name="check existing username",
                 fallback_value=None,

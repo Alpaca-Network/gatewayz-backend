@@ -30,10 +30,10 @@ import httpx
 from openai import OpenAI
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_canopywave_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -104,7 +104,9 @@ def make_canopywave_request_openai_stream(
     """
     try:
         client = get_canopywave_client()
-        stream = client.chat.completions.create(model=model, messages=messages, stream=True, **kwargs)
+        stream = client.chat.completions.create(
+            model=model, messages=messages, stream=True, **kwargs
+        )
         return stream
     except Exception as e:
         logger.error(f"Canopy Wave streaming request failed: {e}")
@@ -173,7 +175,9 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
     except (ValueError, TypeError):
-        logger.warning(f"Failed to convert pricing value to float: {value!r}, using default {default}")
+        logger.warning(
+            f"Failed to convert pricing value to float: {value!r}, using default {default}"
+        )
         return default
 
 
@@ -288,7 +292,9 @@ def fetch_models_from_canopywave() -> list[dict[str, Any]]:
         logger.info(f"Fetched {len(models)} models from Canopy Wave")
         return _cache_and_return(models)
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching models from Canopy Wave: {e.response.status_code} - {e.response.text}")
+        logger.error(
+            f"HTTP error fetching models from Canopy Wave: {e.response.status_code} - {e.response.text}"
+        )
         return []
     except Exception as e:
         logger.error(f"Failed to fetch models from Canopy Wave: {e}")

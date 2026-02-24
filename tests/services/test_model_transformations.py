@@ -1,5 +1,6 @@
 from unittest.mock import patch
-from src.services.model_transformations import transform_model_id, detect_provider_from_model_id
+
+from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 
 
 def test_openrouter_prefixed_model_keeps_nested_provider():
@@ -138,7 +139,7 @@ def test_detect_provider_from_model_id_fal_orgs():
         "stabilityai/stable-diffusion-xl",
         "hunyuan3d/some-model",
         "meshy/mesh-model",
-        "tripo3d/3d-model"
+        "tripo3d/3d-model",
     ]
 
     for model_id in test_cases:
@@ -153,7 +154,10 @@ def test_detect_provider_from_model_id_existing_providers():
     with failover to OpenRouter handled by provider_failover.py.
     """
     test_cases = [
-        ("anthropic/claude-3-sonnet", "anthropic"),  # Native Anthropic first, OpenRouter as fallback
+        (
+            "anthropic/claude-3-sonnet",
+            "anthropic",
+        ),  # Native Anthropic first, OpenRouter as fallback
         ("openai/gpt-4", "openai"),  # Native OpenAI first, OpenRouter as fallback
         ("meta-llama/llama-2-7b", None),  # This model doesn't match any specific provider
     ]
@@ -163,7 +167,7 @@ def test_detect_provider_from_model_id_existing_providers():
         assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
 
 
-@patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
+@patch.dict("os.environ", {"GOOGLE_VERTEX_CREDENTIALS_JSON": '{"type":"service_account"}'})
 def test_detect_provider_google_vertex_models():
     """Test that Google Vertex AI models are correctly detected when credentials are available
 
@@ -176,7 +180,10 @@ def test_detect_provider_google_vertex_models():
         # gemini-1.5-pro excluded - retired on Vertex AI, routed to openrouter instead
         ("google/gemini-2.5-flash", "google-vertex"),
         ("google/gemini-2.0-flash", "google-vertex"),
-        ("@google/models/gemini-2.5-flash", "google-vertex"),  # Key test case - should NOT be portkey
+        (
+            "@google/models/gemini-2.5-flash",
+            "google-vertex",
+        ),  # Key test case - should NOT be portkey
         ("@google/models/gemini-2.0-flash", "google-vertex"),
     ]
 
@@ -209,7 +216,9 @@ def test_z_ai_glm_with_exacto_suffix():
 
     # Test model transformation - OpenRouter passes through as-is (lowercase)
     transformed = transform_model_id("z-ai/glm-4.6:exacto", "openrouter")
-    assert transformed == "z-ai/glm-4.6:exacto", f"Expected 'z-ai/glm-4.6:exacto', got {transformed}"
+    assert (
+        transformed == "z-ai/glm-4.6:exacto"
+    ), f"Expected 'z-ai/glm-4.6:exacto', got {transformed}"
 
 
 def test_z_ai_glm_prefix_detected_as_openrouter():
@@ -247,13 +256,18 @@ def test_openrouter_colon_suffix_variants():
     """Test that OpenRouter models with colon suffixes are correctly detected"""
     test_cases = [
         ("z-ai/glm-4.6:exacto", "openrouter"),
-        ("google/gemini-2.0-flash-exp:free", "google-vertex"),  # Gemini models route to Google Vertex
+        (
+            "google/gemini-2.0-flash-exp:free",
+            "google-vertex",
+        ),  # Gemini models route to Google Vertex
         ("anthropic/claude-3-opus:extended", "openrouter"),
     ]
 
     for model_id, expected_provider in test_cases:
         result = detect_provider_from_model_id(model_id)
-        assert result == expected_provider, f"Expected '{expected_provider}' for {model_id}, got {result}"
+        assert (
+            result == expected_provider
+        ), f"Expected '{expected_provider}' for {model_id}, got {result}"
 
 
 def test_detect_provider_groq_models():
@@ -300,6 +314,7 @@ def test_transform_groq_model_without_prefix():
 # ============================================================================
 # OneRouter Provider Tests
 # ============================================================================
+
 
 def test_detect_provider_onerouter_prefixed_models():
     """Test that onerouter/ prefixed models are detected as 'onerouter' provider"""
@@ -413,14 +428,14 @@ def test_fireworks_unknown_model_does_not_construct_invalid_id():
     result = transform_model_id("deepseek/deepseek-v3.2-speciale", "fireworks")
 
     # Should NOT construct invalid ID like "accounts/fireworks/models/deepseek-v3p2-speciale"
-    assert not result.startswith("accounts/fireworks/models/"), (
-        f"Unknown model should not be naively constructed to Fireworks format: {result}"
-    )
+    assert not result.startswith(
+        "accounts/fireworks/models/"
+    ), f"Unknown model should not be naively constructed to Fireworks format: {result}"
 
     # Should pass through as lowercase
-    assert result == "deepseek/deepseek-v3.2-speciale", (
-        f"Unknown model should pass through as-is (lowercase): {result}"
-    )
+    assert (
+        result == "deepseek/deepseek-v3.2-speciale"
+    ), f"Unknown model should pass through as-is (lowercase): {result}"
 
 
 def test_fireworks_known_model_still_transforms():
@@ -463,9 +478,9 @@ def test_fireworks_nonexistent_variant_passthrough():
     for model_id in nonexistent_variants:
         result = transform_model_id(model_id, "fireworks")
         # Should NOT start with the Fireworks prefix for unknown models
-        assert not result.startswith("accounts/fireworks/models/"), (
-            f"Unknown model '{model_id}' should not be naively constructed to Fireworks format: {result}"
-        )
+        assert not result.startswith(
+            "accounts/fireworks/models/"
+        ), f"Unknown model '{model_id}' should not be naively constructed to Fireworks format: {result}"
         # Should pass through as-is
         assert result == model_id, f"Expected passthrough for '{model_id}', got {result}"
 
@@ -477,6 +492,6 @@ def test_fireworks_fuzzy_match_still_works():
     # Test case-insensitive matching (should still work via normalize_model_name)
     result = transform_model_id("DeepSeek-AI/DeepSeek-V3", "fireworks")
     # Should match to known mapping via fuzzy matching
-    assert result == "accounts/fireworks/models/deepseek-v3p1", (
-        f"Fuzzy matching should still work for known models: {result}"
-    )
+    assert (
+        result == "accounts/fireworks/models/deepseek-v3p1"
+    ), f"Fuzzy matching should still work for known models: {result}"

@@ -8,24 +8,25 @@ Tests the complete flow of:
 - Post-trial credit usage
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
-from src.db.users import create_enhanced_user, deduct_credits
-from src.services.daily_usage_limiter import DailyUsageLimitExceeded
+import pytest
+
 from src.config.usage_limits import (
+    DAILY_USAGE_LIMIT,
     TRIAL_CREDITS_AMOUNT,
     TRIAL_DURATION_DAYS,
-    DAILY_USAGE_LIMIT,
 )
+from src.db.users import create_enhanced_user, deduct_credits
+from src.services.daily_usage_limiter import DailyUsageLimitExceeded
 
 
 class TestTrialCreditAllocation:
     """Test that trial users receive correct credit allocation"""
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.create_api_key')
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.create_api_key")
     def test_new_user_receives_5_dollar_credits(self, mock_create_key, mock_client):
         """Test that new users receive $5 in trial credits"""
         # Mock Supabase responses
@@ -44,9 +45,7 @@ class TestTrialCreditAllocation:
 
         # Create user with default credits
         result = create_enhanced_user(
-            username="testuser",
-            email="test@example.com",
-            auth_method="email"
+            username="testuser", email="test@example.com", auth_method="email"
         )
 
         # Verify credits allocated
@@ -63,9 +62,9 @@ class TestTrialCreditAllocation:
 class TestDailyLimitDuringTrial:
     """Test that daily usage limits are enforced during trial period"""
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.get_daily_usage')
-    @patch('src.db.plans.is_admin_tier_user')
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.get_daily_usage")
+    @patch("src.db.plans.is_admin_tier_user")
     def test_trial_user_limited_to_1_dollar_per_day(
         self, mock_is_admin, mock_get_usage, mock_client
     ):
@@ -86,12 +85,18 @@ class TestDailyLimitDuringTrial:
         def table_side_effect(table_name):
             if table_name == "api_keys_new":
                 mock_table = Mock()
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_key_result
+                mock_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_key_result
+                )
                 return mock_table
             elif table_name == "users":
                 user_table = Mock()
-                user_table.select.return_value.eq.return_value.execute.return_value = mock_user_result
-                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_update_result
+                user_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_user_result
+                )
+                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                    mock_update_result
+                )
                 return user_table
             elif table_name == "credit_transactions":
                 txn_table = Mock()
@@ -101,30 +106,26 @@ class TestDailyLimitDuringTrial:
         mock_client.return_value.table.side_effect = table_side_effect
 
         # First deduction of $1.00 - should succeed
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
-            deduct_credits(
-                api_key="gw_live_testkey",
-                tokens=1.0,
-                description="Day 1 usage"
-            )
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
+            deduct_credits(api_key="gw_live_testkey", tokens=1.0, description="Day 1 usage")
 
         # Update mock to show $1 already used today
         mock_get_usage.return_value = 1.0
 
         # Second deduction attempt - should fail (daily limit exceeded)
         with pytest.raises(ValueError) as exc_info:
-            with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+            with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
                 deduct_credits(
                     api_key="gw_live_testkey",
                     tokens=0.50,
-                    description="Attempt to exceed daily limit"
+                    description="Attempt to exceed daily limit",
                 )
 
         assert "Daily usage limit exceeded" in str(exc_info.value)
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.get_daily_usage')
-    @patch('src.db.plans.is_admin_tier_user')
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.get_daily_usage")
+    @patch("src.db.plans.is_admin_tier_user")
     def test_multiple_small_requests_within_daily_limit(
         self, mock_is_admin, mock_get_usage, mock_client
     ):
@@ -152,12 +153,18 @@ class TestDailyLimitDuringTrial:
         def table_side_effect(table_name):
             if table_name == "api_keys_new":
                 mock_table = Mock()
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_key_result
+                mock_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_key_result
+                )
                 return mock_table
             elif table_name == "users":
                 user_table = Mock()
-                user_table.select.return_value.eq.return_value.execute.return_value = mock_user_result
-                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_update_result
+                user_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_user_result
+                )
+                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                    mock_update_result
+                )
                 return user_table
             elif table_name == "credit_transactions":
                 txn_table = Mock()
@@ -168,12 +175,8 @@ class TestDailyLimitDuringTrial:
 
         # Make 10 requests of $0.09 each (total $0.90)
         for i in range(10):
-            with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
-                deduct_credits(
-                    api_key="gw_live_testkey",
-                    tokens=0.09,
-                    description=f"Request {i+1}"
-                )
+            with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
+                deduct_credits(api_key="gw_live_testkey", tokens=0.09, description=f"Request {i+1}")
                 usage_tracker[0] += 0.09
 
         # All 10 requests should succeed (total $0.90 < $1.00)
@@ -183,12 +186,10 @@ class TestDailyLimitDuringTrial:
 class TestTrialPeriodScenario:
     """Test realistic 3-day trial period scenario"""
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.get_daily_usage')
-    @patch('src.db.plans.is_admin_tier_user')
-    def test_three_day_trial_usage_pattern(
-        self, mock_is_admin, mock_get_usage, mock_client
-    ):
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.get_daily_usage")
+    @patch("src.db.plans.is_admin_tier_user")
+    def test_three_day_trial_usage_pattern(self, mock_is_admin, mock_get_usage, mock_client):
         """Simulate a user using $1/day for 3 days during trial"""
         mock_is_admin.return_value = False
 
@@ -202,6 +203,7 @@ class TestTrialPeriodScenario:
         def get_usage_for_day(day):
             def inner(user_id):
                 return daily_usage[day]
+
             return inner
 
         # Mock Supabase
@@ -224,12 +226,18 @@ class TestTrialPeriodScenario:
         def table_side_effect(table_name):
             if table_name == "api_keys_new":
                 mock_table = Mock()
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_key_result
+                mock_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_key_result
+                )
                 return mock_table
             elif table_name == "users":
                 user_table = Mock()
-                user_table.select.return_value.eq.return_value.execute.return_value = get_user_credits()
-                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = Mock(data=[{}])
+                user_table.select.return_value.eq.return_value.execute.return_value = (
+                    get_user_credits()
+                )
+                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = Mock(
+                    data=[{}]
+                )
                 return user_table
             elif table_name == "credit_transactions":
                 txn_table = Mock()
@@ -240,7 +248,7 @@ class TestTrialPeriodScenario:
 
         # Day 1: Use $1.00
         mock_get_usage.side_effect = get_usage_for_day("day1")
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
             deduct_credits(api_key="gw_live_testkey", tokens=1.0, description="Day 1")
         daily_usage["day1"] = 1.0
         credits_remaining[0] -= 1.0
@@ -249,7 +257,7 @@ class TestTrialPeriodScenario:
 
         # Day 2: Use $1.00 (reset daily limit)
         mock_get_usage.side_effect = get_usage_for_day("day2")
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
             deduct_credits(api_key="gw_live_testkey", tokens=1.0, description="Day 2")
         daily_usage["day2"] = 1.0
         credits_remaining[0] -= 1.0
@@ -258,7 +266,7 @@ class TestTrialPeriodScenario:
 
         # Day 3: Use $1.00 (trial expires after this)
         mock_get_usage.side_effect = get_usage_for_day("day3")
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
             deduct_credits(api_key="gw_live_testkey", tokens=1.0, description="Day 3")
         daily_usage["day3"] = 1.0
         credits_remaining[0] -= 1.0
@@ -269,12 +277,10 @@ class TestTrialPeriodScenario:
 class TestPostTrialCredits:
     """Test that users can continue using remaining credits after trial"""
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.get_daily_usage')
-    @patch('src.db.plans.is_admin_tier_user')
-    def test_post_trial_credits_available(
-        self, mock_is_admin, mock_get_usage, mock_client
-    ):
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.get_daily_usage")
+    @patch("src.db.plans.is_admin_tier_user")
+    def test_post_trial_credits_available(self, mock_is_admin, mock_get_usage, mock_client):
         """Test that $2 remaining credits can be used after trial expires"""
         mock_is_admin.return_value = False
         mock_get_usage.return_value = 0.0  # Fresh day
@@ -284,11 +290,13 @@ class TestPostTrialCredits:
         mock_key_result.data = [{"user_id": 123}]
 
         mock_user_result = Mock()
-        mock_user_result.data = [{
-            "id": 123,
-            "credits": 2.0,
-            "subscription_status": "inactive",  # Trial expired
-        }]
+        mock_user_result.data = [
+            {
+                "id": 123,
+                "credits": 2.0,
+                "subscription_status": "inactive",  # Trial expired
+            }
+        ]
 
         mock_update_result = Mock()
         mock_update_result.data = [{"id": 123, "credits": 1.0}]
@@ -296,12 +304,18 @@ class TestPostTrialCredits:
         def table_side_effect(table_name):
             if table_name == "api_keys_new":
                 mock_table = Mock()
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_key_result
+                mock_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_key_result
+                )
                 return mock_table
             elif table_name == "users":
                 user_table = Mock()
-                user_table.select.return_value.eq.return_value.execute.return_value = mock_user_result
-                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_update_result
+                user_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_user_result
+                )
+                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                    mock_update_result
+                )
                 return user_table
             elif table_name == "credit_transactions":
                 txn_table = Mock()
@@ -311,11 +325,9 @@ class TestPostTrialCredits:
         mock_client.return_value.table.side_effect = table_side_effect
 
         # Should be able to use $1 on day 4 (post-trial)
-        with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+        with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
             deduct_credits(
-                api_key="gw_live_testkey",
-                tokens=1.0,
-                description="Day 4 post-trial usage"
+                api_key="gw_live_testkey", tokens=1.0, description="Day 4 post-trial usage"
             )
 
         # Verify credit deduction happened
@@ -325,12 +337,10 @@ class TestPostTrialCredits:
 class TestFraudMitigation:
     """Test that daily limits prevent fraud scenarios"""
 
-    @patch('src.db.users.get_supabase_client')
-    @patch('src.db.users.get_daily_usage')
-    @patch('src.db.plans.is_admin_tier_user')
-    def test_bot_cannot_drain_credits_instantly(
-        self, mock_is_admin, mock_get_usage, mock_client
-    ):
+    @patch("src.db.users.get_supabase_client")
+    @patch("src.db.users.get_daily_usage")
+    @patch("src.db.plans.is_admin_tier_user")
+    def test_bot_cannot_drain_credits_instantly(self, mock_is_admin, mock_get_usage, mock_client):
         """Test that a bot cannot drain all $5 credits in one day"""
         mock_is_admin.return_value = False
         mock_get_usage.return_value = 0.0
@@ -348,12 +358,18 @@ class TestFraudMitigation:
         def table_side_effect(table_name):
             if table_name == "api_keys_new":
                 mock_table = Mock()
-                mock_table.select.return_value.eq.return_value.execute.return_value = mock_key_result
+                mock_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_key_result
+                )
                 return mock_table
             elif table_name == "users":
                 user_table = Mock()
-                user_table.select.return_value.eq.return_value.execute.return_value = mock_user_result
-                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_update_result
+                user_table.select.return_value.eq.return_value.execute.return_value = (
+                    mock_user_result
+                )
+                user_table.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                    mock_update_result
+                )
                 return user_table
             elif table_name == "credit_transactions":
                 txn_table = Mock()
@@ -364,11 +380,11 @@ class TestFraudMitigation:
 
         # Bot tries to use $5 immediately
         with pytest.raises(ValueError) as exc_info:
-            with patch('src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS', True):
+            with patch("src.services.daily_usage_limiter.ENFORCE_DAILY_LIMITS", True):
                 deduct_credits(
                     api_key="gw_live_botkey",
                     tokens=5.0,
-                    description="Bot attempt to drain all credits"
+                    description="Bot attempt to drain all credits",
                 )
 
         assert "Daily usage limit exceeded" in str(exc_info.value)
@@ -383,21 +399,25 @@ class TestConfigurationValues:
     def test_trial_credits_is_5_dollars(self):
         """Verify TRIAL_CREDITS_AMOUNT is $5"""
         from src.config.usage_limits import TRIAL_CREDITS_AMOUNT
+
         assert TRIAL_CREDITS_AMOUNT == 5.0
 
     def test_daily_limit_is_1_dollar(self):
         """Verify DAILY_USAGE_LIMIT is $1"""
         from src.config.usage_limits import DAILY_USAGE_LIMIT
+
         assert DAILY_USAGE_LIMIT == 1.0
 
     def test_trial_duration_is_3_days(self):
         """Verify TRIAL_DURATION_DAYS is 3"""
         from src.config.usage_limits import TRIAL_DURATION_DAYS
+
         assert TRIAL_DURATION_DAYS == 3
 
     def test_trial_daily_limit_is_1_dollar(self):
         """Verify TRIAL_DAILY_LIMIT is $1"""
         from src.config.usage_limits import TRIAL_DAILY_LIMIT
+
         assert TRIAL_DAILY_LIMIT == 1.0
 
 

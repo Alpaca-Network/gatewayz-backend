@@ -1,10 +1,11 @@
 """
 Comprehensive tests for Model Availability service
 """
-import pytest
-from datetime import datetime, timezone, timedelta, UTC
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestModelAvailability:
@@ -13,12 +14,14 @@ class TestModelAvailability:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.model_availability
+
         assert src.services.model_availability is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import model_availability
-        assert hasattr(model_availability, '__name__')
+
+        assert hasattr(model_availability, "__name__")
 
 
 class TestIsModelAvailable:
@@ -42,10 +45,10 @@ class TestIsModelAvailable:
     def test_available_model_returns_available(self):
         """Test that models with AVAILABLE status return True"""
         from src.services.model_availability import (
-            ModelAvailabilityService,
-            ModelAvailability,
             AvailabilityStatus,
             CircuitBreakerState,
+            ModelAvailability,
+            ModelAvailabilityService,
         )
 
         service = ModelAvailabilityService()
@@ -71,10 +74,10 @@ class TestIsModelAvailable:
     def test_model_with_open_circuit_returns_unavailable(self):
         """Test that models with OPEN circuit breaker return False"""
         from src.services.model_availability import (
-            ModelAvailabilityService,
-            ModelAvailability,
             AvailabilityStatus,
             CircuitBreakerState,
+            ModelAvailability,
+            ModelAvailabilityService,
         )
 
         service = ModelAvailabilityService()
@@ -100,10 +103,10 @@ class TestIsModelAvailable:
     def test_model_in_maintenance_returns_unavailable(self):
         """Test that models in maintenance mode return False"""
         from src.services.model_availability import (
-            ModelAvailabilityService,
-            ModelAvailability,
             AvailabilityStatus,
             CircuitBreakerState,
+            ModelAvailability,
+            ModelAvailabilityService,
         )
 
         service = ModelAvailabilityService()
@@ -131,10 +134,10 @@ class TestIsModelAvailable:
     def test_unavailable_status_returns_unavailable(self):
         """Test that models with UNAVAILABLE status return False"""
         from src.services.model_availability import (
-            ModelAvailabilityService,
-            ModelAvailability,
             AvailabilityStatus,
             CircuitBreakerState,
+            ModelAvailability,
+            ModelAvailabilityService,
         )
 
         service = ModelAvailabilityService()

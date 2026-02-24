@@ -1,8 +1,10 @@
 import csv
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
-from datetime import datetime, UTC
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import as_completed
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
@@ -10,8 +12,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from fastapi import APIRouter
 
-from src.cache import (
-    # Cache helper functions
+from src.cache import (  # Cache helper functions
     get_gateway_error_message,
     is_gateway_in_error_state,
 )
@@ -248,7 +249,7 @@ _building_catalog_local = threading.local()
 
 def _is_building_catalog() -> bool:
     """Check if the current thread is building the model catalog."""
-    return getattr(_building_catalog_local, 'building', False)
+    return getattr(_building_catalog_local, "building", False)
 
 
 def _set_building_catalog(value: bool):
@@ -833,7 +834,8 @@ def filter_valid_enhanced_models(models: list) -> list:
     Logs a warning if any models are filtered out.
     """
     valid = [
-        m for m in models
+        m
+        for m in models
         if isinstance(m, dict) and isinstance(m.get("id"), str) and m["id"].strip()
     ]
     count = len(models) - len(valid)
@@ -942,12 +944,13 @@ def get_cached_unique_models_catalog():
     - TTL: 900 seconds (15 minutes)
     - Cache hit rate expected: >95%
     """
-    from src.services.model_catalog_cache import get_model_catalog_cache
+    import time
+
     from src.db.models_catalog_db import (
         get_all_unique_models_for_catalog,
         transform_unique_models_batch,
     )
-    import time
+    from src.services.model_catalog_cache import get_model_catalog_cache
 
     cache = get_model_catalog_cache()
 
@@ -2778,7 +2781,9 @@ def enhance_model_with_provider_info(openrouter_model: dict, providers_data: lis
             # Rebuild cache if providers_data changed (use id() as cheap identity check)
             if enhance_model_with_provider_info._provider_cache_id != id(providers_data):
                 enhance_model_with_provider_info._provider_cache = {
-                    p.get("slug"): p for p in providers_data if isinstance(p, dict) and p.get("slug")
+                    p.get("slug"): p
+                    for p in providers_data
+                    if isinstance(p, dict) and p.get("slug")
                 }
                 enhance_model_with_provider_info._provider_cache_id = id(providers_data)
 
@@ -2860,7 +2865,7 @@ def normalize_aihubmix_model_with_pricing(model: dict) -> dict | None:
         # Extract pricing from the API response
         # AiHubMix returns pricing per 1K tokens
         # Use pricing_normalization to convert to per-token format
-        from src.services.pricing_normalization import normalize_pricing_dict, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_pricing_dict
 
         pricing_data = model.get("pricing", {})
 
@@ -3291,7 +3296,9 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         output_modalities = ["text"]
 
         raw_arch = openai_model.get("architecture") or {}
-        raw_input_modalities = raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+        raw_input_modalities = (
+            raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+        )
 
         if isinstance(raw_input_modalities, list) and raw_input_modalities:
             # Metadata from API response is authoritative
@@ -3411,7 +3418,9 @@ def normalize_anthropic_model(anthropic_model: dict) -> dict | None:
         # The Anthropic models API does not yet return input_modalities, so we fall back
         # to name-based heuristics. When the API adds that field this branch will be skipped.
         raw_arch = anthropic_model.get("architecture") or {}
-        raw_input_modalities = raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+        raw_input_modalities = (
+            raw_arch.get("input_modalities") if isinstance(raw_arch, dict) else None
+        )
 
         if isinstance(raw_input_modalities, list) and raw_input_modalities:
             # Metadata from API response is authoritative

@@ -31,11 +31,11 @@ from __future__ import annotations
 import logging
 import time
 from collections import defaultdict
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from src.config.supabase_config import get_supabase_client, get_client_for_query
+from src.config.supabase_config import get_client_for_query, get_supabase_client
 
 # NOTE: pricing_lookup imports are deferred to function scope to avoid
 # a layer violation (db → services) at module load time.  The functions
@@ -76,17 +76,16 @@ def _serialize_model_data(data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(value, dict):
             serialized[key] = _serialize_model_data(value)
         elif isinstance(value, list):
-            serialized[key] = [_serialize_model_data(item) if isinstance(item, dict) else item for item in value]
+            serialized[key] = [
+                _serialize_model_data(item) if isinstance(item, dict) else item for item in value
+            ]
         else:
             serialized[key] = value
     return serialized
 
 
 def get_all_models(
-    provider_id: int | None = None,
-    is_active_only: bool = True,
-    limit: int = 100,
-    offset: int = 0
+    provider_id: int | None = None, is_active_only: bool = True, limit: int = 100, offset: int = 0
 ) -> list[dict[str, Any]]:
     """
     Get all models from database
@@ -105,10 +104,7 @@ def get_all_models(
         supabase = get_client_for_query(read_only=True)
 
         # Join with providers table to get provider info
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-        )
+        query = supabase.table("models").select("*, providers!inner(*)")
 
         if provider_id:
             query = query.eq("provider_id", provider_id)
@@ -152,8 +148,7 @@ def get_model_by_id(model_id: int) -> dict[str, Any] | None:
 
 
 def get_models_by_provider_slug(
-    provider_slug: str,
-    is_active_only: bool = True
+    provider_slug: str, is_active_only: bool = True
 ) -> list[dict[str, Any]]:
     """
     Get all models for a specific provider by slug
@@ -215,8 +210,7 @@ def get_models_by_provider_slug(
 
 
 def get_model_by_provider_and_model_id(
-    provider_id: int,
-    provider_model_id: str
+    provider_id: int, provider_model_id: str
 ) -> dict[str, Any] | None:
     """
     Get a model by provider ID and provider-specific model ID
@@ -305,12 +299,7 @@ def update_model(model_id: int, model_data: dict[str, Any]) -> dict[str, Any] | 
     """
     try:
         supabase = get_supabase_client()
-        response = (
-            supabase.table("models")
-            .update(model_data)
-            .eq("id", model_id)
-            .execute()
-        )
+        response = supabase.table("models").update(model_data).eq("id", model_id).execute()
 
         if response.data:
             logger.info(f"Updated model {model_id}")
@@ -374,7 +363,7 @@ def update_model_health(
     model_id: int,
     health_status: str,
     response_time_ms: int | None = None,
-    error_message: str | None = None
+    error_message: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Update model health status and log to history
@@ -418,10 +407,7 @@ def update_model_health(
         return None
 
 
-def get_model_health_history(
-    model_id: int,
-    limit: int = 100
-) -> list[dict[str, Any]]:
+def get_model_health_history(model_id: int, limit: int = 100) -> list[dict[str, Any]]:
     """
     Get health check history for a model
 
@@ -592,9 +578,7 @@ def get_models_stats(provider_id: int | None = None) -> dict[str, Any]:
                 )
                 break
 
-            query = supabase.table("models").select(
-                "id, is_active, health_status, modality"
-            )
+            query = supabase.table("models").select("id, is_active, health_status, modality")
             if provider_id:
                 query = query.eq("provider_id", provider_id)
 
@@ -669,10 +653,7 @@ def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
 
         response = (
             supabase.table("models")
-            .upsert(
-                cleaned_data,
-                on_conflict="provider_id,provider_model_id"
-            )
+            .upsert(cleaned_data, on_conflict="provider_id,provider_model_id")
             .execute()
         )
 
@@ -685,7 +666,9 @@ def upsert_model(model_data: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = True) -> list[dict[str, Any]]:
+def bulk_upsert_models(
+    models_data: list[dict[str, Any]], use_sync_pool: bool = True
+) -> list[dict[str, Any]]:
     """
     Upsert multiple models at once
 
@@ -733,7 +716,9 @@ def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = 
             provider_model_id = model.get("provider_model_id")
 
             if provider_id is None or provider_model_id is None:
-                logger.warning(f"Skipping model with missing provider_id or provider_model_id: {model.get('model_name', 'unknown')}")
+                logger.warning(
+                    f"Skipping model with missing provider_id or provider_model_id: {model.get('model_name', 'unknown')}"
+                )
                 continue
 
             key = (provider_id, provider_model_id)
@@ -741,7 +726,9 @@ def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = 
             # If we've seen this key before, we're replacing the old value
             if key in seen_keys:
                 duplicates_removed += 1
-                logger.debug(f"Duplicate model found: provider_id={provider_id}, provider_model_id={provider_model_id}")
+                logger.debug(
+                    f"Duplicate model found: provider_id={provider_id}, provider_model_id={provider_model_id}"
+                )
 
             seen_keys[key] = model
 
@@ -766,10 +753,7 @@ def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = 
             batch = deduplicated_models[i : i + BATCH_SIZE]
             response = (
                 supabase.table("models")
-                .upsert(
-                    batch,
-                    on_conflict="provider_id,provider_model_id"
-                )
+                .upsert(batch, on_conflict="provider_id,provider_model_id")
                 .execute()
             )
             if response.data:
@@ -791,9 +775,7 @@ def bulk_upsert_models(models_data: list[dict[str, Any]], use_sync_pool: bool = 
         return []
 
 
-def _sync_pricing_to_model_pricing(
-    supabase, upserted_models: list[dict[str, Any]]
-) -> None:
+def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any]]) -> None:
     """
     Sync pricing from metadata.pricing_raw into the model_pricing table.
 
@@ -869,14 +851,10 @@ def _sync_pricing_to_model_pricing(
         total_synced = 0
         for i in range(0, len(pricing_rows), CHUNK_SIZE):
             chunk = pricing_rows[i : i + CHUNK_SIZE]
-            supabase.table("model_pricing").upsert(
-                chunk, on_conflict="model_id"
-            ).execute()
+            supabase.table("model_pricing").upsert(chunk, on_conflict="model_id").execute()
             total_synced += len(chunk)
 
-        logger.info(
-            f"Synced {total_synced} pricing entries to model_pricing table"
-        )
+        logger.info(f"Synced {total_synced} pricing entries to model_pricing table")
     except Exception as e:
         # Non-fatal: pricing sync failure shouldn't block model sync
         logger.error(f"Failed to sync pricing to model_pricing table: {e}")
@@ -910,7 +888,7 @@ def flush_models_table() -> dict[str, Any]:
         return {
             "success": True,
             "deleted_count": models_count,
-            "message": f"Successfully deleted {models_count} models"
+            "message": f"Successfully deleted {models_count} models",
         }
     except Exception as e:
         logger.error(f"❌ Error flushing models table: {e}")
@@ -918,7 +896,7 @@ def flush_models_table() -> dict[str, Any]:
             "success": False,
             "deleted_count": 0,
             "error": str(e),
-            "message": f"Failed to flush models table: {e}"
+            "message": f"Failed to flush models table: {e}",
         }
 
 
@@ -959,7 +937,7 @@ def flush_providers_table() -> dict[str, Any]:
             "success": True,
             "deleted_providers_count": providers_count,
             "deleted_models_count": models_count,
-            "message": f"Successfully deleted {providers_count} providers and {models_count} models"
+            "message": f"Successfully deleted {providers_count} providers and {models_count} models",
         }
     except Exception as e:
         logger.error(f"❌ Error flushing providers table: {e}")
@@ -968,7 +946,7 @@ def flush_providers_table() -> dict[str, Any]:
             "deleted_providers_count": 0,
             "deleted_models_count": 0,
             "error": str(e),
-            "message": f"Failed to flush providers table: {e}"
+            "message": f"Failed to flush providers table: {e}",
         }
 
 
@@ -980,9 +958,7 @@ def flush_providers_table() -> dict[str, Any]:
 
 
 @with_retry(**_CATALOG_DB_RETRY)
-def get_all_models_for_catalog(
-    include_inactive: bool = False
-) -> list[dict[str, Any]]:
+def get_all_models_for_catalog(include_inactive: bool = False) -> list[dict[str, Any]]:
     """
     Get ALL models from database optimized for catalog building.
 
@@ -1039,10 +1015,7 @@ def get_all_models_for_catalog(
                 break
 
             # Build query with pagination - join with providers table
-            query = (
-                supabase.table("models")
-                .select("*, providers!inner(*)")
-            )
+            query = supabase.table("models").select("*, providers!inner(*)")
 
             # Filter by active status
             if not include_inactive:
@@ -1064,7 +1037,9 @@ def get_all_models_for_catalog(
 
             all_models.extend(batch)
             batch_count += 1
-            logger.debug(f"Fetched batch {batch_count}: {len(batch)} models (offset={offset}, total={len(all_models)})")
+            logger.debug(
+                f"Fetched batch {batch_count}: {len(batch)} models (offset={offset}, total={len(all_models)})"
+            )
 
             # If we got fewer than page_size rows, we've reached the end
             if len(batch) < page_size:
@@ -1074,18 +1049,14 @@ def get_all_models_for_catalog(
             offset += page_size
 
         elapsed = time.monotonic() - start
-        logger.info(f"Query get_all_models_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows")
-
-        step_logger.success(
-            total_models=len(all_models),
-            batches=batch_count,
-            page_size=page_size
+        logger.info(
+            f"Query get_all_models_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows"
         )
 
+        step_logger.success(total_models=len(all_models), batches=batch_count, page_size=page_size)
+
         step_logger.complete(
-            total_models=len(all_models),
-            table="models",
-            include_inactive=include_inactive
+            total_models=len(all_models), table="models", include_inactive=include_inactive
         )
 
         return all_models
@@ -1098,8 +1069,7 @@ def get_all_models_for_catalog(
 
 @with_retry(**_CATALOG_DB_RETRY)
 def get_models_by_gateway_for_catalog(
-    gateway_slug: str,
-    include_inactive: bool = False
+    gateway_slug: str, include_inactive: bool = False
 ) -> list[dict[str, Any]]:
     """
     Get all models for a specific gateway/provider optimized for catalog.
@@ -1127,7 +1097,9 @@ def get_models_by_gateway_for_catalog(
         page_size = SUPABASE_PAGE_SIZE
         offset = 0
 
-        logger.debug(f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})...")
+        logger.debug(
+            f"Fetching models for gateway: {gateway_slug} (include_inactive={include_inactive})..."
+        )
         start = time.monotonic()
         deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
@@ -1166,7 +1138,9 @@ def get_models_by_gateway_for_catalog(
                 break
 
             all_models.extend(batch)
-            logger.debug(f"Fetched batch of {len(batch)} models for {gateway_slug} (offset={offset}, total so far={len(all_models)})")
+            logger.debug(
+                f"Fetched batch of {len(batch)} models for {gateway_slug} (offset={offset}, total so far={len(all_models)})"
+            )
 
             # If we got fewer than page_size rows, we've reached the end
             if len(batch) < page_size:
@@ -1176,7 +1150,9 @@ def get_models_by_gateway_for_catalog(
             offset += page_size
 
         elapsed = time.monotonic() - start
-        logger.info(f"Query get_models_by_gateway_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows")
+        logger.info(
+            f"Query get_models_by_gateway_for_catalog completed in {elapsed:.3f}s, returned {len(all_models)} rows"
+        )
 
         return all_models
 
@@ -1186,8 +1162,7 @@ def get_models_by_gateway_for_catalog(
 
 
 def get_model_by_model_name_string(
-    model_name: str,
-    provider_slug: str | None = None
+    model_name: str, provider_slug: str | None = None
 ) -> dict[str, Any] | None:
     """
     Get a model by its model_name string (not integer primary key).
@@ -1211,9 +1186,7 @@ def get_model_by_model_name_string(
         supabase = get_supabase_client()
 
         query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-            .eq("model_name", model_name)
+            supabase.table("models").select("*, providers!inner(*)").eq("model_name", model_name)
         )
 
         # Optionally filter by provider
@@ -1351,7 +1324,7 @@ def get_models_for_catalog_with_filters(
     search_query: str | None = None,
     include_inactive: bool = False,
     limit: int | None = None,
-    offset: int = 0
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """
     Get models from database with advanced filtering for catalog endpoints.
@@ -1392,10 +1365,7 @@ def get_models_for_catalog_with_filters(
         start = time.monotonic()
 
         # Build base query with provider join
-        query = (
-            supabase.table("models")
-            .select("*, providers!inner(*)")
-        )
+        query = supabase.table("models").select("*, providers!inner(*)")
 
         # Apply filters
         if not include_inactive:
@@ -1411,8 +1381,7 @@ def get_models_for_catalog_with_filters(
             # Search in model_name or description
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_name.ilike.{search_pattern},"
-                f"description.ilike.{search_pattern}"
+                f"model_name.ilike.{search_pattern}," f"description.ilike.{search_pattern}"
             )
 
         # Apply pagination
@@ -1438,10 +1407,7 @@ def get_models_for_catalog_with_filters(
                     )
                     break
 
-                page_query = (
-                    supabase.table("models")
-                    .select("*, providers!inner(*)")
-                )
+                page_query = supabase.table("models").select("*, providers!inner(*)")
 
                 # Re-apply the same filters on each page query
                 if not include_inactive:
@@ -1453,8 +1419,7 @@ def get_models_for_catalog_with_filters(
                 if search_query:
                     search_pattern = f"%{search_query}%"
                     page_query = page_query.or_(
-                        f"model_name.ilike.{search_pattern},"
-                        f"description.ilike.{search_pattern}"
+                        f"model_name.ilike.{search_pattern}," f"description.ilike.{search_pattern}"
                     )
 
                 page_query = page_query.order("model_name").range(
@@ -1474,7 +1439,9 @@ def get_models_for_catalog_with_filters(
                 page_offset += page_size
 
         elapsed = time.monotonic() - start
-        logger.info(f"Query get_models_for_catalog_with_filters completed in {elapsed:.3f}s, returned {len(models)} rows")
+        logger.info(
+            f"Query get_models_for_catalog_with_filters completed in {elapsed:.3f}s, returned {len(models)} rows"
+        )
 
         return models
 
@@ -1487,7 +1454,7 @@ def get_models_count_by_filters(
     gateway_slug: str | None = None,
     modality: str | None = None,
     search_query: str | None = None,
-    include_inactive: bool = False
+    include_inactive: bool = False,
 ) -> int:
     """
     Get count of models matching filters (for pagination).
@@ -1531,8 +1498,7 @@ def get_models_count_by_filters(
         if search_query:
             search_pattern = f"%{search_query}%"
             query = query.or_(
-                f"model_name.ilike.{search_pattern},"
-                f"description.ilike.{search_pattern}"
+                f"model_name.ilike.{search_pattern}," f"description.ilike.{search_pattern}"
             )
 
         response = query.execute()
@@ -1543,9 +1509,7 @@ def get_models_count_by_filters(
         return 0
 
 
-def transform_db_models_batch(
-    db_models: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+def transform_db_models_batch(db_models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Transform multiple database models to API format efficiently.
 
@@ -1578,7 +1542,9 @@ def transform_db_models_batch(
         enriched_count = 0
         for model in db_models:
             api_model = transform_db_model_to_api_format(model)
-            provider_slug = api_model.get("source_gateway") or api_model.get("provider_slug") or "unknown"
+            provider_slug = (
+                api_model.get("source_gateway") or api_model.get("provider_slug") or "unknown"
+            )
 
             enriched = enrich_model_with_pricing(
                 api_model,
@@ -1592,7 +1558,9 @@ def transform_db_models_batch(
                 result.append(enriched)
 
         if enriched_count > 0:
-            logger.info(f"Enriched pricing for {enriched_count}/{len(db_models)} models in catalog batch")
+            logger.info(
+                f"Enriched pricing for {enriched_count}/{len(db_models)} models in catalog batch"
+            )
 
         return result
     except Exception as e:
@@ -1619,19 +1587,13 @@ def get_catalog_statistics() -> dict[str, Any]:
 
         # Get total model count
         models_response = (
-            supabase.table("models")
-            .select("id", count="exact")
-            .eq("is_active", True)
-            .execute()
+            supabase.table("models").select("id", count="exact").eq("is_active", True).execute()
         )
         total_models = models_response.count or 0
 
         # Get provider count
         providers_response = (
-            supabase.table("providers")
-            .select("id", count="exact")
-            .eq("is_active", True)
-            .execute()
+            supabase.table("providers").select("id", count="exact").eq("is_active", True).execute()
         )
         total_providers = providers_response.count or 0
 
@@ -1700,11 +1662,7 @@ def get_catalog_statistics() -> dict[str, Any]:
             "total_providers": total_providers,
             "models_by_modality": modality_counts,
             "models_by_provider": provider_counts,
-            "top_providers": sorted(
-                provider_counts.items(),
-                key=lambda x: x[1],
-                reverse=True
-            )[:10]
+            "top_providers": sorted(provider_counts.items(), key=lambda x: x[1], reverse=True)[:10],
         }
 
     except Exception as e:
@@ -1714,14 +1672,12 @@ def get_catalog_statistics() -> dict[str, Any]:
             "total_providers": 0,
             "models_by_modality": {},
             "models_by_provider": {},
-            "top_providers": []
+            "top_providers": [],
         }
 
 
 @with_retry(**_CATALOG_DB_RETRY)
-def get_all_unique_models_for_catalog(
-    include_inactive: bool = False
-) -> list[dict[str, Any]]:
+def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[dict[str, Any]]:
     """
     Fetch unique models with provider relationships from the database.
 
@@ -1843,9 +1799,8 @@ def get_all_unique_models_for_catalog(
                 )
                 break
 
-            ump_query = (
-                supabase.table("unique_models_provider")
-                .select("unique_model_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active), providers!inner(id, slug, name)")
+            ump_query = supabase.table("unique_models_provider").select(
+                "unique_model_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active), providers!inner(id, slug, name)"
             )
 
             if not include_inactive:
@@ -1897,29 +1852,31 @@ def get_all_unique_models_for_catalog(
             # and architecture columns were dropped from the models table
             # (migrations 20260121000003, 20260131000005). Pricing is now
             # extracted from metadata.pricing_raw (JSONB).
-            model_metadata = model.get('metadata') or {}
-            pricing_raw = model_metadata.get('pricing_raw') if isinstance(model_metadata, dict) else None
+            model_metadata = model.get("metadata") or {}
+            pricing_raw = (
+                model_metadata.get("pricing_raw") if isinstance(model_metadata, dict) else None
+            )
             pricing_raw = pricing_raw if isinstance(pricing_raw, dict) else {}
 
             provider_data = {
-                'provider_id': provider.get('id'),
-                'provider_slug': provider.get('slug'),
-                'provider_name': provider.get('name'),
-                'model_id': model.get('id'),
-                'model_api_name': model.get('model_name'),
-                'provider_model_id': model.get('provider_model_id'),
-                'pricing_prompt': pricing_raw.get('prompt'),
-                'pricing_completion': pricing_raw.get('completion'),
-                'pricing_image': pricing_raw.get('image'),
-                'pricing_request': pricing_raw.get('request'),
-                'context_length': model.get('context_length'),
-                'health_status': model.get('health_status'),
-                'average_response_time_ms': model.get('average_response_time_ms'),
-                'modality': model.get('modality'),
-                'supports_streaming': model.get('supports_streaming'),
-                'supports_function_calling': model.get('supports_function_calling'),
-                'supports_vision': model.get('supports_vision'),
-                'description': model.get('description'),
+                "provider_id": provider.get("id"),
+                "provider_slug": provider.get("slug"),
+                "provider_name": provider.get("name"),
+                "model_id": model.get("id"),
+                "model_api_name": model.get("model_name"),
+                "provider_model_id": model.get("provider_model_id"),
+                "pricing_prompt": pricing_raw.get("prompt"),
+                "pricing_completion": pricing_raw.get("completion"),
+                "pricing_image": pricing_raw.get("image"),
+                "pricing_request": pricing_raw.get("request"),
+                "context_length": model.get("context_length"),
+                "health_status": model.get("health_status"),
+                "average_response_time_ms": model.get("average_response_time_ms"),
+                "modality": model.get("modality"),
+                "supports_streaming": model.get("supports_streaming"),
+                "supports_function_calling": model.get("supports_function_calling"),
+                "supports_vision": model.get("supports_vision"),
+                "description": model.get("description"),
             }
 
             providers_by_unique_model[unique_model_id].append(provider_data)
@@ -1927,7 +1884,7 @@ def get_all_unique_models_for_catalog(
         # Build final result by combining unique models with their providers
         result = []
         for um in unique_models_data:
-            unique_model_id = um['id']
+            unique_model_id = um["id"]
             providers = providers_by_unique_model.get(unique_model_id, [])
 
             # Only include models that have at least one provider
@@ -1935,26 +1892,30 @@ def get_all_unique_models_for_catalog(
                 # Sort providers by price (cheapest first)
                 # pricing_prompt is now a string from metadata.pricing_raw
                 def _price_sort_key(p):
-                    val = p.get('pricing_prompt')
+                    val = p.get("pricing_prompt")
                     if val is None:
-                        return float('inf')
+                        return float("inf")
                     try:
                         return float(val)
                     except (ValueError, TypeError):
-                        return float('inf')
+                        return float("inf")
 
                 providers.sort(key=_price_sort_key)
 
-                result.append({
-                    'unique_model_id': unique_model_id,
-                    'model_name': um['model_name'],
-                    'model_count': um['model_count'],
-                    'sample_model_id': um['sample_model_id'],
-                    'providers': providers
-                })
+                result.append(
+                    {
+                        "unique_model_id": unique_model_id,
+                        "model_name": um["model_name"],
+                        "model_count": um["model_count"],
+                        "sample_model_id": um["sample_model_id"],
+                        "providers": providers,
+                    }
+                )
 
         elapsed = time.monotonic() - start
-        logger.info(f"Query get_all_unique_models_for_catalog completed in {elapsed:.3f}s, returned {len(result)} rows")
+        logger.info(
+            f"Query get_all_unique_models_for_catalog completed in {elapsed:.3f}s, returned {len(result)} rows"
+        )
 
         if elapsed > 1.0:
             logger.warning(
@@ -2009,16 +1970,16 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
         }
     """
     try:
-        providers_data = db_model.get('providers', [])
+        providers_data = db_model.get("providers", [])
 
         # Transform provider data
         transformed_providers = []
         for provider in providers_data:
             # Format pricing
-            pricing_prompt = provider.get('pricing_prompt')
-            pricing_completion = provider.get('pricing_completion')
-            pricing_image = provider.get('pricing_image')
-            pricing_request = provider.get('pricing_request')
+            pricing_prompt = provider.get("pricing_prompt")
+            pricing_completion = provider.get("pricing_completion")
+            pricing_image = provider.get("pricing_image")
+            pricing_request = provider.get("pricing_request")
 
             # Convert Decimal to string for JSON serialization
             def format_price(price):
@@ -2029,23 +1990,23 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
                 return str(price)
 
             transformed_provider = {
-                'slug': provider.get('provider_slug', 'unknown'),
-                'name': provider.get('provider_name', 'Unknown'),
-                'pricing': {
-                    'prompt': format_price(pricing_prompt),
-                    'completion': format_price(pricing_completion),
-                    'image': format_price(pricing_image),
-                    'request': format_price(pricing_request)
+                "slug": provider.get("provider_slug", "unknown"),
+                "name": provider.get("provider_name", "Unknown"),
+                "pricing": {
+                    "prompt": format_price(pricing_prompt),
+                    "completion": format_price(pricing_completion),
+                    "image": format_price(pricing_image),
+                    "request": format_price(pricing_request),
                 },
-                'context_length': provider.get('context_length'),
-                'health_status': provider.get('health_status', 'unknown'),
-                'average_response_time_ms': provider.get('average_response_time_ms'),
-                'modality': provider.get('modality', 'text->text'),
-                'supports_streaming': provider.get('supports_streaming', False),
-                'supports_function_calling': provider.get('supports_function_calling', False),
-                'supports_vision': provider.get('supports_vision', False),
-                'description': provider.get('description'),
-                'model_name': provider.get('model_api_name')  # Include original model_name
+                "context_length": provider.get("context_length"),
+                "health_status": provider.get("health_status", "unknown"),
+                "average_response_time_ms": provider.get("average_response_time_ms"),
+                "modality": provider.get("modality", "text->text"),
+                "supports_streaming": provider.get("supports_streaming", False),
+                "supports_function_calling": provider.get("supports_function_calling", False),
+                "supports_vision": provider.get("supports_vision", False),
+                "description": provider.get("description"),
+                "model_name": provider.get("model_api_name"),  # Include original model_name
             }
 
             transformed_providers.append(transformed_provider)
@@ -2054,39 +2015,41 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
         cheapest_provider = None
         cheapest_prompt_price = None
         for provider in providers_data:
-            price = provider.get('pricing_prompt')
+            price = provider.get("pricing_prompt")
             if price is not None:
                 if cheapest_prompt_price is None or price < cheapest_prompt_price:
                     cheapest_prompt_price = price
-                    cheapest_provider = provider.get('provider_slug')
+                    cheapest_provider = provider.get("provider_slug")
 
         # Calculate fastest provider
         fastest_provider = None
         fastest_response_time = None
         for provider in providers_data:
-            response_time = provider.get('average_response_time_ms')
+            response_time = provider.get("average_response_time_ms")
             if response_time is not None:
                 if fastest_response_time is None or response_time < fastest_response_time:
                     fastest_response_time = response_time
-                    fastest_provider = provider.get('provider_slug')
+                    fastest_provider = provider.get("provider_slug")
 
         # Generate normalized model ID (use sample_model_id or model_name as fallback)
-        model_id = db_model.get('sample_model_id') or db_model.get('model_name', 'unknown')
+        model_id = db_model.get("sample_model_id") or db_model.get("model_name", "unknown")
 
         # Try to normalize the ID (remove provider prefix if exists)
-        if '/' in model_id:
+        if "/" in model_id:
             # Format like "openai/gpt-4" -> "gpt-4"
-            model_id = model_id.split('/')[-1]
+            model_id = model_id.split("/")[-1]
 
         api_model = {
-            'id': model_id,
-            'name': db_model.get('model_name', 'Unknown'),
-            'providers': transformed_providers,
-            'provider_count': len(transformed_providers),
-            'cheapest_provider': cheapest_provider,
-            'fastest_provider': fastest_provider,
-            'cheapest_prompt_price': float(cheapest_prompt_price) if cheapest_prompt_price is not None else None,
-            'fastest_response_time': fastest_response_time
+            "id": model_id,
+            "name": db_model.get("model_name", "Unknown"),
+            "providers": transformed_providers,
+            "provider_count": len(transformed_providers),
+            "cheapest_provider": cheapest_provider,
+            "fastest_provider": fastest_provider,
+            "cheapest_prompt_price": (
+                float(cheapest_prompt_price) if cheapest_prompt_price is not None else None
+            ),
+            "fastest_response_time": fastest_response_time,
         }
 
         return api_model
@@ -2095,14 +2058,14 @@ def transform_unique_model_to_api_format(db_model: dict[str, Any]) -> dict[str, 
         logger.error(f"Error transforming unique model to API format: {e}")
         # Return minimal valid structure
         return {
-            'id': db_model.get('sample_model_id', 'unknown'),
-            'name': db_model.get('model_name', 'Unknown'),
-            'providers': [],
-            'provider_count': 0,
-            'cheapest_provider': None,
-            'fastest_provider': None,
-            'cheapest_prompt_price': None,
-            'fastest_response_time': None
+            "id": db_model.get("sample_model_id", "unknown"),
+            "name": db_model.get("model_name", "Unknown"),
+            "providers": [],
+            "provider_count": 0,
+            "cheapest_provider": None,
+            "fastest_provider": None,
+            "cheapest_prompt_price": None,
+            "fastest_response_time": None,
         }
 
 
@@ -2133,11 +2096,11 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
             api_model = transform_unique_model_to_api_format(model)
 
             # Enrich per-provider pricing if NULL/zero
-            providers = api_model.get('providers', [])
+            providers = api_model.get("providers", [])
             for provider in providers:
-                pricing = provider.get('pricing', {})
-                prompt_val = pricing.get('prompt', '0')
-                completion_val = pricing.get('completion', '0')
+                pricing = provider.get("pricing", {})
+                prompt_val = pricing.get("prompt", "0")
+                completion_val = pricing.get("completion", "0")
 
                 # Check if pricing is missing or zero
                 try:
@@ -2146,21 +2109,21 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
                     has_real_pricing = False
 
                 if not has_real_pricing:
-                    model_id = api_model.get('id', '')
-                    provider_slug = provider.get('slug', '')
+                    model_id = api_model.get("id", "")
+                    provider_slug = provider.get("slug", "")
                     # Also try with provider's original model_name
-                    model_name = provider.get('model_name', model_id)
+                    model_name = provider.get("model_name", model_id)
 
                     # Try batch pricing map first (O(1), no DB round-trip)
                     enriched_from_batch = False
                     for lookup_key in (model_name, model_id):
                         if lookup_key and lookup_key in pricing_batch:
                             bp = pricing_batch[lookup_key]
-                            provider['pricing'] = {
-                                'prompt': bp.get('prompt', '0'),
-                                'completion': bp.get('completion', '0'),
-                                'image': bp.get('image', '0'),
-                                'request': bp.get('request', '0'),
+                            provider["pricing"] = {
+                                "prompt": bp.get("prompt", "0"),
+                                "completion": bp.get("completion", "0"),
+                                "image": bp.get("image", "0"),
+                                "request": bp.get("request", "0"),
                             }
                             enriched_count += 1
                             enriched_from_batch = True
@@ -2173,11 +2136,11 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
                             manual_pricing = get_model_pricing(provider_slug, model_id)
 
                         if manual_pricing:
-                            provider['pricing'] = {
-                                'prompt': manual_pricing.get('prompt', '0'),
-                                'completion': manual_pricing.get('completion', '0'),
-                                'image': manual_pricing.get('image', '0'),
-                                'request': manual_pricing.get('request', '0'),
+                            provider["pricing"] = {
+                                "prompt": manual_pricing.get("prompt", "0"),
+                                "completion": manual_pricing.get("completion", "0"),
+                                "image": manual_pricing.get("image", "0"),
+                                "request": manual_pricing.get("request", "0"),
                             }
                             enriched_count += 1
 
@@ -2186,21 +2149,23 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
             cheapest_prompt_price = None
             for provider in providers:
                 try:
-                    price = float(provider.get('pricing', {}).get('prompt', '0'))
+                    price = float(provider.get("pricing", {}).get("prompt", "0"))
                 except (ValueError, TypeError):
                     continue
                 if cheapest_prompt_price is None or price < cheapest_prompt_price:
                     cheapest_prompt_price = price
-                    cheapest_provider = provider.get('slug')
+                    cheapest_provider = provider.get("slug")
 
             if cheapest_provider:
-                api_model['cheapest_provider'] = cheapest_provider
-                api_model['cheapest_prompt_price'] = cheapest_prompt_price
+                api_model["cheapest_provider"] = cheapest_provider
+                api_model["cheapest_prompt_price"] = cheapest_prompt_price
 
             result.append(api_model)
 
         if enriched_count > 0:
-            logger.info(f"Enriched pricing for {enriched_count} providers across {len(db_models)} unique models")
+            logger.info(
+                f"Enriched pricing for {enriched_count} providers across {len(db_models)} unique models"
+            )
 
         return result
     except Exception as e:

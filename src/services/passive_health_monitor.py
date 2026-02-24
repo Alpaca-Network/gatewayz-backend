@@ -77,10 +77,7 @@ async def capture_model_health(
         logger.error(f"Failed to capture health metric for {provider}/{model}: {e}")
 
 
-def extract_provider_from_request(
-    request_model: str,
-    used_provider: str | None = None
-) -> str:
+def extract_provider_from_request(request_model: str, used_provider: str | None = None) -> str:
     """
     Extract the provider name from a model request.
 

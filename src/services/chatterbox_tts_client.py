@@ -36,15 +36,15 @@ CHATTERBOX_MAX_VOICE_REF_SIZE = 10 * 1024 * 1024  # 10 MB max for voice referenc
 
 # Blocked IP ranges for SSRF protection
 BLOCKED_IP_RANGES = [
-    ipaddress.ip_network("10.0.0.0/8"),       # Private
-    ipaddress.ip_network("172.16.0.0/12"),    # Private
-    ipaddress.ip_network("192.168.0.0/16"),   # Private
-    ipaddress.ip_network("127.0.0.0/8"),      # Loopback
-    ipaddress.ip_network("169.254.0.0/16"),   # Link-local / Cloud metadata
-    ipaddress.ip_network("0.0.0.0/8"),        # Current network
-    ipaddress.ip_network("::1/128"),          # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),         # IPv6 private
-    ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
+    ipaddress.ip_network("10.0.0.0/8"),  # Private
+    ipaddress.ip_network("172.16.0.0/12"),  # Private
+    ipaddress.ip_network("192.168.0.0/16"),  # Private
+    ipaddress.ip_network("127.0.0.0/8"),  # Loopback
+    ipaddress.ip_network("169.254.0.0/16"),  # Link-local / Cloud metadata
+    ipaddress.ip_network("0.0.0.0/8"),  # Current network
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),  # IPv6 private
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
 ]
 
 # Supported models
@@ -61,9 +61,28 @@ CHATTERBOX_MODELS = {
         "description": "Multi-language TTS supporting 23+ languages with zero-shot voice cloning",
         "parameters": 500_000_000,
         "languages": [
-            "ar", "zh", "cs", "nl", "en", "fr", "de", "hi", "hu", "id",
-            "it", "ja", "ko", "pl", "pt", "ro", "ru", "es", "th", "tr",
-            "uk", "vi"
+            "ar",
+            "zh",
+            "cs",
+            "nl",
+            "en",
+            "fr",
+            "de",
+            "hi",
+            "hu",
+            "id",
+            "it",
+            "ja",
+            "ko",
+            "pl",
+            "pt",
+            "ro",
+            "ru",
+            "es",
+            "th",
+            "tr",
+            "uk",
+            "vi",
         ],
         "features": ["multilingual", "voice_cloning"],
     },
@@ -78,12 +97,28 @@ CHATTERBOX_MODELS = {
 
 # Language code to name mapping for multilingual model
 LANGUAGE_NAMES = {
-    "ar": "Arabic", "zh": "Chinese", "cs": "Czech", "nl": "Dutch",
-    "en": "English", "fr": "French", "de": "German", "hi": "Hindi",
-    "hu": "Hungarian", "id": "Indonesian", "it": "Italian", "ja": "Japanese",
-    "ko": "Korean", "pl": "Polish", "pt": "Portuguese", "ro": "Romanian",
-    "ru": "Russian", "es": "Spanish", "th": "Thai", "tr": "Turkish",
-    "uk": "Ukrainian", "vi": "Vietnamese",
+    "ar": "Arabic",
+    "zh": "Chinese",
+    "cs": "Czech",
+    "nl": "Dutch",
+    "en": "English",
+    "fr": "French",
+    "de": "German",
+    "hi": "Hindi",
+    "hu": "Hungarian",
+    "id": "Indonesian",
+    "it": "Italian",
+    "ja": "Japanese",
+    "ko": "Korean",
+    "pl": "Polish",
+    "pt": "Portuguese",
+    "ro": "Romanian",
+    "ru": "Russian",
+    "es": "Spanish",
+    "th": "Thai",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+    "vi": "Vietnamese",
 }
 
 
@@ -249,9 +284,7 @@ async def generate_speech(
         )
 
     if not validate_chatterbox_model(model):
-        raise ValueError(
-            f"Invalid model: {model}. Available: {list(CHATTERBOX_MODELS.keys())}"
-        )
+        raise ValueError(f"Invalid model: {model}. Available: {list(CHATTERBOX_MODELS.keys())}")
 
     if model == "chatterbox-multilingual" and not validate_language(model, language):
         raise ValueError(
@@ -261,9 +294,7 @@ async def generate_speech(
 
     # Validate voice reference URL for SSRF
     if voice_reference_url and not _is_safe_url(voice_reference_url):
-        raise ValueError(
-            "Invalid voice reference URL: must be a public HTTP/HTTPS URL"
-        )
+        raise ValueError("Invalid voice reference URL: must be a public HTTP/HTTPS URL")
 
     # Check for API key (Resemble AI hosted API)
     resemble_api_key = getattr(Config, "RESEMBLE_API_KEY", None)
@@ -446,8 +477,7 @@ async def _generate_speech_local(
         import torchaudio  # noqa: F401
     except ImportError:
         raise RuntimeError(
-            "Local TTS requires torch and torchaudio. "
-            "Install with: pip install torch torchaudio"
+            "Local TTS requires torch and torchaudio. " "Install with: pip install torch torchaudio"
         )
 
     audio_prompt_path = None
@@ -519,9 +549,7 @@ async def _generate_speech_local(
 
     except ImportError as e:
         logger.error(f"Chatterbox TTS import failed: {e}")
-        raise RuntimeError(
-            "Chatterbox TTS not installed. Install with: pip install chatterbox-tts"
-        )
+        raise RuntimeError("Chatterbox TTS not installed. Install with: pip install chatterbox-tts")
     except Exception as e:
         logger.error(f"Chatterbox TTS generation failed: {e}", exc_info=True)
         raise RuntimeError(f"TTS generation failed: {str(e)}")

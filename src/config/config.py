@@ -238,7 +238,9 @@ class Config:
 
     # Canopy Wave AI Configuration
     CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
-    CANOPYWAVE_BASE_URL = os.environ.get("CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1")
+    CANOPYWAVE_BASE_URL = os.environ.get(
+        "CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1"
+    )
 
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
@@ -264,11 +266,9 @@ class Config:
     # and serves cached responses to reduce costs and improve latency.
     # See: https://butter.dev
     # Supports both BUTTER_DEV_ENABLED and BUTTER_ENABLED env vars for compatibility
-    BUTTER_DEV_ENABLED: bool = (
-        os.environ.get("BUTTER_DEV_ENABLED", os.environ.get("BUTTER_ENABLED", "false"))
-        .lower()
-        in {"1", "true", "yes"}
-    )
+    BUTTER_DEV_ENABLED: bool = os.environ.get(
+        "BUTTER_DEV_ENABLED", os.environ.get("BUTTER_ENABLED", "false")
+    ).lower() in {"1", "true", "yes"}
     BUTTER_DEV_BASE_URL: str = os.environ.get(
         "BUTTER_DEV_BASE_URL", os.environ.get("BUTTER_PROXY_URL", "https://proxy.butter.dev/v1")
     )
@@ -462,8 +462,8 @@ class Config:
     # Their models are already in the DB from initial sync and rarely change.
     # Set to empty string to sync all providers: MODEL_SYNC_SKIP_PROVIDERS=""
     MODEL_SYNC_SKIP_PROVIDERS: set[str] = {
-        s.strip() for s in
-        os.environ.get("MODEL_SYNC_SKIP_PROVIDERS", "featherless").split(",")
+        s.strip()
+        for s in os.environ.get("MODEL_SYNC_SKIP_PROVIDERS", "featherless").split(",")
         if s.strip()
     }
 

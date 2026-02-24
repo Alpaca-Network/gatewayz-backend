@@ -10,7 +10,7 @@ This module provides endpoints for:
 
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -177,9 +177,6 @@ async def instrumentation_config(admin_key: str = Depends(get_admin_key)):
     }
 
 
-
-
-
 @router.post("/test-trace", tags=["instrumentation"])
 async def test_trace(admin_key: str = Depends(get_admin_key)):
     """
@@ -252,9 +249,11 @@ async def test_trace(admin_key: str = Depends(get_admin_key)):
         "flush_result": flush_result,
         "flush_error": flush_error,
         "endpoint": Config.TEMPO_OTLP_HTTP_ENDPOINT,
-        "message": "Test trace generated. Check Tempo for trace details."
-        if flush_result
-        else "Trace created but flush failed - check Tempo connection.",
+        "message": (
+            "Test trace generated. Check Tempo for trace details."
+            if flush_result
+            else "Trace created but flush failed - check Tempo connection."
+        ),
         "timestamp": datetime.now(UTC).isoformat(),
     }
 
@@ -311,12 +310,12 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
         "tempo": {
             "TEMPO_ENABLED": os.environ.get("TEMPO_ENABLED", "false"),
             "TEMPO_URL": "***" if os.environ.get("TEMPO_URL") else None,
-            "TEMPO_OTLP_HTTP_ENDPOINT": "***"
-            if os.environ.get("TEMPO_OTLP_HTTP_ENDPOINT")
-            else None,
-            "TEMPO_OTLP_GRPC_ENDPOINT": "***"
-            if os.environ.get("TEMPO_OTLP_GRPC_ENDPOINT")
-            else None,
+            "TEMPO_OTLP_HTTP_ENDPOINT": (
+                "***" if os.environ.get("TEMPO_OTLP_HTTP_ENDPOINT") else None
+            ),
+            "TEMPO_OTLP_GRPC_ENDPOINT": (
+                "***" if os.environ.get("TEMPO_OTLP_GRPC_ENDPOINT") else None
+            ),
         },
         "service": {
             "SERVICE_NAME": os.environ.get("SERVICE_NAME", "gatewayz-api"),
@@ -326,9 +325,6 @@ async def environment_variables(admin_key: str = Depends(get_admin_key)):
         },
         "timestamp": datetime.now(UTC).isoformat(),
     }
-
-
-
 
 
 @router.get("/otel/status", tags=["instrumentation"])

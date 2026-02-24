@@ -7,9 +7,11 @@ Tests cover all cache management functions including:
 - Cache state management
 """
 
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
 import pytest
-from datetime import datetime, timedelta, timezone, UTC
-from unittest.mock import patch, MagicMock
+
 import src.cache as cache_module
 
 
@@ -35,7 +37,6 @@ class TestCacheInitialization:
         assert cache_module._models_cache["ttl"] == 3600
         assert cache_module._models_cache["stale_ttl"] == 7200
 
-
     def test_provider_cache_initialized(self):
         """Test provider cache is properly initialized"""
         assert cache_module._provider_cache is not None
@@ -58,11 +59,26 @@ class TestCacheInitialization:
     def test_all_gateway_caches_exist(self):
         """Test all gateway-specific caches are initialized"""
         expected_gateways = [
-            "openrouter", "featherless", "deepinfra",
-            "chutes", "groq", "fireworks", "together",
-            "google-vertex", "cerebras", "nebius", "xai",
-            "novita", "huggingface", "aimo", "near",
-            "fal", "vercel-ai-gateway", "aihubmix", "anannas", "modelz"
+            "openrouter",
+            "featherless",
+            "deepinfra",
+            "chutes",
+            "groq",
+            "fireworks",
+            "together",
+            "google-vertex",
+            "cerebras",
+            "nebius",
+            "xai",
+            "novita",
+            "huggingface",
+            "aimo",
+            "near",
+            "fal",
+            "vercel-ai-gateway",
+            "aihubmix",
+            "anannas",
+            "modelz",
         ]
 
         for gateway in expected_gateways:
@@ -81,7 +97,6 @@ class TestGetModelsCacheByGateway:
         """Test retrieving OpenRouter cache"""
         cache = cache_module.get_models_cache("openrouter")
         assert cache is cache_module._models_cache
-
 
     def test_get_models_cache_featherless(self):
         """Test retrieving Featherless cache"""
@@ -155,7 +170,6 @@ class TestClearModelsCacheFunction:
         assert cache_module._models_cache["data"] is None
         assert cache_module._models_cache["timestamp"] is None
 
-
     def test_clear_models_cache_case_insensitive(self):
         """Test cache clearing is case insensitive"""
         cache_module._models_cache["data"] = {"test": "data"}
@@ -174,8 +188,13 @@ class TestClearModelsCacheFunction:
     def test_clear_all_gateway_caches(self):
         """Test clearing all gateway caches"""
         gateways = [
-            "openrouter", "featherless", "google-vertex",
-            "cerebras", "xai", "huggingface", "vercel-ai-gateway"
+            "openrouter",
+            "featherless",
+            "google-vertex",
+            "cerebras",
+            "xai",
+            "huggingface",
+            "vercel-ai-gateway",
         ]
 
         # Populate all caches
@@ -256,7 +275,7 @@ class TestCacheFreshness:
             "data": {"model": "test"},
             "timestamp": datetime.now(UTC),
             "ttl": 3600,
-            "stale_ttl": 7200
+            "stale_ttl": 7200,
         }
 
         assert cache_module.is_cache_fresh(cache) is True
@@ -265,60 +284,35 @@ class TestCacheFreshness:
         """Test cache is not fresh when TTL exceeded"""
         # Set timestamp to 2 hours ago
         old_time = datetime.now(UTC) - timedelta(hours=2)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_fresh(cache) is False
 
     def test_cache_fresh_with_none_data(self):
         """Test cache is fresh when data is None but timestamp is valid
-        
+
         Note: With the fix, we only check timestamp, not data value.
         Empty lists [] are valid cached values representing "no models found".
         """
-        cache = {
-            "data": None,
-            "timestamp": datetime.now(UTC),
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": None, "timestamp": datetime.now(UTC), "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_fresh(cache) is True
 
     def test_cache_fresh_with_empty_list(self):
         """Test cache is fresh when data is empty list [] (valid cached value)"""
-        cache = {
-            "data": [],
-            "timestamp": datetime.now(UTC),
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": [], "timestamp": datetime.now(UTC), "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_fresh(cache) is True
 
     def test_cache_not_fresh_no_timestamp(self):
         """Test cache is not fresh when timestamp is None"""
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": None,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_fresh(cache) is False
 
     def test_cache_not_fresh_empty_data(self):
         """Test cache with empty dict is still fresh if timestamp valid"""
-        cache = {
-            "data": {},
-            "timestamp": datetime.now(UTC),
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {}, "timestamp": datetime.now(UTC), "ttl": 3600, "stale_ttl": 7200}
 
         # Empty dict is truthy for freshness check
         assert cache_module.is_cache_fresh(cache) is True
@@ -329,7 +323,7 @@ class TestCacheFreshness:
             "data": {"model": "test"},
             "timestamp": datetime.now(UTC),
             "ttl": 600,  # 10 minutes
-            "stale_ttl": 1200
+            "stale_ttl": 1200,
         }
 
         assert cache_module.is_cache_fresh(cache) is True
@@ -338,12 +332,7 @@ class TestCacheFreshness:
         """Test cache at TTL boundary (just expired)"""
         # Set timestamp to exactly TTL seconds ago + 1 second
         old_time = datetime.now(UTC) - timedelta(seconds=3601)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_fresh(cache) is False
 
@@ -359,7 +348,7 @@ class TestCacheStaleness:
             "data": {"model": "test"},
             "timestamp": old_time,
             "ttl": 3600,  # 1 hour
-            "stale_ttl": 7200  # 2 hours
+            "stale_ttl": 7200,  # 2 hours
         }
 
         assert cache_module.is_cache_stale_but_usable(cache) is True
@@ -370,7 +359,7 @@ class TestCacheStaleness:
             "data": {"model": "test"},
             "timestamp": datetime.now(UTC),
             "ttl": 3600,
-            "stale_ttl": 7200
+            "stale_ttl": 7200,
         }
 
         assert cache_module.is_cache_stale_but_usable(cache) is False
@@ -379,27 +368,17 @@ class TestCacheStaleness:
         """Test cache beyond stale window is not usable"""
         # Set timestamp to 3 hours ago (beyond stale_ttl)
         old_time = datetime.now(UTC) - timedelta(hours=3)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_stale_but_usable(cache) is False
 
     def test_cache_stale_with_none_data(self):
         """Test stale check with None data but valid timestamp
-        
+
         Note: With the fix, we only check timestamp, not data value.
         Empty lists [] are valid cached values representing "no models found".
         """
-        cache = {
-            "data": None,
-            "timestamp": datetime.now(UTC),
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": None, "timestamp": datetime.now(UTC), "ttl": 3600, "stale_ttl": 7200}
 
         # Cache is fresh (not stale) when timestamp is recent
         assert cache_module.is_cache_stale_but_usable(cache) is False
@@ -412,19 +391,14 @@ class TestCacheStaleness:
             "data": [],
             "timestamp": old_time,
             "ttl": 3600,  # 1 hour
-            "stale_ttl": 7200  # 2 hours
+            "stale_ttl": 7200,  # 2 hours
         }
 
         assert cache_module.is_cache_stale_but_usable(cache) is True
 
     def test_cache_stale_no_timestamp(self):
         """Test stale check with no timestamp"""
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": None,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_stale_but_usable(cache) is False
 
@@ -436,7 +410,7 @@ class TestCacheStaleness:
             "data": {"model": "test"},
             "timestamp": old_time,
             "ttl": 1800,  # 30 minutes
-            "stale_ttl": 3600  # 60 minutes
+            "stale_ttl": 3600,  # 60 minutes
         }
 
         assert cache_module.is_cache_stale_but_usable(cache) is True
@@ -445,12 +419,7 @@ class TestCacheStaleness:
         """Test at TTL boundary (just became stale)"""
         # Set timestamp to exactly TTL seconds ago
         old_time = datetime.now(UTC) - timedelta(seconds=3600)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_stale_but_usable(cache) is True
 
@@ -458,12 +427,7 @@ class TestCacheStaleness:
         """Test at stale_ttl boundary (just expired from stale window)"""
         # Set timestamp to exactly stale_ttl seconds ago
         old_time = datetime.now(UTC) - timedelta(seconds=7200)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.is_cache_stale_but_usable(cache) is False
 
@@ -475,12 +439,7 @@ class TestShouldRevalidateInBackground:
         """Test revalidation needed for stale but usable cache"""
         # Set timestamp to 90 minutes ago
         old_time = datetime.now(UTC) - timedelta(minutes=90)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.should_revalidate_in_background(cache) is True
 
@@ -490,7 +449,7 @@ class TestShouldRevalidateInBackground:
             "data": {"model": "test"},
             "timestamp": datetime.now(UTC),
             "ttl": 3600,
-            "stale_ttl": 7200
+            "stale_ttl": 7200,
         }
 
         assert cache_module.should_revalidate_in_background(cache) is False
@@ -498,23 +457,13 @@ class TestShouldRevalidateInBackground:
     def test_should_not_revalidate_expired_cache(self):
         """Test no revalidation for cache beyond stale window"""
         old_time = datetime.now(UTC) - timedelta(hours=3)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.should_revalidate_in_background(cache) is False
 
     def test_should_revalidate_no_data(self):
         """Test revalidation flag for cache with no data"""
-        cache = {
-            "data": None,
-            "timestamp": None,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
 
         assert cache_module.should_revalidate_in_background(cache) is False
 
@@ -522,12 +471,7 @@ class TestShouldRevalidateInBackground:
         """Test revalidation logic (not fresh AND stale usable)"""
         # Just past TTL but within stale window
         old_time = datetime.now(UTC) - timedelta(minutes=65)
-        cache = {
-            "data": {"model": "test"},
-            "timestamp": old_time,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"model": "test"}, "timestamp": old_time, "ttl": 3600, "stale_ttl": 7200}
 
         # Should trigger revalidation
         is_fresh = cache_module.is_cache_fresh(cache)
@@ -542,12 +486,12 @@ class TestShouldRevalidateInBackground:
 class TestInitializeFalCache:
     """Test initialize_fal_cache_from_catalog function"""
 
-    @patch('src.services.fal_image_client.load_fal_models_catalog')
+    @patch("src.services.fal_image_client.load_fal_models_catalog")
     def test_initialize_fal_cache_success(self, mock_load_catalog):
         """Test successful FAL cache initialization"""
         mock_models = [
             {"id": "fal-ai/flux-pro", "name": "Flux Pro"},
-            {"id": "fal-ai/flux-realism", "name": "Flux Realism"}
+            {"id": "fal-ai/flux-realism", "name": "Flux Realism"},
         ]
         mock_load_catalog.return_value = mock_models
 
@@ -562,7 +506,7 @@ class TestInitializeFalCache:
         assert cache_module._fal_models_cache["data"] == mock_models
         assert cache_module._fal_models_cache["timestamp"] is not None
 
-    @patch('src.services.fal_image_client.load_fal_models_catalog')
+    @patch("src.services.fal_image_client.load_fal_models_catalog")
     def test_initialize_fal_cache_empty_catalog(self, mock_load_catalog):
         """Test FAL cache initialization with empty catalog"""
         mock_load_catalog.return_value = []
@@ -575,7 +519,7 @@ class TestInitializeFalCache:
         # Cache should remain empty
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.services.fal_image_client.load_fal_models_catalog')
+    @patch("src.services.fal_image_client.load_fal_models_catalog")
     def test_initialize_fal_cache_import_error(self, mock_load_catalog):
         """Test FAL cache initialization with import error"""
         mock_load_catalog.side_effect = ImportError("Module not found")
@@ -589,7 +533,7 @@ class TestInitializeFalCache:
         # Cache should remain None
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.services.fal_image_client.load_fal_models_catalog')
+    @patch("src.services.fal_image_client.load_fal_models_catalog")
     def test_initialize_fal_cache_os_error(self, mock_load_catalog):
         """Test FAL cache initialization with OS error"""
         mock_load_catalog.side_effect = OSError("File not found")
@@ -602,7 +546,7 @@ class TestInitializeFalCache:
 
         assert cache_module._fal_models_cache["data"] is None
 
-    @patch('src.services.fal_image_client.load_fal_models_catalog')
+    @patch("src.services.fal_image_client.load_fal_models_catalog")
     def test_initialize_fal_cache_timestamp_set(self, mock_load_catalog):
         """Test that FAL cache timestamp is set on successful init"""
         mock_models = [{"id": "fal-ai/test"}]
@@ -666,12 +610,7 @@ class TestCacheIntegration:
 
     def test_cache_freshness_state_transitions(self):
         """Test cache transitions from fresh to stale to expired"""
-        cache = {
-            "data": {"models": []},
-            "timestamp": None,
-            "ttl": 3600,
-            "stale_ttl": 7200
-        }
+        cache = {"data": {"models": []}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
 
         # Fresh state
         cache["timestamp"] = datetime.now(UTC)
@@ -696,14 +635,14 @@ class TestCacheIntegration:
             "data": {"test": "data"},
             "timestamp": datetime.now(UTC) - timedelta(minutes=16),
             "ttl": 900,  # 15 minutes
-            "stale_ttl": 1800
+            "stale_ttl": 1800,
         }
 
         long_ttl_cache = {
             "data": {"test": "data"},
             "timestamp": datetime.now(UTC) - timedelta(minutes=16),
             "ttl": 3600,  # 1 hour
-            "stale_ttl": 7200
+            "stale_ttl": 7200,
         }
 
         # Short TTL cache should be stale

@@ -233,9 +233,9 @@ class TestStreamingParsing:
 
         # Simulated SSE lines
         lines = [
-            "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}",
+            'data: {"choices":[{"delta":{"content":"Hello"}}]}',
             "",
-            "data: {\"choices\":[{\"delta\":{\"content\":\" world\"}}]}",
+            'data: {"choices":[{"delta":{"content":" world"}}]}',
             "",
             "data: [DONE]",
         ]
@@ -325,7 +325,9 @@ class TestHealthCheck:
             raw_response={},
         )
 
-        with patch.object(client, "complete", new_callable=AsyncMock, return_value=mock_response) as mock_complete:
+        with patch.object(
+            client, "complete", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_complete:
             result = await client.health_check()
 
         assert result is True
@@ -336,7 +338,9 @@ class TestHealthCheck:
         """Test failed health check."""
         client = SoundsgoodClient(model_config)
 
-        with patch.object(client, "complete", new_callable=AsyncMock, side_effect=Exception("API Error")):
+        with patch.object(
+            client, "complete", new_callable=AsyncMock, side_effect=Exception("API Error")
+        ):
             result = await client.health_check()
 
         assert result is False

@@ -3,9 +3,9 @@ Comprehensive tests for Morpheus AI Gateway Client service
 """
 
 import importlib
+from unittest.mock import Mock, patch
 
 import pytest
-from unittest.mock import Mock, patch
 
 
 class TestMorpheusClient:
@@ -46,9 +46,7 @@ class TestMorpheusClient:
 
     @patch("src.services.morpheus_client.get_morpheus_pooled_client")
     @patch("src.services.morpheus_client.Config")
-    def test_get_morpheus_client_returns_pooled_client(
-        self, mock_config, mock_get_pooled
-    ):
+    def test_get_morpheus_client_returns_pooled_client(self, mock_config, mock_get_pooled):
         """Test that get_morpheus_client returns pooled client"""
         mock_config.MORPHEUS_API_KEY = "test-key"
         mock_client = Mock()
@@ -220,9 +218,7 @@ class TestMorpheusClient:
 
         mock_config.MORPHEUS_API_KEY = "test-key"
         mock_response = Mock()
-        mock_response.json.return_value = {
-            "data": [{"id": "test-model", "context_length": 4096}]
-        }
+        mock_response.json.return_value = {"data": [{"id": "test-model", "context_length": 4096}]}
         mock_response.raise_for_status = Mock()
         mock_httpx_get.return_value = mock_response
 
@@ -237,10 +233,13 @@ class TestMorpheusClient:
 
     @patch("httpx.get")
     @patch("src.services.morpheus_client.Config")
-    def test_fetch_models_from_morpheus_updates_cache_on_http_error(self, mock_config, mock_httpx_get):
+    def test_fetch_models_from_morpheus_updates_cache_on_http_error(
+        self, mock_config, mock_httpx_get
+    ):
         """Test that cache timestamp is updated even when API fails (prevents repeated calls)"""
-        from src.cache import _morpheus_models_cache, clear_models_cache
         import httpx
+
+        from src.cache import _morpheus_models_cache, clear_models_cache
 
         # Clear cache first
         clear_models_cache("morpheus")
@@ -248,9 +247,7 @@ class TestMorpheusClient:
 
         mock_config.MORPHEUS_API_KEY = "test-key"
         mock_httpx_get.side_effect = httpx.HTTPStatusError(
-            "Server Error",
-            request=Mock(),
-            response=Mock(status_code=500)
+            "Server Error", request=Mock(), response=Mock(status_code=500)
         )
 
         from src.services.morpheus_client import fetch_models_from_morpheus

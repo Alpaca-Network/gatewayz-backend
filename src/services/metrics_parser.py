@@ -25,7 +25,7 @@ class PrometheusMetricsParser:
     def __init__(self, metrics_url: str = "http://localhost:8000/metrics"):
         """
         Initialize the parser with the metrics endpoint URL.
-        
+
         Args:
             metrics_url: URL of the Prometheus metrics endpoint
         """
@@ -35,7 +35,7 @@ class PrometheusMetricsParser:
     async def fetch_metrics(self) -> str | None:
         """
         Fetch raw metrics from the Prometheus endpoint.
-        
+
         Returns:
             Raw metrics text in Prometheus exposition format, or None if fetch fails
         """
@@ -51,10 +51,10 @@ class PrometheusMetricsParser:
     def parse_metrics(self, metrics_text: str) -> dict:
         """
         Parse Prometheus exposition format metrics and extract relevant data.
-        
+
         Args:
             metrics_text: Raw metrics in Prometheus exposition format
-            
+
         Returns:
             Structured metrics dict with latency, requests, and errors
         """
@@ -130,9 +130,7 @@ class PrometheusMetricsParser:
                     error_counts[endpoint][method] += value
 
         # Compute latency percentiles and averages
-        latency_metrics = self._compute_latency_metrics(
-            latency_buckets, latency_sum, latency_count
-        )
+        latency_metrics = self._compute_latency_metrics(latency_buckets, latency_sum, latency_count)
 
         # Build response
         return {
@@ -149,12 +147,12 @@ class PrometheusMetricsParser:
     ) -> dict:
         """
         Compute latency percentiles and averages from histogram data.
-        
+
         Args:
             buckets: {endpoint: [(bucket_value, count), ...]}
             sums: {endpoint: sum_value}
             counts: {endpoint: count_value}
-            
+
         Returns:
             {
                 "avg": float,
@@ -197,13 +195,13 @@ class PrometheusMetricsParser:
     ) -> float | None:
         """
         Calculate percentile from histogram buckets.
-        
+
         Uses linear interpolation between buckets.
-        
+
         Args:
             sorted_buckets: List of (bucket_boundary, cumulative_count) tuples, sorted by boundary
             percentile: Percentile to calculate (0.0-1.0)
-            
+
         Returns:
             Percentile value or None if insufficient data
         """
@@ -240,7 +238,7 @@ class PrometheusMetricsParser:
     async def get_metrics(self) -> dict:
         """
         Fetch and parse metrics in one call.
-        
+
         Returns:
             Structured metrics dict or empty structure if fetch/parse fails
         """
@@ -259,13 +257,15 @@ class PrometheusMetricsParser:
 _parser: PrometheusMetricsParser | None = None
 
 
-def get_metrics_parser(metrics_url: str = "http://localhost:8000/metrics") -> PrometheusMetricsParser:
+def get_metrics_parser(
+    metrics_url: str = "http://localhost:8000/metrics",
+) -> PrometheusMetricsParser:
     """
     Get or create the global metrics parser instance.
-    
+
     Args:
         metrics_url: URL of the Prometheus metrics endpoint
-        
+
     Returns:
         PrometheusMetricsParser instance
     """

@@ -9,7 +9,7 @@ import io
 import json
 import logging
 from contextlib import redirect_stdout
-from datetime import date, datetime, UTC
+from datetime import UTC, date, datetime
 from html import escape
 from typing import Any
 
@@ -17,15 +17,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from src.security.deps import require_admin
-
-from src.services.model_catalog_cache import (
-    clear_models_cache,
-    clear_providers_cache,
-    get_gateway_cache_metadata as get_models_cache,
-    get_provider_cache_metadata as get_providers_cache,
-)
-from src.services.modelz_client import clear_modelz_cache
-from src.services.huggingface_models import fetch_models_from_hug
 
 # Import fetch_models functions from their respective client files
 from src.services.aihubmix_client import fetch_models_from_aihubmix
@@ -36,12 +27,19 @@ from src.services.fal_image_client import fetch_models_from_fal
 from src.services.featherless_client import fetch_models_from_featherless
 from src.services.fireworks_client import fetch_models_from_fireworks
 from src.services.groq_client import fetch_models_from_groq
-from src.services.near_client import fetch_models_from_near
-from src.services.openrouter_client import fetch_models_from_openrouter
-from src.services.together_client import fetch_models_from_together
+from src.services.huggingface_models import fetch_models_from_hug
+from src.services.model_catalog_cache import (
+    clear_models_cache,
+    clear_providers_cache,
+)
+from src.services.model_catalog_cache import get_gateway_cache_metadata as get_models_cache
+from src.services.model_catalog_cache import get_provider_cache_metadata as get_providers_cache
+from src.services.modelz_client import clear_modelz_cache
 from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.modelz_client import refresh_modelz_cache
+from src.services.near_client import fetch_models_from_near
 from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.openrouter_client import fetch_models_from_openrouter
 from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 from src.services.providers import (
     fetch_models_from_cerebras,
@@ -49,6 +47,7 @@ from src.services.providers import (
     fetch_models_from_novita,
     fetch_models_from_xai,
 )
+from src.services.together_client import fetch_models_from_together
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -406,14 +405,12 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                         </div>
                     """
 
-                model_items.append(
-                    f"""
+                model_items.append(f"""
                     <li>
                         <span class="model-id">{escape(model_id)}</span>
                         {pricing_html}
                     </li>
-                    """
-                )
+                    """)
             models_html = f"""
             <tr class="model-row" id="models-{escape(gateway_id)}" style="display: none;">
                 <td colspan="6" class="models-cell">
@@ -485,9 +482,7 @@ def _render_gateway_dashboard(results: dict[str, Any], log_output: str, auto_fix
                 <div class=\"metric\">{fixed}</div>
                 <div class=\"label\">Auto-fixed</div>
             </div>
-        """.format(
-            fixed=summary["fixed"]
-        )
+        """.format(fixed=summary["fixed"])
 
     raw_json = escape(json.dumps(results, indent=2))
     log_block = escape(log_output.strip()) if log_output else "No log output captured."
@@ -1172,7 +1167,7 @@ async def get_cache_debouncer_stats(admin_user: dict = Depends(require_admin)):
             "impact": {
                 "operations_prevented": debouncer_stats["coalesced"],
                 "operations_saved_percent": debouncer_stats["efficiency_percent"],
-                "status": "healthy" if debouncer_stats["efficiency_percent"] > 0 else "idle"
+                "status": "healthy" if debouncer_stats["efficiency_percent"] > 0 else "idle",
             },
             "timestamp": datetime.now(UTC).isoformat(),
         }
@@ -1196,8 +1191,8 @@ async def get_cache_warmer_stats(admin_user: dict = Depends(require_admin)):
     """
     try:
         from src.services.cache_warmer import get_cache_warmer
-        from src.services.model_catalog_cache import get_catalog_cache_stats
         from src.services.local_memory_cache import get_local_cache
+        from src.services.model_catalog_cache import get_catalog_cache_stats
 
         warmer = get_cache_warmer()
         warmer_stats = warmer.get_stats()
@@ -1233,14 +1228,16 @@ async def get_cache_warmer_stats(admin_user: dict = Depends(require_admin)):
                     * 100,
                     2,
                 ),
-                "cache_warmer_effectiveness": round(
-                    (warmer_stats["refreshes"] - warmer_stats["errors"])
-                    / max(warmer_stats["refreshes"], 1)
-                    * 100,
-                    2,
-                )
-                if warmer_stats["refreshes"] > 0
-                else 100.0,
+                "cache_warmer_effectiveness": (
+                    round(
+                        (warmer_stats["refreshes"] - warmer_stats["errors"])
+                        / max(warmer_stats["refreshes"], 1)
+                        * 100,
+                        2,
+                    )
+                    if warmer_stats["refreshes"] > 0
+                    else 100.0
+                ),
             },
         }
     except Exception as e:
@@ -1579,7 +1576,9 @@ async def check_all_gateways():
 
         if not cached_gateways:
             # No cached data - health-service may not be running or no models synced
-            logger.warning("No gateway health data in cache - health-service may not be running or model sync needed")
+            logger.warning(
+                "No gateway health data in cache - health-service may not be running or model sync needed"
+            )
             return {
                 "success": True,
                 "data": {},
@@ -1595,8 +1594,8 @@ async def check_all_gateways():
                 "metadata": {
                     "cache_age_seconds": None,
                     "data_source": "none",
-                    "warning": "No cached data available. Ensure health-service is running and model sync has been executed."
-                }
+                    "warning": "No cached data available. Ensure health-service is running and model sync has been executed.",
+                },
             }
 
         # Process cached gateway data
@@ -1608,28 +1607,28 @@ async def check_all_gateways():
 
         for gateway_name, gateway_info in cached_gateways.items():
             # Normalize status
-            status = gateway_info.get('status', 'unknown').lower()
-            latency_ms = gateway_info.get('latency_ms', 0)
+            status = gateway_info.get("status", "unknown").lower()
+            latency_ms = gateway_info.get("latency_ms", 0)
 
-            if status in ['healthy', 'online']:
-                final_status = 'healthy'
+            if status in ["healthy", "online"]:
+                final_status = "healthy"
                 healthy_count += 1
-            elif status in ['degraded']:
-                final_status = 'degraded'
+            elif status in ["degraded"]:
+                final_status = "degraded"
                 degraded_count += 1
-            elif status in ['unhealthy', 'offline', 'error', 'timeout']:
-                final_status = 'unhealthy'
+            elif status in ["unhealthy", "offline", "error", "timeout"]:
+                final_status = "unhealthy"
                 unhealthy_count += 1
             else:
-                final_status = 'unconfigured'
+                final_status = "unconfigured"
                 unconfigured_count += 1
 
             health_status[gateway_name] = {
                 "status": final_status,
                 "latency_ms": latency_ms if latency_ms else None,
-                "available": gateway_info.get('available', final_status == 'healthy'),
-                "last_check": gateway_info.get('last_check', datetime.now(UTC).isoformat()),
-                "error": gateway_info.get('error', None),
+                "available": gateway_info.get("available", final_status == "healthy"),
+                "last_check": gateway_info.get("last_check", datetime.now(UTC).isoformat()),
+                "error": gateway_info.get("error", None),
             }
 
         # Calculate overall health
@@ -1646,23 +1645,21 @@ async def check_all_gateways():
                 "unhealthy": unhealthy_count,
                 "unconfigured": unconfigured_count,
                 "overall_health_percentage": round(
-                    (healthy_count / total_configured * 100) if total_configured > 0 else 0,
-                    1
+                    (healthy_count / total_configured * 100) if total_configured > 0 else 0, 1
                 ),
             },
             "timestamp": datetime.now(UTC).isoformat(),
             "metadata": {
                 "cache_age_seconds": None,  # Could be calculated if we store cache timestamp
                 "data_source": "health-service-cache",
-                "note": "Data refreshed every 60 seconds by health-service"
-            }
+                "note": "Data refreshed every 60 seconds by health-service",
+            },
         }
 
     except Exception as e:
         logger.error(f"Failed to retrieve gateway health from cache: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve gateway health: {str(e)}"
+            status_code=500, detail=f"Failed to retrieve gateway health: {str(e)}"
         ) from e
 
 
@@ -1970,9 +1967,12 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
         elif cache_type == "models":
             # Clear all gateway model caches using batch operation (Issue #1099)
             gateways = get_all_gateway_names()
-            logger.info(f"Background task: Batch invalidating model caches for {len(gateways)} gateways")
+            logger.info(
+                f"Background task: Batch invalidating model caches for {len(gateways)} gateways"
+            )
             # Use batch invalidation with cascade to refresh catalog (Issue #1099, #1100)
             from src.services.model_catalog_cache import get_model_catalog_cache
+
             cache = get_model_catalog_cache()
             result = cache.invalidate_providers_batch(gateways, cascade=True)
             logger.info(f"Batch invalidation result: {result}")
@@ -1988,9 +1988,12 @@ def _perform_cache_invalidation(gateway: str | None, cache_type: str | None) -> 
         else:
             # Clear all caches using batch operation (Issue #1099)
             gateways = get_all_gateway_names()
-            logger.info(f"Background task: Batch invalidating all caches ({len(gateways)} gateways + providers + pricing)")
+            logger.info(
+                f"Background task: Batch invalidating all caches ({len(gateways)} gateways + providers + pricing)"
+            )
             # Use batch invalidation for better performance (1 Redis operation vs 30+)
             from src.services.model_catalog_cache import get_model_catalog_cache
+
             cache = get_model_catalog_cache()
             result = cache.invalidate_providers_batch(gateways, cascade=False)
             logger.info(f"Batch invalidation result: {result}")
@@ -2015,7 +2018,8 @@ async def invalidate_cache(
         None, description="Specific gateway cache to invalidate, or all if not specified"
     ),
     cache_type: str | None = Query(
-        None, description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified"
+        None,
+        description="Type of cache to invalidate: 'models', 'providers', 'pricing', or all if not specified",
     ),
     admin_user: dict = Depends(require_admin),
 ):
@@ -2064,8 +2068,7 @@ async def invalidate_cache(
     except Exception as e:
         logger.error(f"Failed to schedule cache invalidation: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to schedule cache invalidation: {str(e)}"
+            status_code=500, detail=f"Failed to schedule cache invalidation: {str(e)}"
         ) from e
 
 
@@ -2153,17 +2156,16 @@ async def get_velocity_mode_status():
     """
     try:
         # Import here to avoid circular dependencies
-        from src.middleware.security_middleware import (
-            DEFAULT_IP_LIMIT,
-            STRICT_IP_LIMIT,
-            FINGERPRINT_LIMIT,
-            VELOCITY_ERROR_THRESHOLD,
-            VELOCITY_WINDOW_SECONDS,
-            VELOCITY_LIMIT_MULTIPLIER,
-        )
-
         # Try to get the security middleware instance from the app
         from src.main import app
+        from src.middleware.security_middleware import (
+            DEFAULT_IP_LIMIT,
+            FINGERPRINT_LIMIT,
+            STRICT_IP_LIMIT,
+            VELOCITY_ERROR_THRESHOLD,
+            VELOCITY_LIMIT_MULTIPLIER,
+            VELOCITY_WINDOW_SECONDS,
+        )
 
         security_middleware = None
         for middleware in app.user_middleware:

@@ -3,6 +3,7 @@ Tests for the Prometheus metrics parser.
 """
 
 import pytest
+
 from src.services.metrics_parser import PrometheusMetricsParser
 
 
@@ -26,10 +27,10 @@ http_request_latency_seconds_count{endpoint="/api/test"} 100
 
         assert "/api/test" in result["latency"]
         latency = result["latency"]["/api/test"]
-        
+
         # Average should be sum/count = 25.5/100 = 0.255
         assert latency["avg"] == pytest.approx(0.255, rel=0.01)
-        
+
         # Percentiles should be computed from buckets
         assert latency["p50"] is not None
         assert latency["p95"] is not None
@@ -50,7 +51,7 @@ http_requests_total{endpoint="/api/other",method="GET"} 25
         assert "/api/test" in result["requests"]
         assert result["requests"]["/api/test"]["GET"] == 100
         assert result["requests"]["/api/test"]["POST"] == 50
-        
+
         assert "/api/other" in result["requests"]
         assert result["requests"]["/api/other"]["GET"] == 25
 
@@ -69,7 +70,7 @@ http_request_errors_total{endpoint="/api/other",method="GET"} 1
         assert "/api/test" in result["errors"]
         assert result["errors"]["/api/test"]["GET"] == 5
         assert result["errors"]["/api/test"]["POST"] == 2
-        
+
         assert "/api/other" in result["errors"]
         assert result["errors"]["/api/other"]["GET"] == 1
 
@@ -147,19 +148,19 @@ http_requests_total{endpoint="/api/test",method="GET"} 100
             (1.0, 90),
             (float("inf"), 100),
         ]
-        
+
         parser = PrometheusMetricsParser()
-        
+
         # p50 should be around 0.1 (50th percentile at bucket boundary)
         p50 = parser._calculate_percentile(buckets, 0.50)
         assert p50 is not None
         assert p50 <= 0.1
-        
+
         # p95 should be around 0.9 (95th percentile in the 0.1-1.0 bucket)
         p95 = parser._calculate_percentile(buckets, 0.95)
         assert p95 is not None
         assert 0.1 <= p95 <= 1.0
-        
+
         # p99 should be around 0.99 (99th percentile in the 0.1-1.0 bucket)
         p99 = parser._calculate_percentile(buckets, 0.99)
         assert p99 is not None

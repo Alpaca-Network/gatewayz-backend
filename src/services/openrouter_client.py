@@ -7,13 +7,17 @@ import httpx
 from fastapi import APIRouter
 from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
+from src.config import Config
+from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.circuit_breaker import (
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    get_circuit_breaker,
+)
+from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
 from src.services.model_catalog_cache import (
     update_provider_catalog_incremental,
 )
-from src.config import Config
-from src.services.anthropic_transformer import extract_message_with_tools
-from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
-from src.services.connection_pool import get_openrouter_pooled_client, get_pooled_async_client
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.sentry_context import capture_provider_error
 
@@ -86,11 +90,11 @@ def _extract_error_details(e: Exception, model: str, kwargs: dict) -> dict:
 
     # Log request parameters (excluding sensitive data like messages content)
     error_details["request_params"] = {
-        k: v for k, v in kwargs.items()
-        if k not in ("messages",) and v is not None
+        k: v for k, v in kwargs.items() if k not in ("messages",) and v is not None
     }
 
     return error_details
+
 
 router = APIRouter()
 
@@ -132,7 +136,7 @@ def get_openrouter_client():
         return get_openrouter_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize OpenRouter client: {e}")
-        capture_provider_error(e, provider='openrouter', endpoint='client_init')
+        capture_provider_error(e, provider="openrouter", endpoint="client_init")
         raise
 
 
@@ -148,7 +152,9 @@ def _make_openrouter_request_openai_internal(messages, model, **kwargs):
 
     # Track provider timing
     with ProviderTimingContext("openrouter", model, "non_stream"):
-        response = client.chat.completions.create(model=model, messages=normalized_messages, **merged_kwargs)
+        response = client.chat.completions.create(
+            model=model, messages=normalized_messages, **merged_kwargs
+        )
     return response
 
 
@@ -159,10 +165,7 @@ def make_openrouter_request_openai(messages, model, **kwargs):
     try:
         # Wrap the actual API call with circuit breaker
         response = circuit_breaker.call(
-            _make_openrouter_request_openai_internal,
-            messages,
-            model,
-            **kwargs
+            _make_openrouter_request_openai_internal, messages, model, **kwargs
         )
         return response
     except CircuitBreakerError as e:
@@ -170,10 +173,10 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         logger.warning(f"OpenRouter circuit breaker OPEN: {e.message}")
         capture_provider_error(
             e,
-            provider='openrouter',
+            provider="openrouter",
             model=model,
-            endpoint='/chat/completions',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except APIStatusError as e:
@@ -188,7 +191,11 @@ def make_openrouter_request_openai(messages, model, **kwargs):
             # Check credit balance and alert if necessary
             try:
                 import asyncio
-                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+
+                from src.services.provider_credit_monitor import (
+                    check_openrouter_credits,
+                    send_low_credit_alert,
+                )
 
                 # Run async credit check in sync context
                 loop = asyncio.new_event_loop()
@@ -198,22 +205,22 @@ def make_openrouter_request_openai(messages, model, **kwargs):
                     if credit_info.get("status") in ("critical", "warning"):
                         loop.run_until_complete(
                             send_low_credit_alert(
-                                "openrouter",
-                                credit_info.get("balance", 0),
-                                credit_info["status"]
+                                "openrouter", credit_info.get("balance", 0), credit_info["status"]
                             )
                         )
                 finally:
                     loop.close()
             except Exception as credit_check_err:
-                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+                logger.warning(
+                    f"Failed to check OpenRouter credits after 402 error: {credit_check_err}"
+                )
 
             capture_provider_error(
                 e,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions',
-                extra_context={**error_details, "error_type": "insufficient_credits"}
+                endpoint="/chat/completions",
+                extra_context={**error_details, "error_type": "insufficient_credits"},
             )
             raise
         # Fall through to BadRequestError handling
@@ -222,7 +229,9 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         else:
             # Other APIStatusErrors
             logger.error(f"OpenRouter request failed: {e}")
-            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions')
+            capture_provider_error(
+                e, provider="openrouter", model=model, endpoint="/chat/completions"
+            )
             raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors (helps diagnose openrouter/auto issues)
@@ -232,8 +241,7 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         # Check for invalid model ID error
         if "is not a valid model ID" in error_message:
             logger.warning(
-                f"User requested invalid OpenRouter model: model={model}, "
-                f"error={error_message}"
+                f"User requested invalid OpenRouter model: model={model}, " f"error={error_message}"
             )
             # Provide user-friendly error message
             user_friendly_error = BadRequestError(
@@ -243,14 +251,14 @@ def make_openrouter_request_openai(messages, model, **kwargs):
                     "or verify the model ID at https://openrouter.ai/models"
                 ),
                 response=e.response,
-                body=e.body
+                body=e.body,
             )
             capture_provider_error(
                 user_friendly_error,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions',
-                extra_context={**error_details, "error_type": "invalid_model_id"}
+                endpoint="/chat/completions",
+                extra_context={**error_details, "error_type": "invalid_model_id"},
             )
             raise user_friendly_error from e
 
@@ -262,20 +270,15 @@ def make_openrouter_request_openai(messages, model, **kwargs):
         )
         capture_provider_error(
             e,
-            provider='openrouter',
+            provider="openrouter",
             model=model,
-            endpoint='/chat/completions',
-            extra_context=error_details
+            endpoint="/chat/completions",
+            extra_context=error_details,
         )
         raise
     except Exception as e:
         logger.error(f"OpenRouter request failed: {e}")
-        capture_provider_error(
-            e,
-            provider='openrouter',
-            model=model,
-            endpoint='/chat/completions'
-        )
+        capture_provider_error(e, provider="openrouter", model=model, endpoint="/chat/completions")
         raise
 
 
@@ -312,11 +315,7 @@ def process_openrouter_response(response):
         }
     except Exception as e:
         logger.error(f"Failed to process OpenRouter response: {e}")
-        capture_provider_error(
-            e,
-            provider='openrouter',
-            endpoint='response_processing'
-        )
+        capture_provider_error(e, provider="openrouter", endpoint="response_processing")
         raise
 
 
@@ -345,10 +344,7 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
     try:
         # Wrap the actual API call with circuit breaker
         stream = circuit_breaker.call(
-            _make_openrouter_request_openai_stream_internal,
-            messages,
-            model,
-            **kwargs
+            _make_openrouter_request_openai_stream_internal, messages, model, **kwargs
         )
         return stream
     except CircuitBreakerError as e:
@@ -356,10 +352,10 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
         logger.warning(f"OpenRouter circuit breaker OPEN (streaming): {e.message}")
         capture_provider_error(
             e,
-            provider='openrouter',
+            provider="openrouter",
             model=model,
-            endpoint='/chat/completions (stream)',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions (stream)",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except APIStatusError as e:
@@ -374,7 +370,11 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
             # Check credit balance and alert if necessary
             try:
                 import asyncio
-                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+
+                from src.services.provider_credit_monitor import (
+                    check_openrouter_credits,
+                    send_low_credit_alert,
+                )
 
                 # Run async credit check in sync context
                 loop = asyncio.new_event_loop()
@@ -384,22 +384,22 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
                     if credit_info.get("status") in ("critical", "warning"):
                         loop.run_until_complete(
                             send_low_credit_alert(
-                                "openrouter",
-                                credit_info.get("balance", 0),
-                                credit_info["status"]
+                                "openrouter", credit_info.get("balance", 0), credit_info["status"]
                             )
                         )
                 finally:
                     loop.close()
             except Exception as credit_check_err:
-                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+                logger.warning(
+                    f"Failed to check OpenRouter credits after 402 error: {credit_check_err}"
+                )
 
             capture_provider_error(
                 e,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions (stream)',
-                extra_context={**error_details, "error_type": "insufficient_credits"}
+                endpoint="/chat/completions (stream)",
+                extra_context={**error_details, "error_type": "insufficient_credits"},
             )
             raise
         # Fall through to BadRequestError handling
@@ -408,7 +408,9 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
         else:
             # Other APIStatusErrors
             logger.error(f"OpenRouter streaming request failed: {e}")
-            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions (stream)')
+            capture_provider_error(
+                e, provider="openrouter", model=model, endpoint="/chat/completions (stream)"
+            )
             raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors
@@ -429,14 +431,14 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
                     "or verify the model ID at https://openrouter.ai/models"
                 ),
                 response=e.response,
-                body=e.body
+                body=e.body,
             )
             capture_provider_error(
                 user_friendly_error,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions (stream)',
-                extra_context={**error_details, "error_type": "invalid_model_id"}
+                endpoint="/chat/completions (stream)",
+                extra_context={**error_details, "error_type": "invalid_model_id"},
             )
             raise user_friendly_error from e
 
@@ -448,19 +450,16 @@ def make_openrouter_request_openai_stream(messages, model, **kwargs):
         )
         capture_provider_error(
             e,
-            provider='openrouter',
+            provider="openrouter",
             model=model,
-            endpoint='/chat/completions (stream)',
-            extra_context=error_details
+            endpoint="/chat/completions (stream)",
+            extra_context=error_details,
         )
         raise
     except Exception as e:
         logger.error(f"OpenRouter streaming request failed: {e}")
         capture_provider_error(
-            e,
-            provider='openrouter',
-            model=model,
-            endpoint='/chat/completions (stream)'
+            e, provider="openrouter", model=model, endpoint="/chat/completions (stream)"
         )
         raise
 
@@ -487,7 +486,7 @@ def get_openrouter_async_client() -> AsyncOpenAI:
         )
     except Exception as e:
         logger.error(f"Failed to initialize async OpenRouter client: {e}")
-        capture_provider_error(e, provider='openrouter', endpoint='async_client_init')
+        capture_provider_error(e, provider="openrouter", endpoint="async_client_init")
         raise
 
 
@@ -527,24 +526,27 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
 
             # Check credit balance and alert if necessary
             try:
-                from src.services.provider_credit_monitor import check_openrouter_credits, send_low_credit_alert
+                from src.services.provider_credit_monitor import (
+                    check_openrouter_credits,
+                    send_low_credit_alert,
+                )
 
                 credit_info = await check_openrouter_credits()
                 if credit_info.get("status") in ("critical", "warning"):
                     await send_low_credit_alert(
-                        "openrouter",
-                        credit_info.get("balance", 0),
-                        credit_info["status"]
+                        "openrouter", credit_info.get("balance", 0), credit_info["status"]
                     )
             except Exception as credit_check_err:
-                logger.warning(f"Failed to check OpenRouter credits after 402 error: {credit_check_err}")
+                logger.warning(
+                    f"Failed to check OpenRouter credits after 402 error: {credit_check_err}"
+                )
 
             capture_provider_error(
                 e,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions (async stream)',
-                extra_context={**error_details, "error_type": "insufficient_credits"}
+                endpoint="/chat/completions (async stream)",
+                extra_context={**error_details, "error_type": "insufficient_credits"},
             )
             raise
         # Fall through to BadRequestError handling
@@ -553,7 +555,9 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
         else:
             # Other APIStatusErrors
             logger.error(f"OpenRouter async streaming request failed: {e}")
-            capture_provider_error(e, provider='openrouter', model=model, endpoint='/chat/completions (async stream)')
+            capture_provider_error(
+                e, provider="openrouter", model=model, endpoint="/chat/completions (async stream)"
+            )
             raise
     except BadRequestError as e:
         # Log detailed error info for 400 Bad Request errors
@@ -574,14 +578,14 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
                     "or verify the model ID at https://openrouter.ai/models"
                 ),
                 response=e.response,
-                body=e.body
+                body=e.body,
             )
             capture_provider_error(
                 user_friendly_error,
-                provider='openrouter',
+                provider="openrouter",
                 model=model,
-                endpoint='/chat/completions (async stream)',
-                extra_context={**error_details, "error_type": "invalid_model_id"}
+                endpoint="/chat/completions (async stream)",
+                extra_context={**error_details, "error_type": "invalid_model_id"},
             )
             raise user_friendly_error from e
 
@@ -593,19 +597,16 @@ async def make_openrouter_request_openai_stream_async(messages, model, **kwargs)
         )
         capture_provider_error(
             e,
-            provider='openrouter',
+            provider="openrouter",
             model=model,
-            endpoint='/chat/completions (async stream)',
-            extra_context=error_details
+            endpoint="/chat/completions (async stream)",
+            extra_context=error_details,
         )
         raise
     except Exception as e:
         logger.error(f"OpenRouter async streaming request failed: {e}")
         capture_provider_error(
-            e,
-            provider='openrouter',
-            model=model,
-            endpoint='/chat/completions (async stream)'
+            e, provider="openrouter", model=model, endpoint="/chat/completions (async stream)"
         )
         raise
 
@@ -730,7 +731,7 @@ def fetch_models_from_openrouter():
         step_logger.success(
             final_count=len(filtered_models),
             filtered_out=filtered_count,
-            filter_rate=f"{(filtered_count/len(raw_models)*100):.1f}%"
+            filter_rate=f"{(filtered_count/len(raw_models)*100):.1f}%",
         )
 
         # Step 4: Smart incremental cache update (only updates changed models)
@@ -745,7 +746,7 @@ def fetch_models_from_openrouter():
                 deleted=cache_result.get("deleted", 0),
                 unchanged=cache_result.get("unchanged", 0),
                 efficiency=f"{cache_result.get('efficiency_percent', 0)}%",
-                cache_status="smart_updated"
+                cache_status="smart_updated",
             )
             logger.info(
                 f"Smart cache: OpenRouter | "
@@ -757,7 +758,9 @@ def fetch_models_from_openrouter():
             )
         else:
             step_logger.success(cached_count=len(filtered_models), cache_status="fallback_updated")
-            logger.warning(f"Smart cache update failed, used fallback: {cache_result.get('error', 'unknown')}")
+            logger.warning(
+                f"Smart cache update failed, used fallback: {cache_result.get('error', 'unknown')}"
+            )
 
         step_logger.complete(total_models=len(filtered_models), provider="openrouter")
         return filtered_models

@@ -19,8 +19,8 @@ from src.services.image_generation_client import (
     make_google_vertex_image_request,
     process_image_generation_response,
 )
+from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.performance_tracker import PerformanceTracker
-from src.utils.ai_tracing import AITracer, AIRequestType
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -60,9 +60,7 @@ IMAGE_COST_PER_IMAGE = {
 UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
 
 
-def get_image_cost(
-    provider: str, model: str, num_images: int = 1
-) -> tuple[float, float, bool]:
+def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[float, float, bool]:
     """
     Calculate the cost for image generation.
 

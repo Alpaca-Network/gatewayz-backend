@@ -21,7 +21,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 import src.db.chat_completion_requests as chat_completion_requests_module
+from src.adapters.chat import AISDKChatAdapter
 from src.db.users import deduct_credits, get_user, record_usage
+
+# Unified chat handler and adapters for chat unification
+from src.handlers.chat_handler import ChatInferenceHandler
 from src.security.deps import get_api_key
 from src.services.ai_sdk_client import (
     make_ai_sdk_request_openai_stream_async,
@@ -35,10 +39,6 @@ from src.services.openrouter_client import (
 from src.services.pricing import calculate_cost
 from src.services.trial_validation import track_trial_usage, validate_trial_access
 from src.utils.sentry_context import capture_payment_error
-
-# Unified chat handler and adapters for chat unification
-from src.handlers.chat_handler import ChatInferenceHandler
-from src.adapters.chat import AISDKChatAdapter
 
 # Initialize logging
 logger = logging.getLogger(__name__)

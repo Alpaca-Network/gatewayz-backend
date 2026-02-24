@@ -9,12 +9,12 @@ These tests validate pricing data to prevent errors like:
 Run with: pytest tests/services/test_pricing_validation.py -v
 """
 
-import pytest
 from decimal import Decimal
-from typing import Dict, Any
+from typing import Any, Dict
+
+import pytest
 
 from src.services.google_models_config import get_google_models
-
 
 # Official Google pricing (from ai.google.dev/gemini-api/docs/pricing)
 GOOGLE_OFFICIAL_PRICING = {
@@ -22,7 +22,10 @@ GOOGLE_OFFICIAL_PRICING = {
     "gemini-3-flash": {"input_per_1m": 0.50, "output_per_1m": 3.00},
     "gemini-2.5-pro": {"input_per_1m": 1.25, "output_per_1m": 10.00},
     "gemini-2.5-flash": {"input_per_1m": 0.30, "output_per_1m": 2.50},
-    "gemini-2.5-flash-lite": {"input_per_1m": 0.10, "output_per_1m": 0.40},  # Base price (text/image/video, not audio)
+    "gemini-2.5-flash-lite": {
+        "input_per_1m": 0.10,
+        "output_per_1m": 0.40,
+    },  # Base price (text/image/video, not audio)
     "gemini-2.0-flash": {"input_per_1m": 0.10, "output_per_1m": 0.40},
     "gemini-2.0-flash-lite": {"input_per_1m": 0.075, "output_per_1m": 0.30},
     "gemma": {"input_per_1m": 0.0, "output_per_1m": 0.0},  # Free
@@ -43,10 +46,12 @@ class TestGoogleModelsPricing:
         for model in google_models:
             for provider in model.providers:
                 if provider.name == "google-vertex":
-                    assert provider.cost_per_1k_input is not None, \
-                        f"Model {model.id} missing cost_per_1k_input"
-                    assert provider.cost_per_1k_output is not None, \
-                        f"Model {model.id} missing cost_per_1k_output"
+                    assert (
+                        provider.cost_per_1k_input is not None
+                    ), f"Model {model.id} missing cost_per_1k_input"
+                    assert (
+                        provider.cost_per_1k_output is not None
+                    ), f"Model {model.id} missing cost_per_1k_output"
 
     def test_pricing_format_not_per_million(self, google_models):
         """
@@ -125,10 +130,12 @@ class TestGoogleModelsPricing:
             if "gemma" in model.id.lower():
                 for provider in model.providers:
                     if provider.name == "google-vertex":
-                        assert provider.cost_per_1k_input == 0.0, \
-                            f"Gemma model {model.id} should be free (input)"
-                        assert provider.cost_per_1k_output == 0.0, \
-                            f"Gemma model {model.id} should be free (output)"
+                        assert (
+                            provider.cost_per_1k_input == 0.0
+                        ), f"Gemma model {model.id} should be free (input)"
+                        assert (
+                            provider.cost_per_1k_output == 0.0
+                        ), f"Gemma model {model.id} should be free (output)"
 
     def test_output_price_higher_than_input(self, google_models):
         """
@@ -206,39 +213,43 @@ class TestPricingNormalization:
 
     def test_per_1k_to_per_token_conversion(self):
         """Test conversion from per-1K to per-token format."""
-        from src.services.pricing_normalization import normalize_to_per_token, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_to_per_token
 
         # Test per-1K conversion
         result = normalize_to_per_token(0.0003, PricingFormat.PER_1K_TOKENS)
         expected = Decimal("0.0003") / Decimal("1000")
-        assert abs(result - expected) < Decimal("0.000000001"), \
-            f"Per-1K conversion failed: {result} != {expected}"
+        assert abs(result - expected) < Decimal(
+            "0.000000001"
+        ), f"Per-1K conversion failed: {result} != {expected}"
 
     def test_per_1m_to_per_token_conversion(self):
         """Test conversion from per-1M to per-token format."""
-        from src.services.pricing_normalization import normalize_to_per_token, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_to_per_token
 
         # Test per-1M conversion
         result = normalize_to_per_token(0.30, PricingFormat.PER_1M_TOKENS)
         expected = Decimal("0.30") / Decimal("1000000")
-        assert abs(result - expected) < Decimal("0.000000001"), \
-            f"Per-1M conversion failed: {result} != {expected}"
+        assert abs(result - expected) < Decimal(
+            "0.000000001"
+        ), f"Per-1M conversion failed: {result} != {expected}"
 
     def test_google_pricing_conversion_examples(self):
         """Test specific Google pricing conversion examples."""
-        from src.services.pricing_normalization import normalize_to_per_token, PricingFormat
+        from src.services.pricing_normalization import PricingFormat, normalize_to_per_token
 
         # Gemini 2.5 Flash: $0.30/1M should become 0.0000003 per token
         result = normalize_to_per_token(0.30, PricingFormat.PER_1M_TOKENS)
         expected = Decimal("0.0000003")
-        assert abs(result - expected) < Decimal("0.00000001"), \
-            f"Gemini 2.5 Flash conversion failed: {result} != {expected}"
+        assert abs(result - expected) < Decimal(
+            "0.00000001"
+        ), f"Gemini 2.5 Flash conversion failed: {result} != {expected}"
 
         # Gemini 2.5 Pro: $1.25/1M should become 0.00000125 per token
         result = normalize_to_per_token(1.25, PricingFormat.PER_1M_TOKENS)
         expected = Decimal("0.00000125")
-        assert abs(result - expected) < Decimal("0.00000001"), \
-            f"Gemini 2.5 Pro conversion failed: {result} != {expected}"
+        assert abs(result - expected) < Decimal(
+            "0.00000001"
+        ), f"Gemini 2.5 Pro conversion failed: {result} != {expected}"
 
 
 class TestPriceBoundsValidation:

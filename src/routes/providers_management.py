@@ -50,15 +50,13 @@ async def list_providers(
     """
     try:
         providers = get_all_providers(
-            is_active_only=is_active_only,
-            include_inactive=include_inactive
+            is_active_only=is_active_only, include_inactive=include_inactive
         )
         return providers
     except Exception as e:
         logger.error(f"Error fetching providers: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch providers"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch providers"
         )
 
 
@@ -79,7 +77,7 @@ async def get_provider_statistics():
         logger.error(f"Error fetching provider stats: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch provider statistics"
+            detail="Failed to fetch provider statistics",
         )
 
 
@@ -101,14 +99,15 @@ async def search_providers_endpoint(
     except Exception as e:
         logger.error(f"Error searching providers: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to search providers"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search providers"
         )
 
 
 @router.get("/health/{health_status}", response_model=list[ProviderResponse])
 async def get_providers_by_health(
-    health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
+    health_status: str = Path(
+        ..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"
+    ),
 ):
     """
     Get providers by health status
@@ -122,7 +121,7 @@ async def get_providers_by_health(
         if health_status not in ["healthy", "degraded", "down", "unknown"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'"
+                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'",
             )
 
         providers = get_providers_by_health_status(health_status)
@@ -133,7 +132,7 @@ async def get_providers_by_health(
         logger.error(f"Error fetching providers by health status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch providers by health status"
+            detail="Failed to fetch providers by health status",
         )
 
 
@@ -152,7 +151,7 @@ async def get_provider(provider_id: int):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
         return provider
     except HTTPException:
@@ -160,8 +159,7 @@ async def get_provider(provider_id: int):
     except Exception as e:
         logger.error(f"Error fetching provider {provider_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch provider"
         )
 
 
@@ -180,7 +178,7 @@ async def get_provider_by_slug_endpoint(slug: str):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with slug '{slug}' not found"
+                detail=f"Provider with slug '{slug}' not found",
             )
         return provider
     except HTTPException:
@@ -188,8 +186,7 @@ async def get_provider_by_slug_endpoint(slug: str):
     except Exception as e:
         logger.error(f"Error fetching provider by slug {slug}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch provider"
         )
 
 
@@ -209,7 +206,7 @@ async def get_provider_model_stats(provider_id: int):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         stats = get_models_stats(provider_id=provider_id)
@@ -220,7 +217,7 @@ async def get_provider_model_stats(provider_id: int):
         logger.error(f"Error fetching model stats for provider {provider_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch model statistics"
+            detail="Failed to fetch model statistics",
         )
 
 
@@ -240,14 +237,14 @@ async def create_provider_endpoint(provider: ProviderCreate):
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Provider with slug '{provider.slug}' already exists"
+                detail=f"Provider with slug '{provider.slug}' already exists",
             )
 
         created_provider = create_provider(provider.model_dump())
         if not created_provider:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create provider"
+                detail="Failed to create provider",
             )
         return created_provider
     except HTTPException:
@@ -255,8 +252,7 @@ async def create_provider_endpoint(provider: ProviderCreate):
     except Exception as e:
         logger.error(f"Error creating provider: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create provider"
         )
 
 
@@ -277,22 +273,21 @@ async def update_provider_endpoint(provider_id: int, provider: ProviderUpdate):
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         # Only include fields that were actually set
         update_data = provider.model_dump(exclude_unset=True)
         if not update_data:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No fields to update"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
             )
 
         updated_provider = update_provider(provider_id, update_data)
         if not updated_provider:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update provider"
+                detail="Failed to update provider",
             )
         return updated_provider
     except HTTPException:
@@ -300,16 +295,12 @@ async def update_provider_endpoint(provider_id: int, provider: ProviderUpdate):
     except Exception as e:
         logger.error(f"Error updating provider {provider_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update provider"
         )
 
 
 @router.patch("/{provider_id}/health", response_model=ProviderResponse)
-async def update_provider_health_endpoint(
-    provider_id: int,
-    health_update: ProviderHealthUpdate
-):
+async def update_provider_health_endpoint(provider_id: int, health_update: ProviderHealthUpdate):
     """
     Update provider health status
 
@@ -325,26 +316,24 @@ async def update_provider_health_endpoint(
         if not existing:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         # Validate health status
         if health_update.health_status not in ["healthy", "degraded", "down", "unknown"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'"
+                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'",
             )
 
         updated_provider = update_provider_health(
-            provider_id,
-            health_update.health_status,
-            health_update.average_response_time_ms
+            provider_id, health_update.health_status, health_update.average_response_time_ms
         )
 
         if not updated_provider:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update provider health"
+                detail="Failed to update provider health",
             )
         return updated_provider
     except HTTPException:
@@ -353,7 +342,7 @@ async def update_provider_health_endpoint(
         logger.error(f"Error updating provider health {provider_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update provider health"
+            detail="Failed to update provider health",
         )
 
 
@@ -372,14 +361,14 @@ async def activate_provider_endpoint(provider_id: int):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         activated_provider = activate_provider(provider_id)
         if not activated_provider:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to activate provider"
+                detail="Failed to activate provider",
             )
         return activated_provider
     except HTTPException:
@@ -387,8 +376,7 @@ async def activate_provider_endpoint(provider_id: int):
     except Exception as e:
         logger.error(f"Error activating provider {provider_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to activate provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to activate provider"
         )
 
 
@@ -407,14 +395,14 @@ async def deactivate_provider_endpoint(provider_id: int):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         deactivated_provider = deactivate_provider(provider_id)
         if not deactivated_provider:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to deactivate provider"
+                detail="Failed to deactivate provider",
             )
         return deactivated_provider
     except HTTPException:
@@ -423,7 +411,7 @@ async def deactivate_provider_endpoint(provider_id: int):
         logger.error(f"Error deactivating provider {provider_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to deactivate provider"
+            detail="Failed to deactivate provider",
         )
 
 
@@ -442,20 +430,19 @@ async def delete_provider_endpoint(provider_id: int):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {provider_id} not found"
+                detail=f"Provider with ID {provider_id} not found",
             )
 
         success = delete_provider(provider_id)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete provider"
+                detail="Failed to delete provider",
             )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting provider {provider_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete provider"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete provider"
         )

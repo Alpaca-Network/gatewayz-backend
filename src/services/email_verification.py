@@ -194,11 +194,17 @@ class EmailVerificationService:
             timeout: Request timeout in seconds (or set EMAILABLE_TIMEOUT env var)
         """
         self.api_key = api_key or os.getenv("EMAILABLE_API_KEY")
-        self.enabled = enabled if enabled is not None else os.getenv("EMAILABLE_ENABLED", "false").lower() == "true"
+        self.enabled = (
+            enabled
+            if enabled is not None
+            else os.getenv("EMAILABLE_ENABLED", "false").lower() == "true"
+        )
         self.timeout = timeout or int(os.getenv("EMAILABLE_TIMEOUT", "5"))
 
         if self.enabled and not self.api_key:
-            logger.warning("EMAILABLE_ENABLED is true but EMAILABLE_API_KEY is not set. Verification disabled.")
+            logger.warning(
+                "EMAILABLE_ENABLED is true but EMAILABLE_API_KEY is not set. Verification disabled."
+            )
             self.enabled = False
 
     async def verify_email(self, email: str) -> EmailVerificationResult:

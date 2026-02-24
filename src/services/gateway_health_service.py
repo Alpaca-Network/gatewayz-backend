@@ -9,21 +9,21 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
+from src.config import Config
+from src.services.model_catalog_cache import get_cached_gateway_catalog, get_gateway_cache_metadata
 from src.services.prometheus_metrics import (
-    record_zero_model_event,
-    set_gateway_model_count,
+    record_auto_fix_attempt,
     record_fallback_activation,
     record_gateway_recovery,
+    record_zero_model_event,
+    set_gateway_model_count,
     track_gateway_health_check,
-    record_auto_fix_attempt,
 )
-from src.services.model_catalog_cache import get_cached_gateway_catalog, get_gateway_cache_metadata
-from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ def _get_redis_cache_wrapper(provider_slug: str) -> dict:
 # Create cache wrappers for all providers (lazy-loaded via property access)
 class _CacheWrapper:
     """Lazy wrapper that fetches cache data from Redis on access"""
+
     def __init__(self, provider_slug: str):
         self.provider_slug = provider_slug
 
@@ -59,7 +60,9 @@ class _CacheWrapper:
 
     def __setitem__(self, key: str, value):
         """Dict-like assignment (no-op for health checks - they only read)"""
-        logger.debug(f"Cache write attempted for {self.provider_slug}.{key} (ignored in Redis mode)")
+        logger.debug(
+            f"Cache write attempted for {self.provider_slug}.{key} (ignored in Redis mode)"
+        )
 
 
 # Create cache wrapper instances for all providers

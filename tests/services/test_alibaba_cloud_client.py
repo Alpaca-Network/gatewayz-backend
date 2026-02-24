@@ -1,11 +1,11 @@
 import types
+from datetime import UTC
 from unittest.mock import MagicMock
 
 import pytest
 
 from src.config import Config
 from src.services import alibaba_cloud_client as acc
-from datetime import UTC
 
 
 def _reset_region_state(monkeypatch):
@@ -127,7 +127,9 @@ def test_failover_with_misconfigured_region_key(monkeypatch):
     monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY", None, raising=False)
     monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_CHINA", None, raising=False)
     # User mistakenly put their China key in the INTERNATIONAL variable
-    monkeypatch.setattr(Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", "china-key-in-wrong-var", raising=False)
+    monkeypatch.setattr(
+        Config, "ALIBABA_CLOUD_API_KEY_INTERNATIONAL", "china-key-in-wrong-var", raising=False
+    )
     monkeypatch.setattr(Config, "ALIBABA_CLOUD_REGION", "international", raising=False)
 
     call_order: list[str] = []
@@ -212,9 +214,7 @@ def test_quota_error_does_not_retry_other_regions(monkeypatch):
         region = region_override or "international"
         call_order.append(region)
         client = MagicMock()
-        client.models.list.side_effect = Exception(
-            "Error code: 429 - insufficient_quota"
-        )
+        client.models.list.side_effect = Exception("Error code: 429 - insufficient_quota")
         return client
 
     monkeypatch.setattr(acc, "get_alibaba_cloud_client", fake_get_client)
@@ -232,6 +232,7 @@ class TestAlibabaQuotaErrorCaching:
     def test_quota_error_caches_failure_state(self, monkeypatch):
         """Test that QuotaExceededError triggers caching of failure state."""
         from datetime import datetime, timezone
+
         from src.cache import _alibaba_models_cache
         from src.services import models
 
@@ -262,6 +263,7 @@ class TestAlibabaQuotaErrorCaching:
     def test_quota_error_backoff_skips_api_calls(self, monkeypatch):
         """Test that subsequent calls during backoff period skip API calls."""
         from datetime import datetime, timezone
+
         from src.cache import _alibaba_models_cache
         from src.services import models
 
@@ -290,7 +292,8 @@ class TestAlibabaQuotaErrorCaching:
 
     def test_quota_error_backoff_expires(self, monkeypatch):
         """Test that backoff expires after the configured duration."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from src.cache import _alibaba_models_cache
         from src.services import models
 
@@ -321,7 +324,8 @@ class TestAlibabaQuotaErrorCaching:
 
     def test_successful_fetch_clears_quota_error(self, monkeypatch):
         """Test that a successful fetch clears the quota error state."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from src.cache import _alibaba_models_cache
         from src.services import models
 
@@ -355,7 +359,8 @@ class TestAlibabaQuotaErrorCaching:
         would cause the cache to appear "fresh" for 1 hour, bypassing the 15-minute
         backoff period.
         """
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
+
         from src.cache import _alibaba_models_cache
         from src.services import models
 

@@ -2,10 +2,10 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_onerouter_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.pricing_lookup import get_model_pricing
 from src.utils.sentry_context import capture_provider_error
 
@@ -27,7 +27,7 @@ def get_onerouter_client():
         return get_onerouter_pooled_client()
     except Exception as e:
         logger.error(f"Failed to initialize Infron AI client: {e}")
-        capture_provider_error(e, provider='onerouter', endpoint='client_init')
+        capture_provider_error(e, provider="onerouter", endpoint="client_init")
         raise
 
 
@@ -50,12 +50,7 @@ def make_onerouter_request_openai(messages, model, **kwargs):
         return response
     except Exception as e:
         logger.error(f"Infron AI request failed: {e}")
-        capture_provider_error(
-            e,
-            provider='onerouter',
-            model=model,
-            endpoint='/chat/completions'
-        )
+        capture_provider_error(e, provider="onerouter", model=model, endpoint="/chat/completions")
         raise
 
 
@@ -81,10 +76,7 @@ def make_onerouter_request_openai_stream(messages, model, **kwargs):
     except Exception as e:
         logger.error(f"Infron AI streaming request failed: {e}")
         capture_provider_error(
-            e,
-            provider='onerouter',
-            model=model,
-            endpoint='/chat/completions (stream)'
+            e, provider="onerouter", model=model, endpoint="/chat/completions (stream)"
         )
         raise
 
@@ -122,11 +114,7 @@ def process_onerouter_response(response):
         }
     except Exception as e:
         logger.error(f"Failed to process Infron AI response: {e}")
-        capture_provider_error(
-            e,
-            provider='onerouter',
-            endpoint='response_processing'
-        )
+        capture_provider_error(e, provider="onerouter", endpoint="response_processing")
         raise
 
 
@@ -162,7 +150,7 @@ def _fetch_display_models_pricing() -> dict:
             "https://app.infron.ai/api/display_models/",
             headers={"Content-Type": "application/json"},
             timeout=10.0,
-            follow_redirects=True
+            follow_redirects=True,
         )
         response.raise_for_status()
         models = response.json().get("data", [])
@@ -205,7 +193,9 @@ def _fetch_display_models_pricing() -> dict:
             input_token_limit = model.get("input_token_limit")
             output_token_limit = model.get("output_token_limit")
             context_length = _parse_token_limit(input_token_limit) if input_token_limit else 128000
-            max_completion_tokens = _parse_token_limit(output_token_limit) if output_token_limit else 4096
+            max_completion_tokens = (
+                _parse_token_limit(output_token_limit) if output_token_limit else 4096
+            )
 
             pricing_map[model_id] = {
                 "prompt": prompt_price,
@@ -252,10 +242,7 @@ def fetch_models_from_onerouter():
 
         # Use the authenticated /v1/models endpoint for complete model list
         response = httpx.get(
-            "https://api.infron.ai/v1/models",
-            headers=headers,
-            timeout=15.0,
-            follow_redirects=True
+            "https://api.infron.ai/v1/models", headers=headers, timeout=15.0, follow_redirects=True
         )
         response.raise_for_status()
 
@@ -363,17 +350,9 @@ def fetch_models_from_onerouter():
             f"HTTP error fetching Infron AI models: {e.response.status_code} - "
             f"{e.response.text[:200] if e.response.text else 'No response body'}"
         )
-        capture_provider_error(
-            e,
-            provider='onerouter',
-            endpoint='/v1/models'
-        )
+        capture_provider_error(e, provider="onerouter", endpoint="/v1/models")
         return _cache_and_return([])
     except Exception as e:
         logger.error(f"Failed to fetch models from Infron AI: {type(e).__name__}: {e}")
-        capture_provider_error(
-            e,
-            provider='onerouter',
-            endpoint='/v1/models'
-        )
+        capture_provider_error(e, provider="onerouter", endpoint="/v1/models")
         return _cache_and_return([])

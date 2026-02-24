@@ -52,7 +52,9 @@ class APIExceptions:
         return HTTPException(status_code=401, detail="Invalid API key")
 
     @staticmethod
-    def payment_required(detail: str = "Insufficient credits", credits: float | None = None) -> HTTPException:
+    def payment_required(
+        detail: str = "Insufficient credits", credits: float | None = None
+    ) -> HTTPException:
         """
         402 Payment Required - User has insufficient credits.
 
@@ -101,7 +103,7 @@ class APIExceptions:
     def rate_limited(
         retry_after: int | None = None,
         detail: str = "Rate limit exceeded",
-        reason: str | None = None
+        reason: str | None = None,
     ) -> HTTPException:
         """
         429 Too Many Requests - Rate limit exceeded.
@@ -131,13 +133,12 @@ class APIExceptions:
         Returns:
             HTTPException with status 429
         """
-        return HTTPException(
-            status_code=429,
-            detail=f"Plan limit exceeded: {reason}"
-        )
+        return HTTPException(status_code=429, detail=f"Plan limit exceeded: {reason}")
 
     @staticmethod
-    def bad_request(detail: str = "Bad request", errors: dict[str, Any] | None = None) -> HTTPException:
+    def bad_request(
+        detail: str = "Bad request", errors: dict[str, Any] | None = None
+    ) -> HTTPException:
         """
         400 Bad Request - Invalid request data.
 
@@ -149,17 +150,12 @@ class APIExceptions:
             HTTPException with status 400
         """
         if errors:
-            return HTTPException(
-                status_code=400,
-                detail={"message": detail, "errors": errors}
-            )
+            return HTTPException(status_code=400, detail={"message": detail, "errors": errors})
         return HTTPException(status_code=400, detail=detail)
 
     @staticmethod
     def internal_error(
-        operation: str = "operation",
-        error: Exception | None = None,
-        include_details: bool = False
+        operation: str = "operation", error: Exception | None = None, include_details: bool = False
     ) -> HTTPException:
         """
         500 Internal Server Error - Server-side error.
@@ -184,7 +180,9 @@ class APIExceptions:
         return HTTPException(status_code=500, detail=detail)
 
     @staticmethod
-    def database_error(operation: str = "database operation", error: Exception | None = None) -> HTTPException:
+    def database_error(
+        operation: str = "database operation", error: Exception | None = None
+    ) -> HTTPException:
         """
         500 Internal Server Error - Database operation failed.
 
@@ -196,17 +194,11 @@ class APIExceptions:
             HTTPException with status 500
         """
         logger.error(f"Database error during {operation}: {error}", exc_info=True)
-        return HTTPException(
-            status_code=500,
-            detail=f"Database error during {operation}"
-        )
+        return HTTPException(status_code=500, detail=f"Database error during {operation}")
 
     @staticmethod
     def provider_error(
-        provider: str,
-        model: str,
-        error: Exception | None = None,
-        status_code: int = 502
+        provider: str, model: str, error: Exception | None = None, status_code: int = 502
     ) -> HTTPException:
         """
         502 Bad Gateway - Upstream provider error.
@@ -228,7 +220,9 @@ class APIExceptions:
         return HTTPException(status_code=status_code, detail=detail)
 
     @staticmethod
-    def service_unavailable(service: str = "service", retry_after: int | None = None) -> HTTPException:
+    def service_unavailable(
+        service: str = "service", retry_after: int | None = None
+    ) -> HTTPException:
         """
         503 Service Unavailable - Service temporarily unavailable.
 
@@ -241,9 +235,7 @@ class APIExceptions:
         """
         headers = {"Retry-After": str(retry_after)} if retry_after else None
         return HTTPException(
-            status_code=503,
-            detail=f"{service} is temporarily unavailable",
-            headers=headers
+            status_code=503, detail=f"{service} is temporarily unavailable", headers=headers
         )
 
     @staticmethod
@@ -258,13 +250,7 @@ class APIExceptions:
         Returns:
             HTTPException with status 422
         """
-        return HTTPException(
-            status_code=422,
-            detail={
-                "field": field,
-                "message": message
-            }
-        )
+        return HTTPException(status_code=422, detail={"field": field, "message": message})
 
     # ==================== Detailed Error Methods ====================
     # These methods use the DetailedErrorFactory for rich error responses

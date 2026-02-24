@@ -6,19 +6,19 @@ This script tests the new direct Hugging Face API integration to ensure
 models are properly fetched, normalized, and cached.
 """
 
-import sys
 import asyncio
+import sys
 from pathlib import Path
 
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.services.huggingface_models import (
-    fetch_models_from_huggingface_api,
     fetch_models_from_hug,
-    search_huggingface_models,
+    fetch_models_from_huggingface_api,
     get_huggingface_model_info,
-    normalize_huggingface_model
+    normalize_huggingface_model,
+    search_huggingface_models,
 )
 
 
@@ -63,6 +63,7 @@ def test_cache():
 
     print("Fetching models (no cache)...")
     import time
+
     start = time.time()
     models1 = fetch_models_from_huggingface_api(limit=5, use_cache=False)
     time1 = time.time() - start
@@ -94,7 +95,7 @@ def test_fetch_hug_wrapper():
     # Display statistics
     if models:
         hf_metrics = [m.get("huggingface_metrics", {}) for m in models]
-        total_downloads = sum(m.get('downloads', 0) for m in hf_metrics)
+        total_downloads = sum(m.get("downloads", 0) for m in hf_metrics)
         avg_downloads = total_downloads // len(models) if models else 0
 
         print("Statistics:")
@@ -119,7 +120,9 @@ def test_search():
 
         if results:
             for i, model in enumerate(results[:2], 1):
-                print(f"  {i}. {model.get('id')} ({model.get('huggingface_metrics', {}).get('downloads')} downloads)")
+                print(
+                    f"  {i}. {model.get('id')} ({model.get('huggingface_metrics', {}).get('downloads')} downloads)"
+                )
             print()
 
     return True
@@ -155,9 +158,9 @@ def test_model_info():
 def run_all_tests():
     """Run all tests"""
     print("\n")
-    print("="*60)
+    print("=" * 60)
     print("  Hugging Face Models API Integration Test Suite")
-    print("="*60)
+    print("=" * 60)
 
     tests = [
         ("Fetch Models", test_fetch_models),
@@ -176,6 +179,7 @@ def run_all_tests():
         except Exception as e:
             print(f"\n✗ TEST FAILED with exception: {e}")
             import traceback
+
             traceback.print_exc()
             results.append((test_name, False))
 

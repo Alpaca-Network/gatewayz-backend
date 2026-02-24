@@ -129,9 +129,12 @@ def log_pool_diagnostics():
             # Export to Prometheus metrics
             try:
                 from src.services.prometheus_metrics import track_connection_pool_stats
+
                 track_connection_pool_stats("supabase", stats.to_dict())
             except Exception as prom_error:
-                logger.debug(f"Failed to export connection pool metrics to Prometheus: {prom_error}")
+                logger.debug(
+                    f"Failed to export connection pool metrics to Prometheus: {prom_error}"
+                )
 
             if not stats.is_healthy():
                 logger.warning("Connection pool is under stress")

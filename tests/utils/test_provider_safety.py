@@ -2,9 +2,10 @@
 Tests for provider safety utilities
 """
 
-import pytest
 import time
 from unittest.mock import Mock
+
+import pytest
 
 from src.utils.provider_safety import (
     CircuitBreaker,
@@ -12,10 +13,10 @@ from src.utils.provider_safety import (
     ProviderError,
     ProviderUnavailableError,
     retry_with_backoff,
-    safe_provider_call,
-    validate_provider_response,
     safe_get_choices,
     safe_get_usage,
+    safe_provider_call,
+    validate_provider_response,
 )
 
 
@@ -93,7 +94,9 @@ class TestCircuitBreaker:
 
     def test_circuit_breaker_closes_after_successful_recovery(self):
         """Test circuit closes after successful call in HALF_OPEN state."""
-        cb = CircuitBreaker("test", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=1)
+        cb = CircuitBreaker(
+            "test", failure_threshold=1, recovery_timeout=0.1, half_open_max_calls=1
+        )
 
         # Cause failure
         try:
@@ -165,21 +168,14 @@ class TestSafeProviderCall:
 
     def test_safe_provider_call_success(self):
         """Test successful provider call."""
-        result = safe_provider_call(
-            lambda: {"data": "success"},
-            "TestProvider"
-        )
+        result = safe_provider_call(lambda: {"data": "success"}, "TestProvider")
         assert result == {"data": "success"}
 
     def test_safe_provider_call_with_circuit_breaker(self):
         """Test provider call with circuit breaker."""
         cb = CircuitBreaker("test")
 
-        result = safe_provider_call(
-            lambda: {"data": "success"},
-            "TestProvider",
-            circuit_breaker=cb
-        )
+        result = safe_provider_call(lambda: {"data": "success"}, "TestProvider", circuit_breaker=cb)
 
         assert result == {"data": "success"}
         assert cb.failure_count == 0
@@ -191,20 +187,14 @@ class TestSafeProviderCall:
         # Fail once to open circuit
         try:
             safe_provider_call(
-                lambda: (_ for _ in ()).throw(Exception("fail")),
-                "TestProvider",
-                circuit_breaker=cb
+                lambda: (_ for _ in ()).throw(Exception("fail")), "TestProvider", circuit_breaker=cb
             )
         except:
             pass
 
         # Next call should be rejected
         with pytest.raises(Exception):  # Circuit breaker will raise its exception
-            safe_provider_call(
-                lambda: "should not execute",
-                "TestProvider",
-                circuit_breaker=cb
-            )
+            safe_provider_call(lambda: "should not execute", "TestProvider", circuit_breaker=cb)
 
 
 class TestValidateProviderResponse:
@@ -213,11 +203,7 @@ class TestValidateProviderResponse:
     def test_validate_provider_response_dict(self):
         """Test validation with dict response."""
         response = {"choices": [], "usage": {}}
-        validated = validate_provider_response(
-            response,
-            ["choices", "usage"],
-            "TestProvider"
-        )
+        validated = validate_provider_response(response, ["choices", "usage"], "TestProvider")
         assert validated == response
 
     def test_validate_provider_response_object_with_dict(self):
@@ -225,11 +211,7 @@ class TestValidateProviderResponse:
         response = Mock()
         response.__dict__ = {"choices": [], "usage": {}}
 
-        validated = validate_provider_response(
-            response,
-            ["choices", "usage"],
-            "TestProvider"
-        )
+        validated = validate_provider_response(response, ["choices", "usage"], "TestProvider")
         assert "choices" in validated
         assert "usage" in validated
 
@@ -238,11 +220,7 @@ class TestValidateProviderResponse:
         response = Mock()
         response.model_dump = lambda: {"choices": [], "usage": {}}
 
-        validated = validate_provider_response(
-            response,
-            ["choices", "usage"],
-            "TestProvider"
-        )
+        validated = validate_provider_response(response, ["choices", "usage"], "TestProvider")
         assert "choices" in validated
 
     def test_validate_provider_response_missing_fields(self):
@@ -250,11 +228,7 @@ class TestValidateProviderResponse:
         response = {"choices": []}
 
         with pytest.raises(ProviderError, match="missing required fields"):
-            validate_provider_response(
-                response,
-                ["choices", "usage", "model"],
-                "TestProvider"
-            )
+            validate_provider_response(response, ["choices", "usage", "model"], "TestProvider")
 
     def test_validate_provider_response_none(self):
         """Test error when response is None."""

@@ -49,7 +49,9 @@ class PostHogService:
                 enable_exception_autocapture=True,  # Enable automatic exception tracking
             )
 
-            logger.info(f"PostHog initialized successfully with exception autocapture (host: {host})")
+            logger.info(
+                f"PostHog initialized successfully with exception autocapture (host: {host})"
+            )
 
         except Exception as e:
             logger.error(f"Failed to initialize PostHog: {e}")

@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.redis_config import get_redis_config
@@ -20,9 +20,7 @@ def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
 
         try:
             key_data = safe_get_first(
-                key_result,
-                error_message="API key not found",
-                validate_keys=["id"]
+                key_result, error_message="API key not found", validate_keys=["id"]
             )
             api_key_id = key_data["id"]
         except (DatabaseResultError, KeyError) as e:
@@ -51,9 +49,7 @@ def get_trial_status_for_key(api_key: str) -> dict[str, Any]:
 
         try:
             key_data = safe_get_first(
-                key_result,
-                error_message="API key not found",
-                validate_keys=["id"]
+                key_result, error_message="API key not found", validate_keys=["id"]
             )
             api_key_id = key_data["id"]
         except (DatabaseResultError, KeyError) as e:
@@ -80,9 +76,7 @@ def convert_trial_to_paid_for_key(api_key: str, plan_name: str) -> dict[str, Any
 
         try:
             key_data = safe_get_first(
-                key_result,
-                error_message="API key not found",
-                validate_keys=["id"]
+                key_result, error_message="API key not found", validate_keys=["id"]
             )
             api_key_id = key_data["id"]
         except (DatabaseResultError, KeyError) as e:
@@ -113,9 +107,7 @@ def track_trial_usage_for_key(
 
         try:
             key_data = safe_get_first(
-                key_result,
-                error_message="API key not found",
-                validate_keys=["id"]
+                key_result, error_message="API key not found", validate_keys=["id"]
             )
             api_key_id = key_data["id"]
         except (DatabaseResultError, KeyError) as e:

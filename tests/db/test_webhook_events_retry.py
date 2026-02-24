@@ -10,18 +10,18 @@ Tests cover:
 - Event cleanup with connection resilience
 """
 
-import pytest
+from datetime import UTC, datetime, timezone
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone, UTC
+
+import pytest
 from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.webhook_events import (
+    cleanup_old_events,
+    get_processed_event,
     is_event_processed,
     record_processed_event,
-    get_processed_event,
-    cleanup_old_events,
 )
-
 
 # ============================================================
 # FIXTURES
@@ -181,22 +181,16 @@ class TestRecordProcessedEventWithRetry:
         result_mock.data = None
         mock_execute_retry.return_value = result_mock
 
-        success = record_processed_event(
-            event_id="evt_test123", event_type="invoice.paid"
-        )
+        success = record_processed_event(event_id="evt_test123", event_type="invoice.paid")
 
         assert success is False
 
     @patch("src.db.webhook_events.execute_with_retry")
     def test_record_processed_event_http2_error(self, mock_execute_retry):
         """Test HTTP/2 connection error during recording"""
-        mock_execute_retry.side_effect = RemoteProtocolError(
-            "ConnectionTerminated: error_code=9"
-        )
+        mock_execute_retry.side_effect = RemoteProtocolError("ConnectionTerminated: error_code=9")
 
-        success = record_processed_event(
-            event_id="evt_test123", event_type="invoice.paid"
-        )
+        success = record_processed_event(event_id="evt_test123", event_type="invoice.paid")
 
         # Should return False on connection error
         assert success is False
@@ -209,9 +203,7 @@ class TestRecordProcessedEventWithRetry:
             "Invalid input StreamInputs.SEND_HEADERS in state 5"
         )
 
-        success = record_processed_event(
-            event_id="evt_test123", event_type="invoice.paid"
-        )
+        success = record_processed_event(event_id="evt_test123", event_type="invoice.paid")
 
         assert success is False
         mock_execute_retry.assert_called_once()
@@ -334,9 +326,7 @@ class TestCleanupOldEventsWithRetry:
         mock_execute_retry.assert_called_once()
 
     @patch("src.db.webhook_events.execute_with_retry")
-    def test_cleanup_old_events_custom_days(
-        self, mock_execute_retry, mock_supabase_client
-    ):
+    def test_cleanup_old_events_custom_days(self, mock_execute_retry, mock_supabase_client):
         """Test cleanup with custom retention period"""
         result_mock = Mock()
         result_mock.data = [{"id": 1}]

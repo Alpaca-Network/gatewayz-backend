@@ -6,14 +6,15 @@ When users sign up with temporary/disposable email addresses,
 their subscription_status should be set to 'bot' instead of 'trial'.
 """
 
-import pytest
-from datetime import datetime, timezone, UTC
-from unittest.mock import patch, MagicMock
+from datetime import UTC, datetime, timezone
+from unittest.mock import MagicMock, patch
 
+import pytest
 
 # ==================================================
 # IN-MEMORY SUPABASE STUB
 # ==================================================
+
 
 class _Result:
     def __init__(self, data=None, count=None):
@@ -66,7 +67,7 @@ class _BaseQuery:
                 matched.sort(key=lambda x: x.get(field, 0), reverse=desc)
 
         if self._limit:
-            matched = matched[:self._limit]
+            matched = matched[: self._limit]
 
         return _Result(matched, len(matched))
 
@@ -89,9 +90,9 @@ class _InsertQuery:
             self.store.tables[self.table] = []
 
         for record in self.data:
-            if 'id' not in record:
-                existing_ids = [int(r.get('id', 0)) for r in self.store.tables[self.table]]
-                record['id'] = str(max(existing_ids, default=0) + 1)
+            if "id" not in record:
+                existing_ids = [int(r.get("id", 0)) for r in self.store.tables[self.table]]
+                record["id"] = str(max(existing_ids, default=0) + 1)
 
         self.store.tables[self.table].extend(self.data)
         return _Result(self.data)
@@ -152,6 +153,7 @@ class SupabaseStub:
 # FIXTURES
 # ==================================================
 
+
 @pytest.fixture
 def sb():
     """Provide in-memory Supabase stub with cleanup"""
@@ -164,57 +166,60 @@ def sb():
 def client(sb, monkeypatch):
     """FastAPI test client with mocked dependencies"""
     import src.config.supabase_config
+
     monkeypatch.setattr(src.config.supabase_config, "get_supabase_client", lambda: sb)
 
-    import src.db.users as users_module
-    import src.db.api_keys as api_keys_module
     import src.db.activity as activity_module
+    import src.db.api_keys as api_keys_module
+    import src.db.users as users_module
 
     def mock_get_user_by_privy_id(privy_id):
-        result = sb.table('users').select('*').eq('privy_user_id', privy_id).execute()
+        result = sb.table("users").select("*").eq("privy_user_id", privy_id).execute()
         return result.data[0] if result.data else None
 
     def mock_get_user_by_username(username):
-        result = sb.table('users').select('*').eq('username', username).execute()
+        result = sb.table("users").select("*").eq("username", username).execute()
         return result.data[0] if result.data else None
 
-    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"):
+    def mock_create_enhanced_user(
+        username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"
+    ):
         trial_expires_at = datetime.now(UTC).isoformat()
         user_data = {
-            'username': username,
-            'email': email,
-            'credits': credits,
-            'privy_user_id': privy_user_id,
-            'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
-            'created_at': datetime.now(UTC).isoformat(),
-            'subscription_status': subscription_status,
-            'trial_expires_at': trial_expires_at,
-            'tier': 'basic',
+            "username": username,
+            "email": email,
+            "credits": credits,
+            "privy_user_id": privy_user_id,
+            "auth_method": auth_method.value if hasattr(auth_method, "value") else str(auth_method),
+            "created_at": datetime.now(UTC).isoformat(),
+            "subscription_status": subscription_status,
+            "trial_expires_at": trial_expires_at,
+            "tier": "basic",
         }
-        result = sb.table('users').insert(user_data).execute()
+        result = sb.table("users").insert(user_data).execute()
         created_user = result.data[0]
 
         api_key = f"gw_live_{username}_test"
         api_key_data = {
-            'user_id': created_user['id'],
-            'api_key': api_key,
-            'key_name': 'Primary API Key',
-            'is_primary': True,
-            'is_active': True,
-            'environment_tag': 'production',
+            "user_id": created_user["id"],
+            "api_key": api_key,
+            "key_name": "Primary API Key",
+            "is_primary": True,
+            "is_active": True,
+            "environment_tag": "production",
         }
-        sb.table('api_keys_new').insert(api_key_data).execute()
+        sb.table("api_keys_new").insert(api_key_data).execute()
 
         return {
-            'user_id': created_user['id'],
-            'username': username,
-            'email': email,
-            'credits': credits,
-            'primary_api_key': api_key,
-            'api_key': api_key,
-            'subscription_status': subscription_status,
-            'trial_expires_at': trial_expires_at,
-            'tier': 'basic',
+            "user_id": created_user["id"],
+            "username": username,
+            "email": email,
+            "credits": credits,
+            "primary_api_key": api_key,
+            "api_key": api_key,
+            "subscription_status": subscription_status,
+            "trial_expires_at": trial_expires_at,
+            "tier": "basic",
         }
 
     def mock_log_activity(*args, **kwargs):
@@ -226,12 +231,19 @@ def client(sb, monkeypatch):
     monkeypatch.setattr(activity_module, "log_activity", mock_log_activity)
 
     import sys
-    if 'src.routes.auth' in sys.modules:
-        auth_module = sys.modules['src.routes.auth']
+
+    if "src.routes.auth" in sys.modules:
+        auth_module = sys.modules["src.routes.auth"]
         if hasattr(auth_module, "users_module"):
-            monkeypatch.setattr(auth_module.users_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
-            monkeypatch.setattr(auth_module.users_module, "create_enhanced_user", mock_create_enhanced_user)
-            monkeypatch.setattr(auth_module.users_module, "get_user_by_username", mock_get_user_by_username)
+            monkeypatch.setattr(
+                auth_module.users_module, "get_user_by_privy_id", mock_get_user_by_privy_id
+            )
+            monkeypatch.setattr(
+                auth_module.users_module, "create_enhanced_user", mock_create_enhanced_user
+            )
+            monkeypatch.setattr(
+                auth_module.users_module, "get_user_by_username", mock_get_user_by_username
+            )
         monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
         if hasattr(auth_module, "supabase_config"):
             monkeypatch.setattr(auth_module.supabase_config, "get_supabase_client", lambda: sb)
@@ -241,15 +253,18 @@ def client(sb, monkeypatch):
     class MockNotificationService:
         def send_welcome_email(self, *args, **kwargs):
             return True
+
         def send_welcome_email_if_needed(self, *args, **kwargs):
             return True
+
         def send_password_reset_email(self, *args, **kwargs):
             return "reset_token_123"
 
     monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
 
-    from src.main import app
     from fastapi.testclient import TestClient
+
+    from src.main import app
 
     return TestClient(app)
 
@@ -257,6 +272,7 @@ def client(sb, monkeypatch):
 # ==================================================
 # TESTS: Temporary Email Bot Status - Privy Auth
 # ==================================================
+
 
 def test_privy_auth_temp_email_sets_bot_status(client, sb):
     """Test that new users with temporary email get subscription_status='bot'"""
@@ -267,29 +283,23 @@ def test_privy_auth_temp_email_sets_bot_status(client, sb):
         "user": {
             "id": "privy_temp_user_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_temp",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['is_new_user'] is True
-    assert data['subscription_status'] == 'bot'
+    assert data["success"] is True
+    assert data["is_new_user"] is True
+    assert data["subscription_status"] == "bot"
 
 
 def test_privy_auth_normal_email_sets_trial_status(client, sb):
@@ -301,28 +311,24 @@ def test_privy_auth_normal_email_sets_trial_status(client, sb):
             "id": "privy_normal_user_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": normal_email,
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": normal_email, "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_normal",
         "email": normal_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['is_new_user'] is True
-    assert data['subscription_status'] == 'trial'
+    assert data["success"] is True
+    assert data["is_new_user"] is True
+    assert data["subscription_status"] == "trial"
 
 
 def test_privy_auth_10minutemail_sets_bot_status(client, sb):
@@ -333,27 +339,21 @@ def test_privy_auth_10minutemail_sets_bot_status(client, sb):
         "user": {
             "id": "privy_10min_user_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_10min",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['subscription_status'] == 'bot'
+    assert data["subscription_status"] == "bot"
 
 
 def test_privy_auth_guerrillamail_sets_bot_status(client, sb):
@@ -364,27 +364,21 @@ def test_privy_auth_guerrillamail_sets_bot_status(client, sb):
         "user": {
             "id": "privy_guerrilla_user_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_guerrilla",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['subscription_status'] == 'bot'
+    assert data["subscription_status"] == "bot"
 
 
 def test_privy_auth_mailinator_sets_bot_status(client, sb):
@@ -395,27 +389,21 @@ def test_privy_auth_mailinator_sets_bot_status(client, sb):
         "user": {
             "id": "privy_mailinator_user_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_mailinator",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['subscription_status'] == 'bot'
+    assert data["subscription_status"] == "bot"
 
 
 def test_privy_auth_yopmail_sets_bot_status(client, sb):
@@ -426,32 +414,27 @@ def test_privy_auth_yopmail_sets_bot_status(client, sb):
         "user": {
             "id": "privy_yopmail_user_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_yopmail",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['subscription_status'] == 'bot'
+    assert data["subscription_status"] == "bot"
 
 
 # ==================================================
 # TESTS: Blocked Email Domains Still Rejected
 # ==================================================
+
 
 def test_privy_auth_blocked_domain_still_rejected(client, sb):
     """Test that blocked abuse domains are still rejected (not just marked as bot)"""
@@ -463,87 +446,73 @@ def test_privy_auth_blocked_domain_still_rejected(client, sb):
             "id": "privy_blocked_user_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": blocked_email,
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": blocked_email, "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_blocked",
         "email": blocked_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     # Blocked domains should still be rejected
     assert response.status_code == 400
-    assert "not allowed" in response.json()['detail'].lower()
+    assert "not allowed" in response.json()["detail"].lower()
 
 
 # ==================================================
 # TESTS: Direct Registration with Temporary Email
 # ==================================================
 
+
 def test_register_temp_email_sets_bot_status(client, sb):
     """Test that direct registration with temporary email sets bot status"""
     temp_email = "newuser@tempmail.com"
 
-    request_data = {
-        "username": "tempmailuser",
-        "email": temp_email,
-        "auth_method": "email"
-    }
+    request_data = {"username": "tempmailuser", "email": temp_email, "auth_method": "email"}
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['subscription_status'] == 'bot'
+    assert data["success"] is True
+    assert data["subscription_status"] == "bot"
 
 
 def test_register_normal_email_sets_trial_status(client, sb):
     """Test that direct registration with normal email sets trial status"""
     normal_email = "newuser@company.com"
 
-    request_data = {
-        "username": "normaluser",
-        "email": normal_email,
-        "auth_method": "email"
-    }
+    request_data = {"username": "normaluser", "email": normal_email, "auth_method": "email"}
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['subscription_status'] == 'trial'
+    assert data["success"] is True
+    assert data["subscription_status"] == "trial"
 
 
 def test_register_blocked_domain_still_rejected(client, sb):
     """Test that blocked domains are still rejected in registration"""
     blocked_email = "user@rccg-clf.org"
 
-    request_data = {
-        "username": "blockeduser",
-        "email": blocked_email,
-        "auth_method": "email"
-    }
+    request_data = {"username": "blockeduser", "email": blocked_email, "auth_method": "email"}
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 400
-    assert "not allowed" in response.json()['detail'].lower()
+    assert "not allowed" in response.json()["detail"].lower()
 
 
 # ==================================================
 # TESTS: Database Status Verification
 # ==================================================
+
 
 def test_temp_email_user_stored_with_bot_status_in_db(client, sb):
     """Verify that users with temp email are stored with bot status in database"""
@@ -553,29 +522,23 @@ def test_temp_email_user_stored_with_bot_status_in_db(client, sb):
         "user": {
             "id": "privy_dbtest_123",
             "created_at": 1705123456,
-            "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": temp_email,
-                    "verified_at": 1705123456
-                }
-            ],
+            "linked_accounts": [{"type": "email", "email": temp_email, "verified_at": 1705123456}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_dbtest",
         "email": temp_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
     assert response.status_code == 200
 
     # Verify in the stub database
-    users = sb.table('users').select('*').eq('email', temp_email).execute()
+    users = sb.table("users").select("*").eq("email", temp_email).execute()
     assert len(users.data) == 1
-    assert users.data[0]['subscription_status'] == 'bot'
+    assert users.data[0]["subscription_status"] == "bot"
 
 
 def test_normal_email_user_stored_with_trial_status_in_db(client, sb):
@@ -587,25 +550,21 @@ def test_normal_email_user_stored_with_trial_status_in_db(client, sb):
             "id": "privy_normaldbtest_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": normal_email,
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": normal_email, "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_normaldbtest",
         "email": normal_email,
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
     assert response.status_code == 200
 
     # Verify in the stub database
-    users = sb.table('users').select('*').eq('email', normal_email).execute()
+    users = sb.table("users").select("*").eq("email", normal_email).execute()
     assert len(users.data) == 1
-    assert users.data[0]['subscription_status'] == 'trial'
+    assert users.data[0]["subscription_status"] == "trial"

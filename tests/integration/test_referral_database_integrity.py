@@ -8,21 +8,24 @@ Tests critical database scenarios:
 - Race conditions
 - Data consistency
 """
+
 import os
-import pytest
 import threading
 import time
-from datetime import datetime, timezone, timezone, UTC
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import UTC, datetime, timezone
+
+import pytest
 
 from src.config.supabase_config import get_supabase_client
 from src.services.referral import (
-    create_user_referral_code,
-    track_referral_signup,
-    apply_referral_bonus,
-    generate_referral_code,
     MAX_REFERRAL_USES,
+    apply_referral_bonus,
+    create_user_referral_code,
+    generate_referral_code,
+    track_referral_signup,
 )
+
 
 # Skip all tests in this module if referral_code column doesn't exist
 def _has_referral_schema():
@@ -35,9 +38,10 @@ def _has_referral_schema():
     except Exception:
         return False
 
+
 pytestmark = pytest.mark.skipif(
     not _has_referral_schema(),
-    reason="Referral schema not available in test database - referral_code column missing"
+    reason="Referral schema not available in test database - referral_code column missing",
 )
 
 
@@ -75,10 +79,10 @@ def test_db_users(supabase_client, test_prefix):
             raise Exception("Failed to create test user")
 
         user = user_result.data[0]
-        created_users.append(user['id'])
+        created_users.append(user["id"])
 
         key_data = {
-            "user_id": user['id'],
+            "user_id": user["id"],
             "api_key": api_key,
             "key_name": f"Test Key {username_suffix}",
             "is_primary": True,
@@ -90,10 +94,10 @@ def test_db_users(supabase_client, test_prefix):
 
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
         if key_result.data:
-            created_keys.append(key_result.data[0]['id'])
+            created_keys.append(key_result.data[0]["id"])
 
         return {
-            "user_id": user['id'],
+            "user_id": user["id"],
             "api_key": api_key,
             "username": username,
             "email": email,
@@ -104,9 +108,13 @@ def test_db_users(supabase_client, test_prefix):
     # Cleanup
     try:
         if created_users:
-            supabase_client.table("referrals").delete().in_("referred_user_id", created_users).execute()
+            supabase_client.table("referrals").delete().in_(
+                "referred_user_id", created_users
+            ).execute()
             supabase_client.table("referrals").delete().in_("referrer_id", created_users).execute()
-            supabase_client.table("credit_transactions").delete().in_("user_id", created_users).execute()
+            supabase_client.table("credit_transactions").delete().in_(
+                "user_id", created_users
+            ).execute()
 
             if created_keys:
                 supabase_client.table("api_keys_new").delete().in_("id", created_keys).execute()
@@ -125,7 +133,7 @@ class TestReferralCodeUniqueness:
         """
         # Create first user with code
         alice = test_db_users("alice_unique", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         print(f"✓ Alice created with code: {alice_code}")
 
@@ -134,17 +142,27 @@ class TestReferralCodeUniqueness:
 
         # Attempt to manually set Bob's code to Alice's (should fail)
         try:
-            supabase_client.table("users").update(
-                {"referral_code": alice_code}
-            ).eq("id", bob['user_id']).execute()
+            supabase_client.table("users").update({"referral_code": alice_code}).eq(
+                "id", bob["user_id"]
+            ).execute()
 
             # If we get here, uniqueness constraint isn't working (or we're checking wrong)
             # Verify codes are actually different
-            alice_user = supabase_client.table("users").select("referral_code").eq("id", alice['user_id']).execute()
-            bob_user = supabase_client.table("users").select("referral_code").eq("id", bob['user_id']).execute()
+            alice_user = (
+                supabase_client.table("users")
+                .select("referral_code")
+                .eq("id", alice["user_id"])
+                .execute()
+            )
+            bob_user = (
+                supabase_client.table("users")
+                .select("referral_code")
+                .eq("id", bob["user_id"])
+                .execute()
+            )
 
-            alice_code_db = alice_user.data[0]['referral_code']
-            bob_code_db = bob_user.data[0]['referral_code']
+            alice_code_db = alice_user.data[0]["referral_code"]
+            bob_code_db = bob_user.data[0]["referral_code"]
 
             # They should be different
             if alice_code_db == bob_code_db:
@@ -182,21 +200,23 @@ class TestConcurrentReferralUsage:
         """
         # Create referrer
         alice = test_db_users("alice_concurrent", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         # Create multiple users
         num_concurrent_signups = 5
-        users = [test_db_users(f"bob_concurrent_{i}", credits=0.0) for i in range(num_concurrent_signups)]
+        users = [
+            test_db_users(f"bob_concurrent_{i}", credits=0.0) for i in range(num_concurrent_signups)
+        ]
 
         # Track signups concurrently
         results = []
 
         def signup_user(user):
             try:
-                success, error, referrer = track_referral_signup(alice_code, user['user_id'])
-                return (user['user_id'], success, error)
+                success, error, referrer = track_referral_signup(alice_code, user["user_id"])
+                return (user["user_id"], success, error)
             except Exception as e:
-                return (user['user_id'], False, str(e))
+                return (user["user_id"], False, str(e))
 
         with ThreadPoolExecutor(max_workers=num_concurrent_signups) as executor:
             futures = [executor.submit(signup_user, user) for user in users]
@@ -204,13 +224,18 @@ class TestConcurrentReferralUsage:
 
         # All should succeed
         successes = sum(1 for _, success, _ in results if success)
-        assert successes == num_concurrent_signups, f"Only {successes}/{num_concurrent_signups} signups succeeded"
+        assert (
+            successes == num_concurrent_signups
+        ), f"Only {successes}/{num_concurrent_signups} signups succeeded"
         print(f"✓ {successes} concurrent signups succeeded")
 
         # Verify all referral records were created
-        referrals = supabase_client.table("referrals").select("*").eq(
-            "referrer_id", alice['user_id']
-        ).execute()
+        referrals = (
+            supabase_client.table("referrals")
+            .select("*")
+            .eq("referrer_id", alice["user_id"])
+            .execute()
+        )
 
         assert len(referrals.data) == num_concurrent_signups
         print(f"✓ All {num_concurrent_signups} referral records created")
@@ -221,13 +246,15 @@ class TestConcurrentReferralUsage:
         """
         # Create referrer and referees
         alice = test_db_users("alice_bonus_concurrent", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         num_referees = 3
         referees = []
         for i in range(num_referees):
-            user = test_db_users(f"bob_bonus_concurrent_{i}", credits=0.0, referred_by_code=alice_code)
-            track_referral_signup(alice_code, user['user_id'])
+            user = test_db_users(
+                f"bob_bonus_concurrent_{i}", credits=0.0, referred_by_code=alice_code
+            )
+            track_referral_signup(alice_code, user["user_id"])
             referees.append(user)
 
         # Apply bonuses concurrently (simulates rapid purchases)
@@ -236,13 +263,11 @@ class TestConcurrentReferralUsage:
         def apply_bonus(user):
             try:
                 success, error, data = apply_referral_bonus(
-                    user_id=user['user_id'],
-                    referral_code=alice_code,
-                    purchase_amount=15.0
+                    user_id=user["user_id"], referral_code=alice_code, purchase_amount=15.0
                 )
-                return (user['user_id'], success, error)
+                return (user["user_id"], success, error)
             except Exception as e:
-                return (user['user_id'], False, str(e))
+                return (user["user_id"], False, str(e))
 
         with ThreadPoolExecutor(max_workers=num_referees) as executor:
             futures = [executor.submit(apply_bonus, user) for user in referees]
@@ -253,10 +278,13 @@ class TestConcurrentReferralUsage:
         print(f"✓ {successes}/{num_referees} concurrent bonuses applied")
 
         # Verify Alice's credits reflect all bonuses
-        alice_after = supabase_client.table("users").select("credits").eq("id", alice['user_id']).execute()
-        alice_credits = float(alice_after.data[0]['credits'])
+        alice_after = (
+            supabase_client.table("users").select("credits").eq("id", alice["user_id"]).execute()
+        )
+        alice_credits = float(alice_after.data[0]["credits"])
 
         from src.services.referral import REFERRAL_BONUS
+
         expected_credits = successes * REFERRAL_BONUS
 
         assert alice_credits >= expected_credits - 1  # Allow for slight timing issues
@@ -272,36 +300,36 @@ class TestReferralUsageLimits:
         """
         # Create referrer
         alice = test_db_users("alice_limit_db", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         # Use code MAX_REFERRAL_USES times
         for i in range(MAX_REFERRAL_USES):
             user = test_db_users(f"bob_limit_db_{i}", credits=0.0)
-            success, error, referrer = track_referral_signup(alice_code, user['user_id'])
+            success, error, referrer = track_referral_signup(alice_code, user["user_id"])
             assert success is True, f"Signup {i+1} should succeed"
 
         print(f"✓ {MAX_REFERRAL_USES} signups completed")
 
         # Verify referral count in database
-        referrals = supabase_client.table("referrals").select("*").eq(
-            "referral_code", alice_code
-        ).execute()
+        referrals = (
+            supabase_client.table("referrals").select("*").eq("referral_code", alice_code).execute()
+        )
 
         assert len(referrals.data) == MAX_REFERRAL_USES
         print(f"✓ Database has exactly {MAX_REFERRAL_USES} referral records")
 
         # Try to add one more (should fail)
         extra_user = test_db_users("bob_limit_db_extra", credits=0.0)
-        success, error, referrer = track_referral_signup(alice_code, extra_user['user_id'])
+        success, error, referrer = track_referral_signup(alice_code, extra_user["user_id"])
 
         assert success is False
         assert "usage limit" in error.lower()
         print(f"✓ {MAX_REFERRAL_USES+1}th signup correctly rejected")
 
         # Verify no extra record was created
-        referrals_after = supabase_client.table("referrals").select("*").eq(
-            "referral_code", alice_code
-        ).execute()
+        referrals_after = (
+            supabase_client.table("referrals").select("*").eq("referral_code", alice_code).execute()
+        )
 
         assert len(referrals_after.data) == MAX_REFERRAL_USES
         print(f"✓ Database still has exactly {MAX_REFERRAL_USES} records (no extra created)")
@@ -316,42 +344,44 @@ class TestReferralStatusTransitions:
         """
         # Create users
         alice = test_db_users("alice_transition", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         bob = test_db_users("bob_transition", credits=0.0, referred_by_code=alice_code)
-        track_referral_signup(alice_code, bob['user_id'])
+        track_referral_signup(alice_code, bob["user_id"])
 
         # Verify pending status
-        pending = supabase_client.table("referrals").select("*").eq(
-            "referred_user_id", bob['user_id']
-        ).eq("status", "pending").execute()
+        pending = (
+            supabase_client.table("referrals")
+            .select("*")
+            .eq("referred_user_id", bob["user_id"])
+            .eq("status", "pending")
+            .execute()
+        )
 
         assert len(pending.data) == 1
-        referral_id = pending.data[0]['id']
-        assert pending.data[0]['completed_at'] is None
+        referral_id = pending.data[0]["id"]
+        assert pending.data[0]["completed_at"] is None
         print("✓ Referral created with pending status")
 
         # Apply bonus
-        apply_referral_bonus(
-            user_id=bob['user_id'],
-            referral_code=alice_code,
-            purchase_amount=15.0
-        )
+        apply_referral_bonus(user_id=bob["user_id"], referral_code=alice_code, purchase_amount=15.0)
 
         # Verify completed status
-        completed = supabase_client.table("referrals").select("*").eq(
-            "id", referral_id
-        ).execute()
+        completed = supabase_client.table("referrals").select("*").eq("id", referral_id).execute()
 
         assert len(completed.data) == 1
-        assert completed.data[0]['status'] == 'completed'
-        assert completed.data[0]['completed_at'] is not None
+        assert completed.data[0]["status"] == "completed"
+        assert completed.data[0]["completed_at"] is not None
         print("✓ Referral transitioned to completed with timestamp")
 
         # Verify no pending record remains for this user
-        pending_after = supabase_client.table("referrals").select("*").eq(
-            "referred_user_id", bob['user_id']
-        ).eq("status", "pending").execute()
+        pending_after = (
+            supabase_client.table("referrals")
+            .select("*")
+            .eq("referred_user_id", bob["user_id"])
+            .eq("status", "pending")
+            .execute()
+        )
 
         assert len(pending_after.data) == 0
         print("✓ No pending record remains after completion")
@@ -361,16 +391,14 @@ class TestReferralStatusTransitions:
         Test that referral cannot be completed twice
         """
         alice = test_db_users("alice_twice", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         bob = test_db_users("bob_twice", credits=0.0, referred_by_code=alice_code)
-        track_referral_signup(alice_code, bob['user_id'])
+        track_referral_signup(alice_code, bob["user_id"])
 
         # Apply bonus first time
         success1, error1, data1 = apply_referral_bonus(
-            user_id=bob['user_id'],
-            referral_code=alice_code,
-            purchase_amount=15.0
+            user_id=bob["user_id"], referral_code=alice_code, purchase_amount=15.0
         )
 
         assert success1 is True
@@ -378,22 +406,25 @@ class TestReferralStatusTransitions:
 
         # Mark first purchase
         from src.services.referral import mark_first_purchase
-        mark_first_purchase(bob['user_id'])
+
+        mark_first_purchase(bob["user_id"])
 
         # Try to apply bonus second time (should fail)
         success2, error2, data2 = apply_referral_bonus(
-            user_id=bob['user_id'],
-            referral_code=alice_code,
-            purchase_amount=20.0
+            user_id=bob["user_id"], referral_code=alice_code, purchase_amount=20.0
         )
 
         assert success2 is False
         print("✓ Second bonus application rejected")
 
         # Verify only one completed record
-        completed = supabase_client.table("referrals").select("*").eq(
-            "referred_user_id", bob['user_id']
-        ).eq("status", "completed").execute()
+        completed = (
+            supabase_client.table("referrals")
+            .select("*")
+            .eq("referred_user_id", bob["user_id"])
+            .eq("status", "completed")
+            .execute()
+        )
 
         assert len(completed.data) == 1
         print("✓ Only one completed referral record exists")
@@ -407,19 +438,22 @@ class TestDataIntegrity:
         Test that referral records reference valid users
         """
         alice = test_db_users("alice_orphan", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         bob = test_db_users("bob_orphan", credits=0.0)
-        track_referral_signup(alice_code, bob['user_id'])
+        track_referral_signup(alice_code, bob["user_id"])
 
         # Verify referral exists
-        referral = supabase_client.table("referrals").select("*").eq(
-            "referred_user_id", bob['user_id']
-        ).execute()
+        referral = (
+            supabase_client.table("referrals")
+            .select("*")
+            .eq("referred_user_id", bob["user_id"])
+            .execute()
+        )
 
         assert len(referral.data) == 1
-        assert referral.data[0]['referrer_id'] == alice['user_id']
-        assert referral.data[0]['referred_user_id'] == bob['user_id']
+        assert referral.data[0]["referrer_id"] == alice["user_id"]
+        assert referral.data[0]["referred_user_id"] == bob["user_id"]
         print("✓ Referral correctly links referrer and referee")
 
     def test_referral_code_persistence(self, supabase_client, test_db_users):
@@ -427,14 +461,17 @@ class TestDataIntegrity:
         Test that referral codes persist correctly in database
         """
         alice = test_db_users("alice_persist", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         # Read back from database
-        alice_user = supabase_client.table("users").select("referral_code").eq(
-            "id", alice['user_id']
-        ).execute()
+        alice_user = (
+            supabase_client.table("users")
+            .select("referral_code")
+            .eq("id", alice["user_id"])
+            .execute()
+        )
 
-        db_code = alice_user.data[0]['referral_code']
+        db_code = alice_user.data[0]["referral_code"]
 
         assert db_code == alice_code
         assert len(db_code) == 8
@@ -445,21 +482,24 @@ class TestDataIntegrity:
         Test that referred_by_code persists correctly
         """
         alice = test_db_users("alice_ref_persist", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         bob = test_db_users("bob_ref_persist", credits=0.0)
 
         # Update Bob's referred_by_code
-        supabase_client.table("users").update(
-            {"referred_by_code": alice_code}
-        ).eq("id", bob['user_id']).execute()
-
-        # Read back
-        bob_user = supabase_client.table("users").select("referred_by_code").eq(
-            "id", bob['user_id']
+        supabase_client.table("users").update({"referred_by_code": alice_code}).eq(
+            "id", bob["user_id"]
         ).execute()
 
-        db_code = bob_user.data[0]['referred_by_code']
+        # Read back
+        bob_user = (
+            supabase_client.table("users")
+            .select("referred_by_code")
+            .eq("id", bob["user_id"])
+            .execute()
+        )
+
+        db_code = bob_user.data[0]["referred_by_code"]
 
         assert db_code == alice_code
         print(f"✓ referred_by_code persisted correctly: {db_code}")
@@ -473,36 +513,42 @@ class TestCreditTransactionIntegrity:
         Test that credit transactions are created when bonuses are applied
         """
         alice = test_db_users("alice_tx", credits=0.0)
-        alice_code = create_user_referral_code(alice['user_id'])
+        alice_code = create_user_referral_code(alice["user_id"])
 
         bob = test_db_users("bob_tx", credits=0.0, referred_by_code=alice_code)
-        track_referral_signup(alice_code, bob['user_id'])
+        track_referral_signup(alice_code, bob["user_id"])
 
         # Apply bonus
-        apply_referral_bonus(
-            user_id=bob['user_id'],
-            referral_code=alice_code,
-            purchase_amount=15.0
-        )
+        apply_referral_bonus(user_id=bob["user_id"], referral_code=alice_code, purchase_amount=15.0)
 
         # Check Alice's transactions
-        alice_txs = supabase_client.table("credit_transactions").select("*").eq(
-            "user_id", alice['user_id']
-        ).execute()
+        alice_txs = (
+            supabase_client.table("credit_transactions")
+            .select("*")
+            .eq("user_id", alice["user_id"])
+            .execute()
+        )
 
         assert len(alice_txs.data) >= 1
         # Look for referral bonus transaction
-        referral_txs = [tx for tx in alice_txs.data if 'referral' in tx.get('description', '').lower()]
+        referral_txs = [
+            tx for tx in alice_txs.data if "referral" in tx.get("description", "").lower()
+        ]
         assert len(referral_txs) >= 1
         print(f"✓ Alice has {len(referral_txs)} referral bonus transaction(s)")
 
         # Check Bob's transactions
-        bob_txs = supabase_client.table("credit_transactions").select("*").eq(
-            "user_id", bob['user_id']
-        ).execute()
+        bob_txs = (
+            supabase_client.table("credit_transactions")
+            .select("*")
+            .eq("user_id", bob["user_id"])
+            .execute()
+        )
 
         assert len(bob_txs.data) >= 1
-        referral_txs_bob = [tx for tx in bob_txs.data if 'referral' in tx.get('description', '').lower()]
+        referral_txs_bob = [
+            tx for tx in bob_txs.data if "referral" in tx.get("description", "").lower()
+        ]
         assert len(referral_txs_bob) >= 1
         print(f"✓ Bob has {len(referral_txs_bob)} referral bonus transaction(s)")
 

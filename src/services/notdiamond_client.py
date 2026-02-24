@@ -76,9 +76,7 @@ class NotDiamondClient:
             mapping_file = Path(__file__).parent / "notdiamond_model_mappings.json"
             with open(mapping_file) as f:
                 mappings = json.load(f)
-            logger.info(
-                f"Loaded {len(mappings.get('mappings', {}))} NotDiamond model mappings"
-            )
+            logger.info(f"Loaded {len(mappings.get('mappings', {}))} NotDiamond model mappings")
             return mappings
         except Exception as e:
             logger.error(f"Failed to load model mappings: {e}")
@@ -156,8 +154,7 @@ class NotDiamondClient:
             # Validate nd_model is not None or empty
             if not nd_model:
                 raise ValueError(
-                    "NotDiamond API returned empty model selection. "
-                    f"Response: {result}"
+                    "NotDiamond API returned empty model selection. " f"Response: {result}"
                 )
 
             # Map to Gatewayz format

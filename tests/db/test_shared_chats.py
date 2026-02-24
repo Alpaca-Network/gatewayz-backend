@@ -12,9 +12,10 @@ Tests cover:
 """
 
 import importlib
+from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import MagicMock, patch
+
 import pytest
-from datetime import datetime, timezone, timedelta, UTC
-from unittest.mock import patch, MagicMock
 
 # Import the module
 MODULE_PATH = "src.db.shared_chats"
@@ -46,7 +47,7 @@ def test_generate_share_token_is_url_safe():
 
     # URL-safe characters: alphanumeric, dash, underscore
     for char in token:
-        assert char.isalnum() or char in '-_'
+        assert char.isalnum() or char in "-_"
 
 
 # =========================
@@ -103,9 +104,7 @@ def test_create_shared_chat_with_expiry(mock_get_client):
     mock_result.data = [expected_share]
     mock_client.table.return_value.insert.return_value.execute.return_value = mock_result
 
-    result = db_module.create_shared_chat(
-        session_id=100, user_id=1, expires_at=expires_at
-    )
+    result = db_module.create_shared_chat(session_id=100, user_id=1, expires_at=expires_at)
 
     assert result["expires_at"] == expires_at.isoformat()
 
@@ -162,12 +161,18 @@ def test_get_shared_chat_by_token_success(mock_get_client):
     def table_side_effect(table_name):
         mock_table = MagicMock()
         if table_name == "shared_chats":
-            mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = share_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                share_result
+            )
             mock_table.update.return_value.eq.return_value.execute.return_value = update_result
         elif table_name == "chat_sessions":
-            mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = session_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+                session_result
+            )
         elif table_name == "chat_messages":
-            mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = messages_result
+            mock_table.select.return_value.eq.return_value.order.return_value.execute.return_value = (
+                messages_result
+            )
         return mock_table
 
     mock_client.table.side_effect = table_side_effect
@@ -188,7 +193,9 @@ def test_get_shared_chat_by_token_not_found(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = []
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.get_shared_chat_by_token("invalid_token")
 
@@ -212,7 +219,9 @@ def test_get_shared_chat_by_token_expired(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = [mock_share]
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.get_shared_chat_by_token("test_token")
 
@@ -237,7 +246,9 @@ def test_get_user_shared_chats_success(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = mock_shares
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.get_user_shared_chats(user_id=1)
 
@@ -252,7 +263,9 @@ def test_get_user_shared_chats_empty(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = []
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.order.return_value.range.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.get_user_shared_chats(user_id=1)
 
@@ -272,7 +285,9 @@ def test_delete_shared_chat_success(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = [{"id": 1, "is_active": False}]
-    mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.delete_shared_chat(token="test_token", user_id=1)
 
@@ -287,7 +302,9 @@ def test_delete_shared_chat_not_found(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = []
-    mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.update.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.delete_shared_chat(token="invalid_token", user_id=1)
 
@@ -307,7 +324,9 @@ def test_verify_session_ownership_true(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = [{"id": 100}]
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.verify_session_ownership(session_id=100, user_id=1)
 
@@ -322,7 +341,9 @@ def test_verify_session_ownership_false(mock_get_client):
 
     mock_result = MagicMock()
     mock_result.data = []
-    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.verify_session_ownership(session_id=100, user_id=999)
 
@@ -343,7 +364,9 @@ def test_check_share_rate_limit_within_limit(mock_get_client):
     # User has created 5 shares in the last hour (limit is 10)
     mock_result = MagicMock()
     mock_result.data = [{"id": i} for i in range(5)]
-    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.check_share_rate_limit(user_id=1)
 
@@ -359,7 +382,9 @@ def test_check_share_rate_limit_exceeded(mock_get_client):
     # User has created 10 shares in the last hour (at limit)
     mock_result = MagicMock()
     mock_result.data = [{"id": i} for i in range(10)]
-    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.check_share_rate_limit(user_id=1)
 
@@ -375,7 +400,9 @@ def test_check_share_rate_limit_custom_limit(mock_get_client):
     # User has created 3 shares, custom limit is 5
     mock_result = MagicMock()
     mock_result.data = [{"id": i} for i in range(3)]
-    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = mock_result
+    mock_client.table.return_value.select.return_value.eq.return_value.gte.return_value.execute.return_value = (
+        mock_result
+    )
 
     result = db_module.check_share_rate_limit(user_id=1, max_shares_per_hour=5)
 

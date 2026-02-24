@@ -5,8 +5,9 @@ Tests the find_similar_models function to ensure it correctly suggests
 similar model names for typos and variations.
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 from src.utils.model_suggestions import find_similar_models, get_available_models
 
@@ -59,9 +60,7 @@ class TestModelSuggestions:
     async def test_no_matches(self):
         """Test when no similar models exist."""
         available = ["gpt-4", "claude-2"]
-        similar = await find_similar_models(
-            "completely-different-model-12345-xyz", available
-        )
+        similar = await find_similar_models("completely-different-model-12345-xyz", available)
 
         # Should return empty or very few matches
         assert len(similar) <= 1

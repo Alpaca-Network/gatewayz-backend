@@ -2,18 +2,20 @@
 Tests for database safety utilities
 """
 
-import pytest
 from unittest.mock import Mock
+
+import pytest
+
 from src.utils.db_safety import (
-    safe_get_first,
-    safe_get_value,
+    DatabaseResultError,
     safe_execute_query,
+    safe_float_convert,
+    safe_get_first,
     safe_get_list,
+    safe_get_value,
+    safe_int_convert,
     safe_update_credits,
     validate_dict_structure,
-    safe_int_convert,
-    safe_float_convert,
-    DatabaseResultError,
 )
 
 
@@ -140,6 +142,7 @@ class TestSafeExecuteQuery:
 
     def test_safe_execute_query_success(self):
         """Test successful query execution."""
+
         def successful_query():
             return {"data": [1, 2, 3]}
 
@@ -148,6 +151,7 @@ class TestSafeExecuteQuery:
 
     def test_safe_execute_query_with_error_raise(self):
         """Test error with raise_on_error=True."""
+
         def failing_query():
             raise ValueError("Database error")
 
@@ -156,14 +160,12 @@ class TestSafeExecuteQuery:
 
     def test_safe_execute_query_with_error_fallback(self):
         """Test error with fallback value."""
+
         def failing_query():
             raise ValueError("Database error")
 
         result = safe_execute_query(
-            failing_query,
-            "test query",
-            fallback_value=[],
-            raise_on_error=False
+            failing_query, "test query", fallback_value=[], raise_on_error=False
         )
         assert result == []
 

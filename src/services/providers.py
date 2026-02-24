@@ -1,7 +1,7 @@
 import json
 import logging
 import threading
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -295,7 +295,9 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
                 try:
                     parsed_logo = urlparse(logo_url)
                     if parsed_logo.scheme not in ("http", "https"):
-                        logger.debug(f"Invalid logo URL scheme for provider '{provider.get('slug')}': {logo_url!r}")
+                        logger.debug(
+                            f"Invalid logo URL scheme for provider '{provider.get('slug')}': {logo_url!r}"
+                        )
                         logo_url = None
                 except Exception:
                     logo_url = None

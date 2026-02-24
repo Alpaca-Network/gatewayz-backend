@@ -9,6 +9,7 @@ Tests verify that:
 
 import pytest
 from fastapi.testclient import TestClient
+
 from src.main import create_app
 from src.services import prometheus_metrics
 
@@ -162,17 +163,10 @@ class TestMetricsRecording:
     def test_record_free_model_usage(self):
         """Test recording free model usage metrics."""
         prometheus_metrics.record_free_model_usage(
-            "expired_trial",
-            "google/gemini-2.0-flash-exp:free"
+            "expired_trial", "google/gemini-2.0-flash-exp:free"
         )
-        prometheus_metrics.record_free_model_usage(
-            "active_trial",
-            "xiaomi/mimo-v2-flash:free"
-        )
-        prometheus_metrics.record_free_model_usage(
-            "paid",
-            "google/gemini-2.0-flash-exp:free"
-        )
+        prometheus_metrics.record_free_model_usage("active_trial", "xiaomi/mimo-v2-flash:free")
+        prometheus_metrics.record_free_model_usage("paid", "google/gemini-2.0-flash-exp:free")
 
         # Verify metrics were recorded (no exception)
         assert True
@@ -184,10 +178,7 @@ class TestFreeModelMetrics:
     def test_free_model_usage_metric_exists(self, client):
         """Test that free_model_usage_total metric exists in metrics output."""
         # Record a sample free model usage
-        prometheus_metrics.record_free_model_usage(
-            "expired_trial",
-            "test/model:free"
-        )
+        prometheus_metrics.record_free_model_usage("expired_trial", "test/model:free")
 
         # Check metrics endpoint
         response = client.get("/metrics")

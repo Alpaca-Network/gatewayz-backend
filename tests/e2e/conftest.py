@@ -13,15 +13,15 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
-from src.main import create_app
 
 # Import db and service modules for mocking
 import src.config.supabase_config
-import src.db.users as users_module
 import src.db.api_keys as api_keys_module
 import src.db.plans as plans_module
-import src.services.trial_validation as trial_module
+import src.db.users as users_module
 import src.services.rate_limiting as rate_limiting_module
+import src.services.trial_validation as trial_module
+from src.main import create_app
 
 
 @pytest.fixture(scope="session")
@@ -35,6 +35,7 @@ def event_loop():
 @pytest.fixture
 def sb():
     """Create in-memory Supabase stub for testing."""
+
     # Minimal in-memory database
     class _Result:
         def __init__(self, data=None, count=None):
@@ -121,13 +122,15 @@ def sb():
     store = _Store()
 
     # Add default test user
-    store.table("users").insert({
-        "id": 1,
-        "api_key": "test-api-key-123",
-        "credits": 1000.0,
-        "is_trial": False,
-        "email": "test@example.com",
-    }).execute()
+    store.table("users").insert(
+        {
+            "id": 1,
+            "api_key": "test-api-key-123",
+            "credits": 1000.0,
+            "is_trial": False,
+            "email": "test@example.com",
+        }
+    ).execute()
 
     return store
 
@@ -183,9 +186,7 @@ def client(sb, monkeypatch):
 
     mock_rate_mgr = Mock()
     mock_rate_mgr.check_rate_limit = AsyncMock(return_value=mock_rl_result)
-    monkeypatch.setattr(
-        rate_limiting_module, "get_rate_limit_manager", lambda: mock_rate_mgr
-    )
+    monkeypatch.setattr(rate_limiting_module, "get_rate_limit_manager", lambda: mock_rate_mgr)
 
     # Create app and return test client
     app = create_app()

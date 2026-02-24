@@ -1,31 +1,34 @@
 """Tests for Fireworks client"""
-import pytest
+
 from unittest.mock import Mock, patch
+
+import pytest
+
 from src.services.fireworks_client import (
     get_fireworks_client,
     make_fireworks_request_openai,
     make_fireworks_request_openai_stream,
-    process_fireworks_response
+    process_fireworks_response,
 )
 
 
 class TestFireworksClient:
     """Test Fireworks client functionality"""
 
-    @patch('src.services.fireworks_client.Config.FIREWORKS_API_KEY', 'test_key')
+    @patch("src.services.fireworks_client.Config.FIREWORKS_API_KEY", "test_key")
     def test_get_fireworks_client(self):
         """Test getting Fireworks client"""
         client = get_fireworks_client()
         assert client is not None
-        assert str(client.base_url).rstrip('/') == "https://api.fireworks.ai/inference/v1"
+        assert str(client.base_url).rstrip("/") == "https://api.fireworks.ai/inference/v1"
 
-    @patch('src.services.fireworks_client.Config.FIREWORKS_API_KEY', None)
+    @patch("src.services.fireworks_client.Config.FIREWORKS_API_KEY", None)
     def test_get_fireworks_client_no_key(self):
         """Test getting Fireworks client without API key"""
         with pytest.raises(ValueError, match="Fireworks API key not configured"):
             get_fireworks_client()
 
-    @patch('src.services.fireworks_client.get_fireworks_client')
+    @patch("src.services.fireworks_client.get_fireworks_client")
     def test_make_fireworks_request_openai(self, mock_get_client):
         """Test making request to Fireworks"""
         # Mock the client and response
@@ -43,7 +46,7 @@ class TestFireworksClient:
         assert response.id == "test_id"
         mock_client.chat.completions.create.assert_called_once()
 
-    @patch('src.services.fireworks_client.get_fireworks_client')
+    @patch("src.services.fireworks_client.get_fireworks_client")
     def test_make_fireworks_request_openai_stream(self, mock_get_client):
         """Test making streaming request to Fireworks"""
         # Mock the client and stream
@@ -57,9 +60,7 @@ class TestFireworksClient:
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(
-            model="test-model",
-            messages=messages,
-            stream=True
+            model="test-model", messages=messages, stream=True
         )
 
     def test_process_fireworks_response(self):

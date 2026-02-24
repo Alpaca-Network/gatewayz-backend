@@ -24,25 +24,36 @@ from typing import Any, Callable
 
 try:
     import orjson
-    def _serialize(data): return orjson.dumps(data)
-    def _deserialize(data): return orjson.loads(data)
-except ImportError:
-    def _serialize(data): return json.dumps(data)
-    def _deserialize(data): return json.loads(data)
 
-from src.config.redis_config import get_redis_client, is_redis_available
+    def _serialize(data):
+        return orjson.dumps(data)
+
+    def _deserialize(data):
+        return orjson.loads(data)
+
+except ImportError:
+
+    def _serialize(data):
+        return json.dumps(data)
+
+    def _deserialize(data):
+        return json.loads(data)
+
 
 import redis
+
+from src.config.redis_config import get_redis_client, is_redis_available
 
 logger = logging.getLogger(__name__)
 
 try:
     from prometheus_client import Counter
+
     try:
         cache_operations = Counter(
-            'catalog_cache_operations_total',
-            'Cache operations',
-            ['operation', 'cache_layer', 'result']
+            "catalog_cache_operations_total",
+            "Cache operations",
+            ["operation", "cache_layer", "result"],
         )
     except ValueError:
         # Already registered by catalog_response_cache — the existing instance
@@ -52,13 +63,14 @@ except Exception:
     cache_operations = None
 
 # Cache TTL constants (in seconds)
-CATALOG_RESPONSE_CACHE_TTL = 300   # 5 minutes
-PROVIDER_MODELS_CACHE_TTL = 1800   # 30 minutes
+CATALOG_RESPONSE_CACHE_TTL = 300  # 5 minutes
+PROVIDER_MODELS_CACHE_TTL = 1800  # 30 minutes
 
 
 # ============================================================================
 # Debouncing Infrastructure (Issue #1099 - Prevent Cache Thrashing)
 # ============================================================================
+
 
 class InvalidationDebouncer:
     """
@@ -92,13 +104,7 @@ class InvalidationDebouncer:
             "coalesced": 0,  # Number of requests that were debounced/skipped
         }
 
-    def schedule(
-        self,
-        key: str,
-        func: Callable[[], Any],
-        *args,
-        **kwargs
-    ) -> None:
+    def schedule(self, key: str, func: Callable[[], Any], *args, **kwargs) -> None:
         """
         Schedule a debounced invalidation.
 
@@ -160,9 +166,8 @@ class InvalidationDebouncer:
                 **self._stats,
                 "pending_count": len(self._pending_tasks),
                 "efficiency_percent": round(
-                    (self._stats["coalesced"] / max(self._stats["scheduled"], 1)) * 100,
-                    2
-                )
+                    (self._stats["coalesced"] / max(self._stats["scheduled"], 1)) * 100, 2
+                ),
             }
 
 
@@ -282,7 +287,7 @@ class ModelCatalogCache:
         """Increment cache_operations Prometheus counter for l2 cache layer"""
         try:
             if cache_operations is not None:
-                cache_operations.labels(operation='get', cache_layer='l2', result=result).inc()
+                cache_operations.labels(operation="get", cache_layer="l2", result=result).inc()
         except Exception as e:
             logger.debug(f"Failed to record cache operation metric: {e}")
 
@@ -303,13 +308,13 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug("Cache HIT: Full model catalog")
                 self.redis_client.expire(key, self.TTL_FULL_CATALOG)
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug("Cache MISS: Full model catalog")
                 return None
 
@@ -411,12 +416,12 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug(f"Cache HIT: Provider catalog for {provider_name}")
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug(f"Cache MISS: Provider catalog for {provider_name}")
                 return None
 
@@ -463,10 +468,7 @@ class ModelCatalogCache:
             return False
 
     def invalidate_provider_catalog(
-        self,
-        provider_name: str,
-        cascade: bool = False,
-        debounce: bool = False
+        self, provider_name: str, cascade: bool = False, debounce: bool = False
     ) -> bool:
         """Invalidate cached catalog for a specific provider.
 
@@ -490,7 +492,7 @@ class ModelCatalogCache:
                 self.invalidate_provider_catalog,
                 provider_name=provider_name,
                 cascade=cascade,
-                debounce=False  # Don't re-debounce
+                debounce=False,  # Don't re-debounce
             )
             logger.debug(f"Cache INVALIDATE (debounced): Provider '{provider_name}'")
             return True
@@ -505,7 +507,9 @@ class ModelCatalogCache:
             self._stats["invalidations"] += 1
             if cascade:
                 self.invalidate_full_catalog()
-            logger.info(f"Cache INVALIDATE: Provider catalog for {provider_name} (cascade={cascade})")
+            logger.info(
+                f"Cache INVALIDATE: Provider catalog for {provider_name} (cascade={cascade})"
+            )
             return True
 
         except redis.RedisError as e:
@@ -533,12 +537,12 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug(f"Cache HIT: Model {model_id}")
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug(f"Cache MISS: Model {model_id}")
                 return None
 
@@ -626,12 +630,12 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug(f"Cache HIT: Pricing for {model_id}")
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug(f"Cache MISS: Pricing for {model_id}")
                 return None
 
@@ -677,9 +681,7 @@ class ModelCatalogCache:
     # Batch Operations
 
     def invalidate_providers_batch(
-        self,
-        provider_names: list[str],
-        cascade: bool = False
+        self, provider_names: list[str], cascade: bool = False
     ) -> dict[str, any]:
         """Batch invalidate multiple provider catalogs using Redis pipeline.
 
@@ -706,7 +708,7 @@ class ModelCatalogCache:
                 "success": False,
                 "providers_invalidated": 0,
                 "keys_deleted": 0,
-                "error": "Redis unavailable"
+                "error": "Redis unavailable",
             }
 
         if not provider_names:
@@ -714,7 +716,7 @@ class ModelCatalogCache:
                 "success": True,
                 "providers_invalidated": 0,
                 "keys_deleted": 0,
-                "duration_ms": 0
+                "duration_ms": 0,
             }
 
         start_time = time.time()
@@ -754,7 +756,7 @@ class ModelCatalogCache:
                 "providers_invalidated": len(provider_names),
                 "keys_deleted": keys_deleted,
                 "duration_ms": round(duration_ms, 2),
-                "cascade": cascade
+                "cascade": cascade,
             }
 
         except redis.RedisError as e:
@@ -766,7 +768,7 @@ class ModelCatalogCache:
                 "providers_invalidated": 0,
                 "keys_deleted": 0,
                 "duration_ms": round(duration_ms, 2),
-                "error": str(e)
+                "error": str(e),
             }
 
     def invalidate_all_models(self) -> int:
@@ -820,9 +822,7 @@ class ModelCatalogCache:
     def get_stats(self) -> dict[str, Any]:
         """Get cache statistics"""
         total_requests = self._stats["hits"] + self._stats["misses"]
-        hit_rate = (
-            (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0
-        )
+        hit_rate = (self._stats["hits"] / total_requests * 100) if total_requests > 0 else 0
 
         stats = {
             "hits": self._stats["hits"],
@@ -895,10 +895,7 @@ class ModelCatalogCache:
         return self.set_provider_catalog(gateway_name, catalog, ttl=ttl)
 
     def invalidate_gateway_catalog(
-        self,
-        gateway_name: str,
-        cascade: bool = False,
-        debounce: bool = False
+        self, gateway_name: str, cascade: bool = False, debounce: bool = False
     ) -> bool:
         """Invalidate cached catalog for a specific gateway.
 
@@ -933,13 +930,13 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug("Cache HIT: Catalog statistics")
                 self.redis_client.expire(key, self.TTL_STATS)
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug("Cache MISS: Catalog statistics")
                 return None
 
@@ -1019,13 +1016,13 @@ class ModelCatalogCache:
             cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
-                self._record_cache_operation('hit')
+                self._record_cache_operation("hit")
                 logger.debug("Cache HIT: Unique models")
                 self.redis_client.expire(key, self.TTL_UNIQUE)
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
-                self._record_cache_operation('miss')
+                self._record_cache_operation("miss")
                 logger.debug("Cache MISS: Unique models")
                 return None
 
@@ -1182,7 +1179,9 @@ def get_cached_full_catalog() -> list[dict[str, Any]] | None:
             api_models = rebuild_full_catalog_from_providers()
             step_logger.success(api_models=len(api_models))
 
-            step_logger.complete(source="provider_assembly", models=len(api_models), cache_status="populated")
+            step_logger.complete(
+                source="provider_assembly", models=len(api_models), cache_status="populated"
+            )
             return api_models
 
         except Exception as e:
@@ -1214,6 +1213,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         Complete merged catalog (all providers), or empty list on total failure.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
+
     from src.services.local_memory_cache import set_local_catalog
 
     cache = get_model_catalog_cache()
@@ -1230,17 +1230,8 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         from src.config.supabase_config import get_client_for_query
 
         supabase = get_client_for_query(read_only=True)
-        response = (
-            supabase.table("providers")
-            .select("slug")
-            .eq("is_active", True)
-            .execute()
-        )
-        provider_slugs = [
-            row["slug"]
-            for row in (response.data or [])
-            if row.get("slug")
-        ]
+        response = supabase.table("providers").select("slug").eq("is_active", True).execute()
+        provider_slugs = [row["slug"] for row in (response.data or []) if row.get("slug")]
         logger.info(
             f"rebuild_full_catalog_from_providers: discovered {len(provider_slugs)} "
             f"active provider slugs from database"
@@ -1255,6 +1246,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         # DB stores models under the original slug "huggingface").
         try:
             from src.routes.catalog import GATEWAY_REGISTRY
+
             provider_slugs = list(GATEWAY_REGISTRY.keys())
         except Exception:
             logger.error(
@@ -1284,18 +1276,13 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
             models = get_cached_provider_catalog(slug) or []
             return (slug, models)
         except Exception as exc:
-            logger.warning(
-                f"rebuild_full_catalog_from_providers: failed to fetch {slug}: {exc}"
-            )
+            logger.warning(f"rebuild_full_catalog_from_providers: failed to fetch {slug}: {exc}")
             return (slug, [])
 
     fetch_start = time.monotonic()
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(_fetch_provider, slug): slug
-            for slug in provider_slugs
-        }
+        futures = {executor.submit(_fetch_provider, slug): slug for slug in provider_slugs}
         for future in as_completed(futures):
             slug = futures[future]
             try:
@@ -1306,9 +1293,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
                 else:
                     empty_providers.append(slug)
             except Exception as exc:
-                logger.warning(
-                    f"rebuild_full_catalog_from_providers: {slug} future failed: {exc}"
-                )
+                logger.warning(f"rebuild_full_catalog_from_providers: {slug} future failed: {exc}")
                 empty_providers.append(slug)
 
     fetch_elapsed = time.monotonic() - fetch_start
@@ -1322,8 +1307,7 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
         # Some providers legitimately have 0 models (e.g., xai, nebius have no
         # public model listing). Only log at debug level.
         logger.debug(
-            f"rebuild_full_catalog_from_providers: providers with 0 models: "
-            f"{empty_providers}"
+            f"rebuild_full_catalog_from_providers: providers with 0 models: " f"{empty_providers}"
         )
 
     # --- Step 3: Cache the assembled full catalog ---
@@ -1345,9 +1329,7 @@ def invalidate_full_catalog() -> bool:
 
 
 def cache_provider_catalog(
-    provider_name: str,
-    catalog: list[dict[str, Any]],
-    ttl: int | None = None
+    provider_name: str, catalog: list[dict[str, Any]], ttl: int | None = None
 ) -> bool:
     """Cache model catalog for a specific provider"""
     cache = get_model_catalog_cache()
@@ -1371,8 +1353,8 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
     Returns:
         Cached provider catalog or empty list on error
     """
-    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
     from src.services.cache_warmer import get_cache_warmer
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
 
     cache = get_model_catalog_cache()
 
@@ -1396,14 +1378,16 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
                     get_models_by_gateway_for_catalog,
                     transform_db_models_batch,
                 )
+
                 db_models = get_models_by_gateway_for_catalog(
-                    gateway_slug=provider_name,
-                    include_inactive=False
+                    gateway_slug=provider_name, include_inactive=False
                 )
                 return transform_db_models_batch(db_models)
 
             def update_caches(fresh_data):
-                cache.set_provider_catalog(provider_name, fresh_data, ttl=ModelCatalogCache.TTL_PROVIDER)
+                cache.set_provider_catalog(
+                    provider_name, fresh_data, ttl=ModelCatalogCache.TTL_PROVIDER
+                )
                 set_local_catalog(provider_name, fresh_data)
 
             # Fire and forget background refresh
@@ -1442,8 +1426,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
             try:
                 # Fetch from database
                 db_models = get_models_by_gateway_for_catalog(
-                    gateway_slug=provider_name,
-                    include_inactive=False
+                    gateway_slug=provider_name, include_inactive=False
                 )
 
                 # Transform to API format
@@ -1452,10 +1435,14 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
                 _set_building_catalog(False)
 
             # Cache in both Redis and local memory
-            cache.set_provider_catalog(provider_name, api_models, ttl=ModelCatalogCache.TTL_PROVIDER)
+            cache.set_provider_catalog(
+                provider_name, api_models, ttl=ModelCatalogCache.TTL_PROVIDER
+            )
             set_local_catalog(provider_name, api_models)
 
-            logger.info(f"Fetched {len(api_models)} models for {provider_name} from database and cached")
+            logger.info(
+                f"Fetched {len(api_models)} models for {provider_name} from database and cached"
+            )
 
             return api_models
 
@@ -1465,9 +1452,7 @@ def get_cached_provider_catalog(provider_name: str) -> list[dict[str, Any]] | No
 
 
 def invalidate_provider_catalog(
-    provider_name: str,
-    cascade: bool = False,
-    debounce: bool = False
+    provider_name: str, cascade: bool = False, debounce: bool = False
 ) -> bool:
     """Invalidate cached provider catalog.
 
@@ -1527,8 +1512,8 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
     Returns:
         Cached gateway catalog or empty list on error
     """
-    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
     from src.services.cache_warmer import get_cache_warmer
+    from src.services.local_memory_cache import get_local_catalog, set_local_catalog
 
     cache = get_model_catalog_cache()
 
@@ -1551,14 +1536,16 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
                     get_models_by_gateway_for_catalog,
                     transform_db_models_batch,
                 )
+
                 db_models = get_models_by_gateway_for_catalog(
-                    gateway_slug=gateway_name,
-                    include_inactive=False
+                    gateway_slug=gateway_name, include_inactive=False
                 )
                 return transform_db_models_batch(db_models)
 
             def update_caches(fresh_data):
-                cache.set_gateway_catalog(gateway_name, fresh_data, ttl=ModelCatalogCache.TTL_GATEWAY)
+                cache.set_gateway_catalog(
+                    gateway_name, fresh_data, ttl=ModelCatalogCache.TTL_GATEWAY
+                )
                 set_local_catalog(gateway_name, fresh_data)
 
             # Fire and forget background refresh
@@ -1597,8 +1584,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
             try:
                 # Fetch from database
                 db_models = get_models_by_gateway_for_catalog(
-                    gateway_slug=gateway_name,
-                    include_inactive=False
+                    gateway_slug=gateway_name, include_inactive=False
                 )
 
                 # Transform to API format
@@ -1610,7 +1596,9 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
             cache.set_gateway_catalog(gateway_name, api_models, ttl=ModelCatalogCache.TTL_GATEWAY)
             set_local_catalog(gateway_name, api_models)
 
-            logger.info(f"Fetched {len(api_models)} models for {gateway_name} from database and cached")
+            logger.info(
+                f"Fetched {len(api_models)} models for {gateway_name} from database and cached"
+            )
 
             return api_models
 
@@ -1620,9 +1608,7 @@ def get_cached_gateway_catalog(gateway_name: str) -> list[dict[str, Any]] | None
 
 
 def invalidate_gateway_catalog(
-    gateway_name: str,
-    cascade: bool = False,
-    debounce: bool = False
+    gateway_name: str, cascade: bool = False, debounce: bool = False
 ) -> bool:
     """Invalidate cached gateway catalog.
 
@@ -1886,7 +1872,7 @@ def set_provider_catalog_smart(
             "success": True,
             "models_cached": cached_count,
             "provider": provider_name,
-            "ttl": ttl
+            "ttl": ttl,
         }
 
     except redis.RedisError as e:
@@ -1895,7 +1881,7 @@ def set_provider_catalog_smart(
             "success": False,
             "models_cached": cached_count,
             "provider": provider_name,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -1939,10 +1925,14 @@ def get_provider_catalog_smart(provider_name: str) -> list[dict[str, Any]] | Non
                         try:
                             models.append(_deserialize(raw))
                         except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as e:
-                            logger.debug(f"Skipping corrupted cache entry for model {model_id}: {e}")
+                            logger.debug(
+                                f"Skipping corrupted cache entry for model {model_id}: {e}"
+                            )
 
             if models:
-                logger.debug(f"Smart cache HIT: {provider_name} - {len(models)} models retrieved individually")
+                logger.debug(
+                    f"Smart cache HIT: {provider_name} - {len(models)} models retrieved individually"
+                )
                 return models
 
         # Fall back to legacy method if smart cache not available
@@ -1979,15 +1969,15 @@ def has_model_changed(old_model: dict[str, Any], new_model: dict[str, Any]) -> b
 
     # Compare critical fields that matter for API responses
     critical_fields = [
-        "pricing",           # Pricing changes
-        "context_length",    # Context window updates
-        "description",       # Model description changes
-        "modality",          # Capability changes
+        "pricing",  # Pricing changes
+        "context_length",  # Context window updates
+        "description",  # Model description changes
+        "modality",  # Capability changes
         "supports_streaming",
         "supports_function_calling",
         "supports_vision",
-        "is_active",         # Availability changes
-        "health_status",     # Health status updates
+        "is_active",  # Availability changes
+        "health_status",  # Health status updates
     ]
 
     for field in critical_fields:
@@ -2014,8 +2004,7 @@ def has_model_changed(old_model: dict[str, Any], new_model: dict[str, Any]) -> b
 
 
 def find_changed_models(
-    cached_models: list[dict[str, Any]],
-    new_models: list[dict[str, Any]]
+    cached_models: list[dict[str, Any]], new_models: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """
     Find which models changed, were added, or were deleted.
@@ -2064,10 +2053,7 @@ def find_changed_models(
             added.append(new_model)
 
     # Find deleted models
-    deleted_ids = [
-        model_id for model_id in cached_by_id.keys()
-        if model_id not in new_by_id
-    ]
+    deleted_ids = [model_id for model_id in cached_by_id.keys() if model_id not in new_by_id]
 
     return {
         "changed": changed,
@@ -2075,14 +2061,12 @@ def find_changed_models(
         "deleted": deleted_ids,
         "unchanged": unchanged_count,
         "total_new": len(new_models),
-        "total_cached": len(cached_models or [])
+        "total_cached": len(cached_models or []),
     }
 
 
 def update_provider_catalog_incremental(
-    provider_name: str,
-    new_models: list[dict[str, Any]],
-    ttl: int | None = None
+    provider_name: str, new_models: list[dict[str, Any]], ttl: int | None = None
 ) -> dict[str, Any]:
     """
     Update provider catalog incrementally - only update what changed.
@@ -2147,9 +2131,7 @@ def update_provider_catalog_incremental(
                 if m.get("id") or m.get("slug") or m.get("provider_model_id")
             ]
             cache.redis_client.setex(
-                f"{CACHE_NAMESPACE}models:index:{provider_name}",
-                ttl,
-                _serialize(model_ids)
+                f"{CACHE_NAMESPACE}models:index:{provider_name}", ttl, _serialize(model_ids)
             )
 
         logger.info(
@@ -2168,16 +2150,14 @@ def update_provider_catalog_incremental(
             "deleted": deleted_count,
             "unchanged": delta["unchanged"],
             "total_operations": updated_count + added_count + deleted_count,
-            "efficiency_percent": round(delta["unchanged"] / max(delta["total_cached"], 1) * 100, 1)
+            "efficiency_percent": round(
+                delta["unchanged"] / max(delta["total_cached"], 1) * 100, 1
+            ),
         }
 
     except Exception as e:
         logger.error(f"Error in incremental cache update for {provider_name}: {e}")
-        return {
-            "success": False,
-            "provider": provider_name,
-            "error": str(e)
-        }
+        return {"success": False, "provider": provider_name, "error": str(e)}
 
 
 # ============================================================================
@@ -2186,8 +2166,7 @@ def update_provider_catalog_incremental(
 
 
 def get_provider_catalog_with_refresh(
-    provider_name: str,
-    ttl_threshold: int = CATALOG_RESPONSE_CACHE_TTL  # 5 minutes
+    provider_name: str, ttl_threshold: int = CATALOG_RESPONSE_CACHE_TTL  # 5 minutes
 ) -> list[dict[str, Any]] | None:
     """
     Get provider catalog with smart background refresh.
@@ -2293,8 +2272,7 @@ def _fetch_provider_models_from_db(provider_name: str) -> list[dict[str, Any]]:
 
         # Fetch from database
         db_models = get_models_by_gateway_for_catalog(
-            gateway_slug=provider_name,
-            include_inactive=False
+            gateway_slug=provider_name, include_inactive=False
         )
 
         # Transform to API format
@@ -2312,11 +2290,7 @@ def _fetch_provider_models_from_db(provider_name: str) -> list[dict[str, Any]]:
 # ============================================================================
 
 
-def cache_unique_model(
-    model_name: str,
-    model_data: dict[str, Any],
-    ttl: int | None = None
-) -> bool:
+def cache_unique_model(model_name: str, model_data: dict[str, Any], ttl: int | None = None) -> bool:
     """
     Cache a single unique model with its provider relationships.
 
@@ -2382,8 +2356,7 @@ def get_cached_unique_model(model_name: str) -> dict[str, Any] | None:
 
 
 def update_unique_models_incremental(
-    new_unique_models: list[dict[str, Any]],
-    ttl: int | None = None
+    new_unique_models: list[dict[str, Any]], ttl: int | None = None
 ) -> dict[str, Any]:
     """
     Update unique models cache incrementally - only update what changed.
@@ -2444,10 +2417,7 @@ def update_unique_models_incremental(
                 added.append(new_model)
 
         # Find deleted
-        deleted_names = [
-            name for name in cached_by_name.keys()
-            if name not in new_by_name
-        ]
+        deleted_names = [name for name in cached_by_name.keys() if name not in new_by_name]
 
         # Update changed models
         updated_count = 0
@@ -2473,9 +2443,7 @@ def update_unique_models_incremental(
         if cache.redis_client and is_redis_available():
             new_index = list(new_by_name.keys())
             cache.redis_client.setex(
-                f"{CACHE_NAMESPACE}models:unique:index",
-                ttl,
-                _serialize(new_index)
+                f"{CACHE_NAMESPACE}models:unique:index", ttl, _serialize(new_index)
             )
 
         logger.info(
@@ -2492,15 +2460,12 @@ def update_unique_models_incremental(
             "deleted": deleted_count,
             "unchanged": unchanged_count,
             "total_operations": updated_count + added_count + deleted_count,
-            "efficiency_percent": round(unchanged_count / max(len(cached_by_name), 1) * 100, 1)
+            "efficiency_percent": round(unchanged_count / max(len(cached_by_name), 1) * 100, 1),
         }
 
     except Exception as e:
         logger.error(f"Error in incremental unique models update: {e}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def has_unique_model_changed(old_model: dict[str, Any], new_model: dict[str, Any]) -> bool:
@@ -2589,9 +2554,7 @@ def invalidate_unique_model(model_name: str) -> bool:
 
 
 def cache_model_relationships_by_unique(
-    model_name: str,
-    relationship_data: dict[str, Any],
-    ttl: int | None = None
+    model_name: str, relationship_data: dict[str, Any], ttl: int | None = None
 ) -> bool:
     """
     Cache provider relationships for a unique model.
@@ -2658,9 +2621,7 @@ def get_cached_model_relationships_by_unique(model_name: str) -> dict[str, Any] 
 
 
 def cache_model_relationships_by_provider(
-    provider_slug: str,
-    relationship_data: dict[str, Any],
-    ttl: int | None = None
+    provider_slug: str, relationship_data: dict[str, Any], ttl: int | None = None
 ) -> bool:
     """
     Cache unique model relationships for a provider.
@@ -2732,9 +2693,7 @@ def get_cached_model_relationships_by_provider(provider_slug: str) -> dict[str, 
 
 
 def cache_provider_metadata(
-    provider_id: int,
-    provider_data: dict[str, Any],
-    ttl: int = 3600
+    provider_id: int, provider_data: dict[str, Any], ttl: int = 3600
 ) -> bool:
     """
     Cache provider metadata.
@@ -2864,7 +2823,7 @@ def _generate_unique_models_cache_key(
     include_inactive: bool = False,
     min_providers: int | None = None,
     sort_by: str = "provider_count",
-    order: str = "desc"
+    order: str = "desc",
 ) -> str:
     """
     Generate cache key for unique models with specific filters.
@@ -2896,7 +2855,7 @@ async def get_cached_unique_models_smart(
     include_inactive: bool = False,
     min_providers: int | None = None,
     sort_by: str = "provider_count",
-    order: str = "desc"
+    order: str = "desc",
 ) -> list[dict[str, Any]] | None:
     """
     Get cached unique models with filter support.
@@ -2925,7 +2884,7 @@ async def get_cached_unique_models_smart(
             include_inactive=include_inactive,
             min_providers=min_providers,
             sort_by=sort_by,
-            order=order
+            order=order,
         )
 
         # Non-blocking Redis access
@@ -2952,7 +2911,7 @@ async def cache_unique_models_with_filters(
     min_providers: int | None = None,
     sort_by: str = "provider_count",
     order: str = "desc",
-    ttl: int = PROVIDER_MODELS_CACHE_TTL
+    ttl: int = PROVIDER_MODELS_CACHE_TTL,
 ) -> bool:
     """
     Cache unique models with specific filter combination.
@@ -2980,7 +2939,7 @@ async def cache_unique_models_with_filters(
             include_inactive=include_inactive,
             min_providers=min_providers,
             sort_by=sort_by,
-            order=order
+            order=order,
         )
 
         serialized_data = _serialize(models)
@@ -3015,47 +2974,64 @@ async def warm_unique_models_cache_all_variants() -> dict[str, Any]:
     Returns:
         dict with warming statistics
     """
+    import asyncio
+
     from src.db.models_catalog_db import (
         get_all_unique_models_for_catalog,
         transform_unique_models_batch,
     )
-    import asyncio
 
     logger.info("Starting unique models cache warming for common variants...")
 
     # Define common filter combinations to pre-warm
     variants = [
         # Default view
-        {"include_inactive": False, "min_providers": None, "sort_by": "provider_count", "order": "desc"},
+        {
+            "include_inactive": False,
+            "min_providers": None,
+            "sort_by": "provider_count",
+            "order": "desc",
+        },
         # Multi-provider models
-        {"include_inactive": False, "min_providers": 2, "sort_by": "provider_count", "order": "desc"},
-        {"include_inactive": False, "min_providers": 3, "sort_by": "provider_count", "order": "desc"},
-        {"include_inactive": False, "min_providers": 5, "sort_by": "provider_count", "order": "desc"},
+        {
+            "include_inactive": False,
+            "min_providers": 2,
+            "sort_by": "provider_count",
+            "order": "desc",
+        },
+        {
+            "include_inactive": False,
+            "min_providers": 3,
+            "sort_by": "provider_count",
+            "order": "desc",
+        },
+        {
+            "include_inactive": False,
+            "min_providers": 5,
+            "sort_by": "provider_count",
+            "order": "desc",
+        },
         # Alphabetical
         {"include_inactive": False, "min_providers": None, "sort_by": "name", "order": "asc"},
         # Cheapest
-        {"include_inactive": False, "min_providers": None, "sort_by": "cheapest_price", "order": "asc"},
+        {
+            "include_inactive": False,
+            "min_providers": None,
+            "sort_by": "cheapest_price",
+            "order": "asc",
+        },
     ]
 
-    stats = {
-        "total_variants": len(variants),
-        "successful": 0,
-        "failed": 0,
-        "variants_cached": []
-    }
+    stats = {"total_variants": len(variants), "successful": 0, "failed": 0, "variants_cached": []}
 
     try:
         # Fetch base data once
         logger.debug("Fetching base unique models data from database...")
         db_unique_models = await asyncio.to_thread(
-            get_all_unique_models_for_catalog,
-            include_inactive=False
+            get_all_unique_models_for_catalog, include_inactive=False
         )
 
-        api_models = await asyncio.to_thread(
-            transform_unique_models_batch,
-            db_unique_models
-        )
+        api_models = await asyncio.to_thread(transform_unique_models_batch, db_unique_models)
 
         logger.info(f"Fetched {len(api_models)} unique models from database")
 
@@ -3067,7 +3043,8 @@ async def warm_unique_models_cache_all_variants() -> dict[str, Any]:
                 # Apply filter
                 if variant["min_providers"] is not None:
                     filtered_models = [
-                        m for m in filtered_models
+                        m
+                        for m in filtered_models
                         if m.get("provider_count", 0) >= variant["min_providers"]
                     ]
 
@@ -3075,32 +3052,33 @@ async def warm_unique_models_cache_all_variants() -> dict[str, Any]:
                 if variant["sort_by"] == "provider_count":
                     filtered_models.sort(
                         key=lambda m: m.get("provider_count", 0),
-                        reverse=(variant["order"] == "desc")
+                        reverse=(variant["order"] == "desc"),
                     )
                 elif variant["sort_by"] == "name":
                     filtered_models.sort(
                         key=lambda m: m.get("name", "").lower(),
-                        reverse=(variant["order"] == "desc")
+                        reverse=(variant["order"] == "desc"),
                     )
                 elif variant["sort_by"] == "cheapest_price":
                     filtered_models.sort(
-                        key=lambda m: m.get("cheapest_prompt_price") if m.get("cheapest_prompt_price") is not None else float('inf'),
-                        reverse=(variant["order"] == "desc")
+                        key=lambda m: (
+                            m.get("cheapest_prompt_price")
+                            if m.get("cheapest_prompt_price") is not None
+                            else float("inf")
+                        ),
+                        reverse=(variant["order"] == "desc"),
                     )
 
                 # Cache this variant
                 success = await cache_unique_models_with_filters(
-                    models=filtered_models,
-                    **variant,
-                    ttl=PROVIDER_MODELS_CACHE_TTL
+                    models=filtered_models, **variant, ttl=PROVIDER_MODELS_CACHE_TTL
                 )
 
                 if success:
                     stats["successful"] += 1
-                    stats["variants_cached"].append({
-                        "variant": variant,
-                        "count": len(filtered_models)
-                    })
+                    stats["variants_cached"].append(
+                        {"variant": variant, "count": len(filtered_models)}
+                    )
                 else:
                     stats["failed"] += 1
 
@@ -3154,11 +3132,13 @@ def invalidate_catalog_caches(gateway: str = None) -> dict[str, Any]:
     cache = get_model_catalog_cache()
 
     if not cache.redis_client or not is_redis_available():
-        logger.warning(
-            "Cache invalidation skipped: Redis unavailable "
-            f"(gateway={gateway!r})"
-        )
-        return {"success": False, "keys_deleted": 0, "gateway": gateway, "error": "Redis unavailable"}
+        logger.warning("Cache invalidation skipped: Redis unavailable " f"(gateway={gateway!r})")
+        return {
+            "success": False,
+            "keys_deleted": 0,
+            "gateway": gateway,
+            "error": "Redis unavailable",
+        }
 
     total_deleted = 0
 
@@ -3168,8 +3148,8 @@ def invalidate_catalog_caches(gateway: str = None) -> dict[str, Any]:
         # ------------------------------------------------------------------
         l1_exact_keys = [
             ModelCatalogCache.PREFIX_FULL_CATALOG,  # gw:models:catalog:full
-            ModelCatalogCache.PREFIX_STATS,          # gw:models:stats
-            ModelCatalogCache.PREFIX_UNIQUE,         # gw:models:unique
+            ModelCatalogCache.PREFIX_STATS,  # gw:models:stats
+            ModelCatalogCache.PREFIX_UNIQUE,  # gw:models:unique
         ]
         for key in l1_exact_keys:
             deleted = cache.redis_client.delete(key)
@@ -3224,15 +3204,18 @@ def invalidate_catalog_caches(gateway: str = None) -> dict[str, Any]:
                     if cursor == 0:
                         break
 
-            logger.info(
-                f"Full catalog cache invalidated: {total_deleted} keys deleted"
-            )
+            logger.info(f"Full catalog cache invalidated: {total_deleted} keys deleted")
 
         return {"success": True, "keys_deleted": total_deleted, "gateway": gateway}
 
     except Exception as e:
         logger.error(f"Cache invalidation error (gateway={gateway!r}): {e}", exc_info=True)
-        return {"success": False, "keys_deleted": total_deleted, "gateway": gateway, "error": str(e)}
+        return {
+            "success": False,
+            "keys_deleted": total_deleted,
+            "gateway": gateway,
+            "error": str(e),
+        }
 
 
 __all__ = [

@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC
 
 from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
@@ -24,7 +25,6 @@ from src.services.prometheus_remote_write import (
 )
 from src.services.response_cache import get_cache
 from src.services.tempo_otlp import init_tempo_otlp_fastapi
-from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +86,18 @@ async def lifespan(app):
 
     for attempt in range(1, max_retries + 1):
         try:
-            logger.info(f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})...")
+            logger.info(
+                f"🔄 Initializing Supabase database client (attempt {attempt}/{max_retries})..."
+            )
             get_supabase_client()  # Forces initialization, leverages lazy proxy for flexibility
             logger.info("✅ Supabase client initialized and connection verified")
             db_initialized = True
             break  # Success, exit retry loop
         except Exception as e:
             last_error = e
-            logger.warning(f"⚠️  Supabase initialization attempt {attempt}/{max_retries} failed: {e}")
+            logger.warning(
+                f"⚠️  Supabase initialization attempt {attempt}/{max_retries} failed: {e}"
+            )
 
             if attempt < max_retries:
                 # Exponential backoff
@@ -103,18 +107,26 @@ async def lifespan(app):
 
     # If all retries failed, log warning and start in degraded mode
     if not db_initialized and last_error:
-        logger.warning(f"⚠️  Supabase client initialization failed after {max_retries} attempts: {last_error}")
-        logger.warning("Application will start in DEGRADED MODE - database-dependent endpoints may fail")
+        logger.warning(
+            f"⚠️  Supabase client initialization failed after {max_retries} attempts: {last_error}"
+        )
+        logger.warning(
+            "Application will start in DEGRADED MODE - database-dependent endpoints may fail"
+        )
         # Capture to Sentry with startup context
         try:
             import sentry_sdk
+
             with sentry_sdk.push_scope() as scope:
-                scope.set_context("startup", {
-                    "phase": "supabase_initialization",
-                    "error_type": type(last_error).__name__,
-                    "attempts": max_retries,
-                    "degraded_mode": True,  # Flag that app is running in degraded mode
-                })
+                scope.set_context(
+                    "startup",
+                    {
+                        "phase": "supabase_initialization",
+                        "error_type": type(last_error).__name__,
+                        "attempts": max_retries,
+                        "degraded_mode": True,  # Flag that app is running in degraded mode
+                    },
+                )
                 scope.set_tag("component", "startup")
                 scope.set_tag("degraded_mode", "true")
                 scope.level = "warning"  # Warning, not fatal - app can still start
@@ -144,6 +156,7 @@ async def lifespan(app):
         # Must run AFTER OTel instrumentation so the asyncio event loop is ready.
         try:
             from src.services.pyroscope_config import init_pyroscope
+
             init_pyroscope()
         except Exception as e:
             logger.warning(f"Pyroscope initialisation warning: {e}")
@@ -166,7 +179,9 @@ async def lifespan(app):
 
                     success = OpenTelemetryConfig.initialize()
                     if success:
-                        logger.info(f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})")
+                        logger.info(
+                            f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})"
+                        )
                         return
                     else:
                         # Initialization returned False (endpoint not reachable, etc.)
@@ -226,7 +241,9 @@ async def lifespan(app):
         # This prevents heavy health checks from affecting API response times
         logger.info("⏭️  Health monitoring handled by dedicated health-service container")
         logger.info("   Main API reads health data from Redis cache")
-        logger.info("✅ Passive health monitoring active (from real API calls in chat.py/messages.py)")
+        logger.info(
+            "✅ Passive health monitoring active (from real API calls in chat.py/messages.py)"
+        )
 
         # Initialize connection pools (they're lazy-loaded, but log readiness)
         pool_stats = get_pool_stats()
@@ -244,6 +261,7 @@ async def lifespan(app):
                     try:
                         logger.info("🔥 [1/5] Pre-warming database connections...")
                         from src.config.supabase_config import get_supabase_client
+
                         client = get_supabase_client()
                         await asyncio.to_thread(
                             lambda: client.table("plans").select("id").limit(1).execute()
@@ -258,13 +276,17 @@ async def lifespan(app):
                 # Per-provider caches are populated as a side-effect.
                 await asyncio.sleep(3)
                 try:
-                    logger.info("🔥 [2/5] Preloading full model catalog cache (per-provider assembly)...")
+                    logger.info(
+                        "🔥 [2/5] Preloading full model catalog cache (per-provider assembly)..."
+                    )
                     from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
                     full_catalog = await asyncio.to_thread(rebuild_full_catalog_from_providers)
 
                     catalog_count = len(full_catalog) if full_catalog else 0
-                    logger.info(f"✅ [2/5] Catalog cache warming complete: {catalog_count} models loaded")
+                    logger.info(
+                        f"✅ [2/5] Catalog cache warming complete: {catalog_count} models loaded"
+                    )
                 except Exception as e:
                     logger.warning(f"Model cache preload warning: {e}")
 
@@ -272,7 +294,9 @@ async def lifespan(app):
                 await asyncio.sleep(2)
                 try:
                     logger.info("🔥 [3/4] Pre-warming unique models cache (all filter variants)...")
-                    from src.services.model_catalog_cache import warm_unique_models_cache_all_variants
+                    from src.services.model_catalog_cache import (
+                        warm_unique_models_cache_all_variants,
+                    )
 
                     warmup_stats = await warm_unique_models_cache_all_variants()
                     logger.info(
@@ -288,7 +312,9 @@ async def lifespan(app):
                     logger.info("🔥 [4/5] Pre-warming provider connections...")
                     warmup_results = await warmup_provider_connections_async()
                     warmed_count = sum(1 for v in warmup_results.values() if v == "ok")
-                    logger.info(f"✅ [4/5] Warmed {warmed_count}/{len(warmup_results)} provider connections")
+                    logger.info(
+                        f"✅ [4/5] Warmed {warmed_count}/{len(warmup_results)} provider connections"
+                    )
                 except Exception as e:
                     logger.warning(f"Provider connection warmup warning: {e}")
 
@@ -299,10 +325,13 @@ async def lifespan(app):
                 # additional DB queries are needed — we simply read from the in-memory/Redis
                 # model catalog cache and write the serialised response into catalog_response_cache.
                 try:
-                    logger.info("🔥 [5/5] Warming catalog response cache (gateway=all, default params)...")
+                    logger.info(
+                        "🔥 [5/5] Warming catalog response cache (gateway=all, default params)..."
+                    )
                     from datetime import datetime
-                    from src.services.models import get_cached_models
+
                     from src.services.catalog_response_cache import cache_catalog_response
+                    from src.services.models import get_cached_models
 
                     default_cache_params = {
                         "limit": 100,
@@ -326,9 +355,7 @@ async def lifespan(app):
                             "next_offset": 100 if len(models) > 100 else None,
                             "include_huggingface": False,
                             "gateway": "all",
-                            "note": (
-                                "Combined catalog (all gateways)"
-                            ),
+                            "note": ("Combined catalog (all gateways)"),
                             "timestamp": datetime.now(UTC).isoformat(),
                         }
                         await cache_catalog_response("all", default_cache_params, response_payload)
@@ -337,7 +364,9 @@ async def lifespan(app):
                             f"{len(paginated)} models cached for gateway=all"
                         )
                     else:
-                        logger.warning("[5/5] Skipping catalog response cache warm: no models available")
+                        logger.warning(
+                            "[5/5] Skipping catalog response cache warm: no models available"
+                        )
                 except Exception as e:
                     logger.warning(f"Catalog response cache warmup warning: {e}")
 
@@ -369,6 +398,7 @@ async def lifespan(app):
                 await asyncio.sleep(30)  # Wait for DB warmup to complete
                 logger.info("🧹 Running startup cleanup for stuck pricing syncs...")
                 from src.services.pricing_sync_cleanup import cleanup_stuck_syncs
+
                 result = await cleanup_stuck_syncs(timeout_minutes=5)
                 logger.info(
                     f"✅ Startup cleanup complete: "
@@ -391,7 +421,9 @@ async def lifespan(app):
 
                 result = await sync_providers_on_startup()
                 if result["success"]:
-                    logger.info(f"✓ Synced {result['providers_synced']} providers from GATEWAY_REGISTRY")
+                    logger.info(
+                        f"✓ Synced {result['providers_synced']} providers from GATEWAY_REGISTRY"
+                    )
                 else:
                     logger.warning(f"Provider sync warning: {result.get('error')}")
             except Exception as e:
@@ -402,9 +434,12 @@ async def lifespan(app):
         # Optionally sync high-priority models on startup (can be disabled for faster startup)
         sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"
         if sync_models_on_startup:
+
             async def sync_initial_models_background():
                 try:
-                    from src.services.provider_model_sync_service import sync_initial_models_on_startup
+                    from src.services.provider_model_sync_service import (
+                        sync_initial_models_on_startup,
+                    )
 
                     result = await sync_initial_models_on_startup()
                     if result["success"]:
@@ -416,6 +451,7 @@ async def lifespan(app):
 
         # Start background model sync task (runs every N hours)
         model_sync_interval = int(os.environ.get("MODEL_SYNC_INTERVAL_HOURS", "6"))
+
         async def start_model_sync_background():
             try:
                 from src.services.provider_model_sync_service import start_background_model_sync
@@ -464,17 +500,22 @@ async def lifespan(app):
             except Exception as e:
                 logger.warning(f"Router health snapshot initialization warning: {e}")
 
-        _create_background_task(init_router_health_snapshots_background(), name="init_router_health_snapshots")
+        _create_background_task(
+            init_router_health_snapshots_background(), name="init_router_health_snapshots"
+        )
 
         # Initialize model catalog background refresh task (Prevent 499 Deadlocks)
         async def init_model_catalog_refresh_background():
             try:
                 from src.services.background_tasks import start_model_catalog_refresh_task
+
                 start_model_catalog_refresh_task()
             except Exception as e:
                 logger.warning(f"Model catalog refresh initialization warning: {e}")
 
-        _create_background_task(init_model_catalog_refresh_background(), name="init_model_catalog_refresh")
+        _create_background_task(
+            init_model_catalog_refresh_background(), name="init_model_catalog_refresh"
+        )
 
         logger.info("=" * 80)
         logger.info("✅ GATEWAYZ API STARTUP - COMPLETE")
@@ -550,6 +591,7 @@ async def lifespan(app):
         # Stop model catalog refresh task
         try:
             from src.services.background_tasks import stop_model_catalog_refresh_task
+
             stop_model_catalog_refresh_task()
         except Exception as e:
             logger.warning(f"Model catalog refresh shutdown warning: {e}")
@@ -571,6 +613,7 @@ async def lifespan(app):
         # explicit shutdown that data is lost when the container stops.
         try:
             from src.services.pyroscope_config import shutdown_pyroscope
+
             shutdown_pyroscope()
         except Exception as e:
             logger.warning(f"Pyroscope shutdown warning: {e}")
@@ -598,6 +641,7 @@ async def lifespan(app):
         # Cleanup Supabase client and close httpx connections
         try:
             from src.config.supabase_config import cleanup_supabase_client
+
             cleanup_supabase_client()
         except Exception as e:
             logger.warning(f"Supabase cleanup warning: {e}")

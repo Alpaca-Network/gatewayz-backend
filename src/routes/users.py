@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -168,9 +168,7 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
                     + timedelta(minutes=1),
                     "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
                     + timedelta(hours=1),
-                    "day": datetime.now(UTC).replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    )
+                    "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
                     + timedelta(days=1),
                 },
             }
@@ -190,8 +188,7 @@ async def user_get_rate_limits(api_key: str = Depends(get_api_key)):
             },
             "current_usage": current_usage,
             "reset_times": {
-                "minute": datetime.now(UTC).replace(second=0, microsecond=0)
-                + timedelta(minutes=1),
+                "minute": datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1),
                 "hour": datetime.now(UTC).replace(minute=0, second=0, microsecond=0)
                 + timedelta(hours=1),
                 "day": datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -380,9 +377,13 @@ async def update_cache_settings_endpoint(
                 )
             ),
             "privacy_notice": (
-                "When enabled, your prompts are sent through Butter.dev's caching proxy. "
-                "Butter.dev uses prompts to identify caching patterns but does not store them long-term."
-            ) if enable_butter_cache else None,
+                (
+                    "When enabled, your prompts are sent through Butter.dev's caching proxy. "
+                    "Butter.dev uses prompts to identify caching patterns but does not store them long-term."
+                )
+                if enable_butter_cache
+                else None
+            ),
         }
 
     except HTTPException:

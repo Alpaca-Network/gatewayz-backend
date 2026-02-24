@@ -1,16 +1,17 @@
 """Tests for Cloudflare Workers AI client"""
 
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 
 from src.services.cloudflare_workers_ai_client import (
+    DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS,
+    fetch_models_from_cloudflare_api,
+    fetch_models_from_cloudflare_workers_ai,
     get_cloudflare_workers_ai_client,
     make_cloudflare_workers_ai_request_openai,
     make_cloudflare_workers_ai_request_openai_stream,
     process_cloudflare_workers_ai_response,
-    fetch_models_from_cloudflare_workers_ai,
-    fetch_models_from_cloudflare_api,
-    DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS,
 )
 
 
@@ -95,9 +96,7 @@ class TestCloudflareWorkersAIClient:
 
         messages = [{"role": "user", "content": "Hello"}]
         with pytest.raises(Exception, match="API Error"):
-            make_cloudflare_workers_ai_request_openai(
-                messages, "@cf/meta/llama-3.1-8b-instruct"
-            )
+            make_cloudflare_workers_ai_request_openai(messages, "@cf/meta/llama-3.1-8b-instruct")
 
     @patch("src.services.cloudflare_workers_ai_client.get_cloudflare_workers_ai_client")
     def test_make_cloudflare_workers_ai_request_openai_stream(self, mock_get_client):
@@ -109,9 +108,7 @@ class TestCloudflareWorkersAIClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_cloudflare_workers_ai_request_openai_stream(
-            messages, "@cf/qwen/qwq-32b"
-        )
+        stream = make_cloudflare_workers_ai_request_openai_stream(messages, "@cf/qwen/qwq-32b")
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(
@@ -119,9 +116,7 @@ class TestCloudflareWorkersAIClient:
         )
 
     @patch("src.services.cloudflare_workers_ai_client.get_cloudflare_workers_ai_client")
-    def test_make_cloudflare_workers_ai_request_openai_stream_with_kwargs(
-        self, mock_get_client
-    ):
+    def test_make_cloudflare_workers_ai_request_openai_stream_with_kwargs(self, mock_get_client):
         """Test making streaming request to Cloudflare Workers AI with additional parameters"""
         mock_client = Mock()
         mock_stream = Mock()
@@ -186,10 +181,7 @@ class TestCloudflareWorkersAIClient:
         assert processed["model"] == "@cf/meta/llama-3.1-8b-instruct"
         assert len(processed["choices"]) == 1
         assert processed["choices"][0]["index"] == 0
-        assert (
-            processed["choices"][0]["message"]["content"]
-            == "Hello! How can I help you today?"
-        )
+        assert processed["choices"][0]["message"]["content"] == "Hello! How can I help you today?"
         assert processed["choices"][0]["finish_reason"] == "stop"
         assert processed["usage"]["prompt_tokens"] == 15
         assert processed["usage"]["completion_tokens"] == 25
@@ -285,9 +277,9 @@ class TestCloudflareWorkersAIClient:
 
         for model in models:
             assert "source_gateway" in model, f"Model {model['id']} missing source_gateway field"
-            assert model["source_gateway"] == "cloudflare-workers-ai", (
-                f"Model {model['id']} has incorrect source_gateway: {model.get('source_gateway')}"
-            )
+            assert (
+                model["source_gateway"] == "cloudflare-workers-ai"
+            ), f"Model {model['id']} has incorrect source_gateway: {model.get('source_gateway')}"
 
 
 class TestFetchModelsFromCloudflareAPI:

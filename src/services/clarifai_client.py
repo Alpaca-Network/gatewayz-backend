@@ -20,9 +20,9 @@ Model ID Format:
 import logging
 
 from src.config import Config
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.pricing_lookup import enrich_model_with_pricing
 
 # Initialize logging
@@ -60,11 +60,7 @@ def make_clarifai_request_openai(messages, model, **kwargs):
         # Log request for debugging
         logger.debug(f"Clarifai request - model: {model}, messages: {len(messages)}")
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
+        response = client.chat.completions.create(model=model, messages=messages, **kwargs)
 
         return response
     except Exception as e:
@@ -90,10 +86,7 @@ def make_clarifai_request_openai_stream(messages, model, **kwargs):
         logger.debug(f"Clarifai streaming request - model: {model}, messages: {len(messages)}")
 
         stream = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True,
-            **kwargs
+            model=model, messages=messages, stream=True, **kwargs
         )
 
         return stream
@@ -182,7 +175,9 @@ def fetch_models_from_clarifai():
         filtered_count = 0
         for model in models:
             model_id = getattr(model, "id", "") or ""
-            context_length = getattr(model, "context_length", None) or getattr(model, "context_window", 4096)
+            context_length = getattr(model, "context_length", None) or getattr(
+                model, "context_window", 4096
+            )
             transformed_model = {
                 "id": model_id,
                 "slug": f"clarifai/{model_id}",
@@ -217,7 +212,9 @@ def fetch_models_from_clarifai():
                 prompt_price = float(pricing.get("prompt", "0") or "0")
                 completion_price = float(pricing.get("completion", "0") or "0")
                 if prompt_price == 0 and completion_price == 0:
-                    logger.debug(f"Filtering out Clarifai model {model_id} - zero pricing after enrichment")
+                    logger.debug(
+                        f"Filtering out Clarifai model {model_id} - zero pricing after enrichment"
+                    )
                     filtered_count += 1
                     continue
             except (ValueError, TypeError):
@@ -225,7 +222,9 @@ def fetch_models_from_clarifai():
 
             transformed_models.append(enriched_model)
 
-        logger.info(f"Successfully fetched {len(transformed_models)} models from Clarifai ({filtered_count} filtered for missing/zero pricing)")
+        logger.info(
+            f"Successfully fetched {len(transformed_models)} models from Clarifai ({filtered_count} filtered for missing/zero pricing)"
+        )
         return _cache_and_return(transformed_models)
 
     except Exception as e:

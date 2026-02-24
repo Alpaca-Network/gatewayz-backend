@@ -11,11 +11,12 @@ Tests cover:
 """
 
 import importlib
+from datetime import UTC, datetime, timezone
+from unittest.mock import patch
+
 import pytest
-from datetime import datetime, timezone, UTC
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 # Import the chat_history module which contains feedback endpoints
 MODULE_PATH = "src.routes.chat_history"
@@ -80,7 +81,13 @@ def mock_feedback():
 @patch("src.routes.chat_history.save_message_feedback")
 @patch("src.routes.chat_history.get_user")
 def test_submit_thumbs_up_feedback(
-    mock_get_user, mock_save_feedback, mock_log_activity, client, auth_headers, mock_user, mock_feedback
+    mock_get_user,
+    mock_save_feedback,
+    mock_log_activity,
+    client,
+    auth_headers,
+    mock_user,
+    mock_feedback,
 ):
     """Test submitting thumbs up feedback"""
     mock_get_user.return_value = mock_user
@@ -263,6 +270,7 @@ def test_submit_feedback_unauthorized(client):
 
         # Mock the get_api_key to return empty/invalid
         from src.security.deps import get_api_key
+
         app.dependency_overrides[get_api_key] = lambda: "invalid_key"
 
         response = test_client.post(
@@ -307,9 +315,7 @@ def test_get_user_feedback_filtered_by_type(
     mock_get_user.return_value = mock_user
     mock_get_feedback.return_value = [mock_feedback]
 
-    response = client.get(
-        "/v1/chat/feedback?feedback_type=thumbs_up", headers=auth_headers
-    )
+    response = client.get("/v1/chat/feedback?feedback_type=thumbs_up", headers=auth_headers)
 
     assert response.status_code == 200
     mock_get_feedback.assert_called_once()
@@ -327,9 +333,7 @@ def test_get_user_feedback_filtered_by_session(
     mock_get_user.return_value = mock_user
     mock_get_feedback.return_value = [mock_feedback]
 
-    response = client.get(
-        "/v1/chat/feedback?session_id=100", headers=auth_headers
-    )
+    response = client.get("/v1/chat/feedback?session_id=100", headers=auth_headers)
 
     assert response.status_code == 200
     call_kwargs = mock_get_feedback.call_args[1]
@@ -345,9 +349,7 @@ def test_get_user_feedback_pagination(
     mock_get_user.return_value = mock_user
     mock_get_feedback.return_value = []
 
-    response = client.get(
-        "/v1/chat/feedback?limit=10&offset=20", headers=auth_headers
-    )
+    response = client.get("/v1/chat/feedback?limit=10&offset=20", headers=auth_headers)
 
     assert response.status_code == 200
     call_kwargs = mock_get_feedback.call_args[1]
@@ -362,9 +364,7 @@ def test_get_user_feedback_pagination(
 
 @patch("src.routes.chat_history.get_feedback_stats")
 @patch("src.routes.chat_history.get_user")
-def test_get_feedback_stats(
-    mock_get_user, mock_get_stats, client, auth_headers, mock_user
-):
+def test_get_feedback_stats(mock_get_user, mock_get_stats, client, auth_headers, mock_user):
     """Test getting feedback statistics"""
     mock_get_user.return_value = mock_user
     mock_get_stats.return_value = {
@@ -400,9 +400,7 @@ def test_get_feedback_stats_with_model_filter(
     mock_get_user.return_value = mock_user
     mock_get_stats.return_value = {"total_feedback": 50}
 
-    response = client.get(
-        "/v1/chat/feedback/stats?model=gpt-4&days=7", headers=auth_headers
-    )
+    response = client.get("/v1/chat/feedback/stats?model=gpt-4&days=7", headers=auth_headers)
 
     assert response.status_code == 200
     call_kwargs = mock_get_stats.call_args[1]
@@ -419,7 +417,13 @@ def test_get_feedback_stats_with_model_filter(
 @patch("src.routes.chat_history.get_chat_session")
 @patch("src.routes.chat_history.get_user")
 def test_get_session_feedback(
-    mock_get_user, mock_get_session, mock_get_feedback, client, auth_headers, mock_user, mock_feedback
+    mock_get_user,
+    mock_get_session,
+    mock_get_feedback,
+    client,
+    auth_headers,
+    mock_user,
+    mock_feedback,
 ):
     """Test getting feedback for a specific session"""
     mock_get_user.return_value = mock_user
@@ -479,9 +483,7 @@ def test_update_feedback_success(
 
 @patch("src.routes.chat_history.update_feedback")
 @patch("src.routes.chat_history.get_user")
-def test_update_feedback_not_found(
-    mock_get_user, mock_update, client, auth_headers, mock_user
-):
+def test_update_feedback_not_found(mock_get_user, mock_update, client, auth_headers, mock_user):
     """Test updating non-existent feedback returns 404"""
     mock_get_user.return_value = mock_user
     mock_update.return_value = None
@@ -515,9 +517,7 @@ def test_update_feedback_invalid_type(client, auth_headers):
 
 @patch("src.routes.chat_history.delete_feedback")
 @patch("src.routes.chat_history.get_user")
-def test_delete_feedback_success(
-    mock_get_user, mock_delete, client, auth_headers, mock_user
-):
+def test_delete_feedback_success(mock_get_user, mock_delete, client, auth_headers, mock_user):
     """Test deleting feedback successfully"""
     mock_get_user.return_value = mock_user
     mock_delete.return_value = True
@@ -532,9 +532,7 @@ def test_delete_feedback_success(
 
 @patch("src.routes.chat_history.delete_feedback")
 @patch("src.routes.chat_history.get_user")
-def test_delete_feedback_not_found(
-    mock_get_user, mock_delete, client, auth_headers, mock_user
-):
+def test_delete_feedback_not_found(mock_get_user, mock_delete, client, auth_headers, mock_user):
     """Test deleting non-existent feedback returns 404"""
     mock_get_user.return_value = mock_user
     mock_delete.return_value = False

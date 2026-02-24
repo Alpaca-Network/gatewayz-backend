@@ -27,11 +27,11 @@ Usage:
     return result
 """
 
-import json
 import hashlib
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any
-from datetime import datetime, UTC
 
 import redis as redis_module
 
@@ -39,10 +39,9 @@ from src.config.redis_config import get_redis_client
 
 try:
     from prometheus_client import Counter
+
     cache_operations = Counter(
-        'catalog_cache_operations_total',
-        'Cache operations',
-        ['operation', 'cache_layer', 'result']
+        "catalog_cache_operations_total", "Cache operations", ["operation", "cache_layer", "result"]
     )
 except Exception:
     cache_operations = None
@@ -102,17 +101,14 @@ def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
     }
 
     # Hash parameters to keep keys short while maintaining uniqueness
-    param_hash = hashlib.md5(
-        json.dumps(cache_data, sort_keys=True).encode()
-    ).hexdigest()[:8]  # Use first 8 chars for readability
+    param_hash = hashlib.md5(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()[
+        :8
+    ]  # Use first 8 chars for readability
 
     return f"{CATALOG_CACHE_PREFIX}{gateway_key}:{param_hash}"
 
 
-async def get_cached_catalog_response(
-    gateway: str | None,
-    params: dict
-) -> dict[str, Any] | None:
+async def get_cached_catalog_response(gateway: str | None, params: dict) -> dict[str, Any] | None:
     """
     Retrieve cached catalog response if available.
 
@@ -165,6 +161,7 @@ async def get_cached_catalog_response(
             if not acquired:
                 # Another request is rebuilding - wait briefly and retry cache
                 import asyncio
+
                 await asyncio.sleep(0.5)
                 cached_data = redis.get(cache_key)
                 if cached_data:
@@ -187,10 +184,7 @@ async def get_cached_catalog_response(
 
 
 async def cache_catalog_response(
-    gateway: str | None,
-    params: dict,
-    response: dict[str, Any],
-    ttl: int = CATALOG_CACHE_TTL
+    gateway: str | None, params: dict, response: dict[str, Any], ttl: int = CATALOG_CACHE_TTL
 ) -> bool:
     """
     Cache catalog response in Redis.
@@ -310,10 +304,7 @@ def invalidate_catalog_cache(gateway: str | None = None) -> int:
                 break
 
         if deleted_count > 0:
-            logger.info(
-                f"🗑️  Invalidated {deleted_count} cache entries "
-                f"(pattern: {pattern})"
-            )
+            logger.info(f"🗑️  Invalidated {deleted_count} cache entries " f"(pattern: {pattern})")
         else:
             logger.debug(f"No cache entries to invalidate (pattern: {pattern})")
 
@@ -373,6 +364,7 @@ def _track_cache_hit(gateway: str | None):
     """Track cache hit in Prometheus metrics"""
     try:
         from src.services.prometheus_metrics import catalog_cache_hits
+
         catalog_cache_hits.labels(gateway=gateway or "all").inc()
     except ImportError:
         # Metrics not available - not critical
@@ -381,7 +373,7 @@ def _track_cache_hit(gateway: str | None):
         logger.debug(f"Failed to track cache hit: {e}")
     try:
         if cache_operations is not None:
-            cache_operations.labels(operation='get', cache_layer='l1', result='hit').inc()
+            cache_operations.labels(operation="get", cache_layer="l1", result="hit").inc()
     except Exception as e:
         logger.debug(f"Failed to track cache_operations hit: {e}")
 
@@ -390,6 +382,7 @@ def _track_cache_miss(gateway: str | None):
     """Track cache miss in Prometheus metrics"""
     try:
         from src.services.prometheus_metrics import catalog_cache_misses
+
         catalog_cache_misses.labels(gateway=gateway or "all").inc()
     except ImportError:
         # Metrics not available - not critical
@@ -398,7 +391,7 @@ def _track_cache_miss(gateway: str | None):
         logger.debug(f"Failed to track cache miss: {e}")
     try:
         if cache_operations is not None:
-            cache_operations.labels(operation='get', cache_layer='l1', result='miss').inc()
+            cache_operations.labels(operation="get", cache_layer="l1", result="miss").inc()
     except Exception as e:
         logger.debug(f"Failed to track cache_operations miss: {e}")
 
@@ -407,6 +400,7 @@ def _track_cache_size(gateway: str | None, size_bytes: int):
     """Update catalog_cache_size_bytes Prometheus gauge for this gateway"""
     try:
         from src.services.prometheus_metrics import catalog_cache_size_bytes
+
         catalog_cache_size_bytes.labels(gateway=gateway or "all").set(size_bytes)
     except ImportError:
         # Metrics not available - not critical

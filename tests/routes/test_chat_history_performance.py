@@ -2,9 +2,11 @@
 Integration tests for chat history routes with performance optimizations
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from fastapi.testclient import TestClient
+
 from src.main import create_app
 
 
@@ -32,9 +34,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -42,9 +42,7 @@ class TestChatHistoryPerformance:
                     "model": "gpt-4",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ) as mock_log:
+                with patch("src.routes.chat_history.log_activity_background") as mock_log:
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"title": "Test Session", "model": "gpt-4"},
@@ -63,9 +61,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -73,9 +69,7 @@ class TestChatHistoryPerformance:
                     "model": "gpt-4",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ) as mock_log:
+                with patch("src.routes.chat_history.log_activity_background") as mock_log:
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"title": "Test Session", "model": "gpt-4"},
@@ -94,9 +88,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -105,9 +97,7 @@ class TestChatHistoryPerformance:
                 }
 
                 with patch("src.routes.chat_history.logger") as mock_logger:
-                    with patch(
-                        "src.routes.chat_history.log_activity_background"
-                    ):
+                    with patch("src.routes.chat_history.log_activity_background"):
                         response = client.post(
                             "/v1/chat/sessions",
                             json={"title": "Test Session", "model": "gpt-4"},
@@ -126,9 +116,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -139,9 +127,7 @@ class TestChatHistoryPerformance:
                     "is_active": True,
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ):
+                with patch("src.routes.chat_history.log_activity_background"):
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"title": "Test Session", "model": "gpt-4"},
@@ -175,9 +161,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -185,9 +169,7 @@ class TestChatHistoryPerformance:
                     "model": "gpt-4",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ) as mock_log:
+                with patch("src.routes.chat_history.log_activity_background") as mock_log:
                     mock_log.side_effect = Exception("Logging error")
 
                     # Should not fail the request
@@ -209,9 +191,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 42,
                     "user_id": 1,
@@ -219,9 +199,7 @@ class TestChatHistoryPerformance:
                     "model": "gpt-4",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ) as mock_log:
+                with patch("src.routes.chat_history.log_activity_background") as mock_log:
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"title": "My Session", "model": "gpt-4"},
@@ -243,9 +221,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -253,9 +229,7 @@ class TestChatHistoryPerformance:
                     "model": "openai/gpt-3.5-turbo",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ):
+                with patch("src.routes.chat_history.log_activity_background"):
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"title": "Test"},
@@ -273,9 +247,7 @@ class TestChatHistoryPerformance:
                 "credits": 100,
             }
 
-            with patch(
-                "src.routes.chat_history.create_chat_session"
-            ) as mock_create_session:
+            with patch("src.routes.chat_history.create_chat_session") as mock_create_session:
                 mock_create_session.return_value = {
                     "id": 1,
                     "user_id": 1,
@@ -283,9 +255,7 @@ class TestChatHistoryPerformance:
                     "model": "gpt-4",
                 }
 
-                with patch(
-                    "src.routes.chat_history.log_activity_background"
-                ):
+                with patch("src.routes.chat_history.log_activity_background"):
                     response = client.post(
                         "/v1/chat/sessions",
                         json={"model": "gpt-4"},

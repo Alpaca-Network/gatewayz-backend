@@ -339,14 +339,16 @@ def transform_anthropic_to_openai(
 
                     # Handle tool_use blocks in assistant messages
                     if block_type == "tool_use" and role == "assistant":
-                        tool_calls_list.append({
-                            "id": block.get("id", f"toolu_{int(time.time())}"),
-                            "type": "function",
-                            "function": {
-                                "name": block.get("name", ""),
-                                "arguments": json.dumps(block.get("input", {})),
-                            },
-                        })
+                        tool_calls_list.append(
+                            {
+                                "id": block.get("id", f"toolu_{int(time.time())}"),
+                                "type": "function",
+                                "function": {
+                                    "name": block.get("name", ""),
+                                    "arguments": json.dumps(block.get("input", {})),
+                                },
+                            }
+                        )
                     else:
                         transformed = _transform_content_block(block)
                         if transformed:
@@ -464,11 +466,13 @@ def transform_openai_to_anthropic(
     # Check for reasoning/thinking content first (for extended thinking models)
     reasoning_content = message.get("reasoning") or message.get("reasoning_content")
     if reasoning_content:
-        content_blocks.append({
-            "type": "thinking",
-            "thinking": reasoning_content,
-            "signature": "",  # Signature is typically provided by the model
-        })
+        content_blocks.append(
+            {
+                "type": "thinking",
+                "thinking": reasoning_content,
+                "signature": "",  # Signature is typically provided by the model
+            }
+        )
 
     # Check for tool_calls (they take priority over text content)
     tool_calls = message.get("tool_calls")
@@ -490,12 +494,14 @@ def transform_openai_to_anthropic(
                     tool_args = {}
 
             # Add tool_use content block in Anthropic format
-            content_blocks.append({
-                "type": "tool_use",
-                "id": tool_id,
-                "name": tool_name,
-                "input": tool_args,
-            })
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name,
+                    "input": tool_args,
+                }
+            )
 
     # Add text content if present and non-empty
     if content and isinstance(content, str) and content.strip():

@@ -5,8 +5,8 @@ from pathlib import Path
 from openai import OpenAI
 
 from src.config import Config
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -129,7 +129,9 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     # pricing_per_hour / 1,000,000 = per-token price
     prompt_price = str(pricing_per_hour / 1000000) if pricing_per_hour > 0 else "0"
 
-    raw_display_name = chutes_model.get("name", model_id.replace("-", " ").replace("_", " ").title())
+    raw_display_name = chutes_model.get(
+        "name", model_id.replace("-", " ").replace("_", " ").title()
+    )
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
 

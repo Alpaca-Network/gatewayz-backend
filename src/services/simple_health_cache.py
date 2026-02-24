@@ -24,12 +24,12 @@ CACHE_PREFIX_DASHBOARD = "health:dashboard"
 # Default TTLs (in seconds)
 # Aligned with HEALTH_CHECK_INTERVAL (300s) + buffer to prevent cache expiration
 # between health check cycles and avoid fallback to database queries
-DEFAULT_TTL_SYSTEM = 360       # 6 minutes (5min health check + 1min buffer)
-DEFAULT_TTL_PROVIDERS = 360    # 6 minutes
-DEFAULT_TTL_MODELS = 360       # 6 minutes (was 120s - caused 3min gap)
-DEFAULT_TTL_GATEWAYS = 360     # 6 minutes
-DEFAULT_TTL_SUMMARY = 360      # 6 minutes
-DEFAULT_TTL_DASHBOARD = 90     # 1.5 minutes (more frequently accessed)
+DEFAULT_TTL_SYSTEM = 360  # 6 minutes (5min health check + 1min buffer)
+DEFAULT_TTL_PROVIDERS = 360  # 6 minutes
+DEFAULT_TTL_MODELS = 360  # 6 minutes (was 120s - caused 3min gap)
+DEFAULT_TTL_GATEWAYS = 360  # 6 minutes
+DEFAULT_TTL_SUMMARY = 360  # 6 minutes
+DEFAULT_TTL_DASHBOARD = 90  # 1.5 minutes (more frequently accessed)
 
 
 class SimpleHealthCache:
@@ -74,7 +74,9 @@ class SimpleHealthCache:
                 self.redis_client.setex(key, ttl, serialized)
 
                 if attempt > 0:
-                    logger.debug(f"Cached {key} after {attempt + 1} attempts (TTL: {ttl}s, size: {len(serialized)} bytes)")
+                    logger.debug(
+                        f"Cached {key} after {attempt + 1} attempts (TTL: {ttl}s, size: {len(serialized)} bytes)"
+                    )
                 else:
                     logger.debug(f"Cached {key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
                 return True
@@ -103,6 +105,7 @@ class SimpleHealthCache:
                     )
                     # Brief delay before retry
                     import time
+
                     time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
                     continue
 
@@ -139,7 +142,9 @@ class SimpleHealthCache:
                 data = self.redis_client.get(key)
                 if data:
                     if attempt > 0:
-                        logger.debug(f"Cache HIT for {key} after {attempt + 1} attempts (size: {len(data)} bytes)")
+                        logger.debug(
+                            f"Cache HIT for {key} after {attempt + 1} attempts (size: {len(data)} bytes)"
+                        )
                     else:
                         logger.debug(f"Cache HIT for {key} (size: {len(data)} bytes)")
                     return json.loads(data)
@@ -170,6 +175,7 @@ class SimpleHealthCache:
                     )
                     # Brief delay before retry
                     import time
+
                     time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
                     continue
 

@@ -27,7 +27,9 @@ class StepLogger:
         step_logger.success(rows_inserted=150)
     """
 
-    def __init__(self, operation_name: str, total_steps: int | None = None, log_level: int = logging.INFO):
+    def __init__(
+        self, operation_name: str, total_steps: int | None = None, log_level: int = logging.INFO
+    ):
         """
         Initialize step logger.
 
@@ -49,10 +51,7 @@ class StepLogger:
         """Log operation start with optional metadata."""
         self.start_time = time.time()
         metadata_str = self._format_metadata(metadata)
-        logger.log(
-            self.log_level,
-            f"🚀 START: {self.operation_name}{metadata_str}"
-        )
+        logger.log(self.log_level, f"🚀 START: {self.operation_name}{metadata_str}")
 
     def step(self, step_num: int, step_name: str, **metadata):
         """
@@ -71,10 +70,7 @@ class StepLogger:
         progress = f"[{step_num}/{self.total_steps}]" if self.total_steps else f"[Step {step_num}]"
         metadata_str = self._format_metadata(metadata)
 
-        logger.log(
-            self.log_level,
-            f"▶️  {progress} {step_name}{metadata_str}"
-        )
+        logger.log(self.log_level, f"▶️  {progress} {step_name}{metadata_str}")
 
     def success(self, **result_metadata):
         """
@@ -88,15 +84,16 @@ class StepLogger:
             return
 
         duration = time.time() - self.step_start_time
-        result_metadata['duration_ms'] = f"{duration * 1000:.1f}"
+        result_metadata["duration_ms"] = f"{duration * 1000:.1f}"
 
-        progress = f"[{self.current_step}/{self.total_steps}]" if self.total_steps else f"[Step {self.current_step}]"
+        progress = (
+            f"[{self.current_step}/{self.total_steps}]"
+            if self.total_steps
+            else f"[Step {self.current_step}]"
+        )
         metadata_str = self._format_metadata(result_metadata)
 
-        logger.log(
-            self.log_level,
-            f"✅ {progress} {self._step_name} - SUCCESS{metadata_str}"
-        )
+        logger.log(self.log_level, f"✅ {progress} {self._step_name} - SUCCESS{metadata_str}")
 
         self.step_start_time = None
 
@@ -107,12 +104,13 @@ class StepLogger:
         Args:
             reason: Why the step was skipped
         """
-        progress = f"[{self.current_step}/{self.total_steps}]" if self.total_steps else f"[Step {self.current_step}]"
-
-        logger.log(
-            self.log_level,
-            f"⏭️  {progress} {self._step_name} - SKIPPED: {reason}"
+        progress = (
+            f"[{self.current_step}/{self.total_steps}]"
+            if self.total_steps
+            else f"[Step {self.current_step}]"
         )
+
+        logger.log(self.log_level, f"⏭️  {progress} {self._step_name} - SKIPPED: {reason}")
 
         self.step_start_time = None
 
@@ -126,14 +124,16 @@ class StepLogger:
         """
         if self.step_start_time:
             duration = time.time() - self.step_start_time
-            metadata['duration_ms'] = f"{duration * 1000:.1f}"
+            metadata["duration_ms"] = f"{duration * 1000:.1f}"
 
-        progress = f"[{self.current_step}/{self.total_steps}]" if self.total_steps else f"[Step {self.current_step}]"
+        progress = (
+            f"[{self.current_step}/{self.total_steps}]"
+            if self.total_steps
+            else f"[Step {self.current_step}]"
+        )
         metadata_str = self._format_metadata(metadata)
 
-        logger.error(
-            f"❌ {progress} {self._step_name} - FAILED: {error}{metadata_str}"
-        )
+        logger.error(f"❌ {progress} {self._step_name} - FAILED: {error}{metadata_str}")
 
         self.step_start_time = None
 
@@ -145,13 +145,10 @@ class StepLogger:
             **summary: Summary statistics (total_items, total_duration, etc.)
         """
         total_duration = time.time() - self.start_time
-        summary['total_duration_ms'] = f"{total_duration * 1000:.1f}"
+        summary["total_duration_ms"] = f"{total_duration * 1000:.1f}"
         summary_str = self._format_metadata(summary)
 
-        logger.log(
-            self.log_level,
-            f"🏁 COMPLETE: {self.operation_name}{summary_str}"
-        )
+        logger.log(self.log_level, f"🏁 COMPLETE: {self.operation_name}{summary_str}")
 
     def _format_metadata(self, metadata: dict) -> str:
         """Format metadata dictionary as readable string."""
@@ -191,7 +188,7 @@ def log_operation_step(
     step_name: str,
     operation_name: str = "Operation",
     total_steps: int | None = None,
-    **metadata
+    **metadata,
 ):
     """
     Quick function to log a single step without creating StepLogger instance.
@@ -213,10 +210,7 @@ def log_operation_step(
 
 
 def log_step_success(
-    step_num: int,
-    step_name: str,
-    total_steps: int | None = None,
-    **result_metadata
+    step_num: int, step_name: str, total_steps: int | None = None, **result_metadata
 ):
     """Log step success."""
     progress = f"[{step_num}/{total_steps}]" if total_steps else f"[Step {step_num}]"
@@ -229,11 +223,7 @@ def log_step_success(
 
 
 def log_step_failure(
-    step_num: int,
-    step_name: str,
-    error: Exception,
-    total_steps: int | None = None,
-    **metadata
+    step_num: int, step_name: str, error: Exception, total_steps: int | None = None, **metadata
 ):
     """Log step failure."""
     progress = f"[{step_num}/{total_steps}]" if total_steps else f"[Step {step_num}]"

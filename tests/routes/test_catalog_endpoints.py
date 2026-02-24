@@ -5,9 +5,11 @@ Integration tests for catalog endpoints
 These tests execute real endpoint code to increase coverage
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
+
 from src.main import app
 
 client = TestClient(app)
@@ -16,59 +18,49 @@ client = TestClient(app)
 class TestGetProvidersEndpoint:
     """Test /v1/provider endpoint"""
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_openrouter_default(self, mock_models, mock_providers):
         """Test getting OpenRouter providers (default)"""
         mock_providers.return_value = [
             {"id": "openai", "name": "OpenAI", "description": "OpenAI models"}
         ]
-        mock_models.return_value = [
-            {"id": "openai/gpt-4", "name": "GPT-4"}
-        ]
+        mock_models.return_value = [{"id": "openai/gpt-4", "name": "GPT-4"}]
 
         response = client.get("/v1/provider")
 
         # Should succeed or fail gracefully
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_with_gateway_param(self, mock_models, mock_providers):
         """Test with specific gateway parameter"""
-        mock_providers.return_value = [
-            {"id": "anthropic", "name": "Anthropic"}
-        ]
+        mock_providers.return_value = [{"id": "anthropic", "name": "Anthropic"}]
         mock_models.return_value = []
 
         response = client.get("/v1/provider?gateway=openrouter")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_all_gateways(self, mock_models, mock_providers):
         """Test getting providers from all gateways"""
-        mock_providers.return_value = [
-            {"id": "openai", "name": "OpenAI"}
-        ]
-        mock_models.return_value = [
-            {"id": "openai/gpt-4"}
-        ]
+        mock_providers.return_value = [{"id": "openai", "name": "OpenAI"}]
+        mock_models.return_value = [{"id": "openai/gpt-4"}]
 
         response = client.get("/v1/provider?gateway=all")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_huggingface(self, mock_models):
         """Test getting Hugging Face providers"""
-        mock_models.return_value = [
-            {"id": "meta-llama/Llama-2-7b"}
-        ]
+        mock_models.return_value = [{"id": "meta-llama/Llama-2-7b"}]
 
         response = client.get("/v1/provider?gateway=hug")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_huggingface_alias(self, mock_models):
         """Test huggingface gateway alias"""
         mock_models.return_value = []
@@ -76,43 +68,40 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=huggingface")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
+    @patch("src.routes.catalog.get_cached_providers")
     def test_get_providers_moderated_only(self, mock_providers):
         """Test filtering for moderated providers"""
         mock_providers.return_value = [
             {"id": "openai", "moderated_by_openrouter": True},
-            {"id": "other", "moderated_by_openrouter": False}
+            {"id": "other", "moderated_by_openrouter": False},
         ]
 
         response = client.get("/v1/provider?moderated_only=true")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_with_limit(self, mock_models, mock_providers):
         """Test pagination with limit parameter"""
         mock_providers.return_value = [
-            {"id": f"provider-{i}", "name": f"Provider {i}"}
-            for i in range(100)
+            {"id": f"provider-{i}", "name": f"Provider {i}"} for i in range(100)
         ]
         mock_models.return_value = []
 
         response = client.get("/v1/provider?limit=10")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_with_offset(self, mock_models, mock_providers):
         """Test pagination with offset parameter"""
-        mock_providers.return_value = [
-            {"id": f"provider-{i}"} for i in range(50)
-        ]
+        mock_providers.return_value = [{"id": f"provider-{i}"} for i in range(50)]
         mock_models.return_value = []
 
         response = client.get("/v1/provider?offset=20&limit=10")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_providers')
+    @patch("src.routes.catalog.get_cached_providers")
     def test_get_providers_empty_data(self, mock_providers):
         """Test when no provider data available - should return 200 with empty response (graceful degradation)"""
         mock_providers.return_value = []
@@ -120,7 +109,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider")
         assert response.status_code == 200  # Changed: graceful degradation, not 503
 
-    @patch('src.routes.catalog.get_cached_providers')
+    @patch("src.routes.catalog.get_cached_providers")
     def test_get_providers_none_data(self, mock_providers):
         """Test when provider data is None - should return 200 with empty response (graceful degradation)"""
         mock_providers.return_value = None
@@ -128,7 +117,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider")
         assert response.status_code == 200  # Changed: graceful degradation, not 503
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_groq(self, mock_models):
         """Test Groq gateway"""
         mock_models.return_value = [{"id": "mixtral-8x7b"}]
@@ -136,7 +125,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=groq")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_fireworks(self, mock_models):
         """Test Fireworks gateway"""
         mock_models.return_value = [{"id": "llama-v2-7b"}]
@@ -144,7 +133,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=fireworks")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_together(self, mock_models):
         """Test Together gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
@@ -152,7 +141,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=together")
         assert response.status_code == 200  # Changed: graceful degradation, not 503
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_cerebras(self, mock_models):
         """Test Cerebras gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
@@ -160,7 +149,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=cerebras")
         assert response.status_code == 200  # Changed: graceful degradation, not 503
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_xai(self, mock_models):
         """Test xAI gateway"""
         mock_models.return_value = [{"id": "grok-1"}]
@@ -168,7 +157,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=xai")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_deepinfra(self, mock_models):
         """Test DeepInfra gateway"""
         mock_models.return_value = [{"id": "meta-llama/Llama-2-70b"}]
@@ -176,7 +165,7 @@ class TestGetProvidersEndpoint:
         response = client.get("/v1/provider?gateway=deepinfra")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_get_providers_featherless(self, mock_models):
         """Test Featherless gateway - should return 200 with empty data (graceful degradation)"""
         mock_models.return_value = []
@@ -188,7 +177,7 @@ class TestGetProvidersEndpoint:
 class TestModelsEndpoint:
     """Test coverage for the unified /models endpoint used by the UI."""
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_nebius_gateway_returns_empty_catalog(self, mock_get_cached_models):
         """Requests for Nebius should return 200 even if no catalog is available."""
 
@@ -207,7 +196,7 @@ class TestModelsEndpoint:
         assert payload["returned"] == 0
         assert payload["data"] == []
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_xai_gateway_returns_empty_catalog(self, mock_get_cached_models):
         """Requests for xAI should return 200 even if no catalog is available."""
 
@@ -226,9 +215,9 @@ class TestModelsEndpoint:
         assert payload["returned"] == 0
         assert payload["data"] == []
 
-    @patch('src.routes.catalog.enhance_providers_with_logos_and_sites')
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.enhance_providers_with_logos_and_sites")
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_models_page_all_gateway_loads(
         self,
         mock_get_cached_models,
@@ -283,20 +272,16 @@ class TestModelsEndpoint:
         assert payload["data"][0]["id"] == "openai/gpt-4"
         assert payload["data"][0]["provider_slug"] == "openai"
 
+
 class TestMergeProviderLists:
     """Test provider list merging"""
 
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_merge_providers_from_multiple_sources(self, mock_models, mock_providers):
         """Test that providers from multiple gateways are merged"""
-        mock_providers.return_value = [
-            {"id": "openai", "name": "OpenAI"}
-        ]
-        mock_models.return_value = [
-            {"id": "openai/gpt-4"},
-            {"id": "anthropic/claude-3"}
-        ]
+        mock_providers.return_value = [{"id": "openai", "name": "OpenAI"}]
+        mock_models.return_value = [{"id": "openai/gpt-4"}, {"id": "anthropic/claude-3"}]
 
         response = client.get("/v1/provider?gateway=all")
         assert response.status_code in [200, 503, 500]
@@ -305,19 +290,17 @@ class TestMergeProviderLists:
 class TestMergeModelsBySlug:
     """Test model merging by slug"""
 
-    @patch('src.routes.catalog.merge_models_by_slug')
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.merge_models_by_slug")
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.get_cached_models")
     def test_models_merged_correctly(self, mock_models, mock_providers, mock_merge):
         """Test that duplicate models are handled"""
         mock_providers.return_value = [{"id": "openai"}]
         mock_models.return_value = [
             {"id": "gpt-4", "canonical_slug": "gpt-4"},
-            {"id": "gpt-4", "canonical_slug": "gpt-4"}  # Duplicate
+            {"id": "gpt-4", "canonical_slug": "gpt-4"},  # Duplicate
         ]
-        mock_merge.return_value = [
-            {"id": "gpt-4", "canonical_slug": "gpt-4"}
-        ]
+        mock_merge.return_value = [{"id": "gpt-4", "canonical_slug": "gpt-4"}]
 
         response = client.get("/v1/provider?gateway=all")
         assert response.status_code in [200, 503, 500]
@@ -362,10 +345,7 @@ class TestGetGatewaysEndpoint:
         assert "simplismart" in gateway_ids
 
         # Check SimpliSmart has correct config
-        simplismart = next(
-            (g for g in data["data"] if g["id"] == "simplismart"),
-            None
-        )
+        simplismart = next((g for g in data["data"] if g["id"] == "simplismart"), None)
         assert simplismart is not None, "SimpliSmart gateway not found in response"
         assert simplismart["name"] == "SimpliSmart"
         assert simplismart["color"] == "bg-sky-500"
@@ -378,8 +358,14 @@ class TestGetGatewaysEndpoint:
 
         gateway_ids = [g["id"] for g in data["data"]]
         expected_gateways = [
-            "openai", "anthropic", "openrouter", "groq",
-            "together", "fireworks", "deepinfra", "huggingface"
+            "openai",
+            "anthropic",
+            "openrouter",
+            "groq",
+            "together",
+            "fireworks",
+            "deepinfra",
+            "huggingface",
         ]
         for gw in expected_gateways:
             assert gw in gateway_ids, f"Expected gateway '{gw}' not found"

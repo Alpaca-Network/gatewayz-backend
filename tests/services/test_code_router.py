@@ -9,13 +9,13 @@ import pytest
 
 from src.services.code_router import (
     CodeRouter,
+    get_baselines,
+    get_fallback_model,
+    get_model_tiers,
     get_router,
+    get_routing_metadata,
     parse_router_model_string,
     route_code_prompt,
-    get_routing_metadata,
-    get_model_tiers,
-    get_fallback_model,
-    get_baselines,
 )
 
 

@@ -108,9 +108,7 @@ class GeneralRouter:
         self.enabled = self.notdiamond_client.enabled
 
         if not self.enabled:
-            logger.info(
-                "NotDiamond client not enabled, general router will use fallback mode"
-            )
+            logger.info("NotDiamond client not enabled, general router will use fallback mode")
 
     async def route(
         self,
@@ -158,12 +156,8 @@ class GeneralRouter:
             model_available = await self._check_model_available(nd_result["model_id"])
 
             if not model_available:
-                logger.warning(
-                    f"NotDiamond selected unavailable model: {nd_result['model_id']}"
-                )
-                return self._use_fallback(
-                    mode, user_default_model, "model_unavailable"
-                )
+                logger.warning(f"NotDiamond selected unavailable model: {nd_result['model_id']}")
+                return self._use_fallback(mode, user_default_model, "model_unavailable")
 
             # Success - calculate total latency
             routing_latency_ms = (time.perf_counter() - start_time) * 1000

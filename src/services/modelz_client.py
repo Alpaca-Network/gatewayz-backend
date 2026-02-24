@@ -39,11 +39,7 @@ def get_modelz_cache() -> dict[str, Any]:
             except (ValueError, TypeError):
                 pass
 
-        return {
-            "data": data,
-            "timestamp": timestamp,
-            "ttl": MODELZ_CACHE_TTL
-        }
+        return {"data": data, "timestamp": timestamp, "ttl": MODELZ_CACHE_TTL}
     except Exception as e:
         logger.debug(f"Failed to get modelz cache: {e}")
         return {"data": None, "timestamp": None, "ttl": MODELZ_CACHE_TTL}
@@ -263,9 +259,7 @@ async def check_model_exists_on_modelz(
     return model_id in model_ids
 
 
-async def get_modelz_model_details(
-    model_id: str, use_cache: bool = True
-) -> dict[str, Any] | None:
+async def get_modelz_model_details(model_id: str, use_cache: bool = True) -> dict[str, Any] | None:
     """
     Get detailed information about a specific model from Modelz.
 

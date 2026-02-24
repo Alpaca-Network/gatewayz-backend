@@ -16,7 +16,7 @@ import warnings
 warnings.warn(
     "braintrust_tracing is deprecated. Use src.services.braintrust_service instead.",
     DeprecationWarning,
-    stacklevel=2
+    stacklevel=2,
 )
 
 import functools
@@ -73,6 +73,7 @@ except ModuleNotFoundError:
             return decorator(decorator_args[0])
 
         return decorator
+
 
 # NOTE: This module-level logger initialization is DEPRECATED and kept only for
 # backward compatibility. It demonstrates the OLD pattern that caused orphaned spans.

@@ -84,7 +84,9 @@ class ErrorContext(BaseModel):
     requested_max_tokens: int | None = Field(None, description="Requested max output tokens")
 
     # Additional context (flexible)
-    additional_info: dict[str, Any] | None = Field(None, description="Additional error-specific context")
+    additional_info: dict[str, Any] | None = Field(
+        None, description="Additional error-specific context"
+    )
 
     class Config:
         json_schema_extra = {
@@ -93,7 +95,7 @@ class ErrorContext(BaseModel):
                 "suggested_models": ["gpt-4", "gpt-4-turbo"],
                 "provider": "openrouter",
                 "current_credits": 0.50,
-                "required_credits": 2.00
+                "required_credits": 2.00,
             }
         }
 
@@ -109,45 +111,39 @@ class ErrorDetail(BaseModel):
     type: str = Field(
         ...,
         description="Error type identifier (snake_case, e.g., 'model_not_found')",
-        examples=["model_not_found", "insufficient_credits", "rate_limit_exceeded"]
+        examples=["model_not_found", "insufficient_credits", "rate_limit_exceeded"],
     )
 
     message: str = Field(
-        ...,
-        description="Human-readable error message",
-        examples=["Model 'gpt-5-ultra' not found"]
+        ..., description="Human-readable error message", examples=["Model 'gpt-5-ultra' not found"]
     )
 
     detail: str | None = Field(
         None,
         description="Additional explanation and context about the error",
-        examples=["The requested model is not available in our catalog. Please check the model name and try again."]
+        examples=[
+            "The requested model is not available in our catalog. Please check the model name and try again."
+        ],
     )
 
     code: str = Field(
         ...,
         description="Error code constant (UPPER_SNAKE_CASE)",
-        examples=["MODEL_NOT_FOUND", "INSUFFICIENT_CREDITS"]
+        examples=["MODEL_NOT_FOUND", "INSUFFICIENT_CREDITS"],
     )
 
     status: int = Field(
-        ...,
-        description="HTTP status code",
-        ge=400,
-        le=599,
-        examples=[404, 402, 429, 500]
+        ..., description="HTTP status code", ge=400, le=599, examples=[404, 402, 429, 500]
     )
 
     request_id: str = Field(
         ...,
         description="Unique request identifier for support and tracking",
-        examples=["req_abc123", "550e8400-e29b-41d4-a716-446655440000"]
+        examples=["req_abc123", "550e8400-e29b-41d4-a716-446655440000"],
     )
 
     timestamp: str = Field(
-        ...,
-        description="ISO 8601 timestamp when error occurred",
-        examples=["2025-01-21T12:00:00Z"]
+        ..., description="ISO 8601 timestamp when error occurred", examples=["2025-01-21T12:00:00Z"]
     )
 
     suggestions: list[str] | None = Field(
@@ -156,26 +152,23 @@ class ErrorDetail(BaseModel):
         examples=[
             [
                 "Check available models at /v1/models",
-                "Visit https://docs.gatewayz.ai/models for the complete model list"
+                "Visit https://docs.gatewayz.ai/models for the complete model list",
             ]
-        ]
+        ],
     )
 
-    context: ErrorContext | None = Field(
-        None,
-        description="Additional context for debugging"
-    )
+    context: ErrorContext | None = Field(None, description="Additional context for debugging")
 
     docs_url: str | None = Field(
         None,
         description="Link to relevant documentation",
-        examples=["https://docs.gatewayz.ai/errors/model-not-found"]
+        examples=["https://docs.gatewayz.ai/errors/model-not-found"],
     )
 
     support_url: str | None = Field(
         None,
         description="Link to support or contact page",
-        examples=["https://gatewayz.ai/support"]
+        examples=["https://gatewayz.ai/support"],
     )
 
     class Config:
@@ -191,14 +184,14 @@ class ErrorDetail(BaseModel):
                 "suggestions": [
                     "Check available models at /v1/models",
                     "Try using 'gpt-4' or 'gpt-3.5-turbo' instead",
-                    "Visit https://docs.gatewayz.ai/models for model list"
+                    "Visit https://docs.gatewayz.ai/models for model list",
                 ],
                 "context": {
                     "requested_model": "gpt-5-ultra",
                     "suggested_models": ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
-                    "provider": "openrouter"
+                    "provider": "openrouter",
                 },
-                "docs_url": "https://docs.gatewayz.ai/errors/model-not-found"
+                "docs_url": "https://docs.gatewayz.ai/errors/model-not-found",
             }
         }
 
@@ -210,10 +203,7 @@ class ErrorResponse(BaseModel):
     Wraps ErrorDetail in an 'error' field for consistency with OpenAI and Anthropic APIs.
     """
 
-    error: ErrorDetail = Field(
-        ...,
-        description="Detailed error information"
-    )
+    error: ErrorDetail = Field(..., description="Detailed error information")
 
     class Config:
         json_schema_extra = {
@@ -228,15 +218,15 @@ class ErrorResponse(BaseModel):
                     "timestamp": "2025-01-21T12:00:00Z",
                     "suggestions": [
                         "Add credits at https://gatewayz.ai/billing",
-                        "Consider upgrading to a subscription plan for better rates"
+                        "Consider upgrading to a subscription plan for better rates",
                     ],
                     "context": {
                         "current_credits": 0.50,
                         "required_credits": 2.00,
-                        "credit_deficit": 1.50
+                        "credit_deficit": 1.50,
                     },
                     "docs_url": "https://docs.gatewayz.ai/errors/insufficient-credits",
-                    "support_url": "https://gatewayz.ai/support"
+                    "support_url": "https://gatewayz.ai/support",
                 }
             }
         }
@@ -250,7 +240,7 @@ def create_simple_error(
     code: str,
     request_id: str | None = None,
     detail: str | None = None,
-    suggestions: list[str] | None = None
+    suggestions: list[str] | None = None,
 ) -> ErrorResponse:
     """
     Create a simple error response without extensive context.
@@ -278,6 +268,6 @@ def create_simple_error(
             status=status,
             request_id=request_id or f"req_{uuid.uuid4().hex[:12]}",
             timestamp=datetime.utcnow().isoformat() + "Z",
-            suggestions=suggestions
+            suggestions=suggestions,
         )
     )

@@ -3,9 +3,10 @@
 Tests for payment failure tier downgrade functionality
 """
 
-import pytest
 from datetime import datetime, timezone
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from src.services.payments import StripeService
 
@@ -42,10 +43,7 @@ class TestPaymentFailureDowngrade:
         )
 
         # Mock subscription data
-        mock_subscription = Mock(
-            id="sub_test_123",
-            metadata={"user_id": "42", "tier": "pro"}
-        )
+        mock_subscription = Mock(id="sub_test_123", metadata={"user_id": "42", "tier": "pro"})
 
         with patch("src.services.payments.stripe.Subscription.retrieve") as mock_retrieve:
             mock_retrieve.return_value = mock_subscription
@@ -89,10 +87,7 @@ class TestPaymentFailureDowngrade:
             subscription="sub_test_max_123",
         )
 
-        mock_subscription = Mock(
-            id="sub_test_max_123",
-            metadata={"user_id": "99", "tier": "max"}
-        )
+        mock_subscription = Mock(id="sub_test_max_123", metadata={"user_id": "99", "tier": "max"})
 
         with patch("src.services.payments.stripe.Subscription.retrieve") as mock_retrieve:
             mock_retrieve.return_value = mock_subscription
@@ -137,10 +132,7 @@ class TestPaymentFailureDowngrade:
             subscription="sub_test_123",
         )
 
-        mock_subscription = Mock(
-            id="sub_test_123",
-            metadata={"user_id": "10", "tier": "pro"}
-        )
+        mock_subscription = Mock(id="sub_test_123", metadata={"user_id": "10", "tier": "pro"})
 
         with patch("src.services.payments.stripe.Subscription.retrieve") as mock_retrieve:
             mock_retrieve.return_value = mock_subscription
@@ -179,22 +171,26 @@ class TestPaymentFailureDowngrade:
             subscription="sub_test_123",
         )
 
-        mock_subscription = Mock(
-            id="sub_test_123",
-            metadata={"user_id": "5", "tier": "pro"}
-        )
+        mock_subscription = Mock(id="sub_test_123", metadata={"user_id": "5", "tier": "pro"})
 
         with patch("src.services.payments.stripe.Subscription.retrieve") as mock_retrieve:
             mock_retrieve.return_value = mock_subscription
 
-            mock_supabase_client.table.return_value.update.return_value.eq.return_value.execute.return_value = Mock()
+            mock_supabase_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+                Mock()
+            )
 
             # Execute handler
             stripe_service._handle_invoice_payment_failed(mock_invoice)
 
             # Verify warning was logged
-            assert any("Invoice payment failed for user 5" in record.message for record in caplog.records)
-            assert any("past_due and downgraded to basic tier" in record.message for record in caplog.records)
+            assert any(
+                "Invoice payment failed for user 5" in record.message for record in caplog.records
+            )
+            assert any(
+                "past_due and downgraded to basic tier" in record.message
+                for record in caplog.records
+            )
 
     def test_payment_failure_handles_database_error(self, stripe_service, mock_supabase_client):
         """Test that database errors during payment failure are handled"""
@@ -203,10 +199,7 @@ class TestPaymentFailureDowngrade:
             subscription="sub_test_123",
         )
 
-        mock_subscription = Mock(
-            id="sub_test_123",
-            metadata={"user_id": "7", "tier": "pro"}
-        )
+        mock_subscription = Mock(id="sub_test_123", metadata={"user_id": "7", "tier": "pro"})
 
         with patch("src.services.payments.stripe.Subscription.retrieve") as mock_retrieve:
             mock_retrieve.return_value = mock_subscription

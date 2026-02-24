@@ -56,12 +56,14 @@ class _CacheDict(dict):
         self._deprecation_warned = False
 
         # Initialize with expected cache structure
-        super().__init__({
-            "data": None,
-            "timestamp": None,
-            "ttl": 3600,
-            "stale_ttl": 7200,
-        })
+        super().__init__(
+            {
+                "data": None,
+                "timestamp": None,
+                "ttl": 3600,
+                "stale_ttl": 7200,
+            }
+        )
 
     def __getitem__(self, key: str) -> Any:
         """Get cache value - delegates to Redis for 'data' key."""
@@ -77,6 +79,7 @@ class _CacheDict(dict):
             # Delegate to Redis-based cache
             try:
                 from src.services.model_catalog_cache import get_cached_gateway_catalog
+
                 cached_data = get_cached_gateway_catalog(self.provider_slug)
 
                 # Update internal timestamp when data is retrieved
@@ -104,6 +107,7 @@ class _CacheDict(dict):
             # Delegate to Redis-based cache
             try:
                 from src.services.model_catalog_cache import cache_gateway_catalog
+
                 if value is not None:
                     cache_gateway_catalog(self.provider_slug, value)
                     # Update internal timestamp
@@ -201,7 +205,7 @@ def get_models_cache(gateway: str):
         "get_models_cache() is deprecated. Use get_cached_gateway_catalog() from "
         "src.services.model_catalog_cache instead.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
     cache_map = {
         "openrouter": _models_cache,
@@ -256,12 +260,13 @@ def clear_models_cache(gateway: str):
         f"clear_models_cache('{gateway}') is deprecated. "
         f"Use invalidate_provider_catalog('{gateway}') from src.services.model_catalog_cache instead.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     # Delegate to new cache system
     try:
         from src.services.model_catalog_cache import invalidate_provider_catalog
+
         invalidate_provider_catalog(gateway)
         logger.debug(f"Delegated clear_models_cache('{gateway}') to invalidate_provider_catalog()")
     except Exception as e:
@@ -438,7 +443,7 @@ def set_gateway_error(gateway: str, error_message: str):
         f"set_gateway_error('{gateway}') is deprecated. "
         "Error tracking is now handled automatically by the cache layer.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     # Keep the old behavior for backward compatibility with non-migrated code
@@ -495,7 +500,7 @@ def is_gateway_in_error_state(gateway: str) -> bool:
         f"is_gateway_in_error_state('{gateway}') is deprecated. "
         "Error tracking is now handled automatically by the cache layer.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     # Keep old behavior for backward compatibility
@@ -533,7 +538,7 @@ def clear_gateway_error(gateway: str):
         f"clear_gateway_error('{gateway}') is deprecated. "
         "Error tracking is now handled automatically by the cache layer.",
         DeprecationWarning,
-        stacklevel=2
+        stacklevel=2,
     )
 
     # Keep old behavior for backward compatibility
