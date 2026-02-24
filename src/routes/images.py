@@ -288,13 +288,20 @@ async def generate_images(
             # potential race conditions where balance could change between check and deduction.
             required_credits = estimated_cost * 1.1  # 10% buffer for safety
             if user["credits"] < required_credits:
+                logger.warning(
+                    "Insufficient credits for image generation (user %s): "
+                    "estimated_cost=%.4f, required_with_buffer=%.4f, available=%.4f, "
+                    "cost_per_image=%.4f, n=%d",
+                    user.get("id"),
+                    estimated_cost,
+                    required_credits,
+                    user["credits"],
+                    cost_per_image,
+                    req.n,
+                )
                 raise HTTPException(
                     status_code=402,
-                    detail=(
-                        f"Insufficient credits. Image generation costs ${estimated_cost:.4f} "
-                        f"(${cost_per_image:.4f}/image x {req.n}), requires ${required_credits:.4f} "
-                        f"with safety buffer. Available: ${user['credits']:.4f}"
-                    ),
+                    detail="Insufficient credits. Please add credits to continue.",
                 )
             actual_provider = provider  # Initialize for error handling
 
@@ -449,7 +456,7 @@ async def generate_images(
                 logger.error(f"Credit deduction failed for image generation: {e}")
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Payment required: {e}",
+                    detail="Insufficient credits. Please add credits to continue.",
                 )
             except Exception as e:
                 # Unexpected error in billing - fail safe, don't give away free images

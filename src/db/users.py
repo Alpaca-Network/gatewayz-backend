@@ -798,15 +798,15 @@ def deduct_credits(
 
         # Check sufficiency
         if balance_before < tokens:
-            # SECURITY: Sanitize exact credit amounts from error messages
-            # Round to nearest $0.01 to avoid exposing precise financial data in logs
-            balance_rounded = round(balance_before, 2)
-            required_rounded = round(tokens, 2)
-
-            raise ValueError(
-                f"Insufficient credits. Current balance: ~${balance_rounded:.2f}, "
-                f"Required: ~${required_rounded:.2f}. Please add credits to continue."
+            # SECURITY: Log exact amounts server-side for debugging, but do NOT
+            # expose them in the ValueError message (which may reach the HTTP response).
+            logger.warning(
+                "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+                user_id,
+                balance_before,
+                tokens,
             )
+            raise ValueError("Insufficient credits. Please add credits to continue.")
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
         from_allowance = min(allowance_before, tokens)
@@ -852,18 +852,16 @@ def deduct_credits(
             else:
                 current_balance = "unknown"
 
-            # SECURITY: Sanitize credit amounts in concurrent modification errors too
-            current_rounded = (
-                round(float(current_balance), 2)
-                if isinstance(current_balance, (int, float))
-                else "unknown"
+            # SECURITY: Log details server-side, keep ValueError generic
+            logger.warning(
+                "Failed to update balance due to concurrent modification for user %s: "
+                "current_balance=%s, required=%.6f",
+                user_id,
+                current_balance,
+                tokens,
             )
-            required_rounded = round(tokens, 2)
-
             raise ValueError(
-                f"Failed to update balance due to concurrent modification. "
-                f"Current balance: ~${current_rounded:.2f if isinstance(current_rounded, float) else ''}{current_rounded if not isinstance(current_rounded, float) else ''}, "
-                f"Required: ~${required_rounded:.2f}. Please retry."
+                "Failed to update balance due to concurrent modification. Please retry."
             )
 
         # Log the transaction with breakdown (negative amount for deduction)

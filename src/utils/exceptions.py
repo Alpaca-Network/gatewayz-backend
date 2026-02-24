@@ -53,21 +53,27 @@ class APIExceptions:
 
     @staticmethod
     def payment_required(
-        detail: str = "Insufficient credits", credits: float | None = None
+        detail: str = "Insufficient credits. Please add credits to continue.",
+        credits: float | None = None,
     ) -> HTTPException:
         """
         402 Payment Required - User has insufficient credits.
 
+        SECURITY: Never expose exact credit balance or required amounts in the
+        HTTP response. Use server-side logging for debugging instead.
+
         Args:
-            detail: Custom error message
-            credits: Optional current credit balance
+            detail: Custom error message (should NOT contain dollar amounts)
+            credits: Ignored for security - kept for backward compatibility
 
         Returns:
             HTTPException with status 402
         """
-        if credits is not None:
-            detail = f"{detail}. Current balance: ${credits:.4f}"
-        return HTTPException(status_code=402, detail=detail)
+        # SECURITY: Do not include credit balance in the response detail
+        return HTTPException(
+            status_code=402,
+            detail="Insufficient credits. Please add credits to continue.",
+        )
 
     @staticmethod
     def forbidden(detail: str = "Access forbidden") -> HTTPException:
