@@ -1881,12 +1881,14 @@ async def get_trending_models_endpoint(
                 status_code=400, detail=f"Invalid sort_by. Must be one of: {', '.join(valid_sort)}"
             )
 
-        # Fetch more results than requested to support offset pagination
+        # Fetch a large result set so total_count reflects the true number of
+        # results and the cache key stays stable regardless of pagination params.
+        _TRENDING_BUFFER = 200
         trending = get_trending_models(
-            gateway=gateway, time_range=time_range, limit=limit + offset, sort_by=sort_by
+            gateway=gateway, time_range=time_range, limit=_TRENDING_BUFFER, sort_by=sort_by
         )
 
-        # Apply offset pagination
+        # Get total count BEFORE slicing so pagination metadata is accurate
         total_count = len(trending)
         trending = trending[offset : offset + limit]
 
@@ -1984,12 +1986,14 @@ async def get_provider_top_models_endpoint(
         provider_name = normalize_developer_segment(provider_name) or provider_name
         logger.info("Fetching top models for provider: %s", sanitize_for_logging(provider_name))
 
-        # Fetch more results than requested to support offset pagination
+        # Fetch a large result set so total_count reflects the true number of
+        # results and the cache key stays stable regardless of pagination params.
+        _TOP_MODELS_BUFFER = 100
         top_models = get_top_models_by_provider(
-            provider_name=provider_name, limit=limit + offset, time_range=time_range
+            provider_name=provider_name, limit=_TOP_MODELS_BUFFER, time_range=time_range
         )
 
-        # Apply offset pagination
+        # Get total count BEFORE slicing so pagination metadata is accurate
         total_count = len(top_models)
         top_models = top_models[offset : offset + limit]
 
@@ -3273,11 +3277,13 @@ async def discover_huggingface_models(
             f"Discovering HuggingFace models: task={task}, sort={sort}, limit={limit}, offset={offset}"
         )
 
-        # Fetch enough models to support offset pagination
+        # Fetch a large result set so total_count reflects the true number of
+        # results regardless of pagination params.
+        _HF_DISCOVER_BUFFER = 200
         models = list_huggingface_models(
             task=task,
             sort=sort,
-            limit=limit + offset,
+            limit=_HF_DISCOVER_BUFFER,
         )
 
         if not models:
@@ -3296,7 +3302,7 @@ async def discover_huggingface_models(
                 },
             }
 
-        # Apply offset pagination
+        # Get total count BEFORE slicing so pagination metadata is accurate
         total_count = len(models)
         paginated_models = models[offset : offset + limit]
 
@@ -3342,14 +3348,16 @@ async def search_huggingface_models_endpoint(
             f"Searching HuggingFace models: q='{q}', task={task}, limit={limit}, offset={offset}"
         )
 
-        # Fetch enough models to support offset pagination
+        # Fetch a large result set so total_count reflects the true number of
+        # results regardless of pagination params.
+        _HF_SEARCH_BUFFER = 200
         models = search_models_by_query(
             query=q,
             task=task,
-            limit=limit + offset,
+            limit=_HF_SEARCH_BUFFER,
         )
 
-        # Apply offset pagination
+        # Get total count BEFORE slicing so pagination metadata is accurate
         total_count = len(models)
         paginated_models = models[offset : offset + limit]
 
