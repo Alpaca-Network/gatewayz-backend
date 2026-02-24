@@ -69,8 +69,8 @@ BYTES_PER_MINUTE_ESTIMATE = 1_000_000  # 1MB per minute
 
 # Uncompressed formats (WAV, FLAC) have much higher bitrates
 UNCOMPRESSED_BYTES_PER_MINUTE = {
-    ".wav": 10_000_000,   # ~10MB/min at 16-bit 44.1kHz stereo
-    ".flac": 5_000_000,   # ~5MB/min (lossless compression varies)
+    ".wav": 10_000_000,  # ~10MB/min at 16-bit 44.1kHz stereo
+    ".flac": 5_000_000,  # ~5MB/min (lossless compression varies)
 }
 
 
@@ -214,9 +214,7 @@ async def _deduct_audio_credits(
         )
     except Exception as e:
         # Unexpected error in billing - fail safe, don't give away free transcription
-        logger.error(
-            f"[{request_id}] Unexpected error in credit deduction: {e}", exc_info=True
-        )
+        logger.error(f"[{request_id}] Unexpected error in credit deduction: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail="Billing error occurred. Please try again or contact support.",
@@ -329,8 +327,7 @@ async def create_transcription(
         user = await loop.run_in_executor(executor, get_user, api_key)
         if not user:
             if (
-                Config.IS_TESTING
-                or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+                Config.IS_TESTING or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
             ) and api_key.lower().startswith("test"):
                 user = {
                     "id": 0,
@@ -498,7 +495,7 @@ async def create_transcription(
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
         # Clean up executor
-        if 'executor' in locals():
+        if "executor" in locals():
             executor.shutdown(wait=False)
 
 
@@ -586,8 +583,7 @@ async def create_transcription_base64(
         user = await loop.run_in_executor(executor, get_user, api_key)
         if not user:
             if (
-                Config.IS_TESTING
-                or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+                Config.IS_TESTING or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
             ) and api_key.lower().startswith("test"):
                 user = {
                     "id": 0,
@@ -664,9 +660,7 @@ async def create_transcription_base64(
             actual_duration = estimated_duration
 
         # Calculate actual cost based on real/estimated duration
-        total_cost, cost_per_minute, used_fallback_pricing = get_audio_cost(
-            model, actual_duration
-        )
+        total_cost, cost_per_minute, used_fallback_pricing = get_audio_cost(model, actual_duration)
 
         # --- Billing: deduct credits ---
         elapsed_ms = int(elapsed * 1000)
@@ -723,5 +717,5 @@ async def create_transcription_base64(
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
         # Clean up executor
-        if 'executor' in locals():
+        if "executor" in locals():
             executor.shutdown(wait=False)
