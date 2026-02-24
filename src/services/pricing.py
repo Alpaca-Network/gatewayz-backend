@@ -1174,8 +1174,9 @@ def get_pricing_coverage_report(model_ids: list[str]) -> dict[str, Any]:
             if not pricing.get("found", False) or pricing.get("source") == "default":
                 uncovered.append(model_id)
         except Exception:
-            # ValueError is raised for high-value models with missing pricing;
-            # any other exception also means pricing is not properly covered.
+            # get_model_pricing catches ValueError internally for high-value
+            # models and returns default pricing instead. Any exception here
+            # means an unexpected failure, so treat the model as uncovered.
             uncovered.append(model_id)
 
     total = len(model_ids)

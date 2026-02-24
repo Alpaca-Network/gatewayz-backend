@@ -331,8 +331,6 @@ def test_individual_model_pricing_not_default(monkeypatch, model_id):
     This test uses warnings.warn rather than assert, so it never fails the
     suite — it only emits visible warnings in the pytest output.
     """
-    import importlib
-
     pricing_mod = importlib.import_module(PRICING_MODULE_PATH)
 
     # Mock out external dependencies so this runs offline
