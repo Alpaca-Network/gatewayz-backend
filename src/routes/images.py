@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -212,6 +213,9 @@ async def generate_images(
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/images/generations")
 
+    # Generate request_id for correlation with billing transactions
+    request_id = str(uuid.uuid4())
+
     # Initialize variables for error handling
     actual_provider = None
     model = None
@@ -401,7 +405,24 @@ async def generate_images(
             # The deduct_credits function handles atomic balance updates to prevent race conditions
             actual_balance_after = None
             try:
-                await loop.run_in_executor(executor, deduct_credits, api_key, total_cost)
+                await loop.run_in_executor(
+                    executor,
+                    partial(
+                        deduct_credits,
+                        api_key,
+                        total_cost,
+                        f"Image generation - {model}",
+                        {
+                            "model": model,
+                            "provider": actual_provider,
+                            "num_images": req.n,
+                            "cost_per_image": cost_per_image,
+                            "cost_usd": total_cost,
+                            "endpoint": "/v1/images/generations",
+                            "request_id": request_id,
+                        },
+                    ),
+                )
 
                 # Fetch fresh balance after deduction for accurate reporting
                 # This avoids stale data from the pre-request user lookup

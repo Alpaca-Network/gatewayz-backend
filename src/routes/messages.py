@@ -870,6 +870,7 @@ async def anthropic_messages(
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
                 endpoint="/v1/messages",
+                request_id=request_id,
             )
         except ValueError as e:
             # Insufficient credits
