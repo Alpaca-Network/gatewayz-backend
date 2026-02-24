@@ -105,11 +105,13 @@ def _record_refund_metrics(reason: str, amount: float) -> None:
 
 # Refund error types that qualify for automatic refund (conservative list)
 # Only clear provider-side failures qualify; user errors (4xx) do not.
-REFUNDABLE_ERROR_TYPES = frozenset({
-    "provider_error",   # 502, 503, upstream errors
-    "timeout_error",    # Request timed out
-    "empty_stream",     # Provider returned empty stream
-})
+REFUNDABLE_ERROR_TYPES = frozenset(
+    {
+        "provider_error",  # 502, 503, upstream errors
+        "timeout_error",  # Request timed out
+        "empty_stream",  # Provider returned empty stream
+    }
+)
 
 
 def _record_background_task_failure(failure_type: str, endpoint: str) -> None:
@@ -711,9 +713,7 @@ async def refund_credits(
         True if the refund was applied successfully, False otherwise.
     """
     if amount <= 0:
-        logger.warning(
-            f"Skipping refund for non-positive amount: ${amount:.6f}, user={user_id}"
-        )
+        logger.warning(f"Skipping refund for non-positive amount: ${amount:.6f}, user={user_id}")
         return False
 
     # Conservative guard: only allow known refundable reasons
