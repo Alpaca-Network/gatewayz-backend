@@ -1062,7 +1062,6 @@ class StripeService:
         except ImportError:
             payment_amount_mismatch = None
 
-        metadata = metadata or {}
         result: dict = {
             "verified": False,
             "severity": "unknown_plan",
@@ -1091,6 +1090,8 @@ class StripeService:
                 "(amount=$%.2f, session=%s, user=%s)",
                 package_name, amount_cents / 100, session_id, user_id,
             )
+            if payment_amount_mismatch:
+                payment_amount_mismatch.labels(severity="matched").inc()
             return result
 
         # Step 2: Try fuzzy matching against known packages (handles rounding/currency)
@@ -1219,8 +1220,8 @@ class StripeService:
                     payment_amount_mismatch.labels(severity="over").inc()
 
             else:
-                # Over but within 10% -- log warning, no Sentry
-                result["verified"] = False
+                # Over but within 10% -- slightly over, still acceptable
+                result["verified"] = True
                 result["severity"] = "within_tolerance"
                 result["message"] = (
                     f"Amount ${amount_cents / 100:.2f} is slightly over expected price for "
