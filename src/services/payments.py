@@ -1544,7 +1544,21 @@ class StripeService:
             raise
 
     def _handle_subscription_deleted(self, subscription):
-        """Handle subscription deleted/canceled event"""
+        """Handle subscription deleted/canceled event (customer.subscription.deleted).
+
+        This webhook fires when:
+        1. A subscription's billing period ends after cancel_at_period_end was set to True
+        2. A subscription is deleted via the Stripe dashboard
+        3. A subscription is canceled immediately via API (though cancel_subscription()
+           already handles forfeiture in that case)
+
+        Credit handling:
+        - subscription_allowance: SET TO 0 (forfeited - these are monthly tier credits)
+        - purchased_credits: KEPT (these were paid for separately)
+
+        The forfeited amount and retained purchased credits are logged in the
+        SUBSCRIPTION_CANCELLATION transaction metadata for audit purposes.
+        """
         try:
             # Extract user_id with fallback strategies
             user_id = self._extract_user_id_from_subscription(subscription)
@@ -1562,18 +1576,53 @@ class StripeService:
                     f"(subscription_id={subscription_id})"
                 )
 
-            logger.info(f"Subscription deleted for user {user_id}: {subscription.id}")
+            subscription_id = self._get_stripe_object_value(subscription, "id")
+
+            # Determine the effective date from Stripe's subscription object
+            # canceled_at is when the user clicked "cancel", NOT when the subscription
+            # actually ends. For scheduled cancellations (cancel_at_period_end=True),
+            # the subscription remains active until current_period_end.
+            current_period_end = self._get_stripe_object_value(subscription, "current_period_end")
+            if isinstance(current_period_end, (int, float)) and current_period_end > 0:
+                effective_date = datetime.fromtimestamp(current_period_end, tz=UTC).isoformat()
+            else:
+                effective_date = datetime.now(UTC).isoformat()
+
+            # Get user's current tier before downgrade for audit logging
+            user = get_user_by_id(user_id)
+            previous_tier = user.get("tier", "unknown") if user else "unknown"
+
+            logger.info(
+                f"Processing subscription.deleted for user {user_id}: "
+                f"subscription_id={subscription_id}, previous_tier={previous_tier}, "
+                f"effective_date={effective_date}"
+            )
 
             # Forfeit subscription allowance before downgrading
+            # Credit policy:
+            # - subscription_allowance -> zeroed (forfeited)
+            # - purchased_credits -> preserved (user paid for these separately)
             # Use raise_on_error=True to ensure data consistency - if forfeiture fails,
             # Stripe will retry the webhook
             from src.db.users import forfeit_subscription_allowance
 
-            forfeited = forfeit_subscription_allowance(user_id, raise_on_error=True)
-            if forfeited > 0:
-                logger.info(
-                    f"Forfeited ${forfeited} allowance for user {user_id} on subscription cancellation"
-                )
+            forfeiture_result = forfeit_subscription_allowance(
+                user_id,
+                raise_on_error=True,
+                effective_date=effective_date,
+                cancellation_context="period_end_webhook",
+            )
+
+            forfeited = forfeiture_result.get("forfeited_allowance", 0)
+            retained = forfeiture_result.get("retained_purchased_credits", 0)
+
+            logger.info(
+                f"Subscription deletion credit summary for user {user_id}: "
+                f"forfeited_allowance=${forfeited:.2f}, "
+                f"retained_purchased_credits=${retained:.2f}, "
+                f"subscription_id={subscription_id}, "
+                f"previous_tier={previous_tier}"
+            )
 
             # Downgrade user to basic tier
             from src.config.supabase_config import get_supabase_client
@@ -1589,13 +1638,25 @@ class StripeService:
                 }
             ).eq("id", user_id).execute()
 
+            # Update API keys to reflect new tier
+            client.table("api_keys_new").update(
+                {
+                    "subscription_status": "canceled",
+                    "subscription_plan": "basic",
+                }
+            ).eq("user_id", user_id).execute()
+
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             from src.db.users import invalidate_user_cache_by_id
 
             invalidate_user_cache_by_id(user_id)
 
             logger.info(
-                f"User {user_id} subscription canceled, downgraded to basic tier, cache invalidated"
+                f"User {user_id} subscription canceled and downgraded to basic tier "
+                f"(subscription_id={subscription_id}, "
+                f"forfeited_allowance=${forfeited:.2f}, "
+                f"retained_purchased_credits=${retained:.2f}, "
+                f"cache_invalidated=True)"
             )
 
         except Exception as e:
@@ -2245,6 +2306,10 @@ class StripeService:
 
             if request.cancel_at_period_end:
                 # Cancel at end of billing period - user keeps access until then
+                # Credit handling:
+                # - subscription_allowance: remains active until period ends, then zeroed
+                #   by the customer.subscription.deleted webhook handler
+                # - purchased_credits: always preserved (paid for separately)
                 updated_subscription = stripe.Subscription.modify(
                     stripe_subscription_id,
                     cancel_at_period_end=True,
@@ -2259,13 +2324,55 @@ class StripeService:
                     else None
                 )
 
+                # Fetch current credit balances for audit logging
+                from src.db.users import get_user_by_id as get_user_fresh
+
+                user_fresh = get_user_fresh(user_id)
+                current_allowance = (
+                    float(user_fresh.get("subscription_allowance") or 0) if user_fresh else 0.0
+                )
+                purchased_credits = (
+                    float(user_fresh.get("purchased_credits") or 0) if user_fresh else 0.0
+                )
+
+                # Log pending cancellation in credit transactions for audit trail
+                # Note: Allowance is NOT zeroed yet - it will be zeroed when the
+                # customer.subscription.deleted webhook fires at period end
+                from src.db.credit_transactions import TransactionType, log_credit_transaction
+
+                log_credit_transaction(
+                    user_id=user_id,
+                    amount=0,  # No immediate credit change
+                    transaction_type=TransactionType.SUBSCRIPTION_CANCELLATION,
+                    description=(
+                        f"Subscription cancellation scheduled at period end. "
+                        f"Allowance (${current_allowance:.2f}) will be forfeited on "
+                        f"{effective_date.strftime('%Y-%m-%d') if effective_date else 'period end'}. "
+                        f"Purchased credits (${purchased_credits:.2f}) will be retained."
+                    ),
+                    balance_before=current_allowance + purchased_credits,
+                    balance_after=current_allowance + purchased_credits,  # No change yet
+                    metadata={
+                        "forfeited_allowance": 0,  # Not forfeited yet
+                        "pending_forfeiture_allowance": current_allowance,
+                        "retained_purchased_credits": purchased_credits,
+                        "effective_date": effective_date.isoformat() if effective_date else None,
+                        "cancellation_type": "cancel_at_period_end",
+                        "cancellation_reason": request.reason or "User requested cancellation",
+                        "subscription_id": updated_subscription.id,
+                        "current_tier": current_tier,
+                    },
+                    created_by="system:subscription_cancellation_scheduled",
+                )
+
                 # Update user's subscription status to indicate pending cancellation
                 from src.config.supabase_config import get_supabase_client
 
                 client = get_supabase_client()
 
-                # Keep the tier and status as-is, but mark cancellation in metadata
-                # The actual downgrade will happen when subscription.deleted webhook fires
+                # Keep the tier, allowance, and purchased_credits as-is.
+                # The actual downgrade and allowance forfeiture will happen when
+                # the customer.subscription.deleted webhook fires at period end.
                 client.table("users").update(
                     {
                         "updated_at": datetime.now(UTC).isoformat(),
@@ -2279,7 +2386,9 @@ class StripeService:
 
                 logger.info(
                     f"Subscription {stripe_subscription_id} marked for cancellation at period end "
-                    f"(effective: {effective_date}) for user {user_id}"
+                    f"for user {user_id} (effective: {effective_date}, "
+                    f"current_allowance=${current_allowance:.2f} will be forfeited, "
+                    f"purchased_credits=${purchased_credits:.2f} will be retained)"
                 )
 
                 return SubscriptionManagementResponse(
@@ -2293,16 +2402,32 @@ class StripeService:
 
             else:
                 # Cancel immediately
+                # Credit handling:
+                # - subscription_allowance: zeroed immediately (forfeited)
+                # - purchased_credits: preserved (paid for separately)
                 canceled_subscription = stripe.Subscription.cancel(stripe_subscription_id)
+                cancellation_effective_date = datetime.now(UTC).isoformat()
 
-                # Forfeit remaining allowance and downgrade tier
+                # Forfeit remaining subscription allowance; purchased credits are preserved
                 from src.db.users import forfeit_subscription_allowance
 
-                forfeited = forfeit_subscription_allowance(user_id, raise_on_error=False)
-                if forfeited > 0:
-                    logger.info(
-                        f"Forfeited ${forfeited} allowance for user {user_id} on immediate cancellation"
-                    )
+                forfeiture_result = forfeit_subscription_allowance(
+                    user_id,
+                    raise_on_error=False,
+                    effective_date=cancellation_effective_date,
+                    cancellation_context="immediate_cancellation",
+                )
+
+                forfeited = forfeiture_result.get("forfeited_allowance", 0)
+                retained = forfeiture_result.get("retained_purchased_credits", 0)
+
+                logger.info(
+                    f"Immediate cancellation credit summary for user {user_id}: "
+                    f"forfeited_allowance=${forfeited:.2f}, "
+                    f"retained_purchased_credits=${retained:.2f}, "
+                    f"subscription_id={stripe_subscription_id}, "
+                    f"from_tier={current_tier}"
+                )
 
                 # Update user to basic tier
                 from src.config.supabase_config import get_supabase_client
@@ -2333,7 +2458,7 @@ class StripeService:
 
                 logger.info(
                     f"Subscription {stripe_subscription_id} canceled immediately for user {user_id}, "
-                    f"downgraded to basic tier"
+                    f"downgraded from {current_tier} to basic tier"
                 )
 
                 return SubscriptionManagementResponse(
