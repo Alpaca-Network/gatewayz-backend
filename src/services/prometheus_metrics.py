@@ -357,6 +357,15 @@ missed_credit_deductions_usd = get_or_create_metric(
     ["reason"],  # reason: background_task_failure, retry_exhausted, etc.
 )
 
+# ==================== Payment Amount Verification Metrics ====================
+# Track payment amount mismatches between Stripe and expected plan pricing
+payment_amount_mismatch = get_or_create_metric(
+    Counter,
+    "gatewayz_payment_amount_mismatch_total",
+    "Total payment amount mismatches between Stripe charge and expected plan pricing",
+    ["severity"],  # severity: within_tolerance, under, over, unknown_plan
+)
+
 # ==================== Database Metrics ====================
 database_query_count = get_or_create_metric(
     Counter,
