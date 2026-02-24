@@ -806,9 +806,7 @@ def deduct_credits(
                 balance_before,
                 tokens,
             )
-            raise ValueError(
-                "Insufficient credits. Please add credits to continue."
-            )
+            raise ValueError("Insufficient credits. Please add credits to continue.")
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
         from_allowance = min(allowance_before, tokens)

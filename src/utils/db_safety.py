@@ -257,9 +257,7 @@ def safe_update_credits(
             new_balance,
             min_credits,
         )
-        raise ValueError(
-            f"{operation_name}: Insufficient credits. Please add credits to continue."
-        )
+        raise ValueError(f"{operation_name}: Insufficient credits. Please add credits to continue.")
 
     return round(new_balance, 6)  # Round to 6 decimal places to avoid floating point issues
 
