@@ -72,6 +72,37 @@ class TrialService:
                     message="Trial already started or subscription active",
                 )
 
+            # Atomically record the trial grant at the database level.
+            # This enforces a UNIQUE(user_id) constraint so concurrent
+            # requests cannot both pass the service-layer check above.
+            user_id = await self._get_user_id_for_api_key(api_key_id)
+            if user_id is not None:
+                grant_result = self.supabase.rpc(
+                    "record_trial_grant",
+                    {
+                        "p_user_id": user_id,
+                        "p_api_key_id": api_key_id,
+                        "p_grant_type": "standard",
+                        "p_trial_credits": float(request.trial_days * 5),
+                        "p_trial_duration_days": request.trial_days,
+                    },
+                ).execute()
+
+                if grant_result.data and not grant_result.data.get("success", True):
+                    logger.warning(
+                        f"Duplicate trial grant blocked by DB constraint for user {user_id}"
+                    )
+                    return StartTrialResponse(
+                        success=False,
+                        trial_start_date=datetime.now(),
+                        trial_end_date=datetime.now(),
+                        trial_days=request.trial_days,
+                        max_tokens=0,
+                        max_requests=0,
+                        trial_credits=0.0,
+                        message="Trial already started or subscription active",
+                    )
+
             # Call database function to start trial
             result = self.supabase.rpc(
                 "start_trial", {"api_key_id": api_key_id, "trial_days": request.trial_days}
@@ -109,6 +140,21 @@ class TrialService:
                 )
 
         except Exception as e:
+            error_str = str(e)
+            # Handle unique violation from the trial_grants constraint
+            # (e.g., if record_trial_grant RPC raises instead of returning error)
+            if "unique" in error_str.lower() or "23505" in error_str or "trial_already_granted" in error_str:
+                logger.warning(f"Duplicate trial grant blocked by DB constraint: {e}")
+                return StartTrialResponse(
+                    success=False,
+                    trial_start_date=datetime.now(),
+                    trial_end_date=datetime.now(),
+                    trial_days=request.trial_days,
+                    max_tokens=0,
+                    max_requests=0,
+                    trial_credits=0.0,
+                    message="Trial already started or subscription active",
+                )
             logger.error(f"Error starting trial: {e}")
             return StartTrialResponse(
                 success=False,
@@ -500,6 +546,22 @@ class TrialService:
             return None
         except Exception as e:
             logger.error(f"Error getting API key ID: {e}")
+            return None
+
+    async def _get_user_id_for_api_key(self, api_key_id: int) -> int | None:
+        """Get user_id for an API key by its ID"""
+        try:
+            result = (
+                self.supabase.table("api_keys_new")
+                .select("user_id")
+                .eq("id", api_key_id)
+                .execute()
+            )
+            if result.data and len(result.data) > 0:
+                return result.data[0]["user_id"]
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user ID for API key {api_key_id}: {e}")
             return None
 
 

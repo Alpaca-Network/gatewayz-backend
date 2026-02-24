@@ -147,6 +147,42 @@ class PartnerTrialService:
             now = datetime.now(UTC)
             trial_end = now + timedelta(days=partner_config["trial_duration_days"])
 
+            # Atomically record the trial grant at the database level.
+            # The UNIQUE(user_id) constraint on trial_grants prevents
+            # concurrent requests from granting duplicate trials.
+            api_key_result = (
+                client.table("api_keys_new")
+                .select("id")
+                .eq("api_key", api_key)
+                .execute()
+            )
+            api_key_id = (
+                api_key_result.data[0]["id"]
+                if api_key_result.data
+                else None
+            )
+
+            grant_result = client.rpc(
+                "record_trial_grant",
+                {
+                    "p_user_id": user_id,
+                    "p_api_key_id": api_key_id,
+                    "p_grant_type": "partner",
+                    "p_partner_code": partner_code,
+                    "p_trial_credits": float(partner_config["trial_credits_usd"]),
+                    "p_trial_duration_days": partner_config["trial_duration_days"],
+                },
+            ).execute()
+
+            if grant_result.data and not grant_result.data.get("success", True):
+                logger.warning(
+                    f"Duplicate partner trial grant blocked by DB constraint "
+                    f"for user {user_id}, partner {partner_code}"
+                )
+                raise ValueError(
+                    f"A trial has already been granted to this user (user_id={user_id})"
+                )
+
             # Update user with partner trial info
             user_update = {
                 "partner_code": partner_code,
@@ -211,7 +247,20 @@ class PartnerTrialService:
                 "daily_usage_limit_usd": float(partner_config["daily_usage_limit_usd"]),
             }
 
+        except ValueError:
+            # Re-raise ValueErrors (including our duplicate trial message) as-is
+            raise
         except Exception as e:
+            error_str = str(e)
+            # Handle unique violation from the trial_grants constraint
+            if "unique" in error_str.lower() or "23505" in error_str or "trial_already_granted" in error_str:
+                logger.warning(
+                    f"Duplicate partner trial grant blocked by DB constraint "
+                    f"for user {user_id}: {e}"
+                )
+                raise ValueError(
+                    f"A trial has already been granted to this user (user_id={user_id})"
+                ) from e
             logger.error(f"Error starting partner trial for user {user_id}: {e}")
             raise
 
