@@ -180,9 +180,7 @@ class TestGetPricingCoverageReport:
         report = pricing_mod.get_pricing_coverage_report(model_ids)
         assert report["uncovered_models"] == ["a-model", "m-model", "z-model"]
 
-    def test_high_value_model_without_pricing_counted_as_uncovered(
-        self, monkeypatch, pricing_mod
-    ):
+    def test_high_value_model_without_pricing_counted_as_uncovered(self, monkeypatch, pricing_mod):
         """
         High-value models (GPT-4, Claude, etc.) that raise ValueError when
         pricing is missing should still be counted as uncovered, not crash.
@@ -254,8 +252,7 @@ class TestCatalogPricingCoverage:
             warnings.warn(
                 f"\nPricing coverage: {report['coverage_percentage']}% "
                 f"({report['covered_count']}/{report['total_models']})\n"
-                f"Uncovered models:\n"
-                + "\n".join(f"  - {m}" for m in report["uncovered_models"]),
+                f"Uncovered models:\n" + "\n".join(f"  - {m}" for m in report["uncovered_models"]),
                 UserWarning,
                 stacklevel=1,
             )
@@ -300,7 +297,7 @@ class TestCatalogPricingCoverage:
 
         if report["uncovered_models"]:
             warnings.warn(
-                f"\nCRITICAL: High-value models missing pricing:\n"
+                "\nCRITICAL: High-value models missing pricing:\n"
                 + "\n".join(f"  - {m}" for m in report["uncovered_models"]),
                 UserWarning,
                 stacklevel=1,
