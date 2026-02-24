@@ -458,7 +458,7 @@ async def get_credit_transactions_endpoint(
         api_key: Authenticated user's API key
 
     Returns:
-        List of credit transactions with running balance
+        List of credit transactions (sanitized for user consumption)
     """
     try:
         user = get_user(api_key)
@@ -475,6 +475,9 @@ async def get_credit_transactions_endpoint(
         # Get summary
         summary = get_transaction_summary(user_id)
 
+        # Sanitize metadata: only expose safe, user-relevant fields
+        safe_metadata_keys = {"model", "endpoint"}
+
         return {
             "transactions": [
                 {
@@ -482,11 +485,12 @@ async def get_credit_transactions_endpoint(
                     "amount": float(txn["amount"]),
                     "transaction_type": txn["transaction_type"],
                     "description": txn.get("description", ""),
-                    "balance_before": float(txn["balance_before"]),
-                    "balance_after": float(txn["balance_after"]),
                     "created_at": txn["created_at"],
-                    "payment_id": txn.get("payment_id"),
-                    "metadata": txn.get("metadata", {}),
+                    "metadata": {
+                        k: v
+                        for k, v in (txn.get("metadata") or {}).items()
+                        if k in safe_metadata_keys
+                    },
                 }
                 for txn in transactions
             ],
