@@ -92,7 +92,15 @@ BEGIN
         );
     END IF;
 
-    -- Verify the breakdown adds up to the total (with small epsilon for floating point)
+    -- Verify the breakdown adds up to the total (with small epsilon for floating point).
+    -- Epsilon of 1e-6 is chosen because:
+    --   - Python float (IEEE 754 double) has ~15-17 significant digits of precision.
+    --   - Credit amounts are typically in the range $0.0001 to $100, so representational
+    --     error is well below 1e-10 for values in that range.
+    --   - PostgreSQL NUMERIC is arbitrary-precision, but the values arrive rounded from
+    --     Python floats, so we need to tolerate at most one ULP of drift (~1e-15 for
+    --     values < $1000). An epsilon of 1e-6 gives >9 orders of magnitude of headroom
+    --     while still catching genuine mismatches (e.g. off-by-one-cent errors).
     IF ABS((p_from_allowance + p_from_purchased) - p_tokens_amount) > 0.000001 THEN
         RETURN jsonb_build_object(
             'success', false,

@@ -878,8 +878,37 @@ def deduct_credits(
                         )
                     elif rpc_error == "user_not_found":
                         raise ValueError("User with API key not found")
+                    elif rpc_error in (
+                        "insufficient_allowance",
+                        "insufficient_purchased_credits",
+                    ):
+                        # Component-level balance check failed -- the RPC has
+                        # precise knowledge of allowance vs purchased breakdown,
+                        # so we must honour its verdict rather than falling back
+                        # to the legacy path which could compute a different split.
+                        rpc_balance = result_data.get("new_balance")
+                        balance_rounded = (
+                            round(float(rpc_balance), 2)
+                            if rpc_balance is not None
+                            else round(balance_before, 2)
+                        )
+                        required_rounded = round(tokens, 2)
+                        logger.warning(
+                            "Atomic deduct RPC component check failed ('%s') for user %s. "
+                            "Balance: $%.2f, Required: $%.2f",
+                            rpc_error,
+                            sanitize_for_logging(str(user_id)),
+                            balance_rounded,
+                            required_rounded,
+                        )
+                        raise ValueError(
+                            f"Insufficient credits ({rpc_error.replace('_', ' ')}). "
+                            f"Current balance: ~${balance_rounded:.2f}, "
+                            f"Required: ~${required_rounded:.2f}. Please add credits to continue."
+                        )
                     else:
-                        # Other RPC-level errors -- fall through to legacy path
+                        # Other RPC-level errors (e.g. unexpected DB constraint
+                        # violations) -- fall through to legacy path
                         logger.warning(
                             "Atomic deduct RPC returned error '%s' for user %s, "
                             "falling back to legacy two-call path.",
