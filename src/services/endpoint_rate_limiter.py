@@ -2,7 +2,7 @@
 Per-Endpoint Rate Limiter
 
 Lightweight in-memory rate limiter for individual API endpoints.
-Uses a sliding-window counter keyed by (api_key, endpoint_name) with
+Uses a fixed-window counter keyed by (api_key, endpoint_name) with
 automatic expiry of old buckets.
 
 This module is intentionally simple: no Redis dependency, no database
@@ -149,9 +149,16 @@ def create_endpoint_rate_limit(
     """
 
     async def _rate_limit_dependency(request: Request) -> None:
-        # Extract API key from Authorization header
+        # Extract API key using the same approach as the auth dependency
+        # (security/deps.py get_api_key). HTTPBearer parses the
+        # "Authorization: Bearer <token>" header and returns .credentials.
+        # We replicate the extraction here to avoid calling the full auth
+        # dependency (which performs DB lookups and validation).
         auth_header = request.headers.get("Authorization", "")
-        api_key = auth_header.replace("Bearer ", "").strip() if auth_header else ""
+        if auth_header.lower().startswith("bearer "):
+            api_key = auth_header[7:].strip()
+        else:
+            api_key = ""
 
         # If no API key is present, skip endpoint rate limiting
         # (the auth dependency will reject the request anyway)
