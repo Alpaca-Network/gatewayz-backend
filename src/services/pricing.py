@@ -1156,3 +1156,65 @@ def track_code_router_cost_metrics(
         logger.debug("Prometheus metrics not available for code router cost tracking")
     except Exception as e:
         logger.debug(f"Failed to track code router cost metrics: {e}")
+
+
+def get_pricing_coverage_report(model_ids: list[str]) -> dict[str, Any]:
+    """
+    Generate a pricing coverage report for a list of model IDs.
+
+    For each model ID, checks whether get_model_pricing() returns non-default
+    pricing (i.e., pricing with source != "default" and found == True).
+    Models that silently fall back to the $0.00002/token default are flagged
+    as uncovered.
+
+    This function is designed to be called from admin endpoints, monitoring
+    scripts, or tests to audit pricing completeness across the catalog.
+
+    Args:
+        model_ids: List of model IDs to check (e.g., from the catalog).
+
+    Returns:
+        Dictionary with coverage statistics:
+        {
+            "total_models": int,
+            "covered_count": int,
+            "uncovered_count": int,
+            "coverage_percentage": float,
+            "uncovered_models": list[str],
+        }
+    """
+    if not model_ids:
+        return {
+            "total_models": 0,
+            "covered_count": 0,
+            "uncovered_count": 0,
+            "coverage_percentage": 100.0,
+            "uncovered_models": [],
+        }
+
+    uncovered: list[str] = []
+
+    for model_id in model_ids:
+        try:
+            pricing = get_model_pricing(model_id)
+            # A model is "uncovered" if the pricing source is "default"
+            # (meaning no database, cache, or manual pricing was found)
+            if not pricing.get("found", False) or pricing.get("source") == "default":
+                uncovered.append(model_id)
+        except Exception:
+            # get_model_pricing catches ValueError internally for high-value
+            # models and returns default pricing instead. Any exception here
+            # means an unexpected failure, so treat the model as uncovered.
+            uncovered.append(model_id)
+
+    total = len(model_ids)
+    covered = total - len(uncovered)
+    percentage = (covered / total * 100.0) if total > 0 else 100.0
+
+    return {
+        "total_models": total,
+        "covered_count": covered,
+        "uncovered_count": len(uncovered),
+        "coverage_percentage": round(percentage, 2),
+        "uncovered_models": sorted(uncovered),
+    }
