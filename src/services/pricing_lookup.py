@@ -206,6 +206,71 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         return None
 
 
+def get_image_pricing(provider: str, model: str) -> tuple[float, bool] | None:
+    """
+    Get per-image pricing from manual_pricing.json for image generation models.
+
+    Looks up the "image_pricing" section of manual_pricing.json. Returns the
+    per-image cost in USD and a flag indicating whether the price came from a
+    provider-level default rather than an exact model match.  Returns None if
+    not found (caller should fall back to hardcoded defaults).
+
+    The lookup order is:
+      1. Exact model match under the provider key  (is_fallback=False)
+      2. Provider-level "default" entry             (is_fallback=True)
+      3. None (not found)
+
+    Args:
+        provider: Image generation provider (e.g. "deepinfra", "fal", "google-vertex")
+        model: Model name (e.g. "stable-diffusion-3.5-large", "flux/schnell")
+
+    Returns:
+        Tuple of (cost_per_image, is_fallback), or None if no config-driven pricing
+        is available.
+    """
+    try:
+        pricing_data = load_manual_pricing()
+        if not pricing_data:
+            return None
+
+        image_pricing = pricing_data.get("image_pricing")
+        if not image_pricing or not isinstance(image_pricing, dict):
+            return None
+
+        provider_lower = provider.lower()
+        provider_section = image_pricing.get(provider_lower)
+        if not provider_section or not isinstance(provider_section, dict):
+            return None
+
+        # Try exact model match first (all keys are pre-lowercased at load time)
+        is_fallback = False
+        model_lower = model.lower()
+        entry = provider_section.get(model_lower)
+        if entry is None:
+            entry = provider_section.get(model)
+
+        # Fall back to provider-level default for unknown models
+        if entry is None:
+            entry = provider_section.get("default")
+            is_fallback = True
+
+        if entry is None:
+            return None
+
+        if isinstance(entry, dict):
+            per_image = entry.get("per_image")
+            if per_image is not None:
+                return float(per_image), is_fallback
+            return None
+        else:
+            # Support bare numeric values for simpler entries
+            return float(entry), is_fallback
+
+    except Exception as e:
+        logger.error(f"Error loading image pricing for {provider}/{model}: {e}")
+        return None
+
+
 def _is_building_catalog() -> bool:
     """Check if we're currently building the model catalog to avoid circular imports"""
     try:
