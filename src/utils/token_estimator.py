@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 # tiktoken lazy-loading
 # ---------------------------------------------------------------------------
 
-_tiktoken_encoding = None
-_tiktoken_available: bool | None = None  # None = not yet checked
+_TIKTOKEN_NOT_CHECKED = object()  # Sentinel: init not yet attempted
+_tiktoken_encoding = _TIKTOKEN_NOT_CHECKED
 
 
 def _get_tiktoken_encoding():
@@ -38,32 +38,25 @@ def _get_tiktoken_encoding():
     estimation because it approximates the BPE split that the majority
     of hosted models use.
     """
-    global _tiktoken_encoding, _tiktoken_available
+    global _tiktoken_encoding
 
-    if _tiktoken_available is False:
-        return None
+    if _tiktoken_encoding is _TIKTOKEN_NOT_CHECKED:
+        try:
+            import tiktoken  # noqa: F401
 
-    if _tiktoken_encoding is not None:
-        return _tiktoken_encoding
+            _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+            logger.info("tiktoken loaded successfully - using cl100k_base for token estimation")
+        except ImportError:
+            _tiktoken_encoding = None
+            logger.info(
+                "tiktoken not installed - falling back to word-based token estimation. "
+                "Install tiktoken for more accurate billing: pip install tiktoken"
+            )
+        except Exception as e:
+            _tiktoken_encoding = None
+            logger.warning(f"tiktoken failed to initialize: {e} - using word-based fallback")
 
-    try:
-        import tiktoken  # noqa: F401
-
-        _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
-        _tiktoken_available = True
-        logger.info("tiktoken loaded successfully - using cl100k_base for token estimation")
-        return _tiktoken_encoding
-    except ImportError:
-        _tiktoken_available = False
-        logger.info(
-            "tiktoken not installed - falling back to word-based token estimation. "
-            "Install tiktoken for more accurate billing: pip install tiktoken"
-        )
-        return None
-    except Exception as e:
-        _tiktoken_available = False
-        logger.warning(f"tiktoken failed to initialize: {e} - using word-based fallback")
-        return None
+    return _tiktoken_encoding
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +137,7 @@ def count_tokens_text(text: str) -> int:
     # For code, the ratio is somewhat higher (~1.0) due to punctuation, but
     # 0.75 is a good middle ground across mixed workloads.
     word_count = len(text.split())
-    return max(0, int(word_count * 0.75))
+    return max(1, int(word_count * 0.75))
 
 
 def count_tokens_messages(messages: Iterable[dict] | None) -> int:
