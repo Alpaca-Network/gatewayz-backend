@@ -7,11 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from src.config.config import Config
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
 from src.db.credit_transactions import (
-    TransactionType,
     get_admin_daily_grant_total,
     get_all_transactions,
     get_transaction_summary,
-    log_credit_transaction,
 )
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
@@ -154,6 +152,7 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
                 "admin_user_id": admin_id,
                 "admin_username": admin_user.get("username"),
             },
+            created_by=f"admin:{admin_id}",
         )
 
         updated_user = await asyncio.to_thread(get_user, req.api_key)

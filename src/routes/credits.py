@@ -5,6 +5,7 @@ Provides endpoints for credit operations including add, adjust, bulk-add, refund
 These endpoints match the admin dashboard API expectations.
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -130,7 +131,7 @@ class BulkCreditResponse(BaseModel):
 # =============================================================================
 
 
-def _validate_admin_credit_grant(
+async def _validate_admin_credit_grant(
     amount: float,
     admin_user: dict,
     *,
@@ -165,7 +166,7 @@ def _validate_admin_credit_grant(
 
     # 2. Daily rolling window limit
     total_grant_amount = amount * bulk_user_count if is_bulk else amount
-    daily_total = get_admin_daily_grant_total(admin_id)
+    daily_total = await asyncio.to_thread(get_admin_daily_grant_total, admin_id)
     remaining = daily_limit - daily_total
 
     if daily_total + total_grant_amount > daily_limit:
@@ -208,7 +209,7 @@ async def add_credits_endpoint(
     """
     try:
         # Enforce admin credit grant safety controls
-        _validate_admin_credit_grant(request.amount, admin_user)
+        await _validate_admin_credit_grant(request.amount, admin_user)
 
         client = get_supabase_client()
 
@@ -301,7 +302,7 @@ async def adjust_credits_endpoint(
     try:
         # Enforce admin credit grant safety controls for positive adjustments (grants)
         if request.amount > 0:
-            _validate_admin_credit_grant(request.amount, admin_user)
+            await _validate_admin_credit_grant(request.amount, admin_user)
 
         client = get_supabase_client()
 
@@ -408,7 +409,7 @@ async def bulk_add_credits_endpoint(
         unique_user_ids = list(dict.fromkeys(request.user_ids))
 
         # Enforce admin credit grant safety controls (per-amount cap + daily total)
-        _validate_admin_credit_grant(
+        await _validate_admin_credit_grant(
             request.amount,
             admin_user,
             is_bulk=True,

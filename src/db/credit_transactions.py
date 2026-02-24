@@ -681,6 +681,6 @@ def get_admin_daily_grant_total(admin_user_id: int | str) -> float:
             f"Error querying admin daily grant total for admin {admin_user_id}: {e}",
             exc_info=True,
         )
-        # Return 0 on error to avoid blocking legitimate grants due to query failures.
-        # The per-transaction cap still provides protection.
-        return 0.0
+        # Fail closed: return infinity so the daily-limit check will reject the grant.
+        # This prevents unlimited grants if the audit query is broken.
+        return float("inf")
