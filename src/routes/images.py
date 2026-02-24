@@ -86,10 +86,11 @@ def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[floa
     is_fallback = False
 
     # --- Tier 1: config-driven pricing from manual_pricing.json ---
-    config_price = get_image_pricing(provider, model)
-    if config_price is not None:
+    config_result = get_image_pricing(provider, model)
+    if config_result is not None:
+        config_price, config_is_fallback = config_result
         total_cost = config_price * num_images
-        return total_cost, config_price, False
+        return total_cost, config_price, config_is_fallback
 
     # --- Tier 2+: hardcoded fallback (deprecated) ---
     logger.warning(
