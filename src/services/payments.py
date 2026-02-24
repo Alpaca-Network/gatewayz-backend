@@ -1018,13 +1018,13 @@ class StripeService:
     # Known credit package prices (amount_cents -> package_name)
     # Mirrors the packages defined in get_credit_packages()
     KNOWN_CREDIT_PACKAGES: dict[int, str] = {
-        1000: "starter",       # $10.00 - Starter Pack
+        1000: "starter",  # $10.00 - Starter Pack
         4500: "professional",  # $45.00 - Professional Pack (10% discount on $50 credits)
     }
 
     # Tolerance thresholds for amount verification
-    AMOUNT_TOLERANCE_CENTS = 50       # $0.50 absolute tolerance
-    AMOUNT_TOLERANCE_PERCENT = 0.01   # 1% relative tolerance
+    AMOUNT_TOLERANCE_CENTS = 50  # $0.50 absolute tolerance
+    AMOUNT_TOLERANCE_PERCENT = 0.01  # 1% relative tolerance
     AMOUNT_OVER_THRESHOLD_PERCENT = 0.10  # 10% over triggers error-level alert
 
     def _verify_payment_amount(
@@ -1076,19 +1076,24 @@ class StripeService:
         # Check for exact match first
         if amount_cents in self.KNOWN_CREDIT_PACKAGES:
             package_name = self.KNOWN_CREDIT_PACKAGES[amount_cents]
-            result.update({
-                "verified": True,
-                "severity": "matched",
-                "expected_cents": amount_cents,
-                "matched_package": package_name,
-                "difference_cents": 0,
-                "difference_percent": 0.0,
-                "message": f"Exact match for '{package_name}' package (${amount_cents / 100:.2f})",
-            })
+            result.update(
+                {
+                    "verified": True,
+                    "severity": "matched",
+                    "expected_cents": amount_cents,
+                    "matched_package": package_name,
+                    "difference_cents": 0,
+                    "difference_percent": 0.0,
+                    "message": f"Exact match for '{package_name}' package (${amount_cents / 100:.2f})",
+                }
+            )
             logger.info(
                 "Payment amount verified: exact match for '%s' package "
                 "(amount=$%.2f, session=%s, user=%s)",
-                package_name, amount_cents / 100, session_id, user_id,
+                package_name,
+                amount_cents / 100,
+                session_id,
+                user_id,
             )
             if payment_amount_mismatch:
                 payment_amount_mismatch.labels(severity="matched").inc()
@@ -1137,9 +1142,7 @@ class StripeService:
         if best_match_expected is not None:
             diff_cents_signed = amount_cents - best_match_expected
             diff_percent = (
-                abs(diff_cents_signed) / best_match_expected
-                if best_match_expected > 0
-                else 0.0
+                abs(diff_cents_signed) / best_match_expected if best_match_expected > 0 else 0.0
             )
             tolerance_cents = max(
                 self.AMOUNT_TOLERANCE_CENTS,
@@ -1162,7 +1165,9 @@ class StripeService:
                 )
                 logger.info(
                     "Payment amount within tolerance: %s (session=%s, user=%s)",
-                    result["message"], session_id, user_id,
+                    result["message"],
+                    session_id,
+                    user_id,
                 )
                 if payment_amount_mismatch:
                     payment_amount_mismatch.labels(severity="within_tolerance").inc()
@@ -1179,7 +1184,9 @@ class StripeService:
                 logger.warning(
                     "Payment amount UNDER expected: %s (session=%s, user=%s). "
                     "Stripe is source of truth -- credits will be granted for charged amount.",
-                    result["message"], session_id, user_id,
+                    result["message"],
+                    session_id,
+                    user_id,
                 )
                 if payment_amount_mismatch:
                     payment_amount_mismatch.labels(severity="under").inc()
@@ -1197,12 +1204,16 @@ class StripeService:
                 logger.error(
                     "Payment amount SIGNIFICANTLY OVER expected: %s (session=%s, user=%s). "
                     "Processing payment but flagging for manual review.",
-                    result["message"], session_id, user_id,
+                    result["message"],
+                    session_id,
+                    user_id,
                 )
                 # Send Sentry alert for significant overpayments
                 try:
                     capture_payment_error(
-                        RuntimeError(f"Payment amount significantly over expected: {result['message']}"),
+                        RuntimeError(
+                            f"Payment amount significantly over expected: {result['message']}"
+                        ),
                         operation="payment_amount_verification",
                         user_id=str(user_id) if user_id else None,
                         amount=amount_cents / 100,
@@ -1230,7 +1241,9 @@ class StripeService:
                 )
                 logger.info(
                     "Payment amount slightly over expected: %s (session=%s, user=%s)",
-                    result["message"], session_id, user_id,
+                    result["message"],
+                    session_id,
+                    user_id,
                 )
                 if payment_amount_mismatch:
                     payment_amount_mismatch.labels(severity="within_tolerance").inc()
@@ -1244,7 +1257,9 @@ class StripeService:
             logger.warning(
                 "Payment amount does not match ANY known plan: %s (session=%s, user=%s). "
                 "This may be a custom amount or a new plan not yet registered.",
-                result["message"], session_id, user_id,
+                result["message"],
+                session_id,
+                user_id,
             )
             if payment_amount_mismatch:
                 payment_amount_mismatch.labels(severity="unknown_plan").inc()
