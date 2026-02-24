@@ -424,7 +424,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
                         pricing_cache_hits.labels(cache_name="model_pricing").inc()
                     except Exception:
-                        pass
+                        pass  # Metrics failure must not affect pricing flow
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
@@ -437,7 +437,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
             pricing_cache_misses.labels(cache_name="model_pricing").inc()
         except Exception:
-            pass
+            pass  # Metrics failure must not affect pricing flow
 
         # Step 2: Live API fetch - DEPRECATED (Phase 2)
         # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.
@@ -619,7 +619,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
                         pricing_cache_hits.labels(cache_name="model_pricing").inc()
                     except Exception:
-                        pass
+                        pass  # Metrics failure must not affect pricing flow
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
@@ -632,7 +632,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
             pricing_cache_misses.labels(cache_name="model_pricing").inc()
         except Exception:
-            pass
+            pass  # Metrics failure must not affect pricing flow
 
         # Step 2: Live API fetch - DEPRECATED (Phase 2)
         # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.
