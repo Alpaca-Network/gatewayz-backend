@@ -419,11 +419,25 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                 age = time.time() - cache_entry["timestamp"]
                 if age < _pricing_cache_ttl:
                     logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    try:
+                        from src.services.prometheus_metrics import pricing_cache_hits
+
+                        pricing_cache_hits.labels(cache_name="model_pricing").inc()
+                    except Exception:
+                        pass  # Metrics failure must not affect pricing flow
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
                     del _pricing_cache[model_id]
                     logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+
+        # Cache miss: entry not found or expired
+        try:
+            from src.services.prometheus_metrics import pricing_cache_misses
+
+            pricing_cache_misses.labels(cache_name="model_pricing").inc()
+        except Exception:
+            pass  # Metrics failure must not affect pricing flow
 
         # Step 2: Live API fetch - DEPRECATED (Phase 2)
         # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.
@@ -600,11 +614,25 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                 age = time.time() - cache_entry["timestamp"]
                 if age < _pricing_cache_ttl:
                     logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    try:
+                        from src.services.prometheus_metrics import pricing_cache_hits
+
+                        pricing_cache_hits.labels(cache_name="model_pricing").inc()
+                    except Exception:
+                        pass  # Metrics failure must not affect pricing flow
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
                     del _pricing_cache[model_id]
                     logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+
+        # Cache miss: entry not found or expired
+        try:
+            from src.services.prometheus_metrics import pricing_cache_misses
+
+            pricing_cache_misses.labels(cache_name="model_pricing").inc()
+        except Exception:
+            pass  # Metrics failure must not affect pricing flow
 
         # Step 2: Live API fetch - DEPRECATED (Phase 2)
         # NOTE: pricing_live_fetch module was removed as part of pricing sync deprecation.

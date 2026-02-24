@@ -212,6 +212,24 @@ default_pricing_usage_counter = get_or_create_metric(
     ["model"],
 )
 
+# ==================== Pricing Cache Metrics ====================
+# Track pricing cache hit/miss ratio for monitoring cache effectiveness
+# cache_name labels: "model_pricing" (in-memory per-model cache in pricing.py),
+#                    "manual_pricing" (file-backed cache in pricing_lookup.py)
+pricing_cache_hits = get_or_create_metric(
+    Counter,
+    "gatewayz_pricing_cache_hits_total",
+    "Number of pricing cache hits",
+    ["cache_name"],
+)
+
+pricing_cache_misses = get_or_create_metric(
+    Counter,
+    "gatewayz_pricing_cache_misses_total",
+    "Number of pricing cache misses",
+    ["cache_name"],
+)
+
 # ==================== Cost Tracking Metrics ====================
 # Track actual USD costs for billing and budget monitoring
 api_cost_usd_total = get_or_create_metric(
