@@ -739,8 +739,16 @@ def deduct_credits(
             enforce_daily_usage_limit,
         )
 
-        # IDEMPOTENCY CHECK: If a request_id is provided, check for existing transaction
-        # This prevents double-charging on HTTP retries or timeouts
+        # IDEMPOTENCY CHECK: If a request_id is provided, check for existing transaction.
+        # This prevents double-charging on HTTP retries or timeouts.
+        #
+        # NOTE: This is a best-effort application-level check (defense-in-depth).
+        # A TOCTOU race exists: two concurrent requests could both pass this check
+        # before either writes the transaction record. The true idempotency guard is
+        # the database unique index on credit_transactions.request_id, which will
+        # reject the second insert. The upcoming atomic_deduct_credits stored
+        # procedure (PR #1148) will provide full atomic idempotency by combining
+        # the check-and-deduct into a single database round-trip.
         if request_id:
             existing = get_transaction_by_request_id(request_id)
             if existing:
