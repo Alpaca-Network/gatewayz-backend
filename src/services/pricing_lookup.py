@@ -113,6 +113,12 @@ def load_manual_pricing() -> dict[str, Any]:
     if _pricing_cache is not None:
         age = time.monotonic() - (_pricing_cache_timestamp or 0.0)
         if age < PRICING_CACHE_TTL:
+            try:
+                from src.services.prometheus_metrics import pricing_cache_hits
+
+                pricing_cache_hits.labels(cache_name="manual_pricing").inc()
+            except Exception:
+                pass
             return _pricing_cache
         # TTL expired — clear outside the lock so the locked section re-populates.
         logger.debug(
@@ -120,6 +126,14 @@ def load_manual_pricing() -> dict[str, Any]:
         )
         _pricing_cache = None
         _pricing_cache_timestamp = None
+
+    # Cache miss: not populated or TTL expired, reloading from file
+    try:
+        from src.services.prometheus_metrics import pricing_cache_misses
+
+        pricing_cache_misses.labels(cache_name="manual_pricing").inc()
+    except Exception:
+        pass
 
     with _pricing_cache_lock:
         # Double-checked locking: re-check after acquiring the lock
