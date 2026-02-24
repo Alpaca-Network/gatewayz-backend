@@ -894,6 +894,7 @@ async def _handle_credits_and_usage(
     completion_tokens: int,
     elapsed_ms: int,
     is_streaming: bool = False,
+    request_id: str | None = None,
 ) -> float:
     """
     Centralized credit/trial handling logic.
@@ -903,6 +904,7 @@ async def _handle_credits_and_usage(
 
     Args:
         is_streaming: Whether this is a streaming request (affects retry behavior)
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
 
     Returns: cost (float)
     """
@@ -919,6 +921,7 @@ async def _handle_credits_and_usage(
         elapsed_ms=elapsed_ms,
         endpoint="/v1/chat/completions",
         is_streaming=is_streaming,
+        request_id=request_id,
     )
 
 
@@ -931,6 +934,7 @@ async def _handle_credits_and_usage_with_fallback(
     prompt_tokens: int,
     completion_tokens: int,
     elapsed_ms: int,
+    request_id: str | None = None,
 ) -> tuple[float, bool]:
     """
     Credit handling for streaming background tasks with fallback on failure.
@@ -940,6 +944,9 @@ async def _handle_credits_and_usage_with_fallback(
     1. Attempts credit deduction with full retry logic
     2. On failure, logs for reconciliation and returns (cost, False)
     3. Never raises - failures are tracked for manual reconciliation
+
+    Args:
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
 
     Returns: tuple[float, bool] - (cost, success)
     """
@@ -956,6 +963,7 @@ async def _handle_credits_and_usage_with_fallback(
         elapsed_ms=elapsed_ms,
         endpoint="/v1/chat/completions",
         is_streaming=True,
+        request_id=request_id,
     )
 
 
@@ -1176,6 +1184,7 @@ async def _process_stream_completion_background(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
+                request_id=request_id,
             )
 
             if not credit_deduction_success:
@@ -3157,6 +3166,7 @@ async def chat_completions(
                 completion_tokens=completion_tokens,
                 elapsed_ms=int(elapsed * 1000),
                 is_streaming=False,
+                request_id=request_id,
             )
             await _to_thread(increment_api_key_usage, api_key)
         else:
@@ -4337,6 +4347,7 @@ async def unified_responses(
             completion_tokens=completion_tokens,
             elapsed_ms=int(elapsed * 1000),
             is_streaming=False,
+            request_id=request_id,
         )
 
         await _to_thread(increment_api_key_usage, api_key)

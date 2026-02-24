@@ -35,6 +35,39 @@ class TransactionType:
     SUBSCRIPTION_DOWNGRADE = "subscription_downgrade"  # Allowance reset on tier downgrade
 
 
+def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:
+    """
+    Look up an existing credit transaction by its idempotency request_id.
+
+    Args:
+        request_id: The UUID request_id to look up
+
+    Returns:
+        The existing transaction record if found, or None
+    """
+    if not request_id:
+        return None
+
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table("credit_transactions")
+            .select("*")
+            .eq("request_id", request_id)
+            .execute()
+        )
+        if result.data:
+            logger.info(
+                f"Found existing transaction for request_id={request_id}: "
+                f"id={result.data[0].get('id')}"
+            )
+            return result.data[0]
+        return None
+    except Exception as e:
+        logger.error(f"Error looking up transaction by request_id={request_id}: {e}", exc_info=True)
+        return None
+
+
 def log_credit_transaction(
     user_id: int,
     amount: float,
@@ -45,6 +78,7 @@ def log_credit_transaction(
     payment_id: int | None = None,
     metadata: dict[str, Any] | None = None,
     created_by: str | None = None,
+    request_id: str | None = None,
 ) -> dict[str, Any] | None:
     """
     Log a credit transaction to the audit trail
@@ -59,6 +93,7 @@ def log_credit_transaction(
         payment_id: Optional payment record ID (for purchase/refund transactions)
         metadata: Optional additional data as JSON
         created_by: Optional identifier of who created the transaction
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
 
     Returns:
         Created transaction record or None if failed
@@ -80,6 +115,10 @@ def log_credit_transaction(
         "created_by": created_by,
         "created_at": datetime.now(UTC).isoformat(),
     }
+
+    # Include request_id only if provided (nullable column)
+    if request_id:
+        transaction_data["request_id"] = request_id
 
     def do_insert(client):
         """Execute the insert operation with the given client."""

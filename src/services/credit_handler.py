@@ -174,6 +174,7 @@ async def handle_credits_and_usage(
     elapsed_ms: int,
     endpoint: str = "/v1/chat/completions",
     is_streaming: bool = False,
+    request_id: str | None = None,
 ) -> float:
     """
     Centralized credit/trial handling logic for all chat endpoints.
@@ -197,6 +198,7 @@ async def handle_credits_and_usage(
         elapsed_ms: Request processing time in milliseconds
         endpoint: API endpoint for logging (default: /v1/chat/completions)
         is_streaming: Whether this is a streaming request (affects retry behavior)
+        request_id: Optional UUID idempotency key to prevent duplicate deductions on retries
 
     Returns:
         float: Calculated cost in USD
@@ -354,6 +356,7 @@ async def handle_credits_and_usage(
                         "is_streaming": is_streaming,
                         "attempt_number": attempt,
                     },
+                    request_id,
                 )
 
                 # CRITICAL: Once deduct_credits succeeds, mark as successful immediately
@@ -484,6 +487,7 @@ async def handle_credits_and_usage_with_fallback(
     elapsed_ms: int,
     endpoint: str = "/v1/chat/completions",
     is_streaming: bool = True,
+    request_id: str | None = None,
 ) -> tuple[float, bool]:
     """
     Wrapper for streaming background tasks that handles failures gracefully.
@@ -519,6 +523,7 @@ async def handle_credits_and_usage_with_fallback(
                 elapsed_ms=elapsed_ms,
                 endpoint=endpoint,
                 is_streaming=is_streaming,
+                request_id=request_id,
             )
 
             if attempt > 1:

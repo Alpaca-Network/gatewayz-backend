@@ -696,17 +696,25 @@ def log_api_usage_transaction(
 
 
 def deduct_credits(
-    api_key: str, tokens: float, description: str = "API usage", metadata: dict | None = None
+    api_key: str,
+    tokens: float,
+    description: str = "API usage",
+    metadata: dict | None = None,
+    request_id: str | None = None,
 ) -> None:
     """
     Deduct credits from user account by API key and log the transaction.
     Deducts from subscription_allowance first, then purchased_credits.
+
+    If a request_id is provided and a transaction with that request_id already
+    exists, the deduction is skipped (idempotent behavior to prevent double-charging).
 
     Args:
         api_key: User's API key
         tokens: Amount of credits to deduct
         description: Description of the usage
         metadata: Optional metadata (model used, tokens, etc.)
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
     """
     # Allow very small amounts but not exactly 0 or negative
     if tokens < 0:
@@ -721,11 +729,29 @@ def deduct_credits(
         return
 
     try:
-        from src.db.credit_transactions import TransactionType, log_credit_transaction
+        from src.db.credit_transactions import (
+            TransactionType,
+            get_transaction_by_request_id,
+            log_credit_transaction,
+        )
         from src.services.daily_usage_limiter import (
             DailyUsageLimitExceeded,
             enforce_daily_usage_limit,
         )
+
+        # IDEMPOTENCY CHECK: If a request_id is provided, check for existing transaction
+        # This prevents double-charging on HTTP retries or timeouts
+        if request_id:
+            existing = get_transaction_by_request_id(request_id)
+            if existing:
+                logger.info(
+                    "Idempotent skip: transaction already exists for request_id=%s "
+                    "(transaction_id=%s, amount=%s). Skipping duplicate deduction.",
+                    request_id,
+                    existing.get("id"),
+                    existing.get("amount"),
+                )
+                return
 
         client = get_supabase_client()
 
@@ -885,6 +911,7 @@ def deduct_credits(
             balance_before=balance_before,
             balance_after=balance_after,
             metadata=transaction_metadata,
+            request_id=request_id,
         )
 
         if not transaction_result:
