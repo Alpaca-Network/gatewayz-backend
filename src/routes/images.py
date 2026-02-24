@@ -64,10 +64,10 @@ UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
 RESOLUTION_MULTIPLIERS = {
     "256x256": 0.5,
     "512x512": 0.75,
-    "1024x1024": 1.0,    # Base rate
-    "1024x1792": 1.5,    # HD portrait
-    "1792x1024": 1.5,    # HD landscape
-    "2048x2048": 2.0,    # Ultra HD
+    "1024x1024": 1.0,  # Base rate
+    "1024x1792": 1.5,  # HD portrait
+    "1792x1024": 1.5,  # HD landscape
+    "2048x2048": 2.0,  # Ultra HD
 }
 # Default multiplier for unknown/unrecognized sizes (backwards compatible)
 DEFAULT_RESOLUTION_MULTIPLIER = 1.0
@@ -356,8 +356,8 @@ async def generate_images(
 
             # Calculate actual cost using the provider that was used (may differ from requested)
             # Resolution multiplier is applied based on requested size
-            total_cost, cost_per_image, used_fallback_pricing, resolution_multiplier = get_image_cost(
-                actual_provider, model, req.n, size=req.size
+            total_cost, cost_per_image, used_fallback_pricing, resolution_multiplier = (
+                get_image_cost(actual_provider, model, req.n, size=req.size)
             )
 
             # Audit log: resolution-adjusted pricing for billing transparency
