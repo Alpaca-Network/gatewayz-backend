@@ -403,6 +403,7 @@ async def ai_sdk_chat_completion(
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "cost_usd": cost,
+                        "request_id": request_id,
                     },
                 )
                 await asyncio.to_thread(
@@ -690,6 +691,7 @@ async def _handle_openrouter_stream(
                             "prompt_tokens": total_prompt_tokens,
                             "completion_tokens": total_completion_tokens,
                             "cost_usd": cost,
+                            "request_id": request_id,
                         },
                     )
                     await asyncio.to_thread(
@@ -887,6 +889,7 @@ async def _handle_ai_sdk_stream(
                             "prompt_tokens": total_prompt_tokens,
                             "completion_tokens": total_completion_tokens,
                             "cost_usd": cost,
+                            "request_id": request_id,
                         },
                     )
                     await asyncio.to_thread(
