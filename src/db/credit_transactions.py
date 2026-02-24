@@ -51,10 +51,7 @@ def get_transaction_by_request_id(request_id: str) -> dict[str, Any] | None:
     try:
         client = get_supabase_client()
         result = (
-            client.table("credit_transactions")
-            .select("*")
-            .eq("request_id", request_id)
-            .execute()
+            client.table("credit_transactions").select("*").eq("request_id", request_id).execute()
         )
         if result.data:
             logger.info(
