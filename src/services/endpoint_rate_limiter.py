@@ -63,9 +63,7 @@ def _cleanup_stale_buckets(endpoint_name: str, window_seconds: int) -> None:
     store = _buckets[endpoint_name]
 
     # Keep only the current bucket (older ones are irrelevant)
-    expired_keys = [
-        key for key in store if key[1] < current_bucket
-    ]
+    expired_keys = [key for key in store if key[1] < current_bucket]
     for key in expired_keys:
         del store[key]
 
@@ -174,8 +172,7 @@ def create_endpoint_rate_limit(
 
         if not allowed:
             logger.warning(
-                "Endpoint rate limit exceeded: endpoint=%s, api_key=%s..., "
-                "limit=%d/%ds",
+                "Endpoint rate limit exceeded: endpoint=%s, api_key=%s..., " "limit=%d/%ds",
                 endpoint_name,
                 api_key[:10],
                 max_requests,
