@@ -5,6 +5,7 @@ Handles model pricing calculations and credit cost computation
 
 import asyncio
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -30,6 +31,13 @@ _pricing_cache_lock = threading.RLock()  # Reentrant lock to prevent race condit
 #         with an org/ prefix, i.e. the one most likely stored in the pricing DB).
 # ---------------------------------------------------------------------------
 _reverse_transform_cache: dict[str, str] | None = None
+_reverse_transform_cache_lock = threading.Lock()
+
+# Regex for recognised version suffixes after "@" (e.g. "@latest", "@20240620", "@1").
+# Only these patterns are stripped; arbitrary text like "user@model" is left intact.
+_VERSION_SUFFIX_RE = re.compile(
+    r"^(?:latest|\d{8}|\d{1,10})$"  # "latest", 8-digit date (YYYYMMDD), or digit-only versions
+)
 
 
 def _build_reverse_transform_lookup() -> dict[str, str]:
@@ -80,10 +88,17 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
 
 
 def _get_reverse_transform_lookup() -> dict[str, str]:
-    """Return the cached reverse-transform lookup, building it on first access."""
+    """Return the cached reverse-transform lookup, building it on first access.
+
+    Uses double-checked locking to ensure thread-safe lazy initialization
+    without acquiring the lock on every call after the cache is built.
+    """
     global _reverse_transform_cache
     if _reverse_transform_cache is None:
-        _reverse_transform_cache = _build_reverse_transform_lookup()
+        with _reverse_transform_cache_lock:
+            # Double-check after acquiring the lock to avoid redundant builds
+            if _reverse_transform_cache is None:
+                _reverse_transform_cache = _build_reverse_transform_lookup()
     return _reverse_transform_cache
 
 
@@ -210,11 +225,12 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
             break
 
     # 2f. Onerouter / version suffixes: "@latest", "@20240620", etc.
+    # IMPORTANT: Only strip if the part after @ matches known version patterns
+    # to avoid incorrectly stripping "@" from model names like "user@model".
     if "@" in normalized:
         at_idx = normalized.rfind("@")
         version_part = normalized[at_idx + 1:]
-        # Only strip if the part after @ looks like a version/date, not a model name
-        if version_part and (version_part == "latest" or version_part.isdigit()):
+        if version_part and _VERSION_SUFFIX_RE.match(version_part):
             normalized = normalized[:at_idx]
             logger.debug(
                 "[PRICING_NORMALIZE] Stripped version suffix '@%s': '%s' -> '%s'",
@@ -355,7 +371,17 @@ def clear_pricing_cache(model_id: str | None = None) -> None:
     with _pricing_cache_lock:
         if model_id:
             # Normalize the model ID to match the cache key strategy (FIX A2)
-            cache_key = normalize_model_id_for_pricing(model_id)
+            # Wrap in try/except so a normalization error never prevents cache clearing.
+            try:
+                cache_key = normalize_model_id_for_pricing(model_id)
+            except Exception:
+                logger.warning(
+                    "Failed to normalize model ID '%s' during cache clear, "
+                    "falling back to raw key",
+                    model_id,
+                    exc_info=True,
+                )
+                cache_key = model_id
             cleared = False
             # Clear both the normalized key and the raw key (belt-and-suspenders)
             for key in {cache_key, model_id}:
