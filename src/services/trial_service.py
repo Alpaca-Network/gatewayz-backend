@@ -113,10 +113,16 @@ class TrialService:
             except Exception as start_err:
                 if user_id is not None:
                     try:
-                        self.supabase.table("trial_grants").delete().eq("user_id", user_id).execute()
-                        logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial failure")
+                        self.supabase.table("trial_grants").delete().eq(
+                            "user_id", user_id
+                        ).execute()
+                        logger.info(
+                            f"Cleaned up trial_grants for user {user_id} after start_trial failure"
+                        )
                     except Exception as cleanup_err:
-                        logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
+                        logger.error(
+                            f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}"
+                        )
                 raise start_err
 
             if result.data and result.data.get("success"):
@@ -142,10 +148,16 @@ class TrialService:
                 # Clean up the grant so the user can retry
                 if user_id is not None:
                     try:
-                        self.supabase.table("trial_grants").delete().eq("user_id", user_id).execute()
-                        logger.info(f"Cleaned up trial_grants for user {user_id} after start_trial logical failure")
+                        self.supabase.table("trial_grants").delete().eq(
+                            "user_id", user_id
+                        ).execute()
+                        logger.info(
+                            f"Cleaned up trial_grants for user {user_id} after start_trial logical failure"
+                        )
                     except Exception as cleanup_err:
-                        logger.error(f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}")
+                        logger.error(
+                            f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}"
+                        )
                 return StartTrialResponse(
                     success=False,
                     trial_start_date=datetime.now(),
@@ -161,7 +173,11 @@ class TrialService:
             error_str = str(e)
             # Handle unique violation from the trial_grants constraint
             # (e.g., if record_trial_grant RPC raises instead of returning error)
-            if "unique" in error_str.lower() or "23505" in error_str or "trial_already_granted" in error_str:
+            if (
+                "unique" in error_str.lower()
+                or "23505" in error_str
+                or "trial_already_granted" in error_str
+            ):
                 logger.warning(f"Duplicate trial grant blocked by DB constraint: {e}")
                 return StartTrialResponse(
                     success=False,
@@ -570,10 +586,7 @@ class TrialService:
         """Get user_id for an API key by its ID"""
         try:
             result = (
-                self.supabase.table("api_keys_new")
-                .select("user_id")
-                .eq("id", api_key_id)
-                .execute()
+                self.supabase.table("api_keys_new").select("user_id").eq("id", api_key_id).execute()
             )
             if result.data and len(result.data) > 0:
                 return result.data[0]["user_id"]

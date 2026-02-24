@@ -151,16 +151,9 @@ class PartnerTrialService:
             # The UNIQUE(user_id) constraint on trial_grants prevents
             # concurrent requests from granting duplicate trials.
             api_key_result = (
-                client.table("api_keys_new")
-                .select("id")
-                .eq("api_key", api_key)
-                .execute()
+                client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
             )
-            api_key_id = (
-                api_key_result.data[0]["id"]
-                if api_key_result.data
-                else None
-            )
+            api_key_id = api_key_result.data[0]["id"] if api_key_result.data else None
 
             grant_result = client.rpc(
                 "record_trial_grant",
@@ -270,7 +263,11 @@ class PartnerTrialService:
         except Exception as e:
             error_str = str(e)
             # Handle unique violation from the trial_grants constraint
-            if "unique" in error_str.lower() or "23505" in error_str or "trial_already_granted" in error_str:
+            if (
+                "unique" in error_str.lower()
+                or "23505" in error_str
+                or "trial_already_granted" in error_str
+            ):
                 logger.warning(
                     f"Duplicate partner trial grant blocked by DB constraint "
                     f"for user {user_id}: {e}"
