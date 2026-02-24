@@ -147,51 +147,97 @@ class PartnerTrialService:
             now = datetime.now(UTC)
             trial_end = now + timedelta(days=partner_config["trial_duration_days"])
 
-            # Update user with partner trial info
-            user_update = {
-                "partner_code": partner_code,
-                "partner_trial_id": partner_config["id"],
-                "partner_signup_timestamp": now.isoformat(),
-                "partner_metadata": metadata or {},
-                "subscription_status": "trial",
-                "tier": partner_config["trial_tier"],
-                "trial_expires_at": trial_end.isoformat(),
-                "credits": float(partner_config["trial_credits_usd"]),
-            }
+            # Atomically record the trial grant at the database level.
+            # The UNIQUE(user_id) constraint on trial_grants prevents
+            # concurrent requests from granting duplicate trials.
+            api_key_result = (
+                client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+            )
+            api_key_id = api_key_result.data[0]["id"] if api_key_result.data else None
 
-            client.table("users").update(user_update).eq("id", user_id).execute()
+            grant_result = client.rpc(
+                "record_trial_grant",
+                {
+                    "p_user_id": user_id,
+                    "p_api_key_id": api_key_id,
+                    "p_grant_type": "partner",
+                    "p_partner_code": partner_code,
+                    "p_trial_credits": float(partner_config["trial_credits_usd"]),
+                    "p_trial_duration_days": partner_config["trial_duration_days"],
+                },
+            ).execute()
 
-            # Update API key with partner trial info
-            api_key_update = {
-                "is_trial": True,
-                "trial_start_date": now.isoformat(),
-                "trial_end_date": trial_end.isoformat(),
-                "trial_credits": float(partner_config["trial_credits_usd"]),
-                "trial_max_tokens": partner_config["trial_max_tokens"],
-                "trial_max_requests": partner_config["trial_max_requests"],
-                "trial_used_tokens": 0,
-                "trial_used_requests": 0,
-                "trial_used_credits": 0,
-                "trial_converted": False,
-                "partner_code": partner_code,
-                "partner_trial_tier": partner_config["trial_tier"],
-                "partner_trial_credits": float(partner_config["trial_credits_usd"]),
-            }
+            if grant_result.data and not grant_result.data.get("success", True):
+                logger.warning(
+                    f"Duplicate partner trial grant blocked by DB constraint "
+                    f"for user {user_id}, partner {partner_code}"
+                )
+                raise ValueError(
+                    f"A trial has already been granted to this user (user_id={user_id})"
+                )
 
-            client.table("api_keys_new").update(api_key_update).eq("api_key", api_key).execute()
+            # Activate the trial. If any step below fails after
+            # record_trial_grant succeeded, clean up the grant so
+            # the user can retry.
+            try:
+                # Update user with partner trial info
+                user_update = {
+                    "partner_code": partner_code,
+                    "partner_trial_id": partner_config["id"],
+                    "partner_signup_timestamp": now.isoformat(),
+                    "partner_metadata": metadata or {},
+                    "subscription_status": "trial",
+                    "tier": partner_config["trial_tier"],
+                    "trial_expires_at": trial_end.isoformat(),
+                    "credits": float(partner_config["trial_credits_usd"]),
+                }
 
-            # Create analytics record
-            analytics_record = {
-                "partner_code": partner_code,
-                "user_id": user_id,
-                "trial_started_at": now.isoformat(),
-                "trial_expires_at": trial_end.isoformat(),
-                "trial_status": "active",
-                "signup_source": signup_source,
-                "metadata": metadata or {},
-            }
+                client.table("users").update(user_update).eq("id", user_id).execute()
 
-            client.table("partner_trial_analytics").insert(analytics_record).execute()
+                # Update API key with partner trial info
+                api_key_update = {
+                    "is_trial": True,
+                    "trial_start_date": now.isoformat(),
+                    "trial_end_date": trial_end.isoformat(),
+                    "trial_credits": float(partner_config["trial_credits_usd"]),
+                    "trial_max_tokens": partner_config["trial_max_tokens"],
+                    "trial_max_requests": partner_config["trial_max_requests"],
+                    "trial_used_tokens": 0,
+                    "trial_used_requests": 0,
+                    "trial_used_credits": 0,
+                    "trial_converted": False,
+                    "partner_code": partner_code,
+                    "partner_trial_tier": partner_config["trial_tier"],
+                    "partner_trial_credits": float(partner_config["trial_credits_usd"]),
+                }
+
+                client.table("api_keys_new").update(api_key_update).eq("api_key", api_key).execute()
+
+                # Create analytics record
+                analytics_record = {
+                    "partner_code": partner_code,
+                    "user_id": user_id,
+                    "trial_started_at": now.isoformat(),
+                    "trial_expires_at": trial_end.isoformat(),
+                    "trial_status": "active",
+                    "signup_source": signup_source,
+                    "metadata": metadata or {},
+                }
+
+                client.table("partner_trial_analytics").insert(analytics_record).execute()
+            except Exception as activation_err:
+                # Trial grant was recorded but activation failed — remove
+                # the grant so the user is not permanently blocked.
+                try:
+                    client.table("trial_grants").delete().eq("user_id", user_id).execute()
+                    logger.info(
+                        f"Cleaned up trial_grants for user {user_id} after partner trial activation failure"
+                    )
+                except Exception as cleanup_err:
+                    logger.error(
+                        f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}"
+                    )
+                raise activation_err
 
             logger.info(
                 f"Started {partner_code} trial for user {user_id}: "
@@ -211,7 +257,24 @@ class PartnerTrialService:
                 "daily_usage_limit_usd": float(partner_config["daily_usage_limit_usd"]),
             }
 
+        except ValueError:
+            # Re-raise ValueErrors (including our duplicate trial message) as-is
+            raise
         except Exception as e:
+            error_str = str(e)
+            # Handle unique violation from the trial_grants constraint
+            if (
+                "unique" in error_str.lower()
+                or "23505" in error_str
+                or "trial_already_granted" in error_str
+            ):
+                logger.warning(
+                    f"Duplicate partner trial grant blocked by DB constraint "
+                    f"for user {user_id}: {e}"
+                )
+                raise ValueError(
+                    f"A trial has already been granted to this user (user_id={user_id})"
+                ) from e
             logger.error(f"Error starting partner trial for user {user_id}: {e}")
             raise
 
