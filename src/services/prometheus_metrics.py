@@ -357,6 +357,98 @@ missed_credit_deductions_usd = get_or_create_metric(
     ["reason"],  # reason: background_task_failure, retry_exhausted, etc.
 )
 
+# ==================== Token Estimation Metrics ====================
+# Track when token counts are estimated vs provided by providers,
+# and the accuracy of estimations for calibration purposes.
+
+token_count_source_total = get_or_create_metric(
+    Counter,
+    "gatewayz_token_count_source_total",
+    "Count of streaming requests by token count source (provider-reported vs estimated)",
+    ["provider", "model", "source"],  # source: provider, tiktoken, word_heuristic
+)
+
+token_estimation_accuracy_ratio = get_or_create_metric(
+    Histogram,
+    "gatewayz_token_estimation_accuracy_ratio",
+    "Ratio of estimated to actual token count when both are available (1.0 = perfect). "
+    "Values >1 indicate over-estimation, <1 under-estimation.",
+    ["provider", "estimation_method", "token_type"],  # token_type: prompt, completion, total
+    buckets=(0.25, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0, 1.05, 1.1, 1.2, 1.5, 2.0, 4.0),
+)
+
+token_estimation_delta = get_or_create_metric(
+    Histogram,
+    "gatewayz_token_estimation_delta",
+    "Absolute delta between estimated and actual token count (estimated - actual). "
+    "Positive values = over-estimation, negative = under-estimation.",
+    ["provider", "estimation_method", "token_type"],
+    buckets=(-1000, -500, -200, -100, -50, -20, -10, 0, 10, 20, 50, 100, 200, 500, 1000),
+)
+
+
+def record_token_count_source(provider: str, model: str, source: str):
+    """Record whether token counts came from the provider or were estimated.
+
+    Args:
+        provider: Provider name (e.g. "openrouter", "chutes").
+        model: Model ID.
+        source: One of "provider", "tiktoken", "word_heuristic".
+    """
+    try:
+        token_count_source_total.labels(provider=provider, model=model, source=source).inc()
+    except Exception:
+        pass  # Never break the main flow
+
+
+def record_token_estimation_accuracy(
+    provider: str,
+    estimation_method: str,
+    estimated_prompt: int,
+    estimated_completion: int,
+    actual_prompt: int,
+    actual_completion: int,
+):
+    """Record accuracy metrics when both estimated and actual counts are available.
+
+    This is called when a provider returns usage data *and* we also
+    computed an estimate, allowing us to calibrate the estimation method.
+
+    Args:
+        provider: Provider name.
+        estimation_method: "tiktoken" or "word_heuristic".
+        estimated_prompt: Estimated prompt token count.
+        estimated_completion: Estimated completion token count.
+        actual_prompt: Provider-reported prompt token count.
+        actual_completion: Provider-reported completion token count.
+    """
+    try:
+        estimated_total = estimated_prompt + estimated_completion
+        actual_total = actual_prompt + actual_completion
+
+        for token_type, estimated, actual in [
+            ("prompt", estimated_prompt, actual_prompt),
+            ("completion", estimated_completion, actual_completion),
+            ("total", estimated_total, actual_total),
+        ]:
+            if actual > 0:
+                ratio = estimated / actual
+                token_estimation_accuracy_ratio.labels(
+                    provider=provider,
+                    estimation_method=estimation_method,
+                    token_type=token_type,
+                ).observe(ratio)
+
+            delta = estimated - actual
+            token_estimation_delta.labels(
+                provider=provider,
+                estimation_method=estimation_method,
+                token_type=token_type,
+            ).observe(delta)
+    except Exception:
+        pass  # Never break the main flow
+
+
 # ==================== Database Metrics ====================
 database_query_count = get_or_create_metric(
     Counter,
