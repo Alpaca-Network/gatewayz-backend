@@ -19,6 +19,7 @@ from src.services.image_generation_client import (
     make_google_vertex_image_request,
     process_image_generation_response,
 )
+from src.services.pricing_lookup import get_image_pricing
 from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.performance_tracker import PerformanceTracker
 
@@ -27,10 +28,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Provider-specific image generation pricing (cost per image in USD)
-# Based on provider pricing pages as of Jan 2025
-# TODO: Move to database-driven pricing for easier updates
-IMAGE_COST_PER_IMAGE = {
+# DEPRECATED: Hardcoded image pricing fallback.
+# Canonical image pricing now lives in src/data/manual_pricing.json under the
+# "image_pricing" key.  This dict is kept only as a last-resort fallback during
+# the transition period.  It will be removed once all pricing is confirmed to be
+# served from manual_pricing.json.  Do NOT add new entries here -- update
+# manual_pricing.json instead.
+_HARDCODED_IMAGE_COST_PER_IMAGE = {
     "deepinfra": {
         "stable-diffusion-3.5-large": 0.035,
         "stable-diffusion-3.5-medium": 0.02,
@@ -64,6 +68,12 @@ def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[floa
     """
     Calculate the cost for image generation.
 
+    Pricing lookup order:
+      1. manual_pricing.json  (``image_pricing`` section, via ``get_image_pricing()``)
+      2. Hardcoded fallback   (``_HARDCODED_IMAGE_COST_PER_IMAGE`` -- deprecated)
+      3. Provider default     (``"default"`` key in hardcoded dict)
+      4. Unknown-provider     (``UNKNOWN_PROVIDER_DEFAULT_COST``)
+
     Args:
         provider: Image generation provider (deepinfra, fal, google-vertex)
         model: Model name
@@ -73,8 +83,21 @@ def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[floa
         Tuple of (total_cost, cost_per_image, is_fallback_pricing)
         is_fallback_pricing is True when using default/unknown pricing
     """
-    provider_pricing = IMAGE_COST_PER_IMAGE.get(provider, {})
     is_fallback = False
+
+    # --- Tier 1: config-driven pricing from manual_pricing.json ---
+    config_price = get_image_pricing(provider, model)
+    if config_price is not None:
+        total_cost = config_price * num_images
+        return total_cost, config_price, False
+
+    # --- Tier 2+: hardcoded fallback (deprecated) ---
+    logger.warning(
+        f"Image pricing not found in manual_pricing.json, falling back to hardcoded dict: "
+        f"provider={provider}, model={model}"
+    )
+
+    provider_pricing = _HARDCODED_IMAGE_COST_PER_IMAGE.get(provider, {})
 
     if model in provider_pricing:
         cost_per_image = provider_pricing[model]
