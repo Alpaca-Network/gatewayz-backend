@@ -3,18 +3,28 @@
 This module provides endpoints for audio transcription using OpenAI Whisper
 or compatible services (Simplismart). Supports various audio formats and
 provides options for language hints, prompt context, and output formatting.
+
+Billing: Audio transcription is billed per minute of audio. When the actual
+duration is not available from the API response, duration is estimated from
+file size (approximately 1 minute per 1MB for compressed formats).
 """
 
+import asyncio
 import base64
 import logging
 import os
 import tempfile
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from src.security.deps import get_optional_api_key
+from src.config import Config
+from src.db.api_keys import increment_api_key_usage
+from src.db.users import deduct_credits, get_user, record_usage
+from src.security.deps import get_api_key
 from src.services.connection_pool import get_openai_pooled_client
 from src.utils.ai_tracing import AIRequestType, AITracer
 
@@ -37,6 +47,182 @@ SUPPORTED_FORMATS = {
 
 # Maximum file size (25MB - Whisper's limit)
 MAX_FILE_SIZE = 25 * 1024 * 1024
+
+# Audio transcription pricing (cost per minute in USD)
+# Based on OpenAI Whisper pricing as of Jan 2025
+# TODO: Move to database-driven pricing for easier updates
+AUDIO_COST_PER_MINUTE = {
+    "whisper-1": 0.006,  # $0.006 per minute (OpenAI pricing)
+    "whisper-large-v3": 0.006,
+    "default": 0.006,
+}
+
+# Default fallback cost when model is unknown - set conservatively high
+# to avoid revenue loss on new expensive models
+UNKNOWN_MODEL_DEFAULT_COST_PER_MINUTE = 0.01
+
+# Approximate bytes per minute for compressed audio formats.
+# Conservative estimate: most compressed audio (mp3, ogg, webm, m4a) averages
+# ~1MB/min at typical bitrates (128-192kbps). We use a slightly lower value
+# to avoid undercharging.
+BYTES_PER_MINUTE_ESTIMATE = 1_000_000  # 1MB per minute
+
+# Uncompressed formats (WAV, FLAC) have much higher bitrates
+UNCOMPRESSED_BYTES_PER_MINUTE = {
+    ".wav": 10_000_000,   # ~10MB/min at 16-bit 44.1kHz stereo
+    ".flac": 5_000_000,   # ~5MB/min (lossless compression varies)
+}
+
+
+def estimate_audio_duration_minutes(file_size_bytes: int, extension: str) -> float:
+    """
+    Estimate audio duration in minutes based on file size and format.
+
+    This is used as a fallback when the API response does not include
+    actual duration (e.g., when response_format is not verbose_json).
+
+    Args:
+        file_size_bytes: Size of the audio file in bytes
+        extension: File extension (e.g., ".mp3", ".wav")
+
+    Returns:
+        Estimated duration in minutes (minimum 0.1 minutes / 6 seconds)
+    """
+    bytes_per_minute = UNCOMPRESSED_BYTES_PER_MINUTE.get(extension, BYTES_PER_MINUTE_ESTIMATE)
+    estimated_minutes = file_size_bytes / bytes_per_minute
+    # Minimum charge of 0.1 minutes (6 seconds) to cover very short clips
+    return max(0.1, estimated_minutes)
+
+
+def get_audio_cost(model: str, duration_minutes: float) -> tuple[float, float, bool]:
+    """
+    Calculate the cost for audio transcription.
+
+    Args:
+        model: Whisper model name (e.g., "whisper-1", "whisper-large-v3")
+        duration_minutes: Duration of the audio in minutes
+
+    Returns:
+        Tuple of (total_cost, cost_per_minute, is_fallback_pricing)
+        is_fallback_pricing is True when using default/unknown pricing
+    """
+    is_fallback = False
+
+    if model in AUDIO_COST_PER_MINUTE:
+        cost_per_minute = AUDIO_COST_PER_MINUTE[model]
+    elif "default" in AUDIO_COST_PER_MINUTE:
+        cost_per_minute = AUDIO_COST_PER_MINUTE["default"]
+        is_fallback = True
+        logger.warning(
+            f"Using default pricing for unknown audio model: model={model}, "
+            f"cost_per_minute={cost_per_minute}"
+        )
+    else:
+        cost_per_minute = UNKNOWN_MODEL_DEFAULT_COST_PER_MINUTE
+        is_fallback = True
+        logger.warning(
+            f"Using fallback pricing for unknown audio model: model={model}, "
+            f"cost_per_minute={cost_per_minute}"
+        )
+
+    total_cost = cost_per_minute * duration_minutes
+    return total_cost, cost_per_minute, is_fallback
+
+
+async def _deduct_audio_credits(
+    api_key: str,
+    user: dict,
+    model: str,
+    total_cost: float,
+    duration_minutes: float,
+    elapsed_ms: int,
+    request_id: str,
+    endpoint: str,
+    loop: asyncio.AbstractEventLoop,
+    executor: ThreadPoolExecutor,
+) -> float | None:
+    """
+    Deduct credits for audio transcription and record usage.
+
+    Follows the same fail-safe pattern as image generation billing:
+    if credit deduction fails, the error is raised so the user does NOT
+    get free transcription.
+
+    Args:
+        api_key: User's API key
+        user: User dict from database
+        model: Model used for transcription
+        total_cost: Total cost in USD
+        duration_minutes: Audio duration in minutes
+        elapsed_ms: Request processing time in ms
+        request_id: Request identifier for logging
+        endpoint: API endpoint path
+        loop: Running event loop
+        executor: Thread pool executor for sync DB operations
+
+    Returns:
+        Updated user balance after deduction, or None if balance fetch failed
+
+    Raises:
+        HTTPException: 402 if insufficient credits, 500 on unexpected billing error
+    """
+    # Token-equivalent for rate limiting: use 100 tokens per minute as a standardized unit
+    # This maintains compatibility with token-based rate limiting
+    tokens_equivalent = max(1, int(100 * duration_minutes))
+
+    actual_balance_after = None
+    try:
+        await loop.run_in_executor(
+            executor,
+            deduct_credits,
+            api_key,
+            total_cost,
+            f"Audio transcription - {model}",
+            {
+                "model": model,
+                "duration_minutes": round(duration_minutes, 2),
+                "cost_usd": total_cost,
+                "endpoint": endpoint,
+            },
+        )
+
+        # Fetch fresh balance after deduction for accurate reporting
+        updated_user = await loop.run_in_executor(executor, get_user, api_key)
+        if updated_user:
+            actual_balance_after = updated_user.get("credits")
+
+        await loop.run_in_executor(
+            executor,
+            record_usage,
+            user["id"],
+            api_key,
+            model,
+            tokens_equivalent,
+            total_cost,
+            elapsed_ms,
+        )
+
+        # Increment API key usage count
+        await loop.run_in_executor(executor, increment_api_key_usage, api_key)
+
+    except ValueError as e:
+        # Insufficient credits or daily limit exceeded - user should NOT get free transcription
+        logger.error(f"[{request_id}] Credit deduction failed for audio transcription: {e}")
+        raise HTTPException(
+            status_code=402,
+            detail=f"Payment required: {e}",
+        )
+    except Exception as e:
+        # Unexpected error in billing - fail safe, don't give away free transcription
+        logger.error(
+            f"[{request_id}] Unexpected error in credit deduction: {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Billing error occurred. Please try again or contact support.",
+        )
+
+    return actual_balance_after
 
 
 @router.post("/transcriptions")
@@ -65,9 +251,8 @@ async def create_transcription(
         le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic.",
     ),
-    _api_key: str | None = Depends(
-        get_optional_api_key
-    ),  # noqa: ARG001 - Used for auth side effects
+    background_tasks: BackgroundTasks = None,
+    api_key: str = Depends(get_api_key),
 ):
     """
     Transcribe audio using OpenAI Whisper or compatible services.
@@ -78,6 +263,11 @@ async def create_transcription(
     - **language**: Specify the language to improve accuracy (recommended)
     - **prompt**: Provide context or domain-specific vocabulary
     - **temperature**: Control randomness (0 = deterministic, 1 = creative)
+
+    ## Billing
+
+    Audio transcription is billed per minute of audio at model-specific rates.
+    Credits are deducted after successful transcription.
 
     ## Audio Optimization Tips
 
@@ -129,9 +319,45 @@ async def create_transcription(
     # Determine file extension
     extension = SUPPORTED_FORMATS.get(content_type, ".webm")
 
+    # Get event loop and thread pool for async DB operations
+    loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor()
+
     # Create temporary file for the API
     tmp_file_path = None
     try:
+        # --- Auth & credit pre-check ---
+        user = await loop.run_in_executor(executor, get_user, api_key)
+        if not user:
+            if (
+                Config.IS_TESTING
+                or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+            ) and api_key.lower().startswith("test"):
+                user = {
+                    "id": 0,
+                    "credits": 1_000_000.0,
+                    "api_key": api_key,
+                }
+            else:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Estimate duration from file size for pre-check
+        estimated_duration = estimate_audio_duration_minutes(len(content), extension)
+        estimated_cost, cost_per_minute, _ = get_audio_cost(model, estimated_duration)
+
+        # Pre-flight credit sufficiency check with 10% buffer for race conditions
+        required_credits = estimated_cost * 1.1
+        if user["credits"] < required_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Insufficient credits. Audio transcription estimated cost: ${estimated_cost:.4f} "
+                    f"(${cost_per_minute:.4f}/min x {estimated_duration:.1f} min estimated), "
+                    f"requires ${required_credits:.4f} with safety buffer. "
+                    f"Available: ${user['credits']:.4f}"
+                ),
+            )
+
         with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_file:
             tmp_file_path = tmp_file.name
             tmp_file.write(content)
@@ -158,6 +384,9 @@ async def create_transcription(
         if prompt:
             transcription_params["prompt"] = prompt
 
+        # Start timing inference
+        start = time.monotonic()
+
         # Call Whisper API with distributed tracing for Tempo
         async with AITracer.trace_inference(
             provider="openai",
@@ -173,24 +402,55 @@ async def create_transcription(
                     logger.error(f"[{request_id}] Whisper API error: {e}")
                     raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
-            # Add tracing metadata
+            elapsed = max(0.001, time.monotonic() - start)
+
+            # Determine actual duration: prefer API response, fall back to estimate
+            actual_duration = None
+            if hasattr(response, "duration") and response.duration is not None:
+                actual_duration = response.duration / 60.0  # Convert seconds to minutes
+            if actual_duration is None or actual_duration <= 0:
+                actual_duration = estimated_duration
+
+            # Calculate actual cost based on real/estimated duration
+            total_cost, cost_per_minute, used_fallback_pricing = get_audio_cost(
+                model, actual_duration
+            )
+
+            # Set tracing metadata
+            trace_ctx.set_cost(total_cost)
+            trace_ctx.set_user_info(user_id=str(user.get("id")))
             trace_ctx.add_event(
                 "transcription_completed",
                 {
                     "file_size_bytes": len(content),
                     "language": language,
                     "response_format": response_format,
+                    "duration_minutes": round(actual_duration, 2),
+                    "cost_usd": total_cost,
                 },
             )
 
             logger.info(f"[{request_id}] Transcription completed successfully")
 
-        # Return response based on format
+        # --- Billing: deduct credits ---
+        elapsed_ms = int(elapsed * 1000)
+        actual_balance_after = await _deduct_audio_credits(
+            api_key=api_key,
+            user=user,
+            model=model,
+            total_cost=total_cost,
+            duration_minutes=actual_duration,
+            elapsed_ms=elapsed_ms,
+            request_id=request_id,
+            endpoint="/v1/audio/transcriptions",
+            loop=loop,
+            executor=executor,
+        )
+
+        # Build response based on format
         if response_format == "text":
             # When response_format is "text", Whisper returns a plain string
-            return JSONResponse(
-                content={"text": response if isinstance(response, str) else str(response)}
-            )
+            result = {"text": response if isinstance(response, str) else str(response)}
         elif response_format in ("json", "verbose_json"):
             # OpenAI returns a Transcription object
             if hasattr(response, "text"):
@@ -203,11 +463,28 @@ async def create_transcription(
                     result["segments"] = response.segments
                 if hasattr(response, "words") and response_format == "verbose_json":
                     result["words"] = response.words
-                return JSONResponse(content=result)
-            return JSONResponse(content={"text": str(response)})
+            else:
+                result = {"text": str(response)}
         else:
             # SRT or VTT format - return as text
-            return JSONResponse(content={"text": str(response)})
+            result = {"text": str(response)}
+
+        # Add gateway usage info
+        result["gateway_usage"] = {
+            "cost_usd": total_cost,
+            "cost_per_minute": cost_per_minute,
+            "duration_minutes": round(actual_duration, 2),
+            "request_ms": elapsed_ms,
+            "user_balance_after": (
+                actual_balance_after
+                if actual_balance_after is not None
+                else user["credits"] - total_cost
+            ),
+            "user_api_key": f"{api_key[:10]}...",
+            "used_fallback_pricing": used_fallback_pricing,
+        }
+
+        return JSONResponse(content=result)
 
     except HTTPException:
         raise
@@ -221,6 +498,8 @@ async def create_transcription(
                 os.unlink(tmp_file_path)
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
+        # Clean up executor
+        executor.shutdown(wait=False)
 
 
 @router.post("/transcriptions/base64")
@@ -234,9 +513,8 @@ async def create_transcription_base64(
     prompt: str | None = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0, ge=0.0, le=1.0),
-    _api_key: str | None = Depends(
-        get_optional_api_key
-    ),  # noqa: ARG001 - Used for auth side effects
+    background_tasks: BackgroundTasks = None,
+    api_key: str = Depends(get_api_key),
 ):
     """
     Transcribe base64-encoded audio.
@@ -244,6 +522,11 @@ async def create_transcription_base64(
     This endpoint is useful for browser-based applications that capture
     audio as base64 data URLs. It accepts the raw base64 string (without
     the data URL prefix).
+
+    ## Billing
+
+    Audio transcription is billed per minute of audio at model-specific rates.
+    Credits are deducted after successful transcription.
 
     ## Example
 
@@ -293,9 +576,45 @@ async def create_transcription_base64(
     # Determine file extension
     extension = SUPPORTED_FORMATS.get(content_type, ".webm")
 
+    # Get event loop and thread pool for async DB operations
+    loop = asyncio.get_running_loop()
+    executor = ThreadPoolExecutor()
+
     # Create temporary file and transcribe
     tmp_file_path = None
     try:
+        # --- Auth & credit pre-check ---
+        user = await loop.run_in_executor(executor, get_user, api_key)
+        if not user:
+            if (
+                Config.IS_TESTING
+                or os.environ.get("TESTING", "").lower() in {"1", "true", "yes"}
+            ) and api_key.lower().startswith("test"):
+                user = {
+                    "id": 0,
+                    "credits": 1_000_000.0,
+                    "api_key": api_key,
+                }
+            else:
+                raise HTTPException(status_code=401, detail="Invalid API key")
+
+        # Estimate duration from file size for pre-check
+        estimated_duration = estimate_audio_duration_minutes(len(content), extension)
+        estimated_cost, cost_per_minute, _ = get_audio_cost(model, estimated_duration)
+
+        # Pre-flight credit sufficiency check with 10% buffer for race conditions
+        required_credits = estimated_cost * 1.1
+        if user["credits"] < required_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=(
+                    f"Insufficient credits. Audio transcription estimated cost: ${estimated_cost:.4f} "
+                    f"(${cost_per_minute:.4f}/min x {estimated_duration:.1f} min estimated), "
+                    f"requires ${required_credits:.4f} with safety buffer. "
+                    f"Available: ${user['credits']:.4f}"
+                ),
+            )
+
         with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as tmp_file:
             tmp_file_path = tmp_file.name
             tmp_file.write(content)
@@ -321,6 +640,9 @@ async def create_transcription_base64(
         if prompt:
             transcription_params["prompt"] = prompt
 
+        # Start timing inference
+        start = time.monotonic()
+
         # Call Whisper API
         with open(tmp_file_path, "rb") as audio_file:
             try:
@@ -331,17 +653,63 @@ async def create_transcription_base64(
                 logger.error(f"[{request_id}] Whisper API error: {e}")
                 raise HTTPException(status_code=502, detail=f"Transcription failed: {str(e)}")
 
+        elapsed = max(0.001, time.monotonic() - start)
+
         logger.info(f"[{request_id}] Base64 transcription completed successfully")
 
-        # Return response
+        # Determine actual duration: prefer API response, fall back to estimate
+        actual_duration = None
+        if hasattr(response, "duration") and response.duration is not None:
+            actual_duration = response.duration / 60.0  # Convert seconds to minutes
+        if actual_duration is None or actual_duration <= 0:
+            actual_duration = estimated_duration
+
+        # Calculate actual cost based on real/estimated duration
+        total_cost, cost_per_minute, used_fallback_pricing = get_audio_cost(
+            model, actual_duration
+        )
+
+        # --- Billing: deduct credits ---
+        elapsed_ms = int(elapsed * 1000)
+        actual_balance_after = await _deduct_audio_credits(
+            api_key=api_key,
+            user=user,
+            model=model,
+            total_cost=total_cost,
+            duration_minutes=actual_duration,
+            elapsed_ms=elapsed_ms,
+            request_id=request_id,
+            endpoint="/v1/audio/transcriptions/base64",
+            loop=loop,
+            executor=executor,
+        )
+
+        # Build response
         if hasattr(response, "text"):
             result = {"text": response.text}
             if hasattr(response, "language"):
                 result["language"] = response.language
             if hasattr(response, "duration"):
                 result["duration"] = response.duration
-            return JSONResponse(content=result)
-        return JSONResponse(content={"text": str(response)})
+        else:
+            result = {"text": str(response)}
+
+        # Add gateway usage info
+        result["gateway_usage"] = {
+            "cost_usd": total_cost,
+            "cost_per_minute": cost_per_minute,
+            "duration_minutes": round(actual_duration, 2),
+            "request_ms": elapsed_ms,
+            "user_balance_after": (
+                actual_balance_after
+                if actual_balance_after is not None
+                else user["credits"] - total_cost
+            ),
+            "user_api_key": f"{api_key[:10]}...",
+            "used_fallback_pricing": used_fallback_pricing,
+        }
+
+        return JSONResponse(content=result)
 
     except HTTPException:
         raise
@@ -355,3 +723,5 @@ async def create_transcription_base64(
                 os.unlink(tmp_file_path)
             except OSError as cleanup_err:
                 logger.warning(f"[{request_id}] Failed to clean up temp file: {cleanup_err}")
+        # Clean up executor
+        executor.shutdown(wait=False)
