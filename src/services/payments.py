@@ -1579,10 +1579,12 @@ class StripeService:
             subscription_id = self._get_stripe_object_value(subscription, "id")
 
             # Determine the effective date from Stripe's subscription object
-            # For cancel_at_period_end, this is the period end timestamp
-            canceled_at = self._get_stripe_object_value(subscription, "canceled_at")
-            if isinstance(canceled_at, (int, float)) and canceled_at > 0:
-                effective_date = datetime.fromtimestamp(canceled_at, tz=UTC).isoformat()
+            # canceled_at is when the user clicked "cancel", NOT when the subscription
+            # actually ends. For scheduled cancellations (cancel_at_period_end=True),
+            # the subscription remains active until current_period_end.
+            current_period_end = self._get_stripe_object_value(subscription, "current_period_end")
+            if isinstance(current_period_end, (int, float)) and current_period_end > 0:
+                effective_date = datetime.fromtimestamp(current_period_end, tz=UTC).isoformat()
             else:
                 effective_date = datetime.now(UTC).isoformat()
 
