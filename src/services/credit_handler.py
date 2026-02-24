@@ -725,7 +725,7 @@ async def refund_credits(
         return False
 
     try:
-        from src.db.credit_transactions import TransactionType, log_credit_transaction
+        from src.db.credit_transactions import TransactionType
         from src.db.users import add_credits_to_user
 
         # Build refund metadata with correlation info
@@ -773,7 +773,7 @@ async def refund_credits(
                 },
             )
         except Exception:
-            pass
+            pass  # Sentry breadcrumb should never break billing flow
 
         return True
 
@@ -800,6 +800,6 @@ async def refund_credits(
                 },
             )
         except Exception:
-            pass
+            pass  # Sentry alert should never mask the original refund failure
 
         return False

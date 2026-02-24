@@ -1376,6 +1376,8 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
+    chunk_count = 0  # Initialized before try so it's available in except for refund metadata
+    credit_deduction_success = False  # Track whether credits were actually deducted
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
@@ -1385,8 +1387,6 @@ async def stream_generator(
         if tracker:
             streaming_ctx = tracker.streaming()
             streaming_ctx.__enter__()
-
-        chunk_count = 0
 
         # PERF: Use async iteration for async streams to avoid blocking the event loop
         # This is critical for reducing perceived TTFC as it allows the server to handle
@@ -1644,8 +1644,10 @@ async def stream_generator(
         # task AFTER the stream completes, so this is primarily a defensive measure for
         # edge cases and future code paths. Only refund for obvious provider-side failures
         # (5xx, timeout), NEVER for user errors (4xx, auth, rate limit).
+        # Guard: only attempt refund if credits were actually deducted successfully.
         if (
-            not is_anonymous
+            credit_deduction_success
+            and not is_anonymous
             and user
             and error_type in ("provider_error", "timeout_error")
             and total_tokens > 0
@@ -1669,7 +1671,7 @@ async def stream_generator(
                             "completion_tokens": completion_tokens,
                             "error_type": error_type,
                             "error_message": str(e)[:200],
-                            "stream_chunks_received": chunk_count if "chunk_count" in dir() else 0,
+                            "stream_chunks_received": chunk_count,
                         },
                     )
                     if refund_success:
