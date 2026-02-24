@@ -2044,7 +2044,7 @@ class StripeService:
                     "tier": new_tier,
                     # Signal to webhook handlers that allowance was already reset by this endpoint.
                     # The webhook handler checks this timestamp and skips allowance reset if it
-                    # was set within the last 60 seconds.
+                    # was set within the last 120 seconds.
                     "allowance_handled_at": allowance_handled_at,
                     "allowance_handled_by": "upgrade_subscription",
                 },
@@ -2391,7 +2391,11 @@ class StripeService:
                 # Calculate how much of the old allowance was used
                 old_used = max(0.0, old_tier_allowance - old_remaining_allowance)
 
-                # Calculate what is being forfeited (unused old allowance exceeding new tier)
+                # Calculate what is being forfeited (unused old allowance exceeding new tier).
+                # Design decision: on downgrade, we only forfeit the excess above the new
+                # tier's allowance. The user keeps the new tier's full capacity as their
+                # starting balance, so they are never worse off than a fresh subscriber on
+                # the lower tier. Purchased credits are never touched by this calculation.
                 forfeited_allowance = max(0.0, old_remaining_allowance - new_allowance)
 
                 logger.info(
