@@ -5,7 +5,7 @@ Handles storage and retrieval of ping counts using Supabase
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from src.config.supabase_config import get_supabase_client
 

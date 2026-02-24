@@ -1,15 +1,16 @@
 """Unit tests for OneRouter client"""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 import os
 from datetime import UTC
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 
 @pytest.fixture
 def mock_onerouter_api_key():
     """Mock the OneRouter API key"""
-    with patch('src.services.onerouter_client.Config') as mock_config:
+    with patch("src.services.onerouter_client.Config") as mock_config:
         mock_config.ONEROUTER_API_KEY = "test_onerouter_key_123"
         yield mock_config
 
@@ -71,7 +72,7 @@ class TestGetOneRouterClient:
         from src.services.onerouter_client import get_onerouter_client
 
         mock_client = Mock()
-        with patch('src.services.onerouter_client.get_onerouter_pooled_client') as mock_get_pooled:
+        with patch("src.services.onerouter_client.get_onerouter_pooled_client") as mock_get_pooled:
             mock_get_pooled.return_value = mock_client
 
             client = get_onerouter_client()
@@ -83,7 +84,7 @@ class TestGetOneRouterClient:
         """Test client initialization with missing API key"""
         from src.services.onerouter_client import get_onerouter_client
 
-        with patch('src.services.onerouter_client.Config') as mock_config:
+        with patch("src.services.onerouter_client.Config") as mock_config:
             mock_config.ONEROUTER_API_KEY = None
 
             with pytest.raises(ValueError, match="OneRouter API key not configured"):
@@ -102,7 +103,7 @@ class TestMakeOneRouterRequest:
         messages = [{"role": "user", "content": "Hello"}]
         model = "claude-3-5-sonnet@20240620"
 
-        with patch('src.services.onerouter_client.get_onerouter_client') as mock_get_client:
+        with patch("src.services.onerouter_client.get_onerouter_client") as mock_get_client:
             mock_client = Mock()
             mock_completions = Mock()
             mock_completions.create.return_value = mock_openai_response
@@ -110,18 +111,12 @@ class TestMakeOneRouterRequest:
             mock_get_client.return_value = mock_client
 
             response = make_onerouter_request_openai(
-                messages=messages,
-                model=model,
-                max_tokens=100,
-                temperature=0.7
+                messages=messages, model=model, max_tokens=100, temperature=0.7
             )
 
             assert response == mock_openai_response
             mock_completions.create.assert_called_once_with(
-                model=model,
-                messages=messages,
-                max_tokens=100,
-                temperature=0.7
+                model=model, messages=messages, max_tokens=100, temperature=0.7
             )
 
     def test_make_onerouter_request_openai_error(self, mock_onerouter_api_key):
@@ -131,7 +126,7 @@ class TestMakeOneRouterRequest:
         messages = [{"role": "user", "content": "Hello"}]
         model = "claude-3-5-sonnet@20240620"
 
-        with patch('src.services.onerouter_client.get_onerouter_client') as mock_get_client:
+        with patch("src.services.onerouter_client.get_onerouter_client") as mock_get_client:
             mock_client = Mock()
             mock_client.chat.completions.create.side_effect = Exception("API error")
             mock_get_client.return_value = mock_client
@@ -151,7 +146,7 @@ class TestMakeOneRouterRequestStream:
         model = "claude-3-5-sonnet@20240620"
         mock_stream = Mock()
 
-        with patch('src.services.onerouter_client.get_onerouter_client') as mock_get_client:
+        with patch("src.services.onerouter_client.get_onerouter_client") as mock_get_client:
             mock_client = Mock()
             mock_completions = Mock()
             mock_completions.create.return_value = mock_stream
@@ -159,17 +154,12 @@ class TestMakeOneRouterRequestStream:
             mock_get_client.return_value = mock_client
 
             stream = make_onerouter_request_openai_stream(
-                messages=messages,
-                model=model,
-                max_tokens=100
+                messages=messages, model=model, max_tokens=100
             )
 
             assert stream == mock_stream
             mock_completions.create.assert_called_once_with(
-                model=model,
-                messages=messages,
-                stream=True,
-                max_tokens=100
+                model=model, messages=messages, stream=True, max_tokens=100
             )
 
     def test_make_onerouter_request_openai_stream_error(self, mock_onerouter_api_key):
@@ -179,7 +169,7 @@ class TestMakeOneRouterRequestStream:
         messages = [{"role": "user", "content": "Hello"}]
         model = "claude-3-5-sonnet@20240620"
 
-        with patch('src.services.onerouter_client.get_onerouter_client') as mock_get_client:
+        with patch("src.services.onerouter_client.get_onerouter_client") as mock_get_client:
             mock_client = Mock()
             mock_client.chat.completions.create.side_effect = Exception("Streaming error")
             mock_get_client.return_value = mock_client
@@ -325,6 +315,7 @@ class TestFetchModelsFromOneRouter:
     def clear_cache(self):
         """Clear the cache before each test"""
         from src.cache import _onerouter_models_cache
+
         _onerouter_models_cache["data"] = None
         _onerouter_models_cache["timestamp"] = None
         yield
@@ -334,16 +325,32 @@ class TestFetchModelsFromOneRouter:
 
     def test_fetch_models_success_with_caching_and_pricing(self, mock_onerouter_api_key):
         """Test successful model fetch with pricing enrichment from display_models"""
-        from src.services.onerouter_client import fetch_models_from_onerouter
-        from src.cache import _onerouter_models_cache
         from datetime import datetime, timezone
+
+        from src.cache import _onerouter_models_cache
+        from src.services.onerouter_client import fetch_models_from_onerouter
 
         # Mock /v1/models response (complete list)
         mock_v1_models_response = {
             "data": [
-                {"id": "gemini-2.0-flash", "object": "model", "created": 1234567890, "owned_by": "google"},
-                {"id": "deepseek-v3-250324", "object": "model", "created": 1234567890, "owned_by": "deepseek"},
-                {"id": "model-without-pricing", "object": "model", "created": 1234567890, "owned_by": "test"}
+                {
+                    "id": "gemini-2.0-flash",
+                    "object": "model",
+                    "created": 1234567890,
+                    "owned_by": "google",
+                },
+                {
+                    "id": "deepseek-v3-250324",
+                    "object": "model",
+                    "created": 1234567890,
+                    "owned_by": "deepseek",
+                },
+                {
+                    "id": "model-without-pricing",
+                    "object": "model",
+                    "created": 1234567890,
+                    "owned_by": "test",
+                },
             ]
         }
 
@@ -373,11 +380,11 @@ class TestFetchModelsFromOneRouter:
                     "output_token_limit": "65,536",
                     "input_modalities": "Text",
                     "output_modalities": "Text",
-                }
+                },
             ]
         }
 
-        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+        with patch("src.services.onerouter_client.httpx.get") as mock_get:
             # Return different responses based on URL
             def side_effect(url, **kwargs):
                 mock_response = Mock()
@@ -442,11 +449,12 @@ class TestFetchModelsFromOneRouter:
         mock_v1_models_response = {
             "data": [
                 {"id": "", "object": "model", "created": 1234567890, "owned_by": "test"},
-                {"id": "valid-model", "object": "model", "created": 1234567890, "owned_by": "test"}
+                {"id": "valid-model", "object": "model", "created": 1234567890, "owned_by": "test"},
             ]
         }
 
-        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+        with patch("src.services.onerouter_client.httpx.get") as mock_get:
+
             def side_effect(url, **kwargs):
                 mock_response = Mock()
                 mock_response.raise_for_status = Mock()
@@ -467,11 +475,12 @@ class TestFetchModelsFromOneRouter:
 
     def test_fetch_models_http_error_with_caching(self, mock_onerouter_api_key):
         """Test HTTP error handling and verify cache is still updated"""
-        from src.services.onerouter_client import fetch_models_from_onerouter
-        from src.cache import _onerouter_models_cache
         import httpx
 
-        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+        from src.cache import _onerouter_models_cache
+        from src.services.onerouter_client import fetch_models_from_onerouter
+
+        with patch("src.services.onerouter_client.httpx.get") as mock_get:
             # Create a proper mock response for HTTPStatusError
             mock_response = Mock()
             mock_response.status_code = 404
@@ -479,9 +488,7 @@ class TestFetchModelsFromOneRouter:
 
             # Simulate HTTP error
             mock_get.side_effect = httpx.HTTPStatusError(
-                "404 Not Found",
-                request=Mock(),
-                response=mock_response
+                "404 Not Found", request=Mock(), response=mock_response
             )
 
             models = fetch_models_from_onerouter()
@@ -495,10 +502,10 @@ class TestFetchModelsFromOneRouter:
 
     def test_fetch_models_generic_error_with_caching(self, mock_onerouter_api_key):
         """Test generic error handling and verify cache is updated"""
-        from src.services.onerouter_client import fetch_models_from_onerouter
         from src.cache import _onerouter_models_cache
+        from src.services.onerouter_client import fetch_models_from_onerouter
 
-        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+        with patch("src.services.onerouter_client.httpx.get") as mock_get:
             # Simulate generic error
             mock_get.side_effect = Exception("Network timeout")
 
@@ -515,7 +522,8 @@ class TestFetchModelsFromOneRouter:
         """Test that fetch_models_from_onerouter calls both /v1/models and display_models"""
         from src.services.onerouter_client import fetch_models_from_onerouter
 
-        with patch('src.services.onerouter_client.httpx.get') as mock_get:
+        with patch("src.services.onerouter_client.httpx.get") as mock_get:
+
             def side_effect(url, **kwargs):
                 mock_response = Mock()
                 mock_response.raise_for_status = Mock()
@@ -541,10 +549,10 @@ class TestFetchModelsFromOneRouter:
 
     def test_fetch_models_missing_api_key(self):
         """Test that fetch returns empty list when API key is not configured"""
-        from src.services.onerouter_client import fetch_models_from_onerouter
         from src.cache import _onerouter_models_cache
+        from src.services.onerouter_client import fetch_models_from_onerouter
 
-        with patch('src.services.onerouter_client.Config') as mock_config:
+        with patch("src.services.onerouter_client.Config") as mock_config:
             mock_config.ONEROUTER_API_KEY = None
 
             models = fetch_models_from_onerouter()

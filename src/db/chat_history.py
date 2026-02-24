@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError
@@ -22,19 +22,19 @@ def _execute_with_connection_retry(  # noqa: UP047
 ) -> T:
     """
     Execute a Supabase operation with retry logic for transient connection errors.
-    
+
     Handles HTTP/2 connection resets, server disconnects, and other transient network issues
     that can occur when reusing connections in high-concurrency scenarios.
-    
+
     Args:
         operation: The operation to execute
         operation_name: Name of the operation for logging
         max_retries: Maximum number of retry attempts (default: 3)
         initial_delay: Initial delay in seconds before first retry (default: 0.1)
-        
+
     Returns:
         The result of the operation
-        
+
     Raises:
         The last exception encountered if all retries fail
     """
@@ -70,16 +70,11 @@ def _execute_with_connection_retry(  # noqa: UP047
     raise RuntimeError(f"{operation_name} failed without exception details")
 
 
-@with_retry(
-    max_attempts=3,
-    initial_delay=0.1,
-    max_delay=2.0,
-    exceptions=(Exception,)
-)
+@with_retry(max_attempts=3, initial_delay=0.1, max_delay=2.0, exceptions=(Exception,))
 def create_chat_session(user_id: int, title: str = None, model: str = None) -> dict[str, Any]:
     """
     Create a new chat session for a user.
-    
+
     This function is decorated with retry logic to handle transient connection errors.
     """
     try:
@@ -102,8 +97,7 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
             return client.table("chat_sessions").insert(session_data).execute()
 
         result = _execute_with_connection_retry(
-            insert_session,
-            f"create_chat_session(user={user_id})"
+            insert_session, f"create_chat_session(user={user_id})"
         )
 
         if not result.data:
@@ -118,12 +112,7 @@ def create_chat_session(user_id: int, title: str = None, model: str = None) -> d
         raise RuntimeError(f"Failed to create chat session: {e}") from e
 
 
-@with_retry(
-    max_attempts=3,
-    initial_delay=0.1,
-    max_delay=2.0,
-    exceptions=(Exception,)
-)
+@with_retry(max_attempts=3, initial_delay=0.1, max_delay=2.0, exceptions=(Exception,))
 def save_chat_message(
     session_id: int,
     role: str,
@@ -177,8 +166,7 @@ def save_chat_message(
                     )
 
                 duplicate_result = _execute_with_connection_retry(
-                    check_duplicate,
-                    f"check_duplicate_message(session={session_id}, role={role})"
+                    check_duplicate, f"check_duplicate_message(session={session_id}, role={role})"
                 )
 
                 if duplicate_result.data:
@@ -211,8 +199,7 @@ def save_chat_message(
             return client.table("chat_messages").insert(message_data).execute()
 
         result = _execute_with_connection_retry(
-            insert_message,
-            f"save_chat_message(session={session_id}, role={role})"
+            insert_message, f"save_chat_message(session={session_id}, role={role})"
         )
 
         if not result.data:
@@ -241,8 +228,7 @@ def save_chat_message(
             return session_update_query.execute()
 
         session_update_result = _execute_with_connection_retry(
-            update_session,
-            f"update_chat_session_timestamp(session={session_id})"
+            update_session, f"update_chat_session_timestamp(session={session_id})"
         )
 
         if not session_update_result.data:
@@ -275,8 +261,7 @@ def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> li
             )
 
         result = _execute_with_connection_retry(
-            query_sessions,
-            f"get_user_chat_sessions(user={user_id})"
+            query_sessions, f"get_user_chat_sessions(user={user_id})"
         )
 
         sessions = result.data or []
@@ -305,8 +290,7 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
             )
 
         session_result = _execute_with_connection_retry(
-            query_session,
-            f"get_chat_session(session={session_id}, user={user_id})"
+            query_session, f"get_chat_session(session={session_id}, user={user_id})"
         )
 
         if not session_result.data:
@@ -326,8 +310,7 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
             )
 
         messages_result = _execute_with_connection_retry(
-            query_messages,
-            f"get_chat_messages(session={session_id})"
+            query_messages, f"get_chat_messages(session={session_id})"
         )
 
         session["messages"] = messages_result.data or []
@@ -339,18 +322,13 @@ def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
         raise RuntimeError(f"Failed to get chat session: {e}") from e
 
 
-@with_retry(
-    max_attempts=3,
-    initial_delay=0.1,
-    max_delay=2.0,
-    exceptions=(Exception,)
-)
+@with_retry(max_attempts=3, initial_delay=0.1, max_delay=2.0, exceptions=(Exception,))
 def update_chat_session(
     session_id: int, user_id: int, title: str = None, model: str = None
 ) -> bool:
     """
     Update a chat session.
-    
+
     This function is decorated with retry logic to handle transient connection errors.
     """
     try:
@@ -373,8 +351,7 @@ def update_chat_session(
             )
 
         result = _execute_with_connection_retry(
-            update_session,
-            f"update_chat_session(session={session_id})"
+            update_session, f"update_chat_session(session={session_id})"
         )
 
         if not result.data:
@@ -389,16 +366,11 @@ def update_chat_session(
         raise RuntimeError(f"Failed to update chat session: {e}") from e
 
 
-@with_retry(
-    max_attempts=3,
-    initial_delay=0.1,
-    max_delay=2.0,
-    exceptions=(Exception,)
-)
+@with_retry(max_attempts=3, initial_delay=0.1, max_delay=2.0, exceptions=(Exception,))
 def delete_chat_session(session_id: int, user_id: int) -> bool:
     """
     Delete a chat session (soft delete).
-    
+
     This function is decorated with retry logic to handle transient connection errors.
     """
     try:
@@ -415,8 +387,7 @@ def delete_chat_session(session_id: int, user_id: int) -> bool:
             )
 
         result = _execute_with_connection_retry(
-            soft_delete_session,
-            f"delete_chat_session(session={session_id})"
+            soft_delete_session, f"delete_chat_session(session={session_id})"
         )
 
         if not result.data:
@@ -447,8 +418,7 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
             )
 
         sessions_result = _execute_with_connection_retry(
-            query_sessions_count,
-            f"get_chat_session_stats_sessions(user={user_id})"
+            query_sessions_count, f"get_chat_session_stats_sessions(user={user_id})"
         )
         total_sessions = len(sessions_result.data) if sessions_result.data else 0
 
@@ -464,8 +434,7 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
             )
 
         messages_result = _execute_with_connection_retry(
-            query_messages_count,
-            f"get_chat_session_stats_messages(user={user_id})"
+            query_messages_count, f"get_chat_session_stats_messages(user={user_id})"
         )
         total_messages = len(messages_result.data) if messages_result.data else 0
 
@@ -481,8 +450,7 @@ def get_chat_session_stats(user_id: int) -> dict[str, Any]:
             )
 
         tokens_result = _execute_with_connection_retry(
-            query_tokens,
-            f"get_chat_session_stats_tokens(user={user_id})"
+            query_tokens, f"get_chat_session_stats_tokens(user={user_id})"
         )
         total_tokens = (
             sum(msg.get("tokens", 0) for msg in tokens_result.data) if tokens_result.data else 0
@@ -530,8 +498,7 @@ def validate_message_ownership(message_id: int, user_id: int, session_id: int = 
             return query.execute()
 
         result = _execute_with_connection_retry(
-            query_message,
-            f"validate_message_ownership(message={message_id}, user={user_id})"
+            query_message, f"validate_message_ownership(message={message_id}, user={user_id})"
         )
 
         return bool(result.data)
@@ -558,8 +525,7 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
             )
 
         title_result = _execute_with_connection_retry(
-            search_titles,
-            f"search_chat_sessions_titles(user={user_id})"
+            search_titles, f"search_chat_sessions_titles(user={user_id})"
         )
 
         # Search in message content
@@ -572,8 +538,7 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
             )
 
         message_result = _execute_with_connection_retry(
-            search_messages,
-            f"search_chat_sessions_messages(user={user_id})"
+            search_messages, f"search_chat_sessions_messages(user={user_id})"
         )
 
         session_ids = set()
@@ -583,6 +548,7 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
         # Get sessions from message search
         message_sessions = []
         if session_ids:
+
             def query_message_sessions():
                 return (
                     client.table("chat_sessions")
@@ -594,8 +560,7 @@ def search_chat_sessions(user_id: int, query: str, limit: int = 20) -> list[dict
                 )
 
             message_sessions_result = _execute_with_connection_retry(
-                query_message_sessions,
-                f"search_chat_sessions_by_message_ids(user={user_id})"
+                query_message_sessions, f"search_chat_sessions_by_message_ids(user={user_id})"
             )
             message_sessions = message_sessions_result.data or []
 

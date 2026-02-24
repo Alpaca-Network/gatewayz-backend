@@ -34,7 +34,7 @@ it will be validated. If not provided, public access is allowed with rate limiti
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -198,6 +198,7 @@ async def sentry_tunnel(request: Request) -> Response:
 # Response Models
 class HealthResponse(BaseModel):
     """Provider health response"""
+
     provider: str
     health_score: float = Field(..., ge=0, le=100, description="Health score 0-100")
     status: str = Field(..., description="healthy, degraded, unhealthy")
@@ -206,6 +207,7 @@ class HealthResponse(BaseModel):
 
 class ErrorResponse(BaseModel):
     """Error entry response"""
+
     model: str
     error: str
     timestamp: float
@@ -214,6 +216,7 @@ class ErrorResponse(BaseModel):
 
 class CircuitBreakerResponse(BaseModel):
     """Circuit breaker state response"""
+
     provider: str
     model: str
     state: str = Field(..., description="CLOSED, OPEN, HALF_OPEN")
@@ -224,6 +227,7 @@ class CircuitBreakerResponse(BaseModel):
 
 class RealtimeStatsResponse(BaseModel):
     """Real-time statistics response"""
+
     timestamp: str
     providers: dict[str, dict[str, Any]]
     total_requests: int
@@ -233,6 +237,7 @@ class RealtimeStatsResponse(BaseModel):
 
 class LatencyPercentilesResponse(BaseModel):
     """Latency percentiles response"""
+
     provider: str
     model: str
     count: int
@@ -266,12 +271,14 @@ async def get_all_provider_health(api_key: str | None = Depends(get_optional_api
             else:
                 status = "unhealthy"
 
-            results.append(HealthResponse(
-                provider=provider,
-                health_score=score,
-                status=status,
-                last_updated=datetime.now(UTC).isoformat()
-            ))
+            results.append(
+                HealthResponse(
+                    provider=provider,
+                    health_score=score,
+                    status=status,
+                    last_updated=datetime.now(UTC).isoformat(),
+                )
+            )
 
         return results
     except Exception as e:
@@ -305,7 +312,7 @@ async def get_provider_health(provider: str, api_key: str | None = Depends(get_o
             provider=provider,
             health_score=score,
             status=status,
-            last_updated=datetime.now(UTC).isoformat()
+            last_updated=datetime.now(UTC).isoformat(),
         )
     except Exception as e:
         logger.error(f"Failed to get health for {provider}: {e}", exc_info=True)
@@ -316,7 +323,7 @@ async def get_provider_health(provider: str, api_key: str | None = Depends(get_o
 async def get_provider_errors(
     provider: str,
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of errors to return"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get recent errors for a specific provider.
@@ -340,7 +347,7 @@ async def get_provider_errors(
 @router.get("/stats/realtime", response_model=RealtimeStatsResponse)
 async def get_realtime_stats(
     hours: int = Query(1, ge=1, le=24, description="Number of hours to look back"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get real-time statistics from Redis for all providers.
@@ -376,7 +383,7 @@ async def get_realtime_stats(
                 "total_requests": provider_total_requests,
                 "total_cost": provider_total_cost,
                 "health_score": health_scores[provider],
-                "hourly_breakdown": hourly_stats
+                "hourly_breakdown": hourly_stats,
             }
 
             total_requests += provider_total_requests
@@ -390,7 +397,7 @@ async def get_realtime_stats(
             providers=provider_stats,
             total_requests=total_requests,
             total_cost=total_cost,
-            avg_health_score=avg_health
+            avg_health_score=avg_health,
         )
     except Exception as e:
         logger.error(f"Failed to get realtime stats: {e}", exc_info=True)
@@ -401,7 +408,7 @@ async def get_realtime_stats(
 async def get_hourly_stats(
     provider: str,
     hours: int = Query(24, ge=1, le=168, description="Number of hours to look back"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get hourly statistics for a specific provider.
@@ -416,11 +423,7 @@ async def get_hourly_stats(
         redis_metrics = get_redis_metrics()
         stats = await redis_metrics.get_hourly_stats(provider, hours=hours)
 
-        return {
-            "provider": provider,
-            "hours": hours,
-            "data": stats
-        }
+        return {"provider": provider, "hours": hours, "data": stats}
     except Exception as e:
         logger.error(f"Failed to get hourly stats for {provider}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get hourly stats: {str(e)}")
@@ -446,14 +449,16 @@ async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_ap
             if len(parts) == 2:
                 provider, model = parts
 
-                circuit_states.append(CircuitBreakerResponse(
-                    provider=provider,
-                    model=model,
-                    state=circuit_data.state.name,
-                    failure_count=circuit_data.failure_count,
-                    is_available=availability_service.is_model_available(model, provider),
-                    last_updated=circuit_data.last_failure_time or 0.0
-                ))
+                circuit_states.append(
+                    CircuitBreakerResponse(
+                        provider=provider,
+                        model=model,
+                        state=circuit_data.state.name,
+                        failure_count=circuit_data.failure_count,
+                        is_available=availability_service.is_model_available(model, provider),
+                        last_updated=circuit_data.last_failure_time or 0.0,
+                    )
+                )
 
         return circuit_states
     except Exception as e:
@@ -462,7 +467,9 @@ async def get_all_circuit_breakers(api_key: str | None = Depends(get_optional_ap
 
 
 @router.get("/circuit-breakers/{provider}", response_model=list[CircuitBreakerResponse])
-async def get_provider_circuit_breakers(provider: str, api_key: str | None = Depends(get_optional_api_key)):
+async def get_provider_circuit_breakers(
+    provider: str, api_key: str | None = Depends(get_optional_api_key)
+):
     """
     Get circuit breaker states for a specific provider's models.
 
@@ -480,17 +487,21 @@ async def get_provider_circuit_breakers(provider: str, api_key: str | None = Dep
             if len(parts) == 2 and parts[0] == provider:
                 model = parts[1]
 
-                circuit_states.append(CircuitBreakerResponse(
-                    provider=provider,
-                    model=model,
-                    state=circuit_data.state.name,
-                    failure_count=circuit_data.failure_count,
-                    is_available=availability_service.is_model_available(model, provider),
-                    last_updated=circuit_data.last_failure_time or 0.0
-                ))
+                circuit_states.append(
+                    CircuitBreakerResponse(
+                        provider=provider,
+                        model=model,
+                        state=circuit_data.state.name,
+                        failure_count=circuit_data.failure_count,
+                        is_available=availability_service.is_model_available(model, provider),
+                        last_updated=circuit_data.last_failure_time or 0.0,
+                    )
+                )
 
         if not circuit_states:
-            raise HTTPException(status_code=404, detail=f"No circuit breaker data found for provider: {provider}")
+            raise HTTPException(
+                status_code=404, detail=f"No circuit breaker data found for provider: {provider}"
+            )
 
         return circuit_states
     except HTTPException:
@@ -521,7 +532,7 @@ async def get_provider_comparison(api_key: str | None = Depends(get_optional_api
         return {
             "timestamp": datetime.now(UTC).isoformat(),
             "providers": providers,
-            "total_providers": len(providers)
+            "total_providers": len(providers),
         }
     except Exception as e:
         logger.error(f"Failed to get provider comparison: {e}", exc_info=True)
@@ -532,8 +543,10 @@ async def get_provider_comparison(api_key: str | None = Depends(get_optional_api
 async def get_latency_percentiles(
     provider: str,
     model: str,
-    percentiles: str = Query("50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)"),
-    api_key: str | None = Depends(get_optional_api_key)
+    percentiles: str = Query(
+        "50,95,99", description="Comma-separated percentiles (e.g., 50,95,99)"
+    ),
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get latency percentiles for a specific provider/model combination.
@@ -550,12 +563,13 @@ async def get_latency_percentiles(
         percentile_list = [int(p.strip()) for p in percentiles.split(",")]
 
         redis_metrics = get_redis_metrics()
-        stats = await redis_metrics.get_latency_percentiles(provider, model, percentiles=percentile_list)
+        stats = await redis_metrics.get_latency_percentiles(
+            provider, model, percentiles=percentile_list
+        )
 
         if not stats:
             raise HTTPException(
-                status_code=404,
-                detail=f"No latency data found for {provider}/{model}"
+                status_code=404, detail=f"No latency data found for {provider}/{model}"
             )
 
         return LatencyPercentilesResponse(
@@ -565,7 +579,7 @@ async def get_latency_percentiles(
             avg=stats.get("avg", 0.0),
             p50=stats.get("p50"),
             p95=stats.get("p95"),
-            p99=stats.get("p99")
+            p99=stats.get("p99"),
         )
     except HTTPException:
         raise
@@ -597,7 +611,7 @@ async def get_anomalies(api_key: str | None = Depends(get_optional_api_key)):
             "anomalies": anomalies,
             "total_count": len(anomalies),
             "critical_count": sum(1 for a in anomalies if a.get("severity") == "critical"),
-            "warning_count": sum(1 for a in anomalies if a.get("severity") == "warning")
+            "warning_count": sum(1 for a in anomalies if a.get("severity") == "warning"),
         }
     except Exception as e:
         logger.error(f"Failed to detect anomalies: {e}", exc_info=True)
@@ -622,10 +636,7 @@ async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key
         analytics = get_analytics_service()
         trial_data = analytics.get_trial_analytics()
 
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            **trial_data
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), **trial_data}
     except Exception as e:
         logger.error(f"Failed to get trial analytics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get trial analytics: {str(e)}")
@@ -634,7 +645,7 @@ async def get_trial_analytics(api_key: str | None = Depends(get_optional_api_key
 @router.get("/cost-analysis")
 async def get_cost_analysis(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get cost breakdown by provider.
@@ -659,11 +670,7 @@ async def get_cost_analysis(
 
         cost_data = await analytics.get_cost_by_provider(start_date, end_date)
 
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "period_days": days,
-            **cost_data
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), "period_days": days, **cost_data}
     except Exception as e:
         logger.error(f"Failed to get cost analysis: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get cost analysis: {str(e)}")
@@ -673,7 +680,7 @@ async def get_cost_analysis(
 async def get_latency_trends(
     provider: str,
     hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get latency trends for a provider over time.
@@ -693,10 +700,7 @@ async def get_latency_trends(
         analytics = get_analytics_service()
         trends = await analytics.get_latency_trends(provider, hours=hours)
 
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            **trends
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), **trends}
     except Exception as e:
         logger.error(f"Failed to get latency trends: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get latency trends: {str(e)}")
@@ -705,7 +709,7 @@ async def get_latency_trends(
 @router.get("/error-rates")
 async def get_error_rates(
     hours: int = Query(24, ge=1, le=168, description="Number of hours to analyze"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get error rates broken down by model.
@@ -724,17 +728,16 @@ async def get_error_rates(
         analytics = get_analytics_service()
         error_data = await analytics.get_error_rate_by_model(hours=hours)
 
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            **error_data
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), **error_data}
     except Exception as e:
         logger.error(f"Failed to get error rates: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get error rates: {str(e)}")
 
 
 @router.get("/token-efficiency/{provider}/{model}")
-async def get_token_efficiency(provider: str, model: str, api_key: str | None = Depends(get_optional_api_key)):
+async def get_token_efficiency(
+    provider: str, model: str, api_key: str | None = Depends(get_optional_api_key)
+):
     """
     Get token efficiency metrics for a provider/model.
 
@@ -754,10 +757,7 @@ async def get_token_efficiency(provider: str, model: str, api_key: str | None = 
         analytics = get_analytics_service()
         efficiency_data = await analytics.get_token_efficiency(provider, model)
 
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            **efficiency_data
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), **efficiency_data}
     except Exception as e:
         logger.error(f"Failed to get token efficiency: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to get token efficiency: {str(e)}")
@@ -789,7 +789,7 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
 
         # Try to use optimized RPC function first (fastest)
         try:
-            rpc_result = client.rpc('get_provider_request_stats').execute()
+            rpc_result = client.rpc("get_provider_request_stats").execute()
             if rpc_result.data:
                 return {
                     "success": True,
@@ -797,16 +797,15 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                     "metadata": {
                         "total_providers": len(rpc_result.data),
                         "timestamp": datetime.now(UTC).isoformat(),
-                        "method": "rpc"
-                    }
+                        "method": "rpc",
+                    },
                 }
         except Exception as rpc_error:
             logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
 
         # Fallback: Get distinct model_ids with their provider info (lightweight)
         # We only fetch unique model_id + provider combinations, not all requests
-        distinct_result = client.table("chat_completion_requests").select(
-            """
+        distinct_result = client.table("chat_completion_requests").select("""
             model_id,
             models!inner(
                 provider_id,
@@ -816,8 +815,7 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                     slug
                 )
             )
-            """
-        ).execute()
+            """).execute()
 
         if not distinct_result.data:
             return {
@@ -826,8 +824,8 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                 "metadata": {
                     "total_providers": 0,
                     "timestamp": datetime.now(UTC).isoformat(),
-                    "method": "fallback"
-                }
+                    "method": "fallback",
+                },
             }
 
         # Build provider stats efficiently
@@ -849,7 +847,7 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
                     "provider_id": provider_id,
                     "name": provider_info.get("name"),
                     "slug": provider_info.get("slug"),
-                    "model_ids": set()
+                    "model_ids": set(),
                 }
 
             provider_stats[provider_id]["model_ids"].add(model_id)
@@ -862,21 +860,24 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
             model_ids_list = list(stats["model_ids"])
 
             # Count total requests for all models of this provider
-            count_result = client.table("chat_completion_requests").select(
-                "id",
-                count="exact",
-                head=True
-            ).in_("model_id", model_ids_list).execute()
+            count_result = (
+                client.table("chat_completion_requests")
+                .select("id", count="exact", head=True)
+                .in_("model_id", model_ids_list)
+                .execute()
+            )
 
             total_requests = count_result.count if count_result.count is not None else 0
 
-            providers_list.append({
-                "provider_id": stats["provider_id"],
-                "name": stats["name"],
-                "slug": stats["slug"],
-                "models_with_requests": len(stats["model_ids"]),
-                "total_requests": total_requests
-            })
+            providers_list.append(
+                {
+                    "provider_id": stats["provider_id"],
+                    "name": stats["name"],
+                    "slug": stats["slug"],
+                    "models_with_requests": len(stats["model_ids"]),
+                    "total_requests": total_requests,
+                }
+            )
 
         # Sort by request count (most used first)
         providers_list.sort(key=lambda x: x["total_requests"], reverse=True)
@@ -887,15 +888,14 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
             "metadata": {
                 "total_providers": len(providers_list),
                 "timestamp": datetime.now(UTC).isoformat(),
-                "method": "fallback_with_counts"
-            }
+                "method": "fallback_with_counts",
+            },
         }
 
     except Exception as e:
         logger.error(f"Failed to get providers with requests: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get providers with requests: {str(e)}"
+            status_code=500, detail=f"Failed to get providers with requests: {str(e)}"
         )
 
 
@@ -922,8 +922,7 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
         client = get_supabase_client()
 
         # Get all requests with model info
-        result = client.table("chat_completion_requests").select(
-            """
+        result = client.table("chat_completion_requests").select("""
             model_id,
             models!inner(
                 id,
@@ -934,8 +933,7 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                     slug
                 )
             )
-            """
-        ).execute()
+            """).execute()
 
         if not result.data:
             return {
@@ -944,8 +942,8 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                 "metadata": {
                     "total_models": 0,
                     "total_requests": 0,
-                    "timestamp": datetime.now(UTC).isoformat()
-                }
+                    "timestamp": datetime.now(UTC).isoformat(),
+                },
             }
 
         # Count requests per model
@@ -964,7 +962,7 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
                     "model_identifier": model_info.get("model_id"),
                     "provider_name": model_info.get("providers", {}).get("name"),
                     "provider_slug": model_info.get("providers", {}).get("slug"),
-                    "request_count": 0
+                    "request_count": 0,
                 }
 
             model_counts[model_id]["request_count"] += 1
@@ -979,22 +977,19 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
             "metadata": {
                 "total_models": len(counts_list),
                 "total_requests": sum(m["request_count"] for m in counts_list),
-                "timestamp": datetime.now(UTC).isoformat()
-            }
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
         }
 
     except Exception as e:
         logger.error(f"Failed to get request counts by model: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get request counts: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get request counts: {str(e)}")
 
 
 @router.get("/chat-requests/models")
 async def get_models_with_requests(
     provider_id: int | None = Query(None, description="Filter by provider ID"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get all unique models that have chat completion requests.
@@ -1027,12 +1022,12 @@ async def get_models_with_requests(
         try:
             if provider_id is not None:
                 # Use RPC with provider filter
-                rpc_result = client.rpc('get_models_with_requests_by_provider', {
-                    'p_provider_id': provider_id
-                }).execute()
+                rpc_result = client.rpc(
+                    "get_models_with_requests_by_provider", {"p_provider_id": provider_id}
+                ).execute()
             else:
                 # Use RPC for all models
-                rpc_result = client.rpc('get_models_with_requests').execute()
+                rpc_result = client.rpc("get_models_with_requests").execute()
 
             if rpc_result.data:
                 return {
@@ -1041,24 +1036,22 @@ async def get_models_with_requests(
                     "metadata": {
                         "total_models": len(rpc_result.data),
                         "timestamp": datetime.now(UTC).isoformat(),
-                        "method": "rpc"
-                    }
+                        "method": "rpc",
+                    },
                 }
         except Exception as rpc_error:
             logger.debug(f"RPC function not available, using fallback method: {rpc_error}")
 
         # Fallback: Optimized query using aggregations (no fetching all requests!)
         # Step 1: Get all models with their provider info
-        models_query = client.table("models").select(
-            """
+        models_query = client.table("models").select("""
             id,
             model_id,
             model_name,
             provider_model_id,
             provider_id,
             providers!inner(id, name, slug)
-            """
-        )
+            """)
 
         # Apply provider filter if specified
         if provider_id is not None:
@@ -1073,8 +1066,8 @@ async def get_models_with_requests(
                 "metadata": {
                     "total_models": 0,
                     "timestamp": datetime.now(UTC).isoformat(),
-                    "method": "fallback"
-                }
+                    "method": "fallback",
+                },
             }
 
         # Step 2: For each model, get aggregated stats using COUNT and RPC
@@ -1087,9 +1080,9 @@ async def get_models_with_requests(
             try:
                 # Try to use RPC for aggregated stats first
                 try:
-                    stats_rpc = client.rpc('get_model_request_stats', {
-                        'p_model_id': model_id
-                    }).execute()
+                    stats_rpc = client.rpc(
+                        "get_model_request_stats", {"p_model_id": model_id}
+                    ).execute()
 
                     if stats_rpc.data and len(stats_rpc.data) > 0:
                         stats_data = stats_rpc.data[0]
@@ -1098,18 +1091,21 @@ async def get_models_with_requests(
                             "total_input_tokens": int(stats_data.get("total_input_tokens", 0)),
                             "total_output_tokens": int(stats_data.get("total_output_tokens", 0)),
                             "total_tokens": int(stats_data.get("total_tokens", 0)),
-                            "avg_processing_time_ms": round(float(stats_data.get("avg_processing_time_ms", 0)), 2)
+                            "avg_processing_time_ms": round(
+                                float(stats_data.get("avg_processing_time_ms", 0)), 2
+                            ),
                         }
                     else:
                         raise Exception("RPC returned no data")
 
                 except Exception:
                     # Fallback: Use COUNT query (still better than fetching all records)
-                    count_result = client.table("chat_completion_requests").select(
-                        "id",
-                        count="exact",
-                        head=True
-                    ).eq("model_id", model_id).execute()
+                    count_result = (
+                        client.table("chat_completion_requests")
+                        .select("id", count="exact", head=True)
+                        .eq("model_id", model_id)
+                        .execute()
+                    )
 
                     total_requests = count_result.count if count_result.count is not None else 0
 
@@ -1124,21 +1120,23 @@ async def get_models_with_requests(
                         "total_input_tokens": 0,
                         "total_output_tokens": 0,
                         "total_tokens": 0,
-                        "avg_processing_time_ms": 0
+                        "avg_processing_time_ms": 0,
                     }
 
                 # Skip models with no requests
                 if stats["total_requests"] == 0:
                     continue
 
-                models_data.append({
-                    "model_id": model_info["id"],
-                    "model_identifier": model_info["model_id"],
-                    "model_name": model_info["model_name"],
-                    "provider_model_id": model_info["provider_model_id"],
-                    "provider": model_info["providers"],
-                    "stats": stats
-                })
+                models_data.append(
+                    {
+                        "model_id": model_info["id"],
+                        "model_identifier": model_info["model_id"],
+                        "model_name": model_info["model_name"],
+                        "provider_model_id": model_info["provider_model_id"],
+                        "provider": model_info["providers"],
+                        "stats": stats,
+                    }
+                )
 
             except Exception as model_error:
                 logger.warning(f"Failed to get stats for model_id={model_id}: {model_error}")
@@ -1153,16 +1151,13 @@ async def get_models_with_requests(
             "metadata": {
                 "total_models": len(models_data),
                 "timestamp": datetime.now(UTC).isoformat(),
-                "method": "fallback_optimized"
-            }
+                "method": "fallback_optimized",
+            },
         }
 
     except Exception as e:
         logger.error(f"Failed to get models with requests: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get models with requests: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get models with requests: {str(e)}")
 
 
 @router.get("/chat-requests")
@@ -1170,11 +1165,15 @@ async def get_chat_completion_requests(
     model_id: int | None = Query(None, description="Filter by model ID"),
     provider_id: int | None = Query(None, description="Filter by provider ID"),
     model_name: str | None = Query(None, description="Filter by model name (contains)"),
-    start_date: str | None = Query(None, description="Filter by start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
-    end_date: str | None = Query(None, description="Filter by end date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"),
+    start_date: str | None = Query(
+        None, description="Filter by start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+    ),
+    end_date: str | None = Query(
+        None, description="Filter by end date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
+    ),
     limit: int = Query(100, ge=1, le=100000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip (pagination)"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get chat completion requests with flexible filtering options.
@@ -1214,8 +1213,7 @@ async def get_chat_completion_requests(
         client = get_supabase_client()
 
         # Build the query with joins to get model and provider information
-        query = client.table("chat_completion_requests").select(
-            """
+        query = client.table("chat_completion_requests").select("""
             *,
             models!inner(
                 id,
@@ -1229,8 +1227,7 @@ async def get_chat_completion_requests(
                     slug
                 )
             )
-            """
-        )
+            """)
 
         # Apply filters
         if model_id is not None:
@@ -1257,9 +1254,7 @@ async def get_chat_completion_requests(
 
         # Get total count for pagination metadata (without limit/offset)
         count_query = client.table("chat_completion_requests").select(
-            "id",
-            count="exact",
-            head=True
+            "id", count="exact", head=True
         )
 
         if model_id is not None:
@@ -1284,17 +1279,16 @@ async def get_chat_completion_requests(
                     "provider_id": provider_id,
                     "model_name": model_name,
                     "start_date": start_date,
-                    "end_date": end_date
+                    "end_date": end_date,
                 },
-                "timestamp": datetime.now(UTC).isoformat()
-            }
+                "timestamp": datetime.now(UTC).isoformat(),
+            },
         }
 
     except Exception as e:
         logger.error(f"Failed to get chat completion requests: {e}", exc_info=True)
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get chat completion requests: {str(e)}"
+            status_code=500, detail=f"Failed to get chat completion requests: {str(e)}"
         )
 
 
@@ -1304,40 +1298,39 @@ async def get_chat_requests_plot_data(
     provider_id: int | None = Query(None, description="Filter by provider ID"),
     start_date: str | None = Query(None, description="Filter by start date (ISO format)"),
     end_date: str | None = Query(None, description="Filter by end date (ISO format)"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """
     Get optimized chat completion request data for plotting.
-    
+
     Returns:
     - recent_requests: Last 10 full requests for display
     - plot_data: ALL requests but only tokens and latency (compressed arrays)
-    
+
     This is highly optimized for frontend plotting:
     - Minimal data transfer (only what's needed for graphs)
     - Compressed format (arrays instead of objects)
     - Fast response time
-    
+
     Examples:
     - /api/monitoring/chat-requests/plot-data?model_id=123
     - /api/monitoring/chat-requests/plot-data?provider_id=5
-    
+
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
         from src.config.supabase_config import get_supabase_client
-        
+
         client = get_supabase_client()
-        
+
         # Build base query
         base_filters = []
-        
+
         if model_id is not None:
             base_filters.append(("model_id", "eq", model_id))
-        
+
         # Step 1: Get last 10 full requests for display
-        recent_query = client.table("chat_completion_requests").select(
-            """
+        recent_query = client.table("chat_completion_requests").select("""
             id,
             request_id,
             model_id,
@@ -1358,100 +1351,97 @@ async def get_chat_requests_plot_data(
                     slug
                 )
             )
-            """
-        )
-        
+            """)
+
         # Apply filters
         if model_id is not None:
             recent_query = recent_query.eq("model_id", model_id)
-        
+
         if provider_id is not None:
             # Note: provider_id filter requires checking through models table
             # We'll filter in Python after fetching
             pass
-        
+
         if start_date is not None:
             recent_query = recent_query.gte("created_at", start_date)
-        
+
         if end_date is not None:
             recent_query = recent_query.lte("created_at", end_date)
-        
+
         recent_query = recent_query.order("created_at", desc=True).limit(10)
         recent_result = recent_query.execute()
-        
+
         recent_requests = recent_result.data or []
-        
+
         # Filter by provider_id if specified (post-fetch filtering)
         if provider_id is not None:
             recent_requests = [
-                r for r in recent_requests
+                r
+                for r in recent_requests
                 if r.get("models", {}).get("providers", {}).get("id") == provider_id
             ]
-        
+
         # Add total_tokens to each recent request
         for req in recent_requests:
             req["total_tokens"] = req.get("input_tokens", 0) + req.get("output_tokens", 0)
-        
+
         # Step 2: Get ALL requests but only tokens and latency for plotting
         # This is much lighter - we only fetch 3 fields instead of all
         plot_query = client.table("chat_completion_requests").select(
             "input_tokens,output_tokens,processing_time_ms,created_at"
         )
-        
+
         # Apply same filters
         if model_id is not None:
             plot_query = plot_query.eq("model_id", model_id)
-        
+
         if start_date is not None:
             plot_query = plot_query.gte("created_at", start_date)
-        
+
         if end_date is not None:
             plot_query = plot_query.lte("created_at", end_date)
-        
+
         # Order by created_at for chronological plotting
         plot_query = plot_query.order("created_at", desc=False)
-        
+
         plot_result = plot_query.execute()
         all_requests = plot_result.data or []
-        
+
         # Step 3: Compress into arrays for efficient transfer and plotting
         # Instead of sending [{tokens: 100, latency: 50}, ...] we send [[100, 50], ...]
         tokens_array = []
         latency_array = []
         timestamps_array = []
-        
+
         for req in all_requests:
             input_tokens = req.get("input_tokens", 0)
             output_tokens = req.get("output_tokens", 0)
             total_tokens = input_tokens + output_tokens
             latency = req.get("processing_time_ms", 0)
             timestamp = req.get("created_at")
-            
+
             tokens_array.append(total_tokens)
             latency_array.append(latency)
             timestamps_array.append(timestamp)
-        
+
         # Return compressed format
         return {
             "success": True,
             "recent_requests": recent_requests[:10],  # Last 10 for display
             "plot_data": {
-                "tokens": tokens_array,           # All total_tokens as array
-                "latency": latency_array,         # All latency_ms as array
-                "timestamps": timestamps_array    # All timestamps for x-axis
+                "tokens": tokens_array,  # All total_tokens as array
+                "latency": latency_array,  # All latency_ms as array
+                "timestamps": timestamps_array,  # All timestamps for x-axis
             },
             "metadata": {
                 "recent_count": len(recent_requests[:10]),
                 "total_count": len(all_requests),
                 "timestamp": datetime.now(UTC).isoformat(),
                 "compression": "arrays",
-                "format_version": "1.0"
-            }
+                "format_version": "1.0",
+            },
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get plot data: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get plot data: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get plot data: {str(e)}")

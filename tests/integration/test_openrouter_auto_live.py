@@ -3,13 +3,16 @@
 Live test for openrouter/auto endpoint
 Sends a real test message to verify the endpoint is accessible
 """
+
 import os
 import sys
+
 import pytest
 
+
 @pytest.mark.skipif(
-    not os.environ.get('OPENROUTER_API_KEY'),
-    reason="OPENROUTER_API_KEY not set - set environment variable to run live API test"
+    not os.environ.get("OPENROUTER_API_KEY"),
+    reason="OPENROUTER_API_KEY not set - set environment variable to run live API test",
 )
 def test_openrouter_auto():
     """Send a test message to openrouter/auto"""
@@ -18,12 +21,13 @@ def test_openrouter_auto():
     print("=" * 80)
 
     # Get API key (guaranteed to exist due to skipif)
-    api_key = os.environ.get('OPENROUTER_API_KEY')
+    api_key = os.environ.get("OPENROUTER_API_KEY")
 
     print(f"\n✅ OPENROUTER_API_KEY is configured (length: {len(api_key)})")
 
     # Try to import required modules
     from src.services.openrouter_client import make_openrouter_request_openai
+
     print("✅ Successfully imported OpenRouter client")
 
     # Prepare test message
@@ -37,16 +41,13 @@ def test_openrouter_auto():
 
     # Make the request
     response = make_openrouter_request_openai(
-        messages=messages,
-        model="openrouter/auto",
-        max_tokens=50,
-        temperature=0.7
+        messages=messages, model="openrouter/auto", max_tokens=50, temperature=0.7
     )
 
     # Assertions to validate the response
     assert response is not None, "Response should not be None"
-    assert hasattr(response, 'model'), "Response should have a model attribute"
-    assert hasattr(response, 'choices'), "Response should have choices"
+    assert hasattr(response, "model"), "Response should have a model attribute"
+    assert hasattr(response, "choices"), "Response should have choices"
     assert len(response.choices) > 0, "Response should have at least one choice"
     assert response.choices[0].message.content, "Response should have content"
 
@@ -65,13 +66,14 @@ def test_openrouter_auto():
     print("✅ OPENROUTER/AUTO IS WORKING CORRECTLY!")
     print("=" * 80)
 
+
 def test_code_only():
     """Test just the code paths without making API calls"""
     print("\n" + "=" * 80)
     print("CODE PATH VALIDATION (No API calls)")
     print("=" * 80)
 
-    from src.services.model_transformations import transform_model_id, detect_provider_from_model_id
+    from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
 
     # Test transformation
     result = transform_model_id("openrouter/auto", "openrouter")
@@ -93,9 +95,10 @@ def test_code_only():
     print("=" * 80)
     print("\nThe code is correct and will work when API key is configured.")
 
+
 if __name__ == "__main__":
     # Try live test first
-    has_api_key = bool(os.environ.get('OPENROUTER_API_KEY'))
+    has_api_key = bool(os.environ.get("OPENROUTER_API_KEY"))
 
     try:
         if has_api_key:
@@ -108,5 +111,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

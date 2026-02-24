@@ -2,10 +2,10 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_fireworks_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging
@@ -156,7 +156,9 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
     # Clean malformed model names (remove company prefix, parentheses, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = fireworks_model.get("owned_by")
-    base_description = fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
+    base_description = (
+        fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
+    )
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:
@@ -229,14 +231,15 @@ def normalize_fireworks_model(fireworks_model: dict) -> dict:
 
 def fetch_models_from_fireworks():
     """Fetch models from Fireworks API with step-by-step logging"""
-    from src.utils.step_logger import StepLogger
+    import time
+
     from src.utils.provider_error_logging import (
         ProviderErrorType,
         ProviderFetchContext,
         log_provider_fetch_error,
         log_provider_fetch_success,
     )
-    import time
+    from src.utils.step_logger import StepLogger
 
     start_time = time.time()
     step_logger = StepLogger("Fireworks Model Fetch", total_steps=4)
@@ -287,14 +290,18 @@ def fetch_models_from_fireworks():
         step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count)
 
         # Step 4: Cache the models
-        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+        step_logger.step(
+            4, "Caching models", cache_type="redis+local", model_count=len(normalized_models)
+        )
 
         cache_gateway_catalog("fireworks", normalized_models)
         step_logger.success(cached_count=len(normalized_models))
 
         # Complete with summary
         duration = time.time() - start_time
-        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+        step_logger.complete(
+            total_models=len(normalized_models), duration_seconds=f"{duration:.2f}"
+        )
 
         # Log success with provider_error_logging utility
         log_provider_fetch_success(
@@ -363,7 +370,10 @@ def fetch_models_from_fireworks():
         step_logger.failure(e)
 
         context = ProviderFetchContext(
-            provider_slug="fireworks", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+            provider_slug="fireworks",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.UNKNOWN,
         )
         log_provider_fetch_error("fireworks", e, context)
 

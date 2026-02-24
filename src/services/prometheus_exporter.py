@@ -197,15 +197,9 @@ class PrometheusExporter:
 
         models = metrics.get("models", {})
         for model, model_metrics in models.items():
-            lines.append(
-                f'model_requests_total{{model="{model}"}} {model_metrics["requests"]}'
-            )
-            lines.append(
-                f'model_errors_total{{model="{model}"}} {model_metrics["errors"]}'
-            )
-            lines.append(
-                f'model_error_rate{{model="{model}"}} {model_metrics["error_rate"]}'
-            )
+            lines.append(f'model_requests_total{{model="{model}"}} {model_metrics["requests"]}')
+            lines.append(f'model_errors_total{{model="{model}"}} {model_metrics["errors"]}')
+            lines.append(f'model_error_rate{{model="{model}"}} {model_metrics["error_rate"]}')
             lines.append(
                 f'model_latency_avg_seconds{{model="{model}"}} {model_metrics["avg_latency"]}'
             )

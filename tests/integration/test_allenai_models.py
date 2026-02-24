@@ -20,8 +20,8 @@ import pytest
 
 sys.path.insert(0, "src")
 
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -38,9 +38,7 @@ ALLENAI_MODELS = [
 ]
 
 # Skip if no API key
-pytestmark = pytest.mark.skipif(
-    not OPENROUTER_API_KEY, reason="OPENROUTER_API_KEY not set"
-)
+pytestmark = pytest.mark.skipif(not OPENROUTER_API_KEY, reason="OPENROUTER_API_KEY not set")
 
 
 def get_openrouter_client():
@@ -111,7 +109,9 @@ class TestAllenAIModelsDirectOpenRouter:
             # Should have some content
             assert len(content_collected) > 0, f"No content collected for {model}"
 
-            print(f"[OK] {model} streaming: {chunks_received} chunks, content: {content_collected[:100]}")
+            print(
+                f"[OK] {model} streaming: {chunks_received} chunks, content: {content_collected[:100]}"
+            )
 
         except Exception as e:
             pytest.fail(f"Model {model} streaming failed: {e}")

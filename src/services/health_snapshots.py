@@ -9,7 +9,7 @@ This is critical for meeting the < 2ms latency budget.
 
 import json
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.redis_config import get_redis_client
@@ -235,7 +235,9 @@ class HealthSnapshotService:
             if last_failure:
                 seconds_since_failure = (now - last_failure).total_seconds()
                 if seconds_since_failure < FAILURE_COOLDOWN_SECONDS:
-                    logger.debug(f"Model {model_id} in cooldown ({seconds_since_failure:.0f}s since failure)")
+                    logger.debug(
+                        f"Model {model_id} in cooldown ({seconds_since_failure:.0f}s since failure)"
+                    )
                     return False
 
         # Check staleness

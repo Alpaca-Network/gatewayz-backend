@@ -11,6 +11,7 @@ This test suite validates:
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     _anonymous_usage_cache,

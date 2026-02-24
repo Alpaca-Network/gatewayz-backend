@@ -21,7 +21,7 @@ Security Design:
 import hashlib
 import logging
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,7 @@ def _get_redis_client():
     """Get Redis client if available."""
     try:
         from src.config.redis_config import get_redis_client
+
         return get_redis_client()
     except Exception as e:
         logger.debug(f"Redis not available for anonymous rate limiting: {e}")
@@ -78,8 +79,7 @@ def _cleanup_memory_cache():
     today = _get_today_key()
     # Remove entries from previous days
     expired_keys = [
-        key for key, data in _anonymous_usage_cache.items()
-        if data.get("date") != today
+        key for key, data in _anonymous_usage_cache.items() if data.get("date") != today
     ]
     for key in expired_keys:
         del _anonymous_usage_cache[key]
@@ -173,7 +173,10 @@ def increment_anonymous_usage(ip_address: str) -> int:
 
     # Fallback to memory
     _cleanup_memory_cache()
-    if ip_hash not in _anonymous_usage_cache or _anonymous_usage_cache[ip_hash].get("date") != today:
+    if (
+        ip_hash not in _anonymous_usage_cache
+        or _anonymous_usage_cache[ip_hash].get("date") != today
+    ):
         _anonymous_usage_cache[ip_hash] = {"date": today, "count": 0}
 
     _anonymous_usage_cache[ip_hash]["count"] += 1
@@ -202,15 +205,10 @@ def check_anonymous_rate_limit(ip_address: str) -> dict[str, Any]:
             "allowed": False,
             "remaining": 0,
             "limit": ANONYMOUS_DAILY_LIMIT,
-            "reason": f"Anonymous daily limit exceeded ({ANONYMOUS_DAILY_LIMIT} requests/day). Please sign up for an account to continue."
+            "reason": f"Anonymous daily limit exceeded ({ANONYMOUS_DAILY_LIMIT} requests/day). Please sign up for an account to continue.",
         }
 
-    return {
-        "allowed": True,
-        "remaining": remaining,
-        "limit": ANONYMOUS_DAILY_LIMIT,
-        "reason": None
-    }
+    return {"allowed": True, "remaining": remaining, "limit": ANONYMOUS_DAILY_LIMIT, "reason": None}
 
 
 def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]:
@@ -242,7 +240,7 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
             "reason": f"Model '{model_id}' is not available for anonymous users. Anonymous access is limited to free models: {allowed_models_str}. Please sign up for an account to access this model.",
             "model_allowed": False,
             "rate_limit_allowed": True,  # Didn't check, but irrelevant
-            "remaining_requests": ANONYMOUS_DAILY_LIMIT
+            "remaining_requests": ANONYMOUS_DAILY_LIMIT,
         }
 
     # Check rate limit
@@ -253,7 +251,7 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
             "reason": rate_check["reason"],
             "model_allowed": True,
             "rate_limit_allowed": False,
-            "remaining_requests": 0
+            "remaining_requests": 0,
         }
 
     return {
@@ -261,7 +259,7 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
         "reason": None,
         "model_allowed": True,
         "rate_limit_allowed": True,
-        "remaining_requests": rate_check["remaining"]
+        "remaining_requests": rate_check["remaining"],
     }
 
 
@@ -286,11 +284,7 @@ def record_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]:
         f"model={model_id}, count={new_count}/{ANONYMOUS_DAILY_LIMIT}"
     )
 
-    return {
-        "count": new_count,
-        "remaining": remaining,
-        "limit": ANONYMOUS_DAILY_LIMIT
-    }
+    return {"count": new_count, "remaining": remaining, "limit": ANONYMOUS_DAILY_LIMIT}
 
 
 def get_anonymous_stats() -> dict[str, Any]:
@@ -311,21 +305,18 @@ def get_anonymous_stats() -> dict[str, Any]:
             return {
                 "unique_ips_today": len(keys),
                 "total_requests_today": total_requests,
-                "storage": "redis"
+                "storage": "redis",
             }
         except Exception as e:
             logger.warning(f"Error getting Redis stats: {e}")
 
     # Memory fallback stats
     today = _get_today_key()
-    today_entries = {
-        k: v for k, v in _anonymous_usage_cache.items()
-        if v.get("date") == today
-    }
+    today_entries = {k: v for k, v in _anonymous_usage_cache.items() if v.get("date") == today}
     total = sum(v.get("count", 0) for v in today_entries.values())
 
     return {
         "unique_ips_today": len(today_entries),
         "total_requests_today": total,
-        "storage": "memory"
+        "storage": "memory",
     }

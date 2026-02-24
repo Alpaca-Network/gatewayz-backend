@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,9 @@ async def validate_model_availability(
         cached = _validation_cache[cache_key]
         cache_age = datetime.now(UTC) - cached["checked_at"]
         if cache_age < VALIDATION_CACHE_DURATION:
-            logger.debug(f"Using cached validation for {cache_key}: available={cached['available']}")
+            logger.debug(
+                f"Using cached validation for {cache_key}: available={cached['available']}"
+            )
             return cached
 
     # Perform validation based on provider
@@ -69,7 +71,9 @@ async def validate_model_availability(
             result = await _validate_openrouter_model(model_id)
         else:
             # For providers we don't have validation for, assume available
-            logger.warning(f"No validation implemented for provider '{provider}', assuming available")
+            logger.warning(
+                f"No validation implemented for provider '{provider}', assuming available"
+            )
             result["available"] = True
 
         # Cache the result
@@ -158,9 +162,9 @@ async def _validate_huggingface_model(model_id: str) -> dict[str, Any]:
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 f"https://huggingface.co/api/models/{clean_model_id}",
-                headers={"Authorization": f"Bearer {Config.HUG_API_KEY}"}
-                if Config.HUG_API_KEY
-                else {},
+                headers=(
+                    {"Authorization": f"Bearer {Config.HUG_API_KEY}"} if Config.HUG_API_KEY else {}
+                ),
                 timeout=10.0,
             )
 
@@ -385,9 +389,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
         }
 
 
-async def validate_models_batch(
-    models: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
+async def validate_models_batch(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Validate a batch of models and filter out unavailable ones.
 

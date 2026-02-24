@@ -15,9 +15,7 @@ from fastapi.testclient import TestClient
 class TestStreamingE2E:
     """E2E tests for streaming functionality."""
 
-    def test_streaming_chat_completions(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_streaming_chat_completions(self, client: TestClient, auth_headers: dict):
         """Test streaming on chat completions endpoint."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -38,9 +36,7 @@ class TestStreamingE2E:
             assert "data:" in response.text
             assert "[DONE]" in response.text
 
-    def test_streaming_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_streaming_messages(self, client: TestClient, auth_headers: dict):
         """Test streaming on messages endpoint."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -61,9 +57,7 @@ class TestStreamingE2E:
             assert "text/event-stream" in response.headers.get("content-type", "")
             assert "data:" in response.text
 
-    def test_streaming_responses(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_streaming_responses(self, client: TestClient, auth_headers: dict):
         """Test streaming on responses endpoint."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -83,9 +77,7 @@ class TestStreamingE2E:
             assert "text/event-stream" in response.headers.get("content-type", "")
             assert "data:" in response.text
 
-    def test_streaming_with_custom_parameters(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_streaming_with_custom_parameters(self, client: TestClient, auth_headers: dict):
         """Test streaming with custom temperature and tokens."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -106,9 +98,7 @@ class TestStreamingE2E:
         if response.status_code == 200:
             assert "[DONE]" in response.text
 
-    def test_non_streaming_chat_completions(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_non_streaming_chat_completions(self, client: TestClient, auth_headers: dict):
         """Test non-streaming chat completions."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -129,9 +119,7 @@ class TestStreamingE2E:
             assert "choices" in data
             assert data["choices"][0]["message"]["content"]
 
-    def test_non_streaming_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_non_streaming_messages(self, client: TestClient, auth_headers: dict):
         """Test non-streaming messages endpoint."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -156,9 +144,7 @@ class TestStreamingE2E:
 class TestProviderParameterE2E:
     """E2E tests for provider parameter across endpoints."""
 
-    def test_provider_openrouter_chat(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_openrouter_chat(self, client: TestClient, auth_headers: dict):
         """Test explicit OpenRouter provider on chat endpoint."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -175,9 +161,7 @@ class TestProviderParameterE2E:
         # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_featherless_chat(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_featherless_chat(self, client: TestClient, auth_headers: dict):
         """Test explicit Featherless provider on chat endpoint."""
         payload = {
             "model": "meta-llama/llama-2-70b-chat",
@@ -193,9 +177,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_fireworks_chat(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_fireworks_chat(self, client: TestClient, auth_headers: dict):
         """Test explicit Fireworks provider on chat endpoint."""
         payload = {
             "model": "deepseek-ai/deepseek-v3",
@@ -211,9 +193,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_together_chat(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_together_chat(self, client: TestClient, auth_headers: dict):
         """Test explicit Together provider on chat endpoint."""
         payload = {
             "model": "meta-llama/llama-2-70b-chat-hf",
@@ -229,9 +209,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_huggingface_chat(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_huggingface_chat(self, client: TestClient, auth_headers: dict):
         """Test explicit HuggingFace provider on chat endpoint."""
         payload = {
             "model": "meta-llama/Llama-2-7b-chat-hf",
@@ -247,9 +225,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_openrouter_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_openrouter_messages(self, client: TestClient, auth_headers: dict):
         """Test explicit OpenRouter provider on messages endpoint."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -267,9 +243,7 @@ class TestProviderParameterE2E:
         # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_openrouter_responses(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_openrouter_responses(self, client: TestClient, auth_headers: dict):
         """Test explicit OpenRouter provider on responses endpoint."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -286,9 +260,7 @@ class TestProviderParameterE2E:
         # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_deepinfra_images(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_deepinfra_images(self, client: TestClient, auth_headers: dict):
         """Test explicit DeepInfra provider on images endpoint."""
         payload = {
             "prompt": "A beautiful sunset",
@@ -305,9 +277,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_default_fallback(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_default_fallback(self, client: TestClient, auth_headers: dict):
         """Test default provider fallback when not specified."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -324,9 +294,7 @@ class TestProviderParameterE2E:
         # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_auto_detection_from_model_id(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_auto_detection_from_model_id(self, client: TestClient, auth_headers: dict):
         """Test provider auto-detection from model ID."""
         payload = {
             "model": "openai/gpt-4",  # Explicit OpenAI prefix
@@ -343,9 +311,7 @@ class TestProviderParameterE2E:
         # Should auto-detect and route correctly
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_alias_hug_to_huggingface(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_alias_hug_to_huggingface(self, client: TestClient, auth_headers: dict):
         """Test provider alias normalization (hug -> huggingface)."""
         payload = {
             "model": "meta-llama/Llama-2-7b-chat-hf",
@@ -361,9 +327,7 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_with_streaming(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_provider_with_streaming(self, client: TestClient, auth_headers: dict):
         """Test provider parameter works with streaming."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -383,9 +347,7 @@ class TestProviderParameterE2E:
         if response.status_code == 200:
             assert "[DONE]" in response.text
 
-    def test_multiple_providers_in_sequence(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_multiple_providers_in_sequence(self, client: TestClient, auth_headers: dict):
         """Test using different providers in sequence."""
         providers = ["openrouter", "featherless", "fireworks"]
         model_for_provider = {

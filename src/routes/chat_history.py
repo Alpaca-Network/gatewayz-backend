@@ -322,14 +322,13 @@ async def save_message(
 # OPTIMIZATION: Batch message save endpoint
 class BatchMessageRequest(BaseModel):
     """Request model for batch message save"""
+
     messages: list[SaveChatMessageRequest]
 
 
 @router.post("/sessions/{session_id}/messages/batch")
 async def save_messages_batch(
-    session_id: int,
-    request: BatchMessageRequest,
-    api_key: str = Depends(get_api_key)
+    session_id: int, request: BatchMessageRequest, api_key: str = Depends(get_api_key)
 ):
     """
     OPTIMIZATION: Save multiple messages in a single request
@@ -359,18 +358,18 @@ async def save_messages_batch(
                     tokens=msg.tokens,
                     user_id=user["id"],
                 )
-                saved_messages.append({
-                    "success": True,
-                    "message_id": message["id"],
-                    "data": message
-                })
+                saved_messages.append(
+                    {"success": True, "message_id": message["id"], "data": message}
+                )
             except Exception as msg_error:
                 logger.error(f"Failed to save message in batch: {msg_error}")
-                failed_messages.append({
-                    "success": False,
-                    "error": str(msg_error),
-                    "content_preview": msg.content[:50] if msg.content else ""
-                })
+                failed_messages.append(
+                    {
+                        "success": False,
+                        "error": str(msg_error),
+                        "content_preview": msg.content[:50] if msg.content else "",
+                    }
+                )
 
         logger.info(
             f"Batch saved {len(saved_messages)}/{len(request.messages)} messages to session {session_id}"
@@ -383,9 +382,9 @@ async def save_messages_batch(
                 "failed": failed_messages,
                 "total": len(request.messages),
                 "success_count": len(saved_messages),
-                "failure_count": len(failed_messages)
+                "failure_count": len(failed_messages),
             },
-            "message": f"Saved {len(saved_messages)}/{len(request.messages)} messages successfully"
+            "message": f"Saved {len(saved_messages)}/{len(request.messages)} messages successfully",
         }
 
     except HTTPException:
@@ -393,8 +392,7 @@ async def save_messages_batch(
     except Exception as e:
         logger.error(f"Failed to batch save messages: {e}")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to batch save messages: {str(e)}"
+            status_code=500, detail=f"Failed to batch save messages: {str(e)}"
         ) from e
 
 
@@ -507,9 +505,7 @@ async def submit_feedback(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to submit feedback: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to submit feedback: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to submit feedback: {str(e)}") from e
 
 
 @router.get("/feedback", response_model=MessageFeedbackListResponse)
@@ -556,9 +552,7 @@ async def get_my_feedback(
         raise
     except Exception as e:
         logger.error(f"Failed to get feedback: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get feedback: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to get feedback: {str(e)}") from e
 
 
 @router.get("/feedback/stats", response_model=FeedbackStatsResponse)
@@ -620,9 +614,7 @@ async def get_session_feedback(
 
         feedback_list = get_feedback_by_session(session_id, user["id"])
 
-        logger.info(
-            f"Retrieved {len(feedback_list)} feedback records for session {session_id}"
-        )
+        logger.info(f"Retrieved {len(feedback_list)} feedback records for session {session_id}")
 
         return MessageFeedbackListResponse(
             success=True,
@@ -683,9 +675,7 @@ async def update_my_feedback(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Failed to update feedback: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to update feedback: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to update feedback: {str(e)}") from e
 
 
 @router.delete("/feedback/{feedback_id}")
@@ -714,6 +704,4 @@ async def delete_my_feedback(
         raise
     except Exception as e:
         logger.error(f"Failed to delete feedback: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to delete feedback: {str(e)}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Failed to delete feedback: {str(e)}") from e

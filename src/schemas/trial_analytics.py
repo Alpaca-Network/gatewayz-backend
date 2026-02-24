@@ -1,4 +1,5 @@
 """Pydantic schemas for trial analytics endpoints"""
+
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -7,8 +8,10 @@ from pydantic import BaseModel, Field
 # Trial User Schemas
 # ===========================
 
+
 class TrialUser(BaseModel):
     """Individual trial user data"""
+
     user_id: int
     email: str
     email_domain: str
@@ -39,6 +42,7 @@ class TrialUser(BaseModel):
 
 class TrialUsersPagination(BaseModel):
     """Pagination metadata for trial users"""
+
     total: int
     limit: int
     offset: int
@@ -47,6 +51,7 @@ class TrialUsersPagination(BaseModel):
 
 class TrialUsersResponse(BaseModel):
     """Response for GET /admin/trial/users"""
+
     success: bool = True
     users: list[TrialUser]
     pagination: TrialUsersPagination
@@ -56,8 +61,10 @@ class TrialUsersResponse(BaseModel):
 # Domain Analysis Schemas
 # ===========================
 
+
 class DomainAnalysis(BaseModel):
     """Analysis data for a specific email domain"""
+
     domain: str
     total_users: int
     active_trials: int
@@ -75,6 +82,7 @@ class DomainAnalysis(BaseModel):
 
 class DomainAnalysisResponse(BaseModel):
     """Response for GET /admin/trial/domain-analysis"""
+
     success: bool = True
     domains: list[DomainAnalysis]
     suspicious_domains: list[str]
@@ -84,8 +92,10 @@ class DomainAnalysisResponse(BaseModel):
 # Conversion Funnel Schemas
 # ===========================
 
+
 class ConversionBreakdown(BaseModel):
     """Breakdown of when users converted"""
+
     converted_before_10_requests: int
     converted_between_10_50_requests: int
     converted_between_50_100_requests: int
@@ -94,6 +104,7 @@ class ConversionBreakdown(BaseModel):
 
 class ConversionFunnelData(BaseModel):
     """Conversion funnel statistics"""
+
     total_trials_started: int
     completed_onboarding: int
     made_first_request: int
@@ -110,6 +121,7 @@ class ConversionFunnelData(BaseModel):
 
 class ConversionFunnelResponse(BaseModel):
     """Response for GET /admin/trial/conversion-funnel"""
+
     success: bool = True
     funnel: ConversionFunnelData
 
@@ -118,8 +130,10 @@ class ConversionFunnelResponse(BaseModel):
 # IP Analysis Schemas
 # ===========================
 
+
 class IPAnalysis(BaseModel):
     """Analysis data for a specific IP address"""
+
     ip_address: str
     total_accounts: int
     active_trials: int
@@ -132,6 +146,7 @@ class IPAnalysis(BaseModel):
 
 class IPAnalysisResponse(BaseModel):
     """Response for GET /admin/trial/ip-analysis"""
+
     success: bool = True
     ips: list[IPAnalysis]
 
@@ -140,8 +155,10 @@ class IPAnalysisResponse(BaseModel):
 # Save Conversion Metrics Schemas
 # ===========================
 
+
 class SaveConversionMetricsRequest(BaseModel):
     """Request body for POST /admin/trial/save-conversion-metrics"""
+
     user_id: int = Field(..., description="User ID who converted")
     api_key_id: int = Field(..., description="API key ID that converted")
     requests_at_conversion: int = Field(..., ge=0, description="Number of requests at conversion")
@@ -151,12 +168,13 @@ class SaveConversionMetricsRequest(BaseModel):
     converted_plan: str = Field(..., description="Plan name user converted to")
     conversion_trigger: str = Field(
         default="manual_upgrade",
-        description="What triggered the conversion (manual_upgrade, auto_upgrade, etc)"
+        description="What triggered the conversion (manual_upgrade, auto_upgrade, etc)",
     )
 
 
 class SaveConversionMetricsResponse(BaseModel):
     """Response for POST /admin/trial/save-conversion-metrics"""
+
     success: bool = True
     message: str = "Conversion metrics saved successfully"
 
@@ -165,8 +183,10 @@ class SaveConversionMetricsResponse(BaseModel):
 # Cohort Analysis Schemas
 # ===========================
 
+
 class CohortData(BaseModel):
     """Data for a single cohort period"""
+
     cohort_label: str
     cohort_start_date: str
     cohort_end_date: str
@@ -180,12 +200,14 @@ class CohortData(BaseModel):
 
 class BestWorstCohort(BaseModel):
     """Best or worst performing cohort"""
+
     label: str
     conversion_rate: float
 
 
 class CohortSummary(BaseModel):
     """Summary statistics across all cohorts"""
+
     total_cohorts: int
     overall_conversion_rate: float
     best_cohort: BestWorstCohort
@@ -194,6 +216,7 @@ class CohortSummary(BaseModel):
 
 class CohortAnalysisResponse(BaseModel):
     """Response for GET /admin/trial/cohort-analysis"""
+
     success: bool = True
     cohorts: list[CohortData]
     summary: CohortSummary

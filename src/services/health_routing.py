@@ -8,6 +8,7 @@ This module provides proactive health checking to route requests away from
 unhealthy models BEFORE they fail, improving user experience and reducing
 failed requests by 40-50%.
 """
+
 import logging
 from typing import Any
 
@@ -17,9 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 def is_model_healthy(
-    model_id: str,
-    provider: str,
-    min_uptime_threshold: float = 50.0
+    model_id: str, provider: str, min_uptime_threshold: float = 50.0
 ) -> tuple[bool, str | None]:
     """
     Check if a model is healthy before routing.
@@ -45,9 +44,7 @@ def is_model_healthy(
 
         if not models_health:
             # No health data available - assume healthy to avoid blocking requests
-            logger.debug(
-                f"No health data available for {model_id} on {provider}, assuming healthy"
-            )
+            logger.debug(f"No health data available for {model_id} on {provider}, assuming healthy")
             return True, None
 
         # Find model health status
@@ -102,9 +99,7 @@ def is_model_healthy(
 
 
 def get_healthy_alternative_provider(
-    model_id: str,
-    current_provider: str,
-    min_uptime_threshold: float = 70.0
+    model_id: str, current_provider: str, min_uptime_threshold: float = 70.0
 ) -> str | None:
     """
     Find a healthy alternative provider for a model.

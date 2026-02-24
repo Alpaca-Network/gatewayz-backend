@@ -25,8 +25,9 @@ class TestGetAllModelsImport:
 
     def test_get_all_models_returns_models_including_simplismart(self):
         """Verify get_all_models returns models including SimpliSmart."""
-        from src.services.models import get_all_models
         from unittest.mock import patch
+
+        from src.services.models import get_all_models
 
         # Mock the cache to make test deterministic
         mock_models = [
@@ -81,8 +82,9 @@ class TestGetAllModelsImport:
 
     def test_all_provider_gateways_included(self):
         """Verify all key providers are supported by get_all_models_parallel."""
+        from unittest.mock import MagicMock, patch
+
         from src.services.models import get_all_models_parallel, get_cached_models
-        from unittest.mock import patch, MagicMock
 
         # Test that the function attempts to fetch models from key providers
         # by mocking get_cached_models and verifying it's called with expected gateways
@@ -107,15 +109,20 @@ class TestGetAllModelsImport:
                 for provider in expected_providers:
                     # Note: 'huggingface' is referenced as 'hug' in the code
                     if provider == "huggingface":
-                        assert "hug" in called_gateways, "Provider 'hug' (huggingface) not found in gateway calls"
+                        assert (
+                            "hug" in called_gateways
+                        ), "Provider 'hug' (huggingface) not found in gateway calls"
                     else:
-                        assert provider in called_gateways, f"Provider {provider} not found in gateway calls"
+                        assert (
+                            provider in called_gateways
+                        ), f"Provider {provider} not found in gateway calls"
 
     def test_gateway_registry_consistency(self):
         """Verify all gateways from GATEWAY_REGISTRY are included in parallel fetch."""
-        from src.services.models import get_all_models_parallel
+        from unittest.mock import MagicMock, patch
+
         from src.routes.catalog import GATEWAY_REGISTRY
-        from unittest.mock import patch, MagicMock
+        from src.services.models import get_all_models_parallel
 
         mock_get_cached = MagicMock(return_value=[])
 
@@ -130,9 +137,8 @@ class TestGetAllModelsImport:
                 for gateway_id, config in GATEWAY_REGISTRY.items():
                     # Handle aliases (e.g., 'huggingface' -> 'hug')
                     aliases = config.get("aliases", [])
-                    gateway_found = (
-                        gateway_id in called_gateways
-                        or any(alias in called_gateways for alias in aliases)
+                    gateway_found = gateway_id in called_gateways or any(
+                        alias in called_gateways for alias in aliases
                     )
 
                     # Skip 'alpaca' as it doesn't have a fetch function yet
@@ -149,8 +155,9 @@ class TestGetAllModelsImport:
 
     def test_morpheus_gateway_included(self):
         """Verify morpheus gateway is included in parallel fetch."""
+        from unittest.mock import MagicMock, patch
+
         from src.services.models import get_all_models_parallel
-        from unittest.mock import patch, MagicMock
 
         mock_get_cached = MagicMock(return_value=[])
 
@@ -163,8 +170,9 @@ class TestGetAllModelsImport:
 
     def test_vercel_ai_gateway_included(self):
         """Verify vercel-ai-gateway is included in parallel fetch."""
+        from unittest.mock import MagicMock, patch
+
         from src.services.models import get_all_models_parallel
-        from unittest.mock import patch, MagicMock
 
         mock_get_cached = MagicMock(return_value=[])
 
@@ -173,12 +181,15 @@ class TestGetAllModelsImport:
                 get_all_models_parallel()
 
                 called_gateways = [call[0][0] for call in mock_get_cached.call_args_list]
-                assert "vercel-ai-gateway" in called_gateways, "vercel-ai-gateway missing from parallel fetch"
+                assert (
+                    "vercel-ai-gateway" in called_gateways
+                ), "vercel-ai-gateway missing from parallel fetch"
 
     def test_sybil_gateway_included(self):
         """Verify sybil gateway is included in parallel fetch."""
+        from unittest.mock import MagicMock, patch
+
         from src.services.models import get_all_models_parallel
-        from unittest.mock import patch, MagicMock
 
         mock_get_cached = MagicMock(return_value=[])
 
@@ -191,10 +202,12 @@ class TestGetAllModelsImport:
 
     def test_near_ai_fallback_models_are_correct(self):
         """Verify Near AI fallback models match the actual models available on the platform."""
+        from unittest.mock import MagicMock, patch
+
         import httpx
-        from unittest.mock import patch, MagicMock
-        from src.services.models import fetch_models_from_near
+
         from src.config import Config
+        from src.services.models import fetch_models_from_near
 
         # Expected models as of 2026-01 from https://cloud-api.near.ai/v1/model/list
         # Note: normalize_near_model() prefixes IDs with "near/"
@@ -231,10 +244,16 @@ class TestGetAllModelsImport:
                     assert "pricing" in model, f"Model {model['id']} missing pricing"
                     pricing = model["pricing"]
                     assert "prompt" in pricing, f"Model {model['id']} missing prompt pricing"
-                    assert "completion" in pricing, f"Model {model['id']} missing completion pricing"
+                    assert (
+                        "completion" in pricing
+                    ), f"Model {model['id']} missing completion pricing"
                     # Pricing values are strings that can be parsed to floats
-                    assert float(pricing["prompt"]) > 0, f"Model {model['id']} has zero prompt pricing"
-                    assert float(pricing["completion"]) > 0, f"Model {model['id']} has zero completion pricing"
+                    assert (
+                        float(pricing["prompt"]) > 0
+                    ), f"Model {model['id']} has zero prompt pricing"
+                    assert (
+                        float(pricing["completion"]) > 0
+                    ), f"Model {model['id']} has zero completion pricing"
 
     def test_get_fallback_models_from_db_function_exists(self):
         """Verify get_fallback_models_from_db function is available."""
@@ -245,7 +264,8 @@ class TestGetAllModelsImport:
 
     def test_get_fallback_models_from_db_handles_missing_provider(self):
         """Verify get_fallback_models_from_db returns None for unknown provider."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from src.services.models import get_fallback_models_from_db
 
         # Mock the database function to return empty list
@@ -256,6 +276,7 @@ class TestGetAllModelsImport:
     def test_get_fallback_models_from_db_converts_models_correctly(self):
         """Verify get_fallback_models_from_db converts database models to raw format."""
         from unittest.mock import patch
+
         from src.services.models import get_fallback_models_from_db
 
         # Mock database response
@@ -271,7 +292,9 @@ class TestGetAllModelsImport:
             }
         ]
 
-        with patch("src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models):
+        with patch(
+            "src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models
+        ):
             result = get_fallback_models_from_db("test-provider")
 
             assert result is not None
@@ -283,6 +306,7 @@ class TestGetAllModelsImport:
     def test_get_fallback_models_from_db_near_pricing_format(self):
         """Verify Near AI models get correct pricing format with amount and scale."""
         from unittest.mock import patch
+
         from src.services.models import get_fallback_models_from_db
 
         # Mock database response for Near AI
@@ -297,7 +321,9 @@ class TestGetAllModelsImport:
             }
         ]
 
-        with patch("src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models):
+        with patch(
+            "src.db.models_catalog_db.get_models_by_provider_slug", return_value=mock_db_models
+        ):
             result = get_fallback_models_from_db("near")
 
             assert result is not None

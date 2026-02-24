@@ -535,7 +535,10 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     if isinstance(properties, list):
                         # Properties is a list of {"property_id": "...", "value": "..."} dicts
                         for prop in properties:
-                            if isinstance(prop, dict) and prop.get("property_id") == "max_total_tokens":
+                            if (
+                                isinstance(prop, dict)
+                                and prop.get("property_id") == "max_total_tokens"
+                            ):
                                 try:
                                     context_length = int(prop.get("value", 8192))
                                 except (ValueError, TypeError):
@@ -570,15 +573,17 @@ async def fetch_models_from_cloudflare_api() -> list[dict[str, Any]]:
                     else:
                         task_name = "Text Generation"
 
-                    models.append({
-                        "id": model_id,
-                        "name": model.get("description", model_id.split("/")[-1]),
-                        "description": model.get("description", ""),
-                        "context_length": context_length,
-                        "provider": "cloudflare-workers-ai",
-                        "source_gateway": "cloudflare-workers-ai",
-                        "task": task_name,
-                    })
+                    models.append(
+                        {
+                            "id": model_id,
+                            "name": model.get("description", model_id.split("/")[-1]),
+                            "description": model.get("description", ""),
+                            "context_length": context_length,
+                            "provider": "cloudflare-workers-ai",
+                            "source_gateway": "cloudflare-workers-ai",
+                            "task": task_name,
+                        }
+                    )
 
                 # Check if there are more pages
                 if len(result) < per_page:

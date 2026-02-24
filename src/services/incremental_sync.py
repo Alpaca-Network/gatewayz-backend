@@ -75,8 +75,7 @@ def compute_model_hash(model_data: dict[str, Any]) -> str:
             "vision": model_data.get("supports_vision", False),
         },
         "metadata": {
-            k: v for k, v in (model_data.get("metadata") or {}).items()
-            if k not in ("synced_at",)
+            k: v for k, v in (model_data.get("metadata") or {}).items() if k not in ("synced_at",)
         },
         "description": model_data.get("description"),
         "top_provider": model_data.get("top_provider"),
@@ -135,9 +134,7 @@ def get_existing_model_hashes(provider_id: int) -> dict[str, str]:
         return {}
 
 
-def sync_provider_incremental(
-    provider_slug: str, dry_run: bool = False
-) -> dict[str, Any]:
+def sync_provider_incremental(provider_slug: str, dry_run: bool = False) -> dict[str, Any]:
     """
     Sync a single provider with incremental change detection.
 
@@ -389,9 +386,7 @@ def sync_all_providers_incremental(
             providers_to_sync = [p for p in all_providers if p not in skip_set]
 
             if skip_set:
-                logger.info(
-                    f"Skipping {len(skip_set)} providers: {', '.join(sorted(skip_set))}"
-                )
+                logger.info(f"Skipping {len(skip_set)} providers: {', '.join(sorted(skip_set))}")
 
         # Separate large providers (sync serially) from small/medium (sync in parallel)
         small_providers = [p for p in providers_to_sync if p not in LARGE_PROVIDERS]
@@ -428,10 +423,7 @@ def sync_all_providers_incremental(
                 if result.get("models_changed", 0) > 0:
                     providers_with_changes.append(provider_slug)
             else:
-                errors.append({
-                    "provider": provider_slug,
-                    "error": result.get("error")
-                })
+                errors.append({"provider": provider_slug, "error": result.get("error")})
 
         # Phase 1: Small/medium providers in parallel
         if small_providers and max_concurrent > 1:
@@ -439,13 +431,9 @@ def sync_all_providers_incremental(
                 f"\n--- Phase 1: Syncing {len(small_providers)} providers "
                 f"(max {max_concurrent} concurrent) ---"
             )
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_concurrent
-            ) as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent) as executor:
                 future_to_slug = {
-                    executor.submit(
-                        sync_provider_incremental, slug, dry_run
-                    ): slug
+                    executor.submit(sync_provider_incremental, slug, dry_run): slug
                     for slug in small_providers
                 }
                 for future in concurrent.futures.as_completed(future_to_slug):
@@ -472,9 +460,7 @@ def sync_all_providers_incremental(
 
         # Phase 2: Large providers serially with memory management
         if large_to_sync:
-            logger.info(
-                f"\n--- Phase 2: Syncing {len(large_to_sync)} large providers (serial) ---"
-            )
+            logger.info(f"\n--- Phase 2: Syncing {len(large_to_sync)} large providers (serial) ---")
             for slug in large_to_sync:
                 gc.collect()
                 logger.info(f"\nSyncing large provider: {slug.upper()}")
@@ -490,9 +476,9 @@ def sync_all_providers_incremental(
             )
             try:
                 from src.services.model_catalog_cache import (
+                    invalidate_catalog_stats,
                     invalidate_full_catalog,
                     invalidate_unique_models,
-                    invalidate_catalog_stats,
                 )
 
                 invalidate_full_catalog()

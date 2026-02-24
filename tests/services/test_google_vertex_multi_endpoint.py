@@ -1,5 +1,7 @@
 """Tests for Google Vertex AI multi-endpoint fallback"""
-from unittest.mock import Mock, patch, MagicMock
+
+from unittest.mock import MagicMock, Mock, patch
+
 import httpx
 
 from src.services.google_vertex_client import _fetch_models_from_vertex_api
@@ -8,11 +10,13 @@ from src.services.google_vertex_client import _fetch_models_from_vertex_api
 class TestGoogleVertexMultiEndpoint:
     """Test Google Vertex AI model fetching with multi-endpoint fallback"""
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_first_endpoint_success(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_first_endpoint_success(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
+    ):
         """Test successful fetch from first endpoint (regional with project)"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-east4"
@@ -25,7 +29,7 @@ class TestGoogleVertexMultiEndpoint:
         mock_response.json.return_value = {
             "publisherModels": [
                 {"name": "publishers/google/models/gemini-2.0-flash"},
-                {"name": "publishers/google/models/gemini-3-pro-preview"}
+                {"name": "publishers/google/models/gemini-3-pro-preview"},
             ]
         }
 
@@ -44,11 +48,13 @@ class TestGoogleVertexMultiEndpoint:
         # Verify only first endpoint was tried
         mock_client_instance.__enter__.return_value.get.assert_called_once()
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_fallback_to_second_endpoint(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_fallback_to_second_endpoint(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
+    ):
         """Test fallback to second endpoint when first fails with 404"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-east4"
@@ -63,15 +69,13 @@ class TestGoogleVertexMultiEndpoint:
         mock_success_response = Mock()
         mock_success_response.status_code = 200
         mock_success_response.json.return_value = {
-            "publisherModels": [
-                {"name": "publishers/google/models/gemini-2.0-flash"}
-            ]
+            "publisherModels": [{"name": "publishers/google/models/gemini-2.0-flash"}]
         }
 
         mock_client_instance = MagicMock()
         mock_client_instance.__enter__.return_value.get.side_effect = [
             mock_404_response,  # First endpoint fails
-            mock_success_response  # Second endpoint succeeds
+            mock_success_response,  # Second endpoint succeeds
         ]
         mock_httpx_client.return_value = mock_client_instance
 
@@ -86,11 +90,13 @@ class TestGoogleVertexMultiEndpoint:
         # Verify both endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 2
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_fallback_to_global_endpoint(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_fallback_to_global_endpoint(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
+    ):
         """Test fallback to global endpoint when regional endpoints fail"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-east4"
@@ -105,16 +111,14 @@ class TestGoogleVertexMultiEndpoint:
         mock_success_response = Mock()
         mock_success_response.status_code = 200
         mock_success_response.json.return_value = {
-            "publisherModels": [
-                {"name": "publishers/google/models/gemini-2.0-flash"}
-            ]
+            "publisherModels": [{"name": "publishers/google/models/gemini-2.0-flash"}]
         }
 
         mock_client_instance = MagicMock()
         mock_client_instance.__enter__.return_value.get.side_effect = [
             mock_error_response,  # First endpoint fails
             mock_error_response,  # Second endpoint fails
-            mock_success_response  # Global endpoint succeeds
+            mock_success_response,  # Global endpoint succeeds
         ]
         mock_httpx_client.return_value = mock_client_instance
 
@@ -128,11 +132,13 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all three endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_all_endpoints_fail_returns_none(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env, caplog):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_all_endpoints_fail_returns_none(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env, caplog
+    ):
         """Test that None is returned when all endpoints fail"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-east4"
@@ -164,11 +170,13 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_exception_handling_falls_through(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_exception_handling_falls_through(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
+    ):
         """Test that exceptions during fetch are handled and fallback occurs"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-east4"
@@ -180,7 +188,7 @@ class TestGoogleVertexMultiEndpoint:
         mock_client_instance.__enter__.return_value.get.side_effect = [
             httpx.TimeoutException("Timeout"),
             httpx.ConnectError("Connection failed"),
-            Exception("Unknown error")
+            Exception("Unknown error"),
         ]
         mock_httpx_client.return_value = mock_client_instance
 
@@ -193,11 +201,13 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all endpoints were attempted despite exceptions
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch('src.services.google_vertex_client._prepare_vertex_environment')
-    @patch('src.services.google_vertex_client._get_google_vertex_access_token')
-    @patch('src.services.google_vertex_client.Config')
-    @patch('httpx.Client')
-    def test_correct_endpoint_urls(self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env):
+    @patch("src.services.google_vertex_client._prepare_vertex_environment")
+    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
+    @patch("src.services.google_vertex_client.Config")
+    @patch("httpx.Client")
+    def test_correct_endpoint_urls(
+        self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
+    ):
         """Test that the correct endpoint URLs are constructed"""
         # Setup mocks
         mock_config.GOOGLE_VERTEX_LOCATION = "us-central1"

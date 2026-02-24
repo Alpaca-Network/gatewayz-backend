@@ -306,6 +306,7 @@ def get_preferred_providers_for_priority(
     Returns:
         Ordered list of provider names
     """
+
     # Sort providers by their latency tier
     def get_tier(provider: str) -> int:
         return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
@@ -415,10 +416,7 @@ def get_fastest_providers() -> list[str]:
     Returns:
         List of provider names sorted by speed
     """
-    sorted_providers = sorted(
-        PROVIDER_LATENCY_TIERS.items(),
-        key=lambda x: x[1]
-    )
+    sorted_providers = sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])
     return [provider for provider, _ in sorted_providers]
 
 

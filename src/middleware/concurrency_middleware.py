@@ -39,11 +39,13 @@ concurrency_rejected = Counter(
 )
 
 # Paths exempt from concurrency control (monitoring must always work)
-CONCURRENCY_EXEMPT_PATHS = frozenset({
-    "/health",
-    "/metrics",
-    "/ready",
-})
+CONCURRENCY_EXEMPT_PATHS = frozenset(
+    {
+        "/health",
+        "/metrics",
+        "/ready",
+    }
+)
 
 
 class ConcurrencyMiddleware:
@@ -150,8 +152,7 @@ class ConcurrencyMiddleware:
             wait_time = time.monotonic() - wait_start
             concurrency_rejected.labels(reason="queue_timeout").inc()
             logger.warning(
-                f"Concurrency gate REJECT (queue timeout {wait_time:.1f}s): "
-                f"{method} {path}"
+                f"Concurrency gate REJECT (queue timeout {wait_time:.1f}s): " f"{method} {path}"
             )
             await self._send_503(scope, send, "Server busy, please retry")
             return
@@ -174,24 +175,30 @@ class ConcurrencyMiddleware:
     @staticmethod
     async def _send_503(scope: Scope, send: Send, message: str) -> None:
         """Send a 503 Service Unavailable response."""
-        body = json.dumps({
-            "error": {
-                "message": message,
-                "type": "server_overload",
-                "code": 503,
+        body = json.dumps(
+            {
+                "error": {
+                    "message": message,
+                    "type": "server_overload",
+                    "code": 503,
+                }
             }
-        }).encode()
+        ).encode()
 
-        await send({
-            "type": "http.response.start",
-            "status": 503,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"content-length", str(len(body)).encode()),
-                (b"retry-after", b"5"),
-            ],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": body,
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 503,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode()),
+                    (b"retry-after", b"5"),
+                ],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body,
+            }
+        )

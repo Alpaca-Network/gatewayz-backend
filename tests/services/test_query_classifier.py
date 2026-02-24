@@ -12,20 +12,20 @@ Tests cover:
 import pytest
 
 from src.services.query_classifier import (
-    ClassificationResult,
-    QueryIntent,
-    classify_query,
-    should_auto_search,
-    _normalize_text,
-    _contains_keywords,
-    _matches_patterns,
-    _is_code_query,
-    _extract_user_query,
+    CODE_PATTERNS,
     CURRENT_INFO_KEYWORDS,
+    FACTUAL_QUESTION_PATTERNS,
     LOCATION_KEYWORDS,
     TRAVEL_DESTINATIONS,
-    FACTUAL_QUESTION_PATTERNS,
-    CODE_PATTERNS,
+    ClassificationResult,
+    QueryIntent,
+    _contains_keywords,
+    _extract_user_query,
+    _is_code_query,
+    _matches_patterns,
+    _normalize_text,
+    classify_query,
+    should_auto_search,
 )
 
 
@@ -57,8 +57,7 @@ class TestContainsKeywords:
     def test_multiple_keywords_found(self):
         """Test detection of multiple keywords."""
         found, keywords = _contains_keywords(
-            "What is the latest news about current events?",
-            {"latest", "current", "news"}
+            "What is the latest news about current events?", {"latest", "current", "news"}
         )
         assert found is True
         assert len(keywords) == 3
@@ -81,41 +80,30 @@ class TestMatchesPatterns:
     def test_factual_question_pattern(self):
         """Test factual question pattern detection."""
         matches, pattern = _matches_patterns(
-            "How easy is it to get wifi in Costa Rica?",
-            FACTUAL_QUESTION_PATTERNS
+            "How easy is it to get wifi in Costa Rica?", FACTUAL_QUESTION_PATTERNS
         )
         assert matches is True
 
     def test_what_is_the_best_pattern(self):
         """Test 'what is the best' pattern."""
         matches, pattern = _matches_patterns(
-            "What is the best coworking space in Lisbon?",
-            FACTUAL_QUESTION_PATTERNS
+            "What is the best coworking space in Lisbon?", FACTUAL_QUESTION_PATTERNS
         )
         assert matches is True
 
     def test_code_pattern_function(self):
         """Test code pattern detection for functions."""
-        matches, pattern = _matches_patterns(
-            "def hello_world():",
-            CODE_PATTERNS
-        )
+        matches, pattern = _matches_patterns("def hello_world():", CODE_PATTERNS)
         assert matches is True
 
     def test_code_pattern_import(self):
         """Test code pattern detection for imports."""
-        matches, pattern = _matches_patterns(
-            "import numpy as np",
-            CODE_PATTERNS
-        )
+        matches, pattern = _matches_patterns("import numpy as np", CODE_PATTERNS)
         assert matches is True
 
     def test_no_pattern_match(self):
         """Test when no patterns match."""
-        matches, pattern = _matches_patterns(
-            "Hello, nice to meet you!",
-            FACTUAL_QUESTION_PATTERNS
-        )
+        matches, pattern = _matches_patterns("Hello, nice to meet you!", FACTUAL_QUESTION_PATTERNS)
         assert matches is False
 
 
@@ -169,7 +157,7 @@ class TestExtractUserQuery:
                 "content": [
                     {"type": "text", "text": "What is in this image?"},
                     {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
-                ]
+                ],
             }
         ]
         assert _extract_user_query(messages) == "What is in this image?"
@@ -190,7 +178,10 @@ class TestClassifyQuery:
     def test_wifi_travel_query_el_salvador(self):
         """Test classification of wifi/travel query for El Salvador."""
         messages = [
-            {"role": "user", "content": "How easy is it to get wifi in El Salvador for remote work and video calls?"}
+            {
+                "role": "user",
+                "content": "How easy is it to get wifi in El Salvador for remote work and video calls?",
+            }
         ]
         result = classify_query(messages)
 
@@ -202,7 +193,10 @@ class TestClassifyQuery:
     def test_wifi_travel_query_thailand(self):
         """Test classification of wifi/travel query for Thailand."""
         messages = [
-            {"role": "user", "content": "Is the internet connection reliable in Bali for video conferencing?"}
+            {
+                "role": "user",
+                "content": "Is the internet connection reliable in Bali for video conferencing?",
+            }
         ]
         result = classify_query(messages)
 
@@ -233,9 +227,7 @@ class TestClassifyQuery:
 
     def test_price_query(self):
         """Test classification of price query."""
-        messages = [
-            {"role": "user", "content": "What is the current Bitcoin price in USD?"}
-        ]
+        messages = [{"role": "user", "content": "What is the current Bitcoin price in USD?"}]
         result = classify_query(messages)
 
         assert result.should_search is True
@@ -243,9 +235,7 @@ class TestClassifyQuery:
 
     def test_weather_query(self):
         """Test classification of weather query."""
-        messages = [
-            {"role": "user", "content": "What's the weather forecast for Tokyo this week?"}
-        ]
+        messages = [{"role": "user", "content": "What's the weather forecast for Tokyo this week?"}]
         result = classify_query(messages)
 
         assert result.should_search is True
@@ -253,7 +243,10 @@ class TestClassifyQuery:
     def test_code_query_no_search(self):
         """Test that code queries don't trigger search."""
         messages = [
-            {"role": "user", "content": "Can you help me with this code?\n```python\ndef hello():\n    print('world')\n```"}
+            {
+                "role": "user",
+                "content": "Can you help me with this code?\n```python\ndef hello():\n    print('world')\n```",
+            }
         ]
         result = classify_query(messages)
 
@@ -272,9 +265,7 @@ class TestClassifyQuery:
 
     def test_simple_greeting_no_search(self):
         """Test that simple greetings don't trigger search."""
-        messages = [
-            {"role": "user", "content": "Hi there!"}
-        ]
+        messages = [{"role": "user", "content": "Hi there!"}]
         result = classify_query(messages, threshold=0.5)
 
         assert result.should_search is False
@@ -282,9 +273,7 @@ class TestClassifyQuery:
 
     def test_general_knowledge_low_confidence(self):
         """Test general knowledge questions have lower confidence."""
-        messages = [
-            {"role": "user", "content": "What is the capital of France?"}
-        ]
+        messages = [{"role": "user", "content": "What is the capital of France?"}]
         result = classify_query(messages, threshold=0.5)
 
         # General knowledge doesn't need real-time search
@@ -301,9 +290,7 @@ class TestClassifyQuery:
 
     def test_threshold_adjustment(self):
         """Test that threshold affects search decision."""
-        messages = [
-            {"role": "user", "content": "What are good coworking spaces?"}
-        ]
+        messages = [{"role": "user", "content": "What are good coworking spaces?"}]
 
         # With low threshold, might search
         result_low = classify_query(messages, threshold=0.2)
@@ -324,9 +311,7 @@ class TestShouldAutoSearch:
 
     def test_enabled_returns_result(self):
         """Test that enabled=True processes the query."""
-        messages = [
-            {"role": "user", "content": "What is the current price of gold?"}
-        ]
+        messages = [{"role": "user", "content": "What is the current price of gold?"}]
         should_search, result = should_auto_search(messages, threshold=0.3, enabled=True)
 
         assert isinstance(should_search, bool)
@@ -334,9 +319,7 @@ class TestShouldAutoSearch:
 
     def test_disabled_returns_false(self):
         """Test that enabled=False always returns False."""
-        messages = [
-            {"role": "user", "content": "What is the current price of gold?"}
-        ]
+        messages = [{"role": "user", "content": "What is the current price of gold?"}]
         should_search, result = should_auto_search(messages, threshold=0.1, enabled=False)
 
         assert should_search is False
@@ -346,7 +329,10 @@ class TestShouldAutoSearch:
     def test_remote_work_query(self):
         """Test remote work related query triggers search."""
         messages = [
-            {"role": "user", "content": "Which countries are best for remote work with good internet?"}
+            {
+                "role": "user",
+                "content": "Which countries are best for remote work with good internet?",
+            }
         ]
         should_search, result = should_auto_search(messages, threshold=0.4, enabled=True)
 
@@ -357,27 +343,29 @@ class TestShouldAutoSearch:
 class TestRealWorldQueries:
     """Integration tests with real-world query examples."""
 
-    @pytest.mark.parametrize("query,should_trigger", [
-        # Should trigger search
-        ("How easy is it to get wifi in El Salvador for remote work and video calls?", True),
-        ("What's the internet speed like in Medellin Colombia?", True),
-        ("Are there good coworking spaces in Lisbon?", True),
-        ("What's the current visa situation for Americans in Thailand?", True),
-        ("How much does an Airbnb cost in Bali?", True),
-        ("What's the weather in Tokyo right now?", True),
-        ("Latest news about OpenAI", True),
-        ("Current stock price of NVIDIA", True),
-        ("Best restaurants in Mexico City 2025", True),
-        ("Is it safe to travel to Colombia right now?", True),
-
-        # Should NOT trigger search
-        ("Hello!", False),
-        ("Thanks for your help", False),
-        ("Can you write a Python function to sort a list?", False),
-        ("```python\ndef foo(): pass\n```", False),
-        ("What is 2 + 2?", False),
-        ("Explain how recursion works", False),
-    ])
+    @pytest.mark.parametrize(
+        "query,should_trigger",
+        [
+            # Should trigger search
+            ("How easy is it to get wifi in El Salvador for remote work and video calls?", True),
+            ("What's the internet speed like in Medellin Colombia?", True),
+            ("Are there good coworking spaces in Lisbon?", True),
+            ("What's the current visa situation for Americans in Thailand?", True),
+            ("How much does an Airbnb cost in Bali?", True),
+            ("What's the weather in Tokyo right now?", True),
+            ("Latest news about OpenAI", True),
+            ("Current stock price of NVIDIA", True),
+            ("Best restaurants in Mexico City 2025", True),
+            ("Is it safe to travel to Colombia right now?", True),
+            # Should NOT trigger search
+            ("Hello!", False),
+            ("Thanks for your help", False),
+            ("Can you write a Python function to sort a list?", False),
+            ("```python\ndef foo(): pass\n```", False),
+            ("What is 2 + 2?", False),
+            ("Explain how recursion works", False),
+        ],
+    )
     def test_query_classification(self, query, should_trigger):
         """Test classification of various real-world queries."""
         messages = [{"role": "user", "content": query}]
@@ -430,9 +418,7 @@ class TestEdgeCases:
 
     def test_unicode_characters(self):
         """Test handling of unicode characters."""
-        messages = [
-            {"role": "user", "content": "¿Cómo es el internet en México? 🌐"}
-        ]
+        messages = [{"role": "user", "content": "¿Cómo es el internet en México? 🌐"}]
 
         # Should not crash
         result = classify_query(messages)

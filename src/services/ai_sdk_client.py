@@ -158,10 +158,22 @@ def process_ai_sdk_response(response):
             "choices": [
                 {
                     "message": {
-                        "role": first_choice.message.role if hasattr(first_choice.message, 'role') else "assistant",
-                        "content": first_choice.message.content if hasattr(first_choice.message, 'content') else "",
+                        "role": (
+                            first_choice.message.role
+                            if hasattr(first_choice.message, "role")
+                            else "assistant"
+                        ),
+                        "content": (
+                            first_choice.message.content
+                            if hasattr(first_choice.message, "content")
+                            else ""
+                        ),
                     },
-                    "finish_reason": first_choice.finish_reason if hasattr(first_choice, 'finish_reason') else "stop",
+                    "finish_reason": (
+                        first_choice.finish_reason
+                        if hasattr(first_choice, "finish_reason")
+                        else "stop"
+                    ),
                 }
             ],
             "usage": usage,

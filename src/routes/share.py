@@ -84,7 +84,9 @@ async def create_share_link(
             expires_at=expires_at,
         )
 
-        logger.info(f"Created share link {share['id']} for session {request.session_id} by user {user_id}")
+        logger.info(
+            f"Created share link {share['id']} for session {request.session_id} by user {user_id}"
+        )
 
         return CreateShareLinkResponse(
             success=True,

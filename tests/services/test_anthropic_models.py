@@ -5,6 +5,7 @@ which use the Anthropic Models API: https://docs.anthropic.com/en/api/models-lis
 """
 
 from unittest.mock import Mock, patch
+
 import httpx
 
 from src.services.models import (
@@ -35,18 +36,18 @@ class TestFetchModelsFromAnthropic:
                     "id": "claude-3-5-sonnet-20241022",
                     "display_name": "Claude 3.5 Sonnet",
                     "created_at": "2024-10-22T00:00:00Z",
-                    "type": "model"
+                    "type": "model",
                 },
                 {
                     "id": "claude-3-opus-20240229",
                     "display_name": "Claude 3 Opus",
                     "created_at": "2024-02-29T00:00:00Z",
-                    "type": "model"
-                }
+                    "type": "model",
+                },
             ],
             "has_more": False,
             "first_id": "claude-3-5-sonnet-20241022",
-            "last_id": "claude-3-opus-20240229"
+            "last_id": "claude-3-opus-20240229",
         }
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
@@ -67,10 +68,15 @@ class TestFetchModelsFromAnthropic:
         page1_response.status_code = 200
         page1_response.json.return_value = {
             "data": [
-                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "created_at": "2024-10-22T00:00:00Z", "type": "model"}
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                    "created_at": "2024-10-22T00:00:00Z",
+                    "type": "model",
+                }
             ],
             "has_more": True,
-            "last_id": "claude-3-5-sonnet-20241022"
+            "last_id": "claude-3-5-sonnet-20241022",
         }
         page1_response.raise_for_status = Mock()
 
@@ -78,10 +84,15 @@ class TestFetchModelsFromAnthropic:
         page2_response.status_code = 200
         page2_response.json.return_value = {
             "data": [
-                {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "created_at": "2024-02-29T00:00:00Z", "type": "model"}
+                {
+                    "id": "claude-3-opus-20240229",
+                    "display_name": "Claude 3 Opus",
+                    "created_at": "2024-02-29T00:00:00Z",
+                    "type": "model",
+                }
             ],
             "has_more": False,
-            "last_id": "claude-3-opus-20240229"
+            "last_id": "claude-3-opus-20240229",
         }
         page2_response.raise_for_status = Mock()
 
@@ -101,10 +112,20 @@ class TestFetchModelsFromAnthropic:
         mock_response.status_code = 200
         mock_response.json.return_value = {
             "data": [
-                {"id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "created_at": "2024-10-22T00:00:00Z", "type": "model"},
-                {"id": "some-other-model", "display_name": "Other Model", "created_at": "2024-01-01T00:00:00Z", "type": "model"},
+                {
+                    "id": "claude-3-5-sonnet-20241022",
+                    "display_name": "Claude 3.5 Sonnet",
+                    "created_at": "2024-10-22T00:00:00Z",
+                    "type": "model",
+                },
+                {
+                    "id": "some-other-model",
+                    "display_name": "Other Model",
+                    "created_at": "2024-01-01T00:00:00Z",
+                    "type": "model",
+                },
             ],
-            "has_more": False
+            "has_more": False,
         }
         mock_response.raise_for_status = Mock()
         mock_get.return_value = mock_response
@@ -124,9 +145,7 @@ class TestFetchModelsFromAnthropic:
         mock_response.text = "Unauthorized"
         mock_get.return_value = mock_response
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "401 Unauthorized",
-            request=Mock(),
-            response=mock_response
+            "401 Unauthorized", request=Mock(), response=mock_response
         )
 
         result = fetch_models_from_anthropic()
@@ -142,7 +161,7 @@ class TestNormalizeAnthropicModel:
             "id": "claude-3-5-sonnet-20241022",
             "display_name": "Claude 3.5 Sonnet",
             "created_at": "2024-10-22T00:00:00Z",
-            "type": "model"
+            "type": "model",
         }
 
         result = normalize_anthropic_model(model)
@@ -158,11 +177,7 @@ class TestNormalizeAnthropicModel:
 
     def test_normalize_model_with_vision(self):
         """Test that Claude 3+ models have vision support"""
-        model = {
-            "id": "claude-3-opus-20240229",
-            "display_name": "Claude 3 Opus",
-            "type": "model"
-        }
+        model = {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "type": "model"}
 
         result = normalize_anthropic_model(model)
 
@@ -175,7 +190,7 @@ class TestNormalizeAnthropicModel:
         model = {
             "id": "claude-3-5-sonnet-20241022",
             "display_name": "Claude 3.5 Sonnet",
-            "type": "model"
+            "type": "model",
         }
 
         result = normalize_anthropic_model(model)
@@ -185,11 +200,7 @@ class TestNormalizeAnthropicModel:
 
     def test_normalize_model_max_output_3_0(self):
         """Test that Claude 3.0 models have 4096 max output"""
-        model = {
-            "id": "claude-3-opus-20240229",
-            "display_name": "Claude 3 Opus",
-            "type": "model"
-        }
+        model = {"id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "type": "model"}
 
         result = normalize_anthropic_model(model)
 
@@ -198,20 +209,14 @@ class TestNormalizeAnthropicModel:
 
     def test_normalize_model_missing_id(self):
         """Test that models without ID return None"""
-        model = {
-            "display_name": "Some Model",
-            "type": "model"
-        }
+        model = {"display_name": "Some Model", "type": "model"}
 
         result = normalize_anthropic_model(model)
         assert result is None
 
     def test_normalize_model_fallback_name(self):
         """Test fallback to model ID when display_name is missing"""
-        model = {
-            "id": "claude-3-haiku-20240307",
-            "type": "model"
-        }
+        model = {"id": "claude-3-haiku-20240307", "type": "model"}
 
         result = normalize_anthropic_model(model)
 

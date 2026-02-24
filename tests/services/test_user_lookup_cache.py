@@ -5,12 +5,14 @@ NOTE: user_lookup_cache now delegates to db.users which has the cache.
 Tests patch at the db.users level to test caching behavior.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
+
 from src.services.user_lookup_cache import (
-    get_user,
     clear_cache,
     get_cache_stats,
+    get_user,
     invalidate_user,
     set_cache_ttl,
 )

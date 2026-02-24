@@ -6,7 +6,7 @@ Tests the fix for metadata field naming and webhook processing
 
 import json
 import os
-from datetime import datetime, timezone, timezone, UTC
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,11 +19,14 @@ from src.services.payments import StripeService
 @pytest.fixture
 def stripe_service():
     """Create a StripeService instance for testing"""
-    with patch.dict(os.environ, {
-        "STRIPE_SECRET_KEY": "sk_test_123456789",
-        "STRIPE_WEBHOOK_SECRET": "whsec_test_123456789",
-        "STRIPE_PUBLISHABLE_KEY": "pk_test_123456789",
-    }):
+    with patch.dict(
+        os.environ,
+        {
+            "STRIPE_SECRET_KEY": "sk_test_123456789",
+            "STRIPE_WEBHOOK_SECRET": "whsec_test_123456789",
+            "STRIPE_PUBLISHABLE_KEY": "pk_test_123456789",
+        },
+    ):
         service = StripeService()
         yield service
 
@@ -33,10 +36,12 @@ class TestCheckoutSessionMetadata:
 
     def test_checkout_session_includes_credits_cents_field(self, stripe_service):
         """Verify checkout session metadata includes 'credits_cents' field"""
-        with patch("src.services.payments.get_user_by_id") as mock_get_user, \
-             patch("src.services.payments.create_payment") as mock_create_payment, \
-             patch("stripe.checkout.Session.create") as mock_create_session, \
-             patch("src.services.payments.update_payment_status") as mock_update:
+        with (
+            patch("src.services.payments.get_user_by_id") as mock_get_user,
+            patch("src.services.payments.create_payment") as mock_create_payment,
+            patch("stripe.checkout.Session.create") as mock_create_session,
+            patch("src.services.payments.update_payment_status") as mock_update,
+        ):
 
             # Setup mocks
             mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
@@ -51,11 +56,12 @@ class TestCheckoutSessionMetadata:
 
             # Create checkout session
             from src.schemas.payments import CreateCheckoutSessionRequest
+
             request = CreateCheckoutSessionRequest(
                 amount=1000,
                 currency="usd",
                 success_url="https://example.com/success",
-                cancel_url="https://example.com/cancel"
+                cancel_url="https://example.com/cancel",
             )
 
             result = stripe_service.create_checkout_session(user_id=1, request=request)
@@ -65,16 +71,20 @@ class TestCheckoutSessionMetadata:
             metadata = call_kwargs["metadata"]
 
             assert "credits_cents" in metadata, "Metadata missing 'credits_cents' field"
-            assert metadata["credits_cents"] == "1000", f"Expected credits_cents='1000', got {metadata['credits_cents']}"
+            assert (
+                metadata["credits_cents"] == "1000"
+            ), f"Expected credits_cents='1000', got {metadata['credits_cents']}"
             assert metadata["user_id"] == "1", "Metadata missing or incorrect user_id"
             assert metadata["payment_id"] == "100", "Metadata missing or incorrect payment_id"
 
     def test_checkout_session_includes_backward_compatible_credits_field(self, stripe_service):
         """Verify checkout session metadata includes 'credits' field for backward compatibility"""
-        with patch("src.services.payments.get_user_by_id") as mock_get_user, \
-             patch("src.services.payments.create_payment") as mock_create_payment, \
-             patch("stripe.checkout.Session.create") as mock_create_session, \
-             patch("src.services.payments.update_payment_status"):
+        with (
+            patch("src.services.payments.get_user_by_id") as mock_get_user,
+            patch("src.services.payments.create_payment") as mock_create_payment,
+            patch("stripe.checkout.Session.create") as mock_create_session,
+            patch("src.services.payments.update_payment_status"),
+        ):
 
             mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
             mock_create_payment.return_value = {"id": 100, "user_id": 1}
@@ -87,18 +97,20 @@ class TestCheckoutSessionMetadata:
             mock_create_session.return_value = mock_session
 
             from src.schemas.payments import CreateCheckoutSessionRequest
-            request = CreateCheckoutSessionRequest(
-                amount=5000,
-                currency="usd"
-            )
+
+            request = CreateCheckoutSessionRequest(amount=5000, currency="usd")
 
             stripe_service.create_checkout_session(user_id=1, request=request)
 
             call_kwargs = mock_create_session.call_args[1]
             metadata = call_kwargs["metadata"]
 
-            assert "credits" in metadata, "Metadata missing 'credits' field for backward compatibility"
-            assert metadata["credits"] == "5000", f"Expected credits='5000', got {metadata['credits']}"
+            assert (
+                "credits" in metadata
+            ), "Metadata missing 'credits' field for backward compatibility"
+            assert (
+                metadata["credits"] == "5000"
+            ), f"Expected credits='5000', got {metadata['credits']}"
 
 
 class TestWebhookMetadataHandling:
@@ -106,12 +118,14 @@ class TestWebhookMetadataHandling:
 
     def test_webhook_parses_credits_cents_field(self, stripe_service):
         """Verify webhook correctly parses credits_cents from metadata"""
-        with patch("src.services.payments.is_event_processed") as mock_is_processed, \
-             patch("src.services.payments.record_processed_event") as mock_record, \
-             patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment, \
-             patch("src.services.payments.add_credits_to_user") as mock_add_credits, \
-             patch("src.services.payments.update_payment_status") as mock_update, \
-             patch("stripe.Webhook.construct_event") as mock_construct:
+        with (
+            patch("src.services.payments.is_event_processed") as mock_is_processed,
+            patch("src.services.payments.record_processed_event") as mock_record,
+            patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment,
+            patch("src.services.payments.add_credits_to_user") as mock_add_credits,
+            patch("src.services.payments.update_payment_status") as mock_update,
+            patch("stripe.Webhook.construct_event") as mock_construct,
+        ):
 
             mock_is_processed.return_value = False
 
@@ -125,16 +139,12 @@ class TestWebhookMetadataHandling:
                         "payment_intent": "pi_test_123",
                         "payment_status": "paid",
                         "status": "complete",
-                        "metadata": {
-                            "user_id": "42",
-                            "payment_id": "200",
-                            "credits_cents": "2500"
-                        },
+                        "metadata": {"user_id": "42", "payment_id": "200", "credits_cents": "2500"},
                         "amount_total": 2500,
-                        "currency": "usd"
+                        "currency": "usd",
                     }
                 },
-                "account": "acct_test"
+                "account": "acct_test",
             }
 
             mock_construct.return_value = event
@@ -152,12 +162,14 @@ class TestWebhookMetadataHandling:
 
     def test_webhook_handles_missing_credits_cents_fallback_to_credits(self, stripe_service):
         """Verify webhook falls back to 'credits' field if 'credits_cents' missing"""
-        with patch("src.services.payments.is_event_processed") as mock_is_processed, \
-             patch("src.services.payments.record_processed_event"), \
-             patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment, \
-             patch("src.services.payments.add_credits_to_user") as mock_add_credits, \
-             patch("src.services.payments.update_payment_status"), \
-             patch("stripe.Webhook.construct_event") as mock_construct:
+        with (
+            patch("src.services.payments.is_event_processed") as mock_is_processed,
+            patch("src.services.payments.record_processed_event"),
+            patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment,
+            patch("src.services.payments.add_credits_to_user") as mock_add_credits,
+            patch("src.services.payments.update_payment_status"),
+            patch("stripe.Webhook.construct_event") as mock_construct,
+        ):
 
             mock_is_processed.return_value = False
 
@@ -174,13 +186,13 @@ class TestWebhookMetadataHandling:
                         "metadata": {
                             "user_id": "50",
                             "payment_id": "300",
-                            "credits": "1500"  # Old field name
+                            "credits": "1500",  # Old field name
                         },
                         "amount_total": 1500,
-                        "currency": "usd"
+                        "currency": "usd",
                     }
                 },
-                "account": "acct_test"
+                "account": "acct_test",
             }
 
             mock_construct.return_value = event
@@ -196,11 +208,13 @@ class TestWebhookMetadataHandling:
 
     def test_webhook_always_marked_processed_even_on_error(self, stripe_service):
         """Verify webhook is marked as processed even if handler fails"""
-        with patch("src.services.payments.is_event_processed") as mock_is_processed, \
-             patch("src.services.payments.record_processed_event") as mock_record, \
-             patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment, \
-             patch("src.services.payments.add_credits_to_user") as mock_add_credits, \
-             patch("stripe.Webhook.construct_event") as mock_construct:
+        with (
+            patch("src.services.payments.is_event_processed") as mock_is_processed,
+            patch("src.services.payments.record_processed_event") as mock_record,
+            patch("src.services.payments.get_payment_by_stripe_intent") as mock_get_payment,
+            patch("src.services.payments.add_credits_to_user") as mock_add_credits,
+            patch("stripe.Webhook.construct_event") as mock_construct,
+        ):
 
             mock_is_processed.return_value = False
             mock_get_payment.return_value = None  # Simulate payment not found
@@ -213,16 +227,12 @@ class TestWebhookMetadataHandling:
                     "object": {
                         "id": "cs_test_error",
                         "payment_intent": "pi_test_error",
-                        "metadata": {
-                            "user_id": "60",
-                            "payment_id": "400",
-                            "credits_cents": "3000"
-                        },
+                        "metadata": {"user_id": "60", "payment_id": "400", "credits_cents": "3000"},
                         "amount_total": 3000,
-                        "currency": "usd"
+                        "currency": "usd",
                     }
                 },
-                "account": "acct_test"
+                "account": "acct_test",
             }
 
             mock_construct.return_value = event
@@ -245,6 +255,7 @@ class TestWebhookHttpStatus:
     def test_webhook_endpoint_returns_200_on_success(self):
         """Verify webhook endpoint returns HTTP 200 on success"""
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         with patch("src.routes.payments.stripe_service.handle_webhook") as mock_handle:
@@ -253,7 +264,7 @@ class TestWebhookHttpStatus:
                 event_type="checkout.session.completed",
                 event_id="evt_123",
                 message="Success",
-                processed_at=datetime.now(UTC)
+                processed_at=datetime.now(UTC),
             )
             mock_handle.return_value = result
 
@@ -261,7 +272,7 @@ class TestWebhookHttpStatus:
             response = client.post(
                 "/api/stripe/webhook",
                 json={"test": "payload"},
-                headers={"stripe-signature": "test_sig"}
+                headers={"stripe-signature": "test_sig"},
             )
 
             assert response.status_code == 200, f"Expected 200, got {response.status_code}"
@@ -271,6 +282,7 @@ class TestWebhookHttpStatus:
     def test_webhook_endpoint_returns_200_on_error(self):
         """Verify webhook endpoint returns HTTP 200 even on processing errors"""
         from fastapi.testclient import TestClient
+
         from src.main import app
 
         with patch("src.routes.payments.stripe_service.handle_webhook") as mock_handle:
@@ -280,7 +292,7 @@ class TestWebhookHttpStatus:
             response = client.post(
                 "/api/stripe/webhook",
                 json={"test": "payload"},
-                headers={"stripe-signature": "test_sig"}
+                headers={"stripe-signature": "test_sig"},
             )
 
             # Should return 200 even with error

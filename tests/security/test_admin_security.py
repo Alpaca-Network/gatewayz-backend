@@ -3,8 +3,10 @@
 Test script to verify admin endpoint security
 """
 
-import requests
 import json
+
+import requests
+
 
 def test_admin_endpoints():
     """Test that all admin endpoints require proper authentication"""
@@ -23,22 +25,27 @@ def test_admin_endpoints():
         ("GET", "/admin/test-huggingface/test-model", None),
         ("GET", "/admin/debug-models", None),
         ("GET", "/admin/trial/analytics", None),
-
         # Plans.py endpoints
         ("POST", "/admin/assign-plan", {"user_id": 1, "plan_id": 1, "duration_months": 1}),
-
         # Notifications.py endpoints
         ("GET", "/admin/notifications/stats", None),
         ("POST", "/admin/notifications/process", None),
-
         # Rate_limits.py endpoints
         ("GET", "/admin/rate-limits/system", None),
         ("GET", "/admin/rate-limits/alerts", None),
-
         # Coupons.py endpoints (these should already be protected)
-        ("POST", "/admin/coupons", {"code": "TEST", "value_usd": 10, "coupon_scope": "global", "max_uses": 1, "valid_until": "2024-12-31T23:59:59Z"}),
+        (
+            "POST",
+            "/admin/coupons",
+            {
+                "code": "TEST",
+                "value_usd": 10,
+                "coupon_scope": "global",
+                "max_uses": 1,
+                "valid_until": "2024-12-31T23:59:59Z",
+            },
+        ),
         ("GET", "/admin/coupons", None),
-
         # Roles.py endpoints (these should already be protected)
         ("POST", "/admin/roles/update", {"user_id": 1, "new_role": "admin", "reason": "test"}),
         ("GET", "/admin/roles/1", None),
@@ -72,12 +79,14 @@ def test_admin_endpoints():
                 status = f"⚠️  UNKNOWN ({response.status_code})"
                 result = "UNKNOWN"
 
-            results.append({
-                "endpoint": f"{method} {endpoint}",
-                "status_code": response.status_code,
-                "status": status,
-                "result": result
-            })
+            results.append(
+                {
+                    "endpoint": f"{method} {endpoint}",
+                    "status_code": response.status_code,
+                    "status": status,
+                    "result": result,
+                }
+            )
 
             print(f"{status} {method:4s} {endpoint:40s} - {response.status_code}")
 
@@ -86,12 +95,14 @@ def test_admin_endpoints():
             break
         except Exception as e:
             print(f"❌ ERROR {method:4s} {endpoint:40s} - {str(e)}")
-            results.append({
-                "endpoint": f"{method} {endpoint}",
-                "status_code": "ERROR",
-                "status": "❌ ERROR",
-                "result": "ERROR"
-            })
+            results.append(
+                {
+                    "endpoint": f"{method} {endpoint}",
+                    "status_code": "ERROR",
+                    "status": "❌ ERROR",
+                    "result": "ERROR",
+                }
+            )
 
     # Summary
     print("\n" + "=" * 60)
@@ -118,6 +129,7 @@ def test_admin_endpoints():
         print("\n🎉 All admin endpoints are properly protected!")
 
     return results
+
 
 if __name__ == "__main__":
     test_admin_endpoints()

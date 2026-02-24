@@ -43,7 +43,13 @@ def get_google_models() -> list[MultiProviderModel]:
                     cost_per_1k_input=0.002,  # $2.00/1M tokens
                     cost_per_1k_output=0.012,  # $12.00/1M tokens
                     max_tokens=65536,
-                    features=["streaming", "multimodal", "function_calling", "thinking", "grounding"],
+                    features=[
+                        "streaming",
+                        "multimodal",
+                        "function_calling",
+                        "thinking",
+                        "grounding",
+                    ],
                 ),
                 ProviderConfig(
                     name="openrouter",

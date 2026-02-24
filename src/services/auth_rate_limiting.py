@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class AuthRateLimitType(Enum):
     """Types of authentication rate limits"""
+
     LOGIN = "login"
     REGISTER = "register"
     PASSWORD_RESET = "password_reset"
@@ -32,6 +33,7 @@ class AuthRateLimitType(Enum):
 @dataclass
 class AuthRateLimitConfig:
     """Rate limit configuration for authentication endpoints"""
+
     # Login: 10 attempts per 15 minutes per IP
     login_attempts_per_window: int = 10
     login_window_seconds: int = 900  # 15 minutes
@@ -52,6 +54,7 @@ class AuthRateLimitConfig:
 @dataclass
 class AuthRateLimitResult:
     """Result of auth rate limit check"""
+
     allowed: bool
     remaining: int
     retry_after: int | None = None
@@ -219,9 +222,7 @@ class AuthRateLimiter:
             return f"{identifier[:8]}..."
         return identifier
 
-    async def get_remaining(
-        self, identifier: str, limit_type: AuthRateLimitType
-    ) -> int:
+    async def get_remaining(self, identifier: str, limit_type: AuthRateLimitType) -> int:
         """Get remaining attempts for an identifier."""
         async with self.lock:
             current_time = time.time()

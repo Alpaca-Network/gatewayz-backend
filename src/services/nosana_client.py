@@ -587,9 +587,12 @@ def build_llm_inference_job_definition(
     if framework == "vllm":
         image = "vllm/vllm-openai:latest"
         cmd = [
-            "--model", model,
-            "--port", str(port),
-            "--tensor-parallel-size", str(tensor_parallel_size),
+            "--model",
+            model,
+            "--port",
+            str(port),
+            "--tensor-parallel-size",
+            str(tensor_parallel_size),
         ]
         if max_model_len:
             cmd.extend(["--max-model-len", str(max_model_len)])
@@ -602,9 +605,14 @@ def build_llm_inference_job_definition(
     elif framework == "lmdeploy":
         image = "openmmlab/lmdeploy:latest"
         cmd = [
-            "lmdeploy", "serve", "api_server", model,
-            "--server-port", str(port),
-            "--tp", str(tensor_parallel_size),
+            "lmdeploy",
+            "serve",
+            "api_server",
+            model,
+            "--server-port",
+            str(port),
+            "--tp",
+            str(tensor_parallel_size),
         ]
 
     else:
@@ -636,8 +644,10 @@ def build_stable_diffusion_job_definition(
         cmd=[
             "--api",
             "--listen",
-            "--port", str(port),
-            "--ckpt", model,
+            "--port",
+            str(port),
+            "--ckpt",
+            model,
         ],
         gpu=True,
         expose=[{"port": port, "type": "webapi"}],

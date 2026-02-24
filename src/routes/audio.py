@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 
 from src.security.deps import get_optional_api_key
 from src.services.connection_pool import get_openai_pooled_client
-from src.utils.ai_tracing import AITracer, AIRequestType
+from src.utils.ai_tracing import AIRequestType, AITracer
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,9 @@ async def create_transcription(
         le=1.0,
         description="Sampling temperature (0-1). Lower values are more deterministic.",
     ),
-    _api_key: str | None = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
+    _api_key: str | None = Depends(
+        get_optional_api_key
+    ),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe audio using OpenAI Whisper or compatible services.
@@ -232,7 +234,9 @@ async def create_transcription_base64(
     prompt: str | None = Form(default=None),
     response_format: str = Form(default="json"),
     temperature: float = Form(default=0.0, ge=0.0, le=1.0),
-    _api_key: str | None = Depends(get_optional_api_key),  # noqa: ARG001 - Used for auth side effects
+    _api_key: str | None = Depends(
+        get_optional_api_key
+    ),  # noqa: ARG001 - Used for auth side effects
 ):
     """
     Transcribe base64-encoded audio.

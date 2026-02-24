@@ -28,23 +28,23 @@ def test_decimal_credit_calculation():
 def test_decimal_precision_edge_cases():
     """Test edge cases where floating-point precision matters."""
     test_cases = [
-        (0.01, 1),      # 1 cent
-        (0.10, 10),     # 10 cents
-        (1.00, 100),    # 1 dollar
-        (9.99, 999),    # 999 cents
+        (0.01, 1),  # 1 cent
+        (0.10, 10),  # 10 cents
+        (1.00, 100),  # 1 dollar
+        (9.99, 999),  # 999 cents
         (10.50, 1050),  # 1050 cents
         (19.99, 1999),  # 1999 cents
         (99.99, 9999),  # 9999 cents
-        (100.00, 10000), # 100 dollars
-        (999.99, 99999), # 999.99 dollars
+        (100.00, 10000),  # 100 dollars
+        (999.99, 99999),  # 999.99 dollars
     ]
 
     for credit_value, expected_cents in test_cases:
         credit_value_decimal = Decimal(str(credit_value))
         calculated_cents = int(credit_value_decimal * 100)
-        assert calculated_cents == expected_cents, (
-            f"Failed for {credit_value}: expected {expected_cents}, got {calculated_cents}"
-        )
+        assert (
+            calculated_cents == expected_cents
+        ), f"Failed for {credit_value}: expected {expected_cents}, got {calculated_cents}"
 
 
 def test_decimal_preserves_precision():
@@ -62,10 +62,10 @@ def test_credit_value_conversion_matches_schema():
     """Test that credit value conversion matches expected schema behavior."""
     # Test various payment amounts and credit values
     test_cases = [
-        (1000, 10.00),   # $10 payment, $10 credit
-        (2000, 25.00),   # $20 payment, $25 credit (125% bonus)
-        (5000, 60.00),   # $50 payment, $60 credit (120% bonus)
-        (10000, 150.00), # $100 payment, $150 credit (150% bonus)
+        (1000, 10.00),  # $10 payment, $10 credit
+        (2000, 25.00),  # $20 payment, $25 credit (125% bonus)
+        (5000, 60.00),  # $50 payment, $60 credit (120% bonus)
+        (10000, 150.00),  # $100 payment, $150 credit (150% bonus)
     ]
 
     for amount_cents, credit_value_dollars in test_cases:
@@ -84,8 +84,8 @@ def test_credit_value_conversion_matches_schema():
 def test_large_credit_values():
     """Test that large credit values are handled correctly."""
     large_values = [
-        1000.00,   # $1,000
-        5000.00,   # $5,000
+        1000.00,  # $1,000
+        5000.00,  # $5,000
         10000.00,  # $10,000
     ]
 

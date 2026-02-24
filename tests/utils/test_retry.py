@@ -4,11 +4,14 @@ Comprehensive tests for retry utilities with exponential backoff.
 Tests both synchronous and asynchronous retry decorators for handling
 transient network and database connection errors.
 """
+
 import asyncio
-import pytest
 import time
-from unittest.mock import Mock, patch, call
-from src.utils.retry import with_retry, with_async_retry
+from unittest.mock import Mock, call, patch
+
+import pytest
+
+from src.utils.retry import with_async_retry, with_retry
 
 
 class TestWithRetry:
@@ -36,13 +39,11 @@ class TestWithRetry:
                 raise ConnectionError("server disconnected")
             return "success"
 
-        decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError,)
-        )(failing_func)
+        decorated = with_retry(max_attempts=3, initial_delay=0.01, exceptions=(ConnectionError,))(
+            failing_func
+        )
 
-        with patch('time.sleep') as mock_sleep:
+        with patch("time.sleep") as mock_sleep:
             result = decorated()
 
             assert result == "success"
@@ -59,13 +60,11 @@ class TestWithRetry:
             call_count += 1
             raise ConnectionError("timeout error")
 
-        decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError,)
-        )(failing_func)
+        decorated = with_retry(max_attempts=3, initial_delay=0.01, exceptions=(ConnectionError,))(
+            failing_func
+        )
 
-        with patch('time.sleep'):
+        with patch("time.sleep"):
             with pytest.raises(ConnectionError, match="timeout error"):
                 decorated()
 
@@ -84,13 +83,10 @@ class TestWithRetry:
             return "success"
 
         decorated = with_retry(
-            max_attempts=4,
-            initial_delay=0.1,
-            exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            max_attempts=4, initial_delay=0.1, exponential_base=2.0, exceptions=(ConnectionError,)
         )(failing_func)
 
-        with patch('time.sleep') as mock_sleep:
+        with patch("time.sleep") as mock_sleep:
             result = decorated()
 
             assert result == "success"
@@ -115,10 +111,10 @@ class TestWithRetry:
             initial_delay=1.0,
             max_delay=1.5,
             exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            exceptions=(ConnectionError,),
         )(failing_func)
 
-        with patch('time.sleep') as mock_sleep:
+        with patch("time.sleep") as mock_sleep:
             result = decorated()
 
             assert result == "success"
@@ -136,13 +132,11 @@ class TestWithRetry:
             call_count += 1
             raise ValueError("invalid value")
 
-        decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(Exception,)
-        )(failing_func)
+        decorated = with_retry(max_attempts=3, initial_delay=0.01, exceptions=(Exception,))(
+            failing_func
+        )
 
-        with patch('time.sleep') as mock_sleep:
+        with patch("time.sleep") as mock_sleep:
             with pytest.raises(ValueError, match="invalid value"):
                 decorated()
 
@@ -159,7 +153,7 @@ class TestWithRetry:
             "network error",
             "remote protocol error",
             "broken pipe",
-            "connection reset by peer"
+            "connection reset by peer",
         ]
 
         for error_msg in retryable_errors:
@@ -172,12 +166,9 @@ class TestWithRetry:
                     raise Exception(error_msg)
                 return "success"
 
-            decorated = with_retry(
-                max_attempts=2,
-                initial_delay=0.01
-            )(failing_func)
+            decorated = with_retry(max_attempts=2, initial_delay=0.01)(failing_func)
 
-            with patch('time.sleep'):
+            with patch("time.sleep"):
                 result = decorated()
 
                 assert result == "success"
@@ -194,12 +185,9 @@ class TestWithRetry:
                 raise Exception("SERVER DISCONNECTED")
             return "success"
 
-        decorated = with_retry(
-            max_attempts=2,
-            initial_delay=0.01
-        )(failing_func)
+        decorated = with_retry(max_attempts=2, initial_delay=0.01)(failing_func)
 
-        with patch('time.sleep'):
+        with patch("time.sleep"):
             result = decorated()
 
             assert result == "success"
@@ -210,9 +198,7 @@ class TestWithRetry:
         mock_func = Mock(side_effect=RuntimeError("some error"))
 
         decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError, TimeoutError)
+            max_attempts=3, initial_delay=0.01, exceptions=(ConnectionError, TimeoutError)
         )
 
         # RuntimeError is not in the exceptions tuple, should raise immediately
@@ -223,6 +209,7 @@ class TestWithRetry:
 
     def test_preserves_function_metadata(self):
         """Test that decorator preserves function metadata"""
+
         def my_function():
             """My function docstring"""
             return "result"
@@ -236,26 +223,21 @@ class TestWithRetry:
         """Test that retry attempts are logged"""
         import logging
 
-        mock_func = Mock(side_effect=[
-            ConnectionError("timeout"),
-            "success"
-        ])
+        mock_func = Mock(side_effect=[ConnectionError("timeout"), "success"])
         mock_func.__name__ = "test_func"
 
-        decorated = with_retry(
-            max_attempts=2,
-            initial_delay=0.01,
-            exceptions=(ConnectionError,)
-        )
+        decorated = with_retry(max_attempts=2, initial_delay=0.01, exceptions=(ConnectionError,))
 
-        with patch('time.sleep'):
+        with patch("time.sleep"):
             with caplog.at_level(logging.WARNING):
                 result = decorated(mock_func)()
 
                 assert result == "success"
                 # Check that retry was logged
-                assert any("test_func" in record.message and "Retrying" in record.message
-                          for record in caplog.records)
+                assert any(
+                    "test_func" in record.message and "Retrying" in record.message
+                    for record in caplog.records
+                )
 
     def test_logging_on_max_attempts_reached(self, caplog):
         """Test that max attempts failure is logged"""
@@ -264,20 +246,18 @@ class TestWithRetry:
         mock_func = Mock(side_effect=ConnectionError("timeout"))
         mock_func.__name__ = "test_func"
 
-        decorated = with_retry(
-            max_attempts=2,
-            initial_delay=0.01,
-            exceptions=(ConnectionError,)
-        )
+        decorated = with_retry(max_attempts=2, initial_delay=0.01, exceptions=(ConnectionError,))
 
-        with patch('time.sleep'):
+        with patch("time.sleep"):
             with caplog.at_level(logging.ERROR):
                 with pytest.raises(ConnectionError):
                     decorated(mock_func)()
 
                 # Check that failure was logged
-                assert any("test_func" in record.message and "failed after" in record.message
-                          for record in caplog.records)
+                assert any(
+                    "test_func" in record.message and "failed after" in record.message
+                    for record in caplog.records
+                )
 
     def test_logging_non_retryable_error(self, caplog):
         """Test that non-retryable errors are logged"""
@@ -286,18 +266,17 @@ class TestWithRetry:
         mock_func = Mock(side_effect=ValueError("bad value"))
         mock_func.__name__ = "test_func"
 
-        decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.01
-        )
+        decorated = with_retry(max_attempts=3, initial_delay=0.01)
 
         with caplog.at_level(logging.WARNING):
             with pytest.raises(ValueError):
                 decorated(mock_func)()
 
             # Check that non-retryable error was logged
-            assert any("test_func" in record.message and "non-retryable" in record.message
-                      for record in caplog.records)
+            assert any(
+                "test_func" in record.message and "non-retryable" in record.message
+                for record in caplog.records
+            )
 
 
 class TestWithAsyncRetry:
@@ -306,6 +285,7 @@ class TestWithAsyncRetry:
     @pytest.mark.asyncio
     async def test_successful_async_function_no_retry(self):
         """Test that successful async function executes without retries"""
+
         async def async_func(arg1, kwarg1=None):
             return "success"
 
@@ -330,9 +310,7 @@ class TestWithAsyncRetry:
             return "success"
 
         decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.001,
-            exceptions=(ConnectionError,)
+            max_attempts=3, initial_delay=0.001, exceptions=(ConnectionError,)
         )(async_func)
 
         result = await decorated()
@@ -351,9 +329,7 @@ class TestWithAsyncRetry:
             raise ConnectionError("timeout error")
 
         decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.001,
-            exceptions=(ConnectionError,)
+            max_attempts=3, initial_delay=0.001, exceptions=(ConnectionError,)
         )(async_func)
 
         with pytest.raises(ConnectionError, match="timeout error"):
@@ -374,10 +350,7 @@ class TestWithAsyncRetry:
             return "success"
 
         decorated = with_async_retry(
-            max_attempts=4,
-            initial_delay=0.001,
-            exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            max_attempts=4, initial_delay=0.001, exponential_base=2.0, exceptions=(ConnectionError,)
         )(async_func)
 
         result = await decorated()
@@ -402,7 +375,7 @@ class TestWithAsyncRetry:
             initial_delay=0.001,
             max_delay=0.002,
             exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            exceptions=(ConnectionError,),
         )(async_func)
 
         result = await decorated()
@@ -420,13 +393,13 @@ class TestWithAsyncRetry:
             call_count += 1
             raise ValueError("invalid value")
 
-        decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(Exception,)
-        )(async_func)
+        decorated = with_async_retry(max_attempts=3, initial_delay=0.01, exceptions=(Exception,))(
+            async_func
+        )
 
-        with patch('asyncio.sleep', new_callable=lambda: Mock(side_effect=lambda x: asyncio.sleep(0))):
+        with patch(
+            "asyncio.sleep", new_callable=lambda: Mock(side_effect=lambda x: asyncio.sleep(0))
+        ):
             with pytest.raises(ValueError, match="invalid value"):
                 await decorated()
 
@@ -442,7 +415,7 @@ class TestWithAsyncRetry:
             "network error",
             "remote protocol error",
             "broken pipe",
-            "connection reset"
+            "connection reset",
         ]
 
         for error_msg in retryable_errors:
@@ -455,10 +428,7 @@ class TestWithAsyncRetry:
                     raise Exception(error_msg)
                 return "success"
 
-            decorated = with_async_retry(
-                max_attempts=2,
-                initial_delay=0.001
-            )(async_func)
+            decorated = with_async_retry(max_attempts=2, initial_delay=0.001)(async_func)
 
             result = await decorated()
 
@@ -468,6 +438,7 @@ class TestWithAsyncRetry:
     @pytest.mark.asyncio
     async def test_async_preserves_function_metadata(self):
         """Test that async decorator preserves function metadata"""
+
         async def my_async_function():
             """My async function docstring"""
             return "result"
@@ -494,9 +465,7 @@ class TestWithAsyncRetry:
         async_func.__name__ = "test_async_func"
 
         decorated = with_async_retry(
-            max_attempts=2,
-            initial_delay=0.001,
-            exceptions=(ConnectionError,)
+            max_attempts=2, initial_delay=0.001, exceptions=(ConnectionError,)
         )(async_func)
 
         with caplog.at_level(logging.WARNING):
@@ -504,19 +473,20 @@ class TestWithAsyncRetry:
 
             assert result == "success"
             # Check that retry was logged
-            assert any("test_async_func" in record.message and "Retrying" in record.message
-                      for record in caplog.records)
+            assert any(
+                "test_async_func" in record.message and "Retrying" in record.message
+                for record in caplog.records
+            )
 
     @pytest.mark.asyncio
     async def test_async_specific_exception_types(self):
         """Test async retry only on specific exception types"""
+
         async def async_func():
             raise RuntimeError("some error")
 
         decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError, TimeoutError)
+            max_attempts=3, initial_delay=0.01, exceptions=(ConnectionError, TimeoutError)
         )(async_func)
 
         call_count = 0
@@ -527,9 +497,7 @@ class TestWithAsyncRetry:
             await async_func()
 
         decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.01,
-            exceptions=(ConnectionError, TimeoutError)
+            max_attempts=3, initial_delay=0.01, exceptions=(ConnectionError, TimeoutError)
         )(counting_func)
 
         # RuntimeError is not in the exceptions tuple, should raise immediately
@@ -547,6 +515,7 @@ class TestRetryIntegration:
         start_time = time.time()
 
         call_count = 0
+
         def flaky_func():
             nonlocal call_count
             call_count += 1
@@ -555,10 +524,7 @@ class TestRetryIntegration:
             return "success"
 
         decorated = with_retry(
-            max_attempts=3,
-            initial_delay=0.05,
-            exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            max_attempts=3, initial_delay=0.05, exponential_base=2.0, exceptions=(ConnectionError,)
         )(flaky_func)
 
         result = decorated()
@@ -576,6 +542,7 @@ class TestRetryIntegration:
         start_time = time.time()
 
         call_count = 0
+
         async def flaky_async_func():
             nonlocal call_count
             call_count += 1
@@ -584,10 +551,7 @@ class TestRetryIntegration:
             return "success"
 
         decorated = with_async_retry(
-            max_attempts=3,
-            initial_delay=0.05,
-            exponential_base=2.0,
-            exceptions=(ConnectionError,)
+            max_attempts=3, initial_delay=0.05, exponential_base=2.0, exceptions=(ConnectionError,)
         )(flaky_async_func)
 
         result = await decorated()
@@ -602,6 +566,7 @@ class TestRetryIntegration:
     def test_default_parameters(self):
         """Test retry with default parameters"""
         call_count = 0
+
         def flaky_func():
             nonlocal call_count
             call_count += 1
@@ -612,7 +577,7 @@ class TestRetryIntegration:
         # Use default parameters
         decorated = with_retry()(flaky_func)
 
-        with patch('time.sleep'):
+        with patch("time.sleep"):
             result = decorated()
 
             assert result == "success"
@@ -622,6 +587,7 @@ class TestRetryIntegration:
     async def test_async_default_parameters(self):
         """Test async retry with default parameters"""
         call_count = 0
+
         async def flaky_async_func():
             nonlocal call_count
             call_count += 1

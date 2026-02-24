@@ -6,8 +6,9 @@ by encryption failures, addressing the security bug identified in PR #749.
 """
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from src.db.api_keys import create_api_key
 
@@ -22,7 +23,9 @@ class TestKeyHashSaltValidation:
 
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Attempt to create API key
             with pytest.raises(ValueError, match="KEY_HASH_SALT"):
@@ -35,7 +38,9 @@ class TestKeyHashSaltValidation:
 
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Attempt to create API key
             with pytest.raises(ValueError, match="KEY_HASH_SALT"):
@@ -57,7 +62,9 @@ class TestKeyHashSaltValidation:
 
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Even with encryption missing, KEY_HASH_SALT validation should fail FIRST
             with pytest.raises(ValueError, match="KEY_HASH_SALT"):
@@ -75,7 +82,9 @@ class TestKeyHashSaltValidation:
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
             # Mock name uniqueness check
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Mock plan entitlements check
             with patch("src.db.api_keys.check_plan_entitlements") as mock_entitlements:
@@ -84,7 +93,9 @@ class TestKeyHashSaltValidation:
                 # Mock insert
                 mock_result = MagicMock()
                 mock_result.data = [{"id": 123, "user_id": 1}]
-                mock_client.return_value.table.return_value.insert.return_value.execute.return_value = mock_result
+                mock_client.return_value.table.return_value.insert.return_value.execute.return_value = (
+                    mock_result
+                )
 
                 # Create API key
                 api_key, key_id = create_api_key(user_id=1, key_name="test_key")
@@ -100,6 +111,7 @@ class TestKeyHashSaltValidation:
 
         # Set valid encryption keys
         from cryptography.fernet import Fernet
+
         key = Fernet.generate_key()
         monkeypatch.setenv("KEYRING_1", key.decode())
         monkeypatch.setenv("KEY_VERSION", "1")
@@ -107,7 +119,9 @@ class TestKeyHashSaltValidation:
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
             # Mock name uniqueness check
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Mock plan entitlements check
             with patch("src.db.api_keys.check_plan_entitlements") as mock_entitlements:
@@ -116,7 +130,9 @@ class TestKeyHashSaltValidation:
                 # Mock insert
                 mock_result = MagicMock()
                 mock_result.data = [{"id": 456, "user_id": 1}]
-                mock_client.return_value.table.return_value.insert.return_value.execute.return_value = mock_result
+                mock_client.return_value.table.return_value.insert.return_value.execute.return_value = (
+                    mock_result
+                )
 
                 # Create API key
                 api_key, key_id = create_api_key(user_id=1, key_name="test_key_encrypted")
@@ -142,7 +158,9 @@ class TestKeyHashSaltValidation:
 
         # Mock Supabase client
         with patch("src.db.api_keys.get_supabase_client") as mock_client:
-            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+            mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                []
+            )
 
             # Verify error message contains helpful generation command
             with pytest.raises(ValueError) as exc_info:
@@ -166,7 +184,10 @@ class TestKeyHashSaltValidation:
         call_order = []
 
         # Mock sha256_key_hash to track when it's called
-        original_sha256 = __import__("src.utils.crypto", fromlist=["sha256_key_hash"]).sha256_key_hash
+        original_sha256 = __import__(
+            "src.utils.crypto", fromlist=["sha256_key_hash"]
+        ).sha256_key_hash
+
         def tracked_sha256(plaintext):
             call_order.append("sha256_key_hash")
             return original_sha256(plaintext)
@@ -180,7 +201,9 @@ class TestKeyHashSaltValidation:
             with patch("src.utils.crypto.encrypt_api_key", side_effect=tracked_encrypt):
                 with patch("src.db.api_keys.get_supabase_client") as mock_client:
                     # Mock name uniqueness check
-                    mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+                    mock_client.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+                        []
+                    )
 
                     # Mock plan entitlements
                     with patch("src.db.api_keys.check_plan_entitlements") as mock_entitlements:
@@ -189,7 +212,9 @@ class TestKeyHashSaltValidation:
                         # Mock insert
                         mock_result = MagicMock()
                         mock_result.data = [{"id": 789, "user_id": 1}]
-                        mock_client.return_value.table.return_value.insert.return_value.execute.return_value = mock_result
+                        mock_client.return_value.table.return_value.insert.return_value.execute.return_value = (
+                            mock_result
+                        )
 
                         # Create API key - encryption will fail but hash should succeed
                         api_key, key_id = create_api_key(user_id=1, key_name="test_order")

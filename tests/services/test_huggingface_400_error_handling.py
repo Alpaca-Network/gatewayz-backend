@@ -1,7 +1,9 @@
 """Tests for HuggingFace 400 error handling improvements"""
-import pytest
+
 from unittest.mock import Mock, patch
+
 import httpx
+import pytest
 
 from src.services.huggingface_client import (
     make_huggingface_request_openai,
@@ -12,7 +14,7 @@ from src.services.huggingface_client import (
 class TestHuggingFace400ErrorHandling:
     """Test improved error handling for HuggingFace 400 Bad Request errors"""
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_400_error_with_detailed_logging(self, mock_get_client, caplog):
         """Test that 400 errors are logged with detailed information including payload"""
         # Mock the client and response
@@ -22,11 +24,7 @@ class TestHuggingFace400ErrorHandling:
         mock_response.text = "Model not available on HF Inference Router"
 
         # Create HTTP status error
-        error = httpx.HTTPStatusError(
-            "400 Bad Request",
-            request=Mock(),
-            response=mock_response
-        )
+        error = httpx.HTTPStatusError("400 Bad Request", request=Mock(), response=mock_response)
 
         mock_client.post.side_effect = error
         mock_client.close = Mock()
@@ -48,11 +46,10 @@ class TestHuggingFace400ErrorHandling:
 
         # Verify payload is logged
         assert any(
-            "Request payload:" in record.message
-            for record in caplog.records
+            "Request payload:" in record.message for record in caplog.records
         ), "Expected payload logging not found"
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_400_error_streaming_with_detailed_logging(self, mock_get_client, caplog):
         """Test that streaming 400 errors are logged with detailed information"""
         # Mock the client and response
@@ -62,11 +59,7 @@ class TestHuggingFace400ErrorHandling:
         mock_response.text = "Model requires Pro subscription"
 
         # Create HTTP status error
-        error = httpx.HTTPStatusError(
-            "400 Bad Request",
-            request=Mock(),
-            response=mock_response
-        )
+        error = httpx.HTTPStatusError("400 Bad Request", request=Mock(), response=mock_response)
 
         # Mock the stream context manager to raise error
         mock_stream_context = Mock()
@@ -92,7 +85,7 @@ class TestHuggingFace400ErrorHandling:
             for record in caplog.records
         ), "Expected detailed 400 streaming error logging not found"
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_non_400_error_standard_logging(self, mock_get_client, caplog):
         """Test that non-400 errors use standard error logging"""
         # Mock the client and response
@@ -103,9 +96,7 @@ class TestHuggingFace400ErrorHandling:
 
         # Create HTTP status error
         error = httpx.HTTPStatusError(
-            "503 Service Unavailable",
-            request=Mock(),
-            response=mock_response
+            "503 Service Unavailable", request=Mock(), response=mock_response
         )
 
         mock_client.post.side_effect = error
@@ -126,21 +117,17 @@ class TestHuggingFace400ErrorHandling:
             for record in caplog.records
         ), "Expected standard error logging not found"
 
-    @patch('src.services.huggingface_client.get_huggingface_client')
+    @patch("src.services.huggingface_client.get_huggingface_client")
     def test_400_error_without_text_attribute(self, mock_get_client, caplog):
         """Test 400 error handling when response has no text attribute"""
         # Mock the client and response without text attribute
         mock_client = Mock()
-        mock_response = Mock(spec=['status_code'])
+        mock_response = Mock(spec=["status_code"])
         mock_response.status_code = 400
         # Don't set text attribute to test fallback
 
         # Create HTTP status error
-        error = httpx.HTTPStatusError(
-            "400 Bad Request",
-            request=Mock(),
-            response=mock_response
-        )
+        error = httpx.HTTPStatusError("400 Bad Request", request=Mock(), response=mock_response)
 
         mock_client.post.side_effect = error
         mock_client.close = Mock()
@@ -155,6 +142,5 @@ class TestHuggingFace400ErrorHandling:
 
         # Verify logging still occurred despite missing text
         assert any(
-            "400 Bad Request for model" in record.message
-            for record in caplog.records
+            "400 Bad Request for model" in record.message for record in caplog.records
         ), "Expected error logging even without response text"

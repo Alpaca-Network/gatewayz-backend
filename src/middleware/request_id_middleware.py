@@ -82,9 +82,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         # Generate or extract request ID
         # Priority: X-Request-ID header > X-Correlation-ID > generate new
         raw_request_id = (
-            request.headers.get("X-Request-ID")
-            or request.headers.get("X-Correlation-ID")
-            or ""
+            request.headers.get("X-Request-ID") or request.headers.get("X-Correlation-ID") or ""
         )
 
         # Sanitize client-supplied request IDs to prevent log injection:
@@ -112,9 +110,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
 
         # Log request with ID for debugging
-        logger.debug(
-            f"Request ID: {request_id} | {request.method} {request.url.path}"
-        )
+        logger.debug(f"Request ID: {request_id} | {request.method} {request.url.path}")
 
         # Call next middleware/route
         try:

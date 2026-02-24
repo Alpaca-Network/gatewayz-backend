@@ -21,6 +21,9 @@ from src.services.nosana_client import (
     DEPLOYMENT_STATUSES,
     DEPLOYMENT_STRATEGIES,
     archive_deployment,
+    build_llm_inference_job_definition,
+    build_stable_diffusion_job_definition,
+    build_whisper_job_definition,
     create_deployment,
     create_deployment_revision,
     create_job,
@@ -36,9 +39,6 @@ from src.services.nosana_client import (
     stop_deployment,
     stop_job,
     update_deployment_replicas,
-    build_llm_inference_job_definition,
-    build_stable_diffusion_job_definition,
-    build_whisper_job_definition,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,6 +53,7 @@ router = APIRouter(prefix="/nosana", tags=["nosana"])
 
 class CreditsBalanceResponse(BaseModel):
     """Response model for credit balance"""
+
     assigned_credits: float = Field(..., alias="assignedCredits")
     reserved_credits: float = Field(..., alias="reservedCredits")
     settled_credits: float = Field(..., alias="settledCredits")
@@ -63,6 +64,7 @@ class CreditsBalanceResponse(BaseModel):
 
 class DeploymentCreate(BaseModel):
     """Request model for creating a deployment"""
+
     name: str = Field(..., description="Unique identifier for the deployment")
     market: str = Field(..., description="GPU market address")
     job_definition: dict[str, Any] = Field(..., description="Container workload specification")
@@ -73,16 +75,19 @@ class DeploymentCreate(BaseModel):
 
 class DeploymentReplicaUpdate(BaseModel):
     """Request model for updating deployment replicas"""
+
     replica_count: int = Field(..., ge=1, description="New number of replicas")
 
 
 class DeploymentRevisionCreate(BaseModel):
     """Request model for creating a deployment revision"""
+
     job_definition: dict[str, Any] = Field(..., description="New container workload specification")
 
 
 class JobCreate(BaseModel):
     """Request model for creating a job"""
+
     ipfs_job: str = Field(..., description="IPFS hash of the job definition")
     market: str = Field(..., description="Market address")
     timeout: int = Field(3600, ge=60, le=360000, description="Job timeout in seconds")
@@ -90,11 +95,13 @@ class JobCreate(BaseModel):
 
 class JobExtend(BaseModel):
     """Request model for extending a job"""
+
     timeout: int = Field(..., ge=1, description="Additional time in seconds")
 
 
 class LLMInferenceJobCreate(BaseModel):
     """Request model for creating an LLM inference deployment"""
+
     name: str = Field(..., description="Deployment name")
     market: str = Field(..., description="GPU market address")
     model: str = Field(..., description="HuggingFace model ID or path")
@@ -108,6 +115,7 @@ class LLMInferenceJobCreate(BaseModel):
 
 class ImageGenerationJobCreate(BaseModel):
     """Request model for creating an image generation deployment"""
+
     name: str = Field(..., description="Deployment name")
     market: str = Field(..., description="GPU market address")
     model: str = Field("stabilityai/stable-diffusion-xl-base-1.0", description="Model checkpoint")
@@ -118,6 +126,7 @@ class ImageGenerationJobCreate(BaseModel):
 
 class WhisperJobCreate(BaseModel):
     """Request model for creating a Whisper transcription deployment"""
+
     name: str = Field(..., description="Deployment name")
     market: str = Field(..., description="GPU market address")
     model: str = Field("large-v3", description="Whisper model size")

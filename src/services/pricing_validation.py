@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 class PricingValidationError(Exception):
     """Raised when pricing validation fails"""
+
     pass
 
 
@@ -31,11 +32,11 @@ class PricingBounds:
 
     # Absolute bounds (per single token)
     MIN_PRICE = Decimal("0.0000001")  # $0.10 per 1M tokens
-    MAX_PRICE = Decimal("0.001")      # $1,000 per 1M tokens
+    MAX_PRICE = Decimal("0.001")  # $1,000 per 1M tokens
 
     # Reasonable bounds for most models
-    TYPICAL_MIN = Decimal("0.0000005")   # $0.50 per 1M tokens
-    TYPICAL_MAX = Decimal("0.0001")      # $100 per 1M tokens
+    TYPICAL_MIN = Decimal("0.0000005")  # $0.50 per 1M tokens
+    TYPICAL_MAX = Decimal("0.0001")  # $100 per 1M tokens
 
     # Free model threshold
     FREE_THRESHOLD = Decimal("0.0000001")  # Below this is considered free
@@ -54,7 +55,7 @@ class ValidationResult:
         price_per_token: Decimal,
         warnings: list[str] | None = None,
         errors: list[str] | None = None,
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ):
         self.is_valid = is_valid
         self.price_per_token = price_per_token
@@ -68,9 +69,7 @@ class ValidationResult:
 
 
 def validate_price_bounds(
-    price: Decimal | float | str,
-    model_id: str,
-    price_type: str = "unknown"
+    price: Decimal | float | str, model_id: str, price_type: str = "unknown"
 ) -> ValidationResult:
     """
     Validate that a price is within reasonable bounds.
@@ -157,10 +156,7 @@ def validate_price_bounds(
     return ValidationResult(True, price_decimal, warnings, errors, metadata)
 
 
-def validate_pricing_dict(
-    pricing: dict[str, Any],
-    model_id: str
-) -> dict[str, ValidationResult]:
+def validate_pricing_dict(pricing: dict[str, Any], model_id: str) -> dict[str, ValidationResult]:
     """
     Validate all pricing fields in a pricing dictionary.
 
@@ -190,9 +186,7 @@ def validate_pricing_dict(
             except Exception as e:
                 logger.error(f"Error validating {field} pricing for {model_id}: {e}")
                 results[field] = ValidationResult(
-                    False,
-                    Decimal("0"),
-                    errors=[f"Validation error: {e}"]
+                    False, Decimal("0"), errors=[f"Validation error: {e}"]
                 )
 
     return results
@@ -202,7 +196,7 @@ def detect_price_spike(
     old_price: Decimal | float | str,
     new_price: Decimal | float | str,
     model_id: str,
-    price_type: str = "unknown"
+    price_type: str = "unknown",
 ) -> ValidationResult:
     """
     Detect if price has changed significantly (spike detection).
@@ -264,6 +258,7 @@ def detect_price_spike(
         # Log to Sentry for investigation
         try:
             import sentry_sdk
+
             sentry_sdk.capture_message(
                 f"Pricing spike detected (ALLOWED): {model_id}",
                 level="warning",
@@ -272,8 +267,8 @@ def detect_price_spike(
                     "price_type": price_type,
                     "old_price": float(old_decimal),
                     "new_price": float(new_decimal),
-                    "percent_change": percent_change
-                }
+                    "percent_change": percent_change,
+                },
             )
         except Exception:
             logger.warning(
@@ -295,9 +290,7 @@ def detect_price_spike(
 
 
 def validate_pricing_update(
-    model_id: str,
-    new_pricing: dict[str, Any],
-    old_pricing: dict[str, Any] | None = None
+    model_id: str, new_pricing: dict[str, Any], old_pricing: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     """
     Comprehensive validation of pricing update.
@@ -336,10 +329,7 @@ def validate_pricing_update(
             if field in new_pricing and field in old_pricing:
                 try:
                     spike_result = detect_price_spike(
-                        old_pricing[field],
-                        new_pricing[field],
-                        model_id,
-                        field
+                        old_pricing[field], new_pricing[field], model_id, field
                     )
                     spike_results[field] = spike_result
                     all_errors.extend([f"{field}: {e}" for e in spike_result.errors])
@@ -353,14 +343,15 @@ def validate_pricing_update(
     # Track validation metrics
     try:
         from src.services.prometheus_metrics import (
+            pricing_validation_failures,
             pricing_validation_total,
-            pricing_validation_failures
         )
+
         pricing_validation_total.labels(model=model_id).inc()
         if not is_valid:
             pricing_validation_failures.labels(
                 model=model_id,
-                reason="bounds" if any("bound" in e.lower() for e in all_errors) else "spike"
+                reason="bounds" if any("bound" in e.lower() for e in all_errors) else "spike",
             ).inc()
     except (ImportError, AttributeError):
         pass
@@ -373,7 +364,7 @@ def validate_pricing_update(
                 "is_valid": result.is_valid,
                 "price": float(result.price_per_token),
                 "warnings": result.warnings,
-                "errors": result.errors
+                "errors": result.errors,
             }
             for field, result in bounds_results.items()
         },
@@ -382,12 +373,12 @@ def validate_pricing_update(
                 "is_valid": result.is_valid,
                 "metadata": result.metadata,
                 "warnings": result.warnings,
-                "errors": result.errors
+                "errors": result.errors,
             }
             for field, result in spike_results.items()
         },
         "errors": all_errors,
-        "warnings": all_warnings
+        "warnings": all_warnings,
     }
 
 
@@ -399,17 +390,13 @@ def get_validation_stats() -> dict[str, Any]:
         Dict with validation metrics
     """
     try:
-        from src.services.prometheus_metrics import (
-            pricing_validation_total,  # noqa: F401
-            pricing_validation_failures  # noqa: F401
-        )
+        from src.services.prometheus_metrics import pricing_validation_failures  # noqa: F401
+        from src.services.prometheus_metrics import pricing_validation_total  # noqa: F401
+
         # This would require collecting metrics - simplified for now
         return {
             "metrics_available": True,
-            "message": "Use Prometheus metrics endpoint for detailed stats"
+            "message": "Use Prometheus metrics endpoint for detailed stats",
         }
     except (ImportError, AttributeError):
-        return {
-            "metrics_available": False,
-            "message": "Prometheus metrics not configured"
-        }
+        return {"metrics_available": False, "message": "Prometheus metrics not configured"}

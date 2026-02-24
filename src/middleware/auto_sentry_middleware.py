@@ -354,9 +354,7 @@ class AutoSentryMiddleware:
         if "HTTPException" in exc_type:
             if hasattr(exception, "status_code"):
                 scope.set_tag("http_status", str(exception.status_code))
-                scope.set_tag(
-                    "error_category", self._categorize_http_error(exception.status_code)
-                )
+                scope.set_tag("error_category", self._categorize_http_error(exception.status_code))
 
         # Provider-related errors
         elif any(
@@ -368,8 +366,7 @@ class AutoSentryMiddleware:
 
         # Database errors
         elif any(
-            keyword in exc_type.lower()
-            for keyword in ["database", "supabase", "postgres", "query"]
+            keyword in exc_type.lower() for keyword in ["database", "supabase", "postgres", "query"]
         ):
             scope.set_tag("error_category", "database_error")
 

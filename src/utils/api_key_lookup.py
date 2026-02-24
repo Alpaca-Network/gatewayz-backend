@@ -68,9 +68,7 @@ async def get_api_key_id_with_retry(
                         api_key_lookup_attempts.labels(status="success").inc()
                     return api_key_id
                 else:
-                    logger.warning(
-                        f"API key record found but missing 'id' field: {api_key_record}"
-                    )
+                    logger.warning(f"API key record found but missing 'id' field: {api_key_record}")
                     if metrics_available:
                         api_key_tracking_failures.labels(reason="invalid_record").inc()
                     return None
@@ -98,7 +96,9 @@ async def get_api_key_id_with_retry(
                 )
 
     # All retries exhausted
-    logger.error(f"Failed to retrieve API key ID after {max_retries} attempts. Last error: {last_error}")
+    logger.error(
+        f"Failed to retrieve API key ID after {max_retries} attempts. Last error: {last_error}"
+    )
     if metrics_available:
         api_key_tracking_failures.labels(reason="lookup_failed").inc()
     return None

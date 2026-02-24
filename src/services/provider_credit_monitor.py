@@ -9,7 +9,7 @@ ensure seamless failover before providers run out of credits.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config import Config
@@ -66,14 +66,14 @@ async def check_openrouter_credits() -> dict[str, Any]:
                 "status": "unknown",
                 "checked_at": datetime.now(UTC),
                 "cached": False,
-                "error": "API key not configured"
+                "error": "API key not configured",
             }
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 "https://openrouter.ai/api/v1/auth/key",
                 headers={"Authorization": f"Bearer {Config.OPENROUTER_API_KEY}"},
-                timeout=10.0
+                timeout=10.0,
             )
             response.raise_for_status()
             data = response.json()
@@ -89,7 +89,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
                     "status": "unknown",
                     "checked_at": datetime.now(UTC),
                     "cached": False,
-                    "error": "Could not parse balance"
+                    "error": "Could not parse balance",
                 }
 
             # Determine status based on thresholds
@@ -100,7 +100,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
                 "balance": balance,
                 "status": status,
                 "checked_at": datetime.now(UTC),
-                "cached": False
+                "cached": False,
             }
 
             # Update cache
@@ -124,7 +124,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
             "status": "unknown",
             "checked_at": datetime.now(UTC),
             "cached": False,
-            "error": f"HTTP {e.response.status_code}"
+            "error": f"HTTP {e.response.status_code}",
         }
     except Exception as e:
         logger.error(f"Failed to check {provider} credits: {e}")
@@ -134,7 +134,7 @@ async def check_openrouter_credits() -> dict[str, Any]:
             "status": "unknown",
             "checked_at": datetime.now(UTC),
             "cached": False,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -190,7 +190,7 @@ async def send_low_credit_alert(provider: str, balance: float, status: str) -> N
                 from src.services.notification import send_email
 
                 await send_email(
-                    to_email=Config.ADMIN_EMAIL if hasattr(Config, 'ADMIN_EMAIL') else None,
+                    to_email=Config.ADMIN_EMAIL if hasattr(Config, "ADMIN_EMAIL") else None,
                     subject=f"URGENT: {provider} credits critically low",
                     body=f"""
                     <h2>Provider Credit Alert</h2>
@@ -210,12 +210,8 @@ async def send_low_credit_alert(provider: str, balance: float, status: str) -> N
         capture_provider_error(
             error,
             provider=provider,
-            endpoint='credit_monitor',
-            extra_context={
-                'balance': balance,
-                'status': status,
-                'thresholds': CREDIT_THRESHOLDS
-            }
+            endpoint="credit_monitor",
+            extra_context={"balance": balance, "status": status, "thresholds": CREDIT_THRESHOLDS},
         )
 
     except Exception as e:

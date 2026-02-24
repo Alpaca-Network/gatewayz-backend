@@ -1,12 +1,12 @@
 """Tests for Nosana GPU Computing Network routes"""
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from fastapi import FastAPI, Depends
 
-from src.routes.nosana import router, get_current_user
-
+from src.routes.nosana import get_current_user, router
 
 # Create a test app with the nosana router
 app = FastAPI()
@@ -102,7 +102,7 @@ class TestNosanaDeploymentEndpoints:
                 "market": "market123",
                 "job_definition": {"version": "0.1", "type": "container", "ops": []},
                 "timeout": 3600,
-            }
+            },
         )
 
         assert response.status_code in [200, 201, 401, 403, 422]
@@ -114,9 +114,7 @@ class TestNosanaQuickDeployEndpoints:
     @patch("src.routes.nosana.start_deployment")
     @patch("src.routes.nosana.create_deployment")
     @patch("src.routes.nosana.build_llm_inference_job_definition")
-    def test_deploy_llm_inference(
-        self, mock_build, mock_create, mock_start, client
-    ):
+    def test_deploy_llm_inference(self, mock_build, mock_create, mock_start, client):
         """Test deploying LLM inference"""
         mock_build.return_value = {"version": "0.1", "type": "container", "ops": []}
         mock_create.return_value = {"id": "dep1", "status": "DRAFT"}
@@ -129,7 +127,7 @@ class TestNosanaQuickDeployEndpoints:
                 "market": "market123",
                 "model": "meta-llama/Llama-3.1-8B-Instruct",
                 "framework": "vllm",
-            }
+            },
         )
 
         assert response.status_code in [200, 201, 401, 403, 422]
@@ -137,9 +135,7 @@ class TestNosanaQuickDeployEndpoints:
     @patch("src.routes.nosana.start_deployment")
     @patch("src.routes.nosana.create_deployment")
     @patch("src.routes.nosana.build_stable_diffusion_job_definition")
-    def test_deploy_image_generation(
-        self, mock_build, mock_create, mock_start, client
-    ):
+    def test_deploy_image_generation(self, mock_build, mock_create, mock_start, client):
         """Test deploying image generation"""
         mock_build.return_value = {"version": "0.1", "type": "container", "ops": []}
         mock_create.return_value = {"id": "dep1", "status": "DRAFT"}
@@ -150,7 +146,7 @@ class TestNosanaQuickDeployEndpoints:
             json={
                 "name": "test-sd",
                 "market": "market123",
-            }
+            },
         )
 
         assert response.status_code in [200, 201, 401, 403, 422]
@@ -158,9 +154,7 @@ class TestNosanaQuickDeployEndpoints:
     @patch("src.routes.nosana.start_deployment")
     @patch("src.routes.nosana.create_deployment")
     @patch("src.routes.nosana.build_whisper_job_definition")
-    def test_deploy_whisper(
-        self, mock_build, mock_create, mock_start, client
-    ):
+    def test_deploy_whisper(self, mock_build, mock_create, mock_start, client):
         """Test deploying Whisper transcription"""
         mock_build.return_value = {"version": "0.1", "type": "container", "ops": []}
         mock_create.return_value = {"id": "dep1", "status": "DRAFT"}
@@ -171,7 +165,7 @@ class TestNosanaQuickDeployEndpoints:
             json={
                 "name": "test-whisper",
                 "market": "market123",
-            }
+            },
         )
 
         assert response.status_code in [200, 201, 401, 403, 422]
@@ -195,7 +189,7 @@ class TestNosanaJobsEndpoints:
                 "ipfs_job": "QmHash123",
                 "market": "market123",
                 "timeout": 3600,
-            }
+            },
         )
 
         assert response.status_code in [200, 201, 401, 403, 422]
@@ -324,8 +318,9 @@ class TestNosanaRouteValidation:
 
     def test_deployment_create_timeout_bounds(self):
         """Test deployment timeout bounds"""
-        from src.routes.nosana import DeploymentCreate
         from pydantic import ValidationError
+
+        from src.routes.nosana import DeploymentCreate
 
         # Timeout too low
         with pytest.raises(ValidationError):
@@ -347,8 +342,9 @@ class TestNosanaRouteValidation:
 
     def test_deployment_replicas_bounds(self):
         """Test deployment replicas bounds"""
-        from src.routes.nosana import DeploymentCreate
         from pydantic import ValidationError
+
+        from src.routes.nosana import DeploymentCreate
 
         # Replicas below minimum
         with pytest.raises(ValidationError):

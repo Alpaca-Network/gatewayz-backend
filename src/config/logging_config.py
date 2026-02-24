@@ -245,7 +245,7 @@ class LokiLogHandler(logging.Handler):
         """
         try:
             # Guard against Python interpreter shutdown where threading might be unavailable
-            if not hasattr(self, '_shutdown') or self._shutdown is None:
+            if not hasattr(self, "_shutdown") or self._shutdown is None:
                 return
 
             # Signal worker to stop accepting new items and drain queue
@@ -254,19 +254,19 @@ class LokiLogHandler(logging.Handler):
 
             # Wait for worker thread to finish draining and exit (with timeout)
             # The timeout prevents hanging during shutdown if Loki is slow/unreachable
-            if hasattr(self, '_worker_thread') and self._worker_thread.is_alive():
+            if hasattr(self, "_worker_thread") and self._worker_thread.is_alive():
                 self._worker_thread.join(timeout=5.0)
 
             # Only mark as closed and clean up session if worker has actually exited
             # If timeout expired but worker is still running, leave resources available
             # so it can continue draining. The daemon thread will be killed on process
             # exit anyway, and resources will be garbage collected.
-            if hasattr(self, '_worker_thread') and not self._worker_thread.is_alive():
+            if hasattr(self, "_worker_thread") and not self._worker_thread.is_alive():
                 # Worker has exited - safe to clean up
-                if hasattr(self._closed, 'set'):
+                if hasattr(self._closed, "set"):
                     self._closed.set()
 
-                if hasattr(self, '_session_lock'):
+                if hasattr(self, "_session_lock"):
                     with self._session_lock:
                         if self._session:
                             try:

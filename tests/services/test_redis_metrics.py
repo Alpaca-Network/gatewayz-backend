@@ -9,11 +9,12 @@ This module tests the RedisMetrics service that provides:
 - Circuit breaker state sync
 """
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch
 import json
 import time
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from src.services.redis_metrics import RedisMetrics, RequestMetrics
 
@@ -38,31 +39,33 @@ def mock_redis_client():
 
     # Mock get operations (with decode_responses=True behavior - string keys/values)
     client.zscore = Mock(return_value=85.0)
-    client.zrevrange = Mock(return_value=[
-        ("openrouter", 95.0),
-        ("portkey", 85.0)
-    ])
-    client.lrange = Mock(return_value=[
-        json.dumps({
-            "model": "gpt-4",
-            "error": "Rate limit exceeded",
-            "timestamp": time.time(),
-            "latency_ms": 1500
-        })
-    ])
-    client.hgetall = Mock(return_value={
-        "total_requests": "1000",
-        "successful_requests": "950",
-        "failed_requests": "50",
-        "tokens_input": "50000",
-        "tokens_output": "25000",
-        "total_cost": "12.5"
-    })
+    client.zrevrange = Mock(return_value=[("openrouter", 95.0), ("portkey", 85.0)])
+    client.lrange = Mock(
+        return_value=[
+            json.dumps(
+                {
+                    "model": "gpt-4",
+                    "error": "Rate limit exceeded",
+                    "timestamp": time.time(),
+                    "latency_ms": 1500,
+                }
+            )
+        ]
+    )
+    client.hgetall = Mock(
+        return_value={
+            "total_requests": "1000",
+            "successful_requests": "950",
+            "failed_requests": "50",
+            "tokens_input": "50000",
+            "tokens_output": "25000",
+            "total_cost": "12.5",
+        }
+    )
     client.zrange = Mock(return_value=["500", "550", "600", "800"])
-    client.scan_iter = Mock(return_value=iter([
-        "metrics:openrouter:2025-11-27:14",
-        "metrics:openrouter:2025-11-27:13"
-    ]))
+    client.scan_iter = Mock(
+        return_value=iter(["metrics:openrouter:2025-11-27:14", "metrics:openrouter:2025-11-27:13"])
+    )
     client.delete = Mock(return_value=1)
 
     return client
@@ -87,7 +90,7 @@ class TestRecordRequest:
             success=True,
             cost=0.05,
             tokens_input=100,
-            tokens_output=50
+            tokens_output=50,
         )
 
         # Verify pipeline was called
@@ -106,7 +109,7 @@ class TestRecordRequest:
             latency_ms=1500,
             success=False,
             cost=0.0,
-            error_message="Rate limit exceeded"
+            error_message="Rate limit exceeded",
         )
 
         # Verify error was recorded
@@ -121,11 +124,7 @@ class TestRecordRequest:
 
         # Should not raise exception
         await redis_metrics.record_request(
-            provider="openrouter",
-            model="gpt-4",
-            latency_ms=500,
-            success=True,
-            cost=0.05
+            provider="openrouter", model="gpt-4", latency_ms=500, success=True, cost=0.05
         )
 
     @pytest.mark.asyncio
@@ -135,11 +134,7 @@ class TestRecordRequest:
 
         # Should not raise exception (logged as warning)
         await redis_metrics.record_request(
-            provider="openrouter",
-            model="gpt-4",
-            latency_ms=500,
-            success=True,
-            cost=0.05
+            provider="openrouter", model="gpt-4", latency_ms=500, success=True, cost=0.05
         )
 
 
@@ -168,10 +163,7 @@ class TestProviderHealth:
         """Test getting all provider health scores"""
         health_scores = await redis_metrics.get_all_provider_health()
 
-        assert health_scores == {
-            "openrouter": 95.0,
-            "portkey": 85.0
-        }
+        assert health_scores == {"openrouter": 95.0, "portkey": 85.0}
 
 
 class TestRecentErrors:
@@ -272,10 +264,7 @@ class TestCircuitBreaker:
         mock_redis_client.setex = Mock()
 
         await redis_metrics.update_circuit_breaker(
-            provider="openrouter",
-            model="gpt-4",
-            state="OPEN",
-            failure_count=5
+            provider="openrouter", model="gpt-4", state="OPEN", failure_count=5
         )
 
         mock_redis_client.setex.assert_called_once()
@@ -294,10 +283,7 @@ class TestCircuitBreaker:
 
         # Should not raise exception
         await redis_metrics.update_circuit_breaker(
-            provider="openrouter",
-            model="gpt-4",
-            state="OPEN",
-            failure_count=5
+            provider="openrouter", model="gpt-4", state="OPEN", failure_count=5
         )
 
 
@@ -337,7 +323,7 @@ class TestRequestMetricsDataclass:
             tokens_input=100,
             tokens_output=50,
             timestamp=time.time(),
-            error_message=None
+            error_message=None,
         )
 
         assert metrics.provider == "openrouter"
@@ -357,7 +343,7 @@ class TestRequestMetricsDataclass:
             tokens_input=0,
             tokens_output=0,
             timestamp=time.time(),
-            error_message="Rate limit exceeded"
+            error_message="Rate limit exceeded",
         )
 
         assert metrics.success is False

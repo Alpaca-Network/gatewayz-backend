@@ -5,12 +5,13 @@ Tests for Authentication Rate Limiting Module
 Tests IP-based rate limiting for authentication endpoints.
 """
 
-import pytest
 from unittest.mock import MagicMock
 
+import pytest
+
 from src.services.auth_rate_limiting import (
-    AuthRateLimiter,
     AuthRateLimitConfig,
+    AuthRateLimiter,
     AuthRateLimitResult,
     AuthRateLimitType,
     check_auth_rate_limit,
@@ -330,6 +331,7 @@ class TestGlobalRateLimiter:
         """Test the convenience function for checking rate limits"""
         # Reset the global limiter to ensure clean state
         from src.services import auth_rate_limiting
+
         auth_rate_limiting._auth_rate_limiter = None
 
         result = await check_auth_rate_limit("test_ip_123", AuthRateLimitType.LOGIN)

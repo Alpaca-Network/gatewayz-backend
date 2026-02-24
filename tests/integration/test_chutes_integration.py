@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Test script to verify Chutes.ai integration"""
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Add project root to path
@@ -10,6 +10,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.services.models import get_cached_models
+
 
 def test_chutes_models():
     """Test loading Chutes models from the catalog"""
@@ -29,10 +30,10 @@ def test_chutes_models():
     # Show first 5 models
     print("First 5 Chutes models:")
     for i, model in enumerate(chutes_models[:5], 1):
-        model_id = model.get('id', 'Unknown')
-        model_type = model.get('model_type', 'Unknown')
-        provider = model.get('provider_slug', 'Unknown')
-        pricing = model.get('pricing', {}).get('hourly_rate', 'N/A')
+        model_id = model.get("id", "Unknown")
+        model_type = model.get("model_type", "Unknown")
+        provider = model.get("provider_slug", "Unknown")
+        pricing = model.get("pricing", {}).get("hourly_rate", "N/A")
 
         print(f"{i}. {model_id}")
         print(f"   Provider: {provider}")
@@ -43,7 +44,7 @@ def test_chutes_models():
     # Test statistics
     model_types = {}
     for model in chutes_models:
-        model_type = model.get('model_type', 'Unknown')
+        model_type = model.get("model_type", "Unknown")
         model_types[model_type] = model_types.get(model_type, 0) + 1
 
     print("\nModel types breakdown:")
@@ -53,6 +54,7 @@ def test_chutes_models():
     print("\n" + "=" * 60)
     print("✓ Chutes.ai integration test PASSED!")
     return True
+
 
 if __name__ == "__main__":
     success = test_chutes_models()

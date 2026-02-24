@@ -20,7 +20,9 @@ router = APIRouter()
 @router.get("/model-health", tags=["monitoring"])
 async def get_all_model_health(
     provider: str | None = Query(None, description="Filter by provider"),
-    status: str | None = Query(None, description="Filter by last status (success, error, timeout, etc.)"),
+    status: str | None = Query(
+        None, description="Filter by last status (success, error, timeout, etc.)"
+    ),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
     offset: int = Query(0, ge=0, description="Number of records to skip"),
     _: dict[str, Any] | None = Depends(get_optional_user),
@@ -85,7 +87,7 @@ async def get_model_health(
         if not record:
             raise HTTPException(
                 status_code=404,
-                detail=f"No health data found for provider '{provider}' and model '{model}'"
+                detail=f"No health data found for provider '{provider}' and model '{model}'",
             )
 
         return record
@@ -172,8 +174,7 @@ async def get_provider_health_summary(
 
         if summary["total_models"] == 0:
             raise HTTPException(
-                status_code=404,
-                detail=f"No health data found for provider '{provider}'"
+                status_code=404, detail=f"No health data found for provider '{provider}'"
             )
 
         return summary

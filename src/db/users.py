@@ -1,7 +1,7 @@
 import logging
 import secrets
 import time
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -230,7 +230,7 @@ def create_enhanced_user(
             user = safe_get_first(
                 user_result,
                 error_message="Failed to create user account - no data returned",
-                validate_keys=["id"]
+                validate_keys=["id"],
             )
             user_id = user["id"]
         except (DatabaseResultError, KeyError) as e:
@@ -333,7 +333,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 key_data = safe_get_first(
                     key_result,
                     error_message="API key found but data structure invalid",
-                    validate_keys=["id", "user_id"]
+                    validate_keys=["id", "user_id"],
                 )
                 user_id = key_data["user_id"]
 
@@ -343,9 +343,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
 
                 if user_result.data and len(user_result.data) > 0:
                     user = safe_get_first(
-                        user_result,
-                        error_message=f"User {user_id} not found",
-                        validate_keys=["id"]
+                        user_result, error_message=f"User {user_id} not found", validate_keys=["id"]
                     )
                     # Add key information to user data
                     user["key_id"] = key_data["id"]
@@ -355,7 +353,9 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     user["is_primary"] = key_data.get("is_primary", False)
                     return user
             except (DatabaseResultError, KeyError) as e:
-                logger.warning(f"Error extracting API key data: {e}. Falling back to legacy lookup.")
+                logger.warning(
+                    f"Error extracting API key data: {e}. Falling back to legacy lookup."
+                )
 
         # Fallback: Check if this is a legacy key (for backward compatibility during migration)
         # PERF: Legacy keys are allowed to authenticate immediately - no blocking
@@ -366,7 +366,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 user = safe_get_first(
                     legacy_result,
                     error_message="Legacy key found but user data invalid",
-                    validate_keys=["id"]
+                    validate_keys=["id"],
                 )
             except (DatabaseResultError, KeyError) as e:
                 logger.error(f"Error extracting legacy user data: {e}")
@@ -415,7 +415,9 @@ def get_user(api_key: str) -> dict[str, Any] | None:
         entry = _user_cache[api_key]
         cache_time = entry["timestamp"]
         if time.time() - cache_time < _user_cache_ttl:
-            logger.debug(f"User cache hit for API key {api_key[:10]}... (age: {time.time() - cache_time:.1f}s)")
+            logger.debug(
+                f"User cache hit for API key {api_key[:10]}... (age: {time.time() - cache_time:.1f}s)"
+            )
             return entry["user"]
         else:
             # Cache expired, remove it
@@ -530,18 +532,23 @@ def add_credits_to_user(
         client = get_supabase_client()
 
         # Get current balances
-        user_result = client.table("users").select(
-            "subscription_allowance, purchased_credits"
-        ).eq("id", user_id).execute()
+        user_result = (
+            client.table("users")
+            .select("subscription_allowance, purchased_credits")
+            .eq("id", user_id)
+            .execute()
+        )
 
         try:
             user_data = safe_get_first(
-                user_result,
-                error_message=f"User with ID {user_id} not found",
-                validate_keys=[]
+                user_result, error_message=f"User with ID {user_id} not found", validate_keys=[]
             )
-            allowance_before = safe_get_value(user_data, "subscription_allowance", default=0.0, expected_type=float)
-            purchased_before = safe_get_value(user_data, "purchased_credits", default=0.0, expected_type=float)
+            allowance_before = safe_get_value(
+                user_data, "subscription_allowance", default=0.0, expected_type=float
+            )
+            purchased_before = safe_get_value(
+                user_data, "purchased_credits", default=0.0, expected_type=float
+            )
             balance_before = allowance_before + purchased_before
         except (DatabaseResultError, KeyError, TypeError) as e:
             logger.error(f"Error getting user balance for user {user_id}: {e}")
@@ -555,7 +562,7 @@ def add_credits_to_user(
             allowance_after = allowance_before
             update_data = {
                 "purchased_credits": purchased_after,
-                "updated_at": datetime.now(UTC).isoformat()
+                "updated_at": datetime.now(UTC).isoformat(),
             }
         else:
             # Other types (admin_credit, trial, etc.) - add to purchased for simplicity
@@ -564,18 +571,13 @@ def add_credits_to_user(
             allowance_after = allowance_before
             update_data = {
                 "purchased_credits": purchased_after,
-                "updated_at": datetime.now(UTC).isoformat()
+                "updated_at": datetime.now(UTC).isoformat(),
             }
 
         balance_after = allowance_after + purchased_after
 
         # Update user credits
-        result = (
-            client.table("users")
-            .update(update_data)
-            .eq("id", user_id)
-            .execute()
-        )
+        result = client.table("users").update(update_data).eq("id", user_id).execute()
 
         if not result.data:
             raise ValueError(f"User with ID {user_id} not found")
@@ -733,21 +735,29 @@ def deduct_credits(
 
         # First, try api_keys_new table (primary key store)
         with track_database_query(table="api_keys_new", operation="select"):
-            key_result = client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
+            key_result = (
+                client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
+            )
 
         if key_result.data:
             # Found in api_keys_new - get user data with both allowance and purchased credits
             user_id = key_result.data[0]["user_id"]
             with track_database_query(table="users", operation="select"):
-                user_lookup = client.table("users").select(
-                    "id, subscription_allowance, purchased_credits, tier"
-                ).eq("id", user_id).execute()
+                user_lookup = (
+                    client.table("users")
+                    .select("id, subscription_allowance, purchased_credits, tier")
+                    .eq("id", user_id)
+                    .execute()
+                )
         else:
             # Fallback: try legacy users.api_key column
             with track_database_query(table="users", operation="select"):
-                user_lookup = client.table("users").select(
-                    "id, subscription_allowance, purchased_credits, tier"
-                ).eq("api_key", api_key).execute()
+                user_lookup = (
+                    client.table("users")
+                    .select("id, subscription_allowance, purchased_credits, tier")
+                    .eq("api_key", api_key)
+                    .execute()
+                )
 
         if not user_lookup.data:
             raise ValueError("User with API key not found")
@@ -757,8 +767,11 @@ def deduct_credits(
         # ADMIN BYPASS: Admin tier users don't consume credits
         try:
             from src.db.plans import is_admin_tier_user
+
             if is_admin_tier_user(user_id):
-                logger.info(f"Admin tier user {user_id} - skipping credit deduction of ${tokens:.6f}")
+                logger.info(
+                    f"Admin tier user {user_id} - skipping credit deduction of ${tokens:.6f}"
+                )
                 return
         except Exception as e:
             logger.warning(f"Error checking admin tier status for credit deduction: {e}")
@@ -808,11 +821,13 @@ def deduct_credits(
         with track_database_query(table="users", operation="update"):
             result = (
                 client.table("users")
-                .update({
-                    "subscription_allowance": allowance_after,
-                    "purchased_credits": purchased_after,
-                    "updated_at": datetime.now(UTC).isoformat()
-                })
+                .update(
+                    {
+                        "subscription_allowance": allowance_after,
+                        "purchased_credits": purchased_after,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                )
                 .eq("id", user_id)
                 .eq("subscription_allowance", allowance_before)  # Optimistic lock
                 .eq("purchased_credits", purchased_before)  # Optimistic lock
@@ -823,9 +838,12 @@ def deduct_credits(
             # Balance changed between our read and update (concurrent modification)
             # Fetch current balance and fail with accurate error
             with track_database_query(table="users", operation="select"):
-                current = client.table("users").select(
-                    "subscription_allowance, purchased_credits"
-                ).eq("id", user_id).execute()
+                current = (
+                    client.table("users")
+                    .select("subscription_allowance, purchased_credits")
+                    .eq("id", user_id)
+                    .execute()
+                )
 
             if current.data and len(current.data) > 0:
                 current_allowance = float(current.data[0].get("subscription_allowance") or 0)
@@ -835,7 +853,11 @@ def deduct_credits(
                 current_balance = "unknown"
 
             # SECURITY: Sanitize credit amounts in concurrent modification errors too
-            current_rounded = round(float(current_balance), 2) if isinstance(current_balance, (int, float)) else "unknown"
+            current_rounded = (
+                round(float(current_balance), 2)
+                if isinstance(current_balance, (int, float))
+                else "unknown"
+            )
             required_rounded = round(tokens, 2)
 
             raise ValueError(
@@ -918,9 +940,12 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         now = datetime.now(UTC).isoformat()
 
         # Get current allowance (will be forfeited)
-        user_result = client.table("users").select(
-            "subscription_allowance, purchased_credits"
-        ).eq("id", user_id).execute()
+        user_result = (
+            client.table("users")
+            .select("subscription_allowance, purchased_credits")
+            .eq("id", user_id)
+            .execute()
+        )
 
         if not user_result.data:
             logger.error(f"User {user_id} not found for allowance reset")
@@ -932,11 +957,13 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         # Reset allowance to new amount
         result = (
             client.table("users")
-            .update({
-                "subscription_allowance": allowance_amount,
-                "allowance_reset_date": now,
-                "updated_at": now,
-            })
+            .update(
+                {
+                    "subscription_allowance": allowance_amount,
+                    "allowance_reset_date": now,
+                    "updated_at": now,
+                }
+            )
             .eq("id", user_id)
             .execute()
         )
@@ -970,7 +997,9 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         return True
 
     except Exception as e:
-        logger.error(f"Failed to reset subscription allowance for user {user_id}: {e}", exc_info=True)
+        logger.error(
+            f"Failed to reset subscription allowance for user {user_id}: {e}", exc_info=True
+        )
         return False
 
 
@@ -996,9 +1025,12 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
         now = datetime.now(UTC).isoformat()
 
         # Get current balances
-        user_result = client.table("users").select(
-            "subscription_allowance, purchased_credits"
-        ).eq("id", user_id).execute()
+        user_result = (
+            client.table("users")
+            .select("subscription_allowance, purchased_credits")
+            .eq("id", user_id)
+            .execute()
+        )
 
         if not user_result.data:
             error_msg = f"User {user_id} not found for allowance forfeiture"
@@ -1012,10 +1044,17 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
 
         if forfeited_amount > 0:
             # Set allowance to 0
-            update_result = client.table("users").update({
-                "subscription_allowance": 0,
-                "updated_at": now,
-            }).eq("id", user_id).execute()
+            update_result = (
+                client.table("users")
+                .update(
+                    {
+                        "subscription_allowance": 0,
+                        "updated_at": now,
+                    }
+                )
+                .eq("id", user_id)
+                .execute()
+            )
 
             # Check if update succeeded
             if not update_result.data:
@@ -1238,7 +1277,9 @@ def get_admin_monitor_data() -> dict[str, Any]:
             logger.info(f"Total users count (exact): {total_users}")
 
             # Then get user data for credit calculations (limited to avoid memory issues)
-            users_result = client.table("users").select("id, credits, api_key").limit(10000).execute()
+            users_result = (
+                client.table("users").select("id, credits, api_key").limit(10000).execute()
+            )
             users = users_result.data or []
         except Exception as e:
             logger.error("Error retrieving users: %s", sanitize_for_logging(str(e)))
@@ -1303,7 +1344,9 @@ def get_admin_monitor_data() -> dict[str, Any]:
                 .execute()
             )
             usage_records_legacy_today = usage_today_result.data or []
-            logger.debug(f"Retrieved {len(usage_records_legacy_today)} legacy usage_records for today")
+            logger.debug(
+                f"Retrieved {len(usage_records_legacy_today)} legacy usage_records for today"
+            )
 
             # Get month's legacy records for complete monthly stats
             month_ago_iso = month_ago.isoformat()
@@ -1315,7 +1358,9 @@ def get_admin_monitor_data() -> dict[str, Any]:
                 .execute()
             )
             usage_records_legacy_month = usage_month_result.data or []
-            logger.debug(f"Retrieved {len(usage_records_legacy_month)} legacy usage_records for month")
+            logger.debug(
+                f"Retrieved {len(usage_records_legacy_month)} legacy usage_records for month"
+            )
         except Exception as e:
             logger.warning(f"Error retrieving usage_records (legacy): {e}")
             usage_records_legacy_today = []
@@ -1351,7 +1396,10 @@ def get_admin_monitor_data() -> dict[str, Any]:
         # Also check api_keys_new table for users who might not have api_key in users table
         try:
             api_keys_result = (
-                client.table("api_keys_new").select("user_id, api_key, is_primary").limit(10000).execute()
+                client.table("api_keys_new")
+                .select("user_id, api_key, is_primary")
+                .limit(10000)
+                .execute()
             )
             if api_keys_result.data:
                 for key_data in api_keys_result.data:
@@ -1420,7 +1468,6 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
         # Sort day_usage by timestamp descending to ensure correct order for recent activity
         day_usage.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
-
 
         # Process MONTH's activity logs
         month_usage = []
@@ -1644,7 +1691,11 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         # If tiered fields are empty but legacy credits exist, use legacy credits
         # For Pro/Max users with active subscription, legacy credits should go to subscription_allowance
         # For basic users or purchased credits, they should go to purchased_credits
-        if subscription_allowance_dollars == 0 and purchased_credits_dollars == 0 and legacy_credits_dollars > 0:
+        if (
+            subscription_allowance_dollars == 0
+            and purchased_credits_dollars == 0
+            and legacy_credits_dollars > 0
+        ):
             if tier in ("pro", "max") and user.get("subscription_status") == "active":
                 # Active Pro/Max subscriber - legacy credits are subscription allowance
                 subscription_allowance_dollars = legacy_credits_dollars
@@ -1667,7 +1718,9 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
             "subscription_allowance": subscription_allowance_cents,  # Monthly subscription allowance in cents
             "purchased_credits": purchased_credits_cents,  # One-time purchased credits in cents
             "total_credits": total_credits_cents,  # Explicit sum of both in cents
-            "allowance_reset_date": user.get("allowance_reset_date"),  # When allowance was last reset
+            "allowance_reset_date": user.get(
+                "allowance_reset_date"
+            ),  # When allowance was last reset
             "created_at": user.get("created_at"),
             "updated_at": user.get("updated_at"),
             "username": user.get("username"),
@@ -1698,9 +1751,7 @@ def mark_welcome_email_sent(user_id: int) -> bool:
 
         result = (
             client.table("users")
-            .update(
-                {"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()}
-            )
+            .update({"welcome_email_sent": True, "updated_at": datetime.now(UTC).isoformat()})
             .eq("id", user_id)
             .execute()
         )

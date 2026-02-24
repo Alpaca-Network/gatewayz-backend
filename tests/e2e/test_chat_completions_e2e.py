@@ -41,9 +41,7 @@ class TestChatCompletionsE2E:
             assert "role" in data["choices"][0]["message"]
             assert data["choices"][0]["message"]["role"] == "assistant"
 
-    def test_chat_completions_with_system_prompt(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_with_system_prompt(self, client: TestClient, auth_headers: dict):
         """Test chat completion with system prompt."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -68,9 +66,7 @@ class TestChatCompletionsE2E:
             data = response.json()
             assert data["choices"][0]["message"]["role"] == "assistant"
 
-    def test_chat_completions_with_all_parameters(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_with_all_parameters(self, client: TestClient, auth_headers: dict):
         """Test chat completion with all optional parameters."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -158,9 +154,7 @@ class TestChatCompletionsE2E:
         # Should succeed or fail gracefully with provider error
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_chat_completions_with_provider_fireworks(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_with_provider_fireworks(self, client: TestClient, auth_headers: dict):
         """Test chat completion with Fireworks provider."""
         payload = {
             "model": "deepseek-ai/deepseek-v3",
@@ -176,9 +170,7 @@ class TestChatCompletionsE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_chat_completions_missing_api_key(
-        self, client: TestClient, base_chat_payload: dict
-    ):
+    def test_chat_completions_missing_api_key(self, client: TestClient, base_chat_payload: dict):
         """Test chat completion without API key."""
         response = client.post(
             "/v1/chat/completions",
@@ -189,9 +181,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "detail" in data
 
-    def test_chat_completions_empty_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_empty_messages(self, client: TestClient, auth_headers: dict):
         """Test chat completion with empty messages array."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -208,9 +198,7 @@ class TestChatCompletionsE2E:
         data = response.json()
         assert "detail" in data
 
-    def test_chat_completions_invalid_role(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_invalid_role(self, client: TestClient, auth_headers: dict):
         """Test chat completion with invalid message role."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -225,9 +213,7 @@ class TestChatCompletionsE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_chat_completions_empty_content(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_empty_content(self, client: TestClient, auth_headers: dict):
         """Test chat completion with empty message content."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -242,9 +228,7 @@ class TestChatCompletionsE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_chat_completions_multiple_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_multiple_messages(self, client: TestClient, auth_headers: dict):
         """Test chat completion with conversation history."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -268,9 +252,7 @@ class TestChatCompletionsE2E:
             data = response.json()
             assert "choices" in data
 
-    def test_chat_completions_with_tools(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_with_tools(self, client: TestClient, auth_headers: dict):
         """Test chat completion with function calling tools."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -306,9 +288,7 @@ class TestChatCompletionsE2E:
         # May return 400 if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_chat_completions_response_format_json(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_response_format_json(self, client: TestClient, auth_headers: dict):
         """Test chat completion with JSON response format."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -330,9 +310,7 @@ class TestChatCompletionsE2E:
         # Response format may not be supported by all models
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_chat_completions_very_long_message(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_very_long_message(self, client: TestClient, auth_headers: dict):
         """Test chat completion with very long message."""
         long_content = "This is a test. " * 1000  # ~16KB message
 
@@ -361,11 +339,21 @@ class TestChatCompletionsE2E:
         )
 
         # Session_id is optional; should still work
-        assert response.status_code in [200, 400, 401, 402, 403, 404, 422, 429, 500, 502, 503]  # 404 if session doesn't exist
+        assert response.status_code in [
+            200,
+            400,
+            401,
+            402,
+            403,
+            404,
+            422,
+            429,
+            500,
+            502,
+            503,
+        ]  # 404 if session doesn't exist
 
-    def test_chat_completions_default_max_tokens(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_default_max_tokens(self, client: TestClient, auth_headers: dict):
         """Test that max_tokens defaults to 950."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -386,9 +374,7 @@ class TestChatCompletionsE2E:
         if "usage" in data:
             assert data["usage"]["completion_tokens"] <= 950
 
-    def test_chat_completions_default_temperature(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_default_temperature(self, client: TestClient, auth_headers: dict):
         """Test that temperature defaults to 1.0."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -416,9 +402,7 @@ class TestChatCompletionsDeveloperRoleE2E:
     (o1, o3, etc.) as an alternative to the 'system' role.
     """
 
-    def test_chat_completions_with_developer_role(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_chat_completions_with_developer_role(self, client: TestClient, auth_headers: dict):
         """Test chat completion with developer role message."""
         payload = {
             "model": "gpt-3.5-turbo",

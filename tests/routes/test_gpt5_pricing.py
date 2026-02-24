@@ -6,9 +6,11 @@ These tests verify that GPT-5.1 pricing is available through the API
 and that the dynamic pricing system works correctly for OpenRouter models.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
+
 from src.main import app
 
 client = TestClient(app)
@@ -17,30 +19,24 @@ client = TestClient(app)
 class TestGPT51ModelAvailability:
     """Test that GPT-5.1 models are available in the catalog"""
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_gpt51_in_openrouter_models(self, mock_get_models):
         """Test that GPT-5.1 is returned from OpenRouter models endpoint"""
         mock_get_models.return_value = [
             {
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                },
+                "pricing": {"prompt": "1.25", "completion": "10.00"},
                 "context_length": 128000,
-                "source_gateway": "openrouter"
+                "source_gateway": "openrouter",
             },
             {
                 "id": "openai/gpt-5",
                 "name": "GPT-5",
-                "pricing": {
-                    "prompt": "0.10",
-                    "completion": "0.40"
-                },
+                "pricing": {"prompt": "0.10", "completion": "0.40"},
                 "context_length": 128000,
-                "source_gateway": "openrouter"
-            }
+                "source_gateway": "openrouter",
+            },
         ]
 
         response = client.get("/v1/models")
@@ -51,18 +47,15 @@ class TestGPT51ModelAvailability:
 class TestGPT51Pricing:
     """Test GPT-5.1 pricing data structure and availability"""
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_gpt51_pricing_structure(self, mock_get_models):
         """Test that GPT-5.1 pricing has correct structure"""
         gpt51_model = {
             "id": "openai/gpt-5.1",
             "name": "GPT-5.1",
-            "pricing": {
-                "prompt": "1.25",
-                "completion": "10.00"
-            },
+            "pricing": {"prompt": "1.25", "completion": "10.00"},
             "context_length": 128000,
-            "source_gateway": "openrouter"
+            "source_gateway": "openrouter",
         }
 
         mock_get_models.return_value = [gpt51_model]
@@ -71,19 +64,13 @@ class TestGPT51Pricing:
         response = client.get("/v1/models")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_gpt51_pricing_lookup(self, mock_get_cached):
         """Test that pricing can be looked up for GPT-5.1"""
         from src.services.pricing import get_model_pricing
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         pricing = get_model_pricing("openai/gpt-5.1")
@@ -92,19 +79,13 @@ class TestGPT51Pricing:
         assert float(pricing["prompt"]) == 1.25
         assert float(pricing["completion"]) == 10.00
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_gpt51_pricing_lookup_hyphen_alias(self, mock_get_cached):
         """Test that pricing lookup works for hyphenated GPT-5-1 alias"""
         from src.services.pricing import get_model_pricing
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         pricing = get_model_pricing("openai/gpt-5-1")
@@ -113,19 +94,13 @@ class TestGPT51Pricing:
         assert float(pricing["prompt"]) == 1.25
         assert float(pricing["completion"]) == 10.00
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_gpt51_cost_calculation(self, mock_get_cached):
         """Test that costs are calculated correctly for GPT-5.1"""
         from src.services.pricing import calculate_cost
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         # 1000 prompt tokens + 500 completion tokens
@@ -140,45 +115,32 @@ class TestGPT51Pricing:
 class TestGPT51ModelCatalogEndpoints:
     """Test GPT-5.1 availability through various catalog endpoints"""
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_models_endpoint_includes_gpt51(self, mock_get_models):
         """Test that /v1/models includes GPT-5.1"""
         mock_get_models.return_value = [
             {
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                },
-                "source_gateway": "openrouter"
+                "pricing": {"prompt": "1.25", "completion": "10.00"},
+                "source_gateway": "openrouter",
             }
         ]
 
         response = client.get("/v1/models")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
-    @patch('src.routes.catalog.get_cached_providers')
+    @patch("src.routes.catalog.get_cached_models")
+    @patch("src.routes.catalog.get_cached_providers")
     def test_provider_endpoint_openai_includes_gpt51(self, mock_providers, mock_get_models):
         """Test that /v1/provider returns OpenAI provider with GPT-5.1"""
-        mock_get_models.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "provider_slug": "openai"
-            }
-        ]
-        mock_providers.return_value = [
-            {
-                "slug": "openai",
-                "name": "OpenAI"
-            }
-        ]
+        mock_get_models.return_value = [{"id": "openai/gpt-5.1", "provider_slug": "openai"}]
+        mock_providers.return_value = [{"slug": "openai", "name": "OpenAI"}]
 
         response = client.get("/v1/provider?gateway=openrouter")
         assert response.status_code in [200, 503, 500]
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_catalog_page_loads_gpt51(self, mock_get_models):
         """Test that models catalog page loads with GPT-5.1"""
         mock_get_models.return_value = [
@@ -187,11 +149,8 @@ class TestGPT51ModelCatalogEndpoints:
                 "slug": "openai-gpt-5-1",
                 "canonical_slug": "openai/gpt-5.1",
                 "name": "GPT-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                },
-                "source_gateway": "openrouter"
+                "pricing": {"prompt": "1.25", "completion": "10.00"},
+                "source_gateway": "openrouter",
             }
         ]
 
@@ -202,8 +161,8 @@ class TestGPT51ModelCatalogEndpoints:
 class TestGPT51DynamicPricing:
     """Test that GPT-5.1 pricing is dynamically fetched from OpenRouter"""
 
-    @patch('src.services.models.httpx.get')
-    @patch('src.config.Config.OPENROUTER_API_KEY', 'test-key')
+    @patch("src.services.models.httpx.get")
+    @patch("src.config.Config.OPENROUTER_API_KEY", "test-key")
     def test_fetch_gpt51_from_openrouter_api(self, mock_httpx_get):
         """Test that GPT-5.1 can be fetched from OpenRouter API"""
         from src.services.models import fetch_models_from_openrouter
@@ -215,21 +174,15 @@ class TestGPT51DynamicPricing:
                 {
                     "id": "openai/gpt-5.1",
                     "name": "GPT-5.1",
-                    "pricing": {
-                        "prompt": "1.25",
-                        "completion": "10.00"
-                    },
-                    "context_length": 128000
+                    "pricing": {"prompt": "1.25", "completion": "10.00"},
+                    "context_length": 128000,
                 },
                 {
                     "id": "openai/gpt-5",
                     "name": "GPT-5",
-                    "pricing": {
-                        "prompt": "0.10",
-                        "completion": "0.40"
-                    },
-                    "context_length": 128000
-                }
+                    "pricing": {"prompt": "0.10", "completion": "0.40"},
+                    "context_length": 128000,
+                },
             ]
         }
         mock_httpx_get.return_value = mock_response
@@ -250,10 +203,7 @@ class TestGPT51DynamicPricing:
         from src.services.models import sanitize_pricing
 
         # Test that negative values cause model to be filtered
-        pricing = {
-            "prompt": "-1",
-            "completion": "10.00"
-        }
+        pricing = {"prompt": "-1", "completion": "10.00"}
 
         sanitized = sanitize_pricing(pricing)
 
@@ -264,10 +214,7 @@ class TestGPT51DynamicPricing:
         """Test sanitization when all pricing is dynamic (-1)"""
         from src.services.models import sanitize_pricing
 
-        pricing = {
-            "prompt": "-1",
-            "completion": "-1"
-        }
+        pricing = {"prompt": "-1", "completion": "-1"}
 
         sanitized = sanitize_pricing(pricing)
 
@@ -278,7 +225,7 @@ class TestGPT51DynamicPricing:
 class TestGPT51Variants:
     """Test different GPT-5 model variants are all available with pricing"""
 
-    @patch('src.routes.catalog.get_cached_models')
+    @patch("src.routes.catalog.get_cached_models")
     def test_all_gpt5_variants_have_pricing(self, mock_get_models):
         """Test that all GPT-5 variants have pricing"""
         mock_get_models.return_value = [
@@ -286,20 +233,20 @@ class TestGPT51Variants:
                 "id": "openai/gpt-5",
                 "name": "GPT-5",
                 "pricing": {"prompt": "0.10", "completion": "0.40"},
-                "source_gateway": "openrouter"
+                "source_gateway": "openrouter",
             },
             {
                 "id": "openai/gpt-5.1",
                 "name": "GPT-5.1",
                 "pricing": {"prompt": "1.25", "completion": "10.00"},
-                "source_gateway": "openrouter"
+                "source_gateway": "openrouter",
             },
             {
                 "id": "openai/gpt-5-turbo",
                 "name": "GPT-5 Turbo",
                 "pricing": {"prompt": "0.05", "completion": "0.20"},
-                "source_gateway": "openrouter"
-            }
+                "source_gateway": "openrouter",
+            },
         ]
 
         response = client.get("/v1/models")
@@ -315,19 +262,13 @@ class TestGPT51Variants:
 class TestGPT51CostEstimation:
     """Test accurate cost estimation for GPT-5.1 requests"""
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_estimate_gpt51_request_cost(self, mock_get_cached):
         """Test cost estimation for typical GPT-5.1 requests"""
         from src.services.pricing import calculate_cost
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         # Typical request: 2000 prompt tokens, 1000 completion tokens
@@ -338,19 +279,13 @@ class TestGPT51CostEstimation:
 
         assert cost == pytest.approx(expected_cost, rel=1e-9)
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_large_gpt51_request_cost(self, mock_get_cached):
         """Test cost estimation for large GPT-5.1 requests"""
         from src.services.pricing import calculate_cost
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         # Large request: 100k prompt tokens, 50k completion tokens
@@ -362,19 +297,13 @@ class TestGPT51CostEstimation:
         # Should be ~$0.625 (125 + 500) / 1M = 625 / 1M
         assert cost > 0.6 and cost < 0.7
 
-    @patch('src.services.models.get_cached_models')
+    @patch("src.services.models.get_cached_models")
     def test_gpt51_hyphen_alias_cost(self, mock_get_cached):
         """Test cost estimation works for hyphen alias input"""
         from src.services.pricing import calculate_cost
 
         mock_get_cached.return_value = [
-            {
-                "id": "openai/gpt-5.1",
-                "pricing": {
-                    "prompt": "1.25",
-                    "completion": "10.00"
-                }
-            }
+            {"id": "openai/gpt-5.1", "pricing": {"prompt": "1.25", "completion": "10.00"}}
         ]
 
         cost = calculate_cost("openai/gpt-5-1", 1000, 500)
@@ -386,12 +315,10 @@ class TestGPT51CostEstimation:
 class TestGPT51Integration:
     """Integration tests for GPT-5.1 with the full system"""
 
-    @patch('src.routes.catalog.get_cached_models')
-    @patch('src.routes.catalog.get_cached_providers')
-    @patch('src.routes.catalog.enhance_providers_with_logos_and_sites')
-    def test_gpt51_in_full_catalog_response(
-        self, mock_enhance, mock_providers, mock_get_models
-    ):
+    @patch("src.routes.catalog.get_cached_models")
+    @patch("src.routes.catalog.get_cached_providers")
+    @patch("src.routes.catalog.enhance_providers_with_logos_and_sites")
+    def test_gpt51_in_full_catalog_response(self, mock_enhance, mock_providers, mock_get_models):
         """Test GPT-5.1 appears in full catalog response"""
 
         def fake_get_models(gateway: str):
@@ -401,7 +328,7 @@ class TestGPT51Integration:
                         "id": "openai/gpt-5.1",
                         "name": "GPT-5.1",
                         "pricing": {"prompt": "1.25", "completion": "10.00"},
-                        "source_gateway": "openrouter"
+                        "source_gateway": "openrouter",
                     }
                 ]
             return []

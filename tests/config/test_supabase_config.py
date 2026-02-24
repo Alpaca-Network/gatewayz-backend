@@ -4,7 +4,7 @@ Tests for src/config/supabase_config.py
 Tests the Supabase client initialization and URL validation.
 """
 
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -136,9 +136,7 @@ class TestGetSupabaseClientValidation:
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_logs_masked_url_on_initialization(
-        self, mock_httpx_client, mock_create_client, caplog
-    ):
+    def test_logs_masked_url_on_initialization(self, mock_httpx_client, mock_create_client, caplog):
         """Test that initialization logs a masked version of the URL"""
         import src.config.supabase_config as supabase_config_mod
 
@@ -207,7 +205,9 @@ class TestHttpxClientConfiguration:
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_includes_authorization_header(self, mock_httpx_client, mock_create_client):
+    def test_httpx_client_includes_authorization_header(
+        self, mock_httpx_client, mock_create_client
+    ):
         """Test that httpx client is created with Authorization Bearer header.
 
         The Authorization header with Bearer token is required for authenticated
@@ -236,11 +236,15 @@ class TestHttpxClientConfiguration:
         assert "headers" in call_kwargs, "httpx.Client must be created with headers"
         assert "Authorization" in call_kwargs["headers"], "headers must include 'Authorization'"
         assert call_kwargs["headers"]["Authorization"] == f"Bearer {test_key}"
-        assert call_kwargs["headers"]["Authorization"].startswith("Bearer "), "Authorization must use Bearer scheme"
+        assert call_kwargs["headers"]["Authorization"].startswith(
+            "Bearer "
+        ), "Authorization must use Bearer scheme"
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_auth_headers_match_supabase_key(self, mock_httpx_client, mock_create_client):
+    def test_httpx_client_auth_headers_match_supabase_key(
+        self, mock_httpx_client, mock_create_client
+    ):
         """Test that both auth headers use the same SUPABASE_KEY value.
 
         Both apikey and Authorization headers must use the exact same key value
@@ -300,7 +304,9 @@ class TestHttpxClientConfiguration:
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_httpx_client_injected_into_postgrest_session(self, mock_httpx_client, mock_create_client):
+    def test_httpx_client_injected_into_postgrest_session(
+        self, mock_httpx_client, mock_create_client
+    ):
         """Test that the configured httpx client is injected into postgrest.session.
 
         The custom httpx client with auth headers must replace the postgrest session
@@ -327,8 +333,9 @@ class TestHttpxClientConfiguration:
                     supabase_config_mod.get_supabase_client()
 
         # Verify the httpx client was injected into postgrest.session
-        assert mock_client.postgrest.session == mock_httpx_instance, \
-            "Custom httpx client must be injected into postgrest.session"
+        assert (
+            mock_client.postgrest.session == mock_httpx_instance
+        ), "Custom httpx client must be injected into postgrest.session"
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.HTTPTransport")
@@ -353,7 +360,9 @@ class TestHttpxClientConfiguration:
 
         # Verify HTTP/2 is disabled in the transport configuration
         call_kwargs = mock_http_transport.call_args[1]
-        assert call_kwargs.get("http2") is False, "HTTP/2 must be disabled to prevent stale connection errors"
+        assert (
+            call_kwargs.get("http2") is False
+        ), "HTTP/2 must be disabled to prevent stale connection errors"
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
@@ -475,8 +484,9 @@ class TestErrorPersistence:
 
     def test_get_supabase_client_reraises_previous_error(self):
         """Test that get_supabase_client re-raises previous initialization errors within TTL"""
-        import src.config.supabase_config as supabase_config_mod
         import time
+
+        import src.config.supabase_config as supabase_config_mod
 
         # Simulate a previous initialization failure
         test_error = RuntimeError("Previous initialization failed")
@@ -488,7 +498,9 @@ class TestErrorPersistence:
         with pytest.raises(RuntimeError) as exc_info:
             supabase_config_mod.get_supabase_client()
 
-        assert "unavailable" in str(exc_info.value).lower() or "retry" in str(exc_info.value).lower()
+        assert (
+            "unavailable" in str(exc_info.value).lower() or "retry" in str(exc_info.value).lower()
+        )
 
     def test_initialization_error_captured_on_failure(self):
         """Test that initialization errors are captured for future reference"""
@@ -663,7 +675,9 @@ class TestConnectionErrorHandling:
 
     @patch("src.config.supabase_config.create_client")
     @patch("src.config.supabase_config.httpx.Client")
-    def test_refresh_supabase_client_closes_old_connection(self, mock_httpx_client, mock_create_client):
+    def test_refresh_supabase_client_closes_old_connection(
+        self, mock_httpx_client, mock_create_client
+    ):
         """Test that refresh_supabase_client properly closes the old connection"""
         import src.config.supabase_config as supabase_config_mod
 

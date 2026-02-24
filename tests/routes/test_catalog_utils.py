@@ -6,10 +6,11 @@ These tests actually execute code to increase coverage
 """
 
 import pytest
+
 from src.routes.catalog import (
+    annotate_provider_sources,
     normalize_developer_segment,
     normalize_model_segment,
-    annotate_provider_sources,
 )
 
 
@@ -79,10 +80,7 @@ class TestAnnotateProviderSources:
         assert "openrouter" in result[0]["source_gateways"]
 
     def test_annotate_multiple_providers(self):
-        providers = [
-            {"id": "openai", "name": "OpenAI"},
-            {"id": "anthropic", "name": "Anthropic"}
-        ]
+        providers = [{"id": "openai", "name": "OpenAI"}, {"id": "anthropic", "name": "Anthropic"}]
         result = annotate_provider_sources(providers, "portkey")
 
         assert len(result) == 2
@@ -98,20 +96,14 @@ class TestAnnotateProviderSources:
         assert result[0]["id"] == "openai"
 
     def test_annotate_doesnt_duplicate_source(self):
-        providers = [{
-            "id": "openai",
-            "source_gateways": ["openrouter"]
-        }]
+        providers = [{"id": "openai", "source_gateways": ["openrouter"]}]
         result = annotate_provider_sources(providers, "openrouter")
 
         # Should only have one "openrouter" entry
         assert result[0]["source_gateways"].count("openrouter") == 1
 
     def test_annotate_adds_new_source(self):
-        providers = [{
-            "id": "openai",
-            "source_gateways": ["portkey"]
-        }]
+        providers = [{"id": "openai", "source_gateways": ["portkey"]}]
         result = annotate_provider_sources(providers, "openrouter")
 
         assert "portkey" in result[0]["source_gateways"]

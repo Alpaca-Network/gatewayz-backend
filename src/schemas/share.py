@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class SharedChatMessage(BaseModel):
     """A message in a shared chat."""
+
     id: int
     session_id: int
     role: str  # 'user' or 'assistant'
@@ -18,12 +19,14 @@ class SharedChatMessage(BaseModel):
 
 class CreateShareLinkRequest(BaseModel):
     """Request to create a share link."""
+
     session_id: int
     expires_at: str | None = None  # ISO 8601 datetime string
 
 
 class CreateShareLinkResponse(BaseModel):
     """Response from creating a share link."""
+
     success: bool
     id: int | None = None
     session_id: int | None = None
@@ -39,6 +42,7 @@ class CreateShareLinkResponse(BaseModel):
 
 class ShareLinkData(BaseModel):
     """Data for a single share link."""
+
     id: int
     session_id: int
     share_token: str
@@ -52,6 +56,7 @@ class ShareLinkData(BaseModel):
 
 class ShareLinksListResponse(BaseModel):
     """Response for listing share links."""
+
     success: bool
     data: list[dict[str, Any]]
     count: int
@@ -60,6 +65,7 @@ class ShareLinksListResponse(BaseModel):
 
 class SharedChatPublicView(BaseModel):
     """Public view of a shared chat."""
+
     success: bool
     session_id: int | None = None
     title: str | None = None

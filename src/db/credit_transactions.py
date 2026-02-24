@@ -5,7 +5,7 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config.supabase_config import (
@@ -112,15 +112,15 @@ def log_credit_transaction(
         logger.error(f"Error logging credit transaction: {e}", exc_info=True)
         capture_database_error(
             e,
-            operation='insert',
-            table='credit_transactions',
+            operation="insert",
+            table="credit_transactions",
             details={
-                'user_id': user_id,
-                'amount': amount,
-                'transaction_type': transaction_type,
-                'balance_before': balance_before,
-                'balance_after': balance_after
-            }
+                "user_id": user_id,
+                "amount": amount,
+                "transaction_type": transaction_type,
+                "balance_before": balance_before,
+                "balance_after": balance_after,
+            },
         )
         return None
 

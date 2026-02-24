@@ -201,12 +201,14 @@ class WebSearchTool(BaseTool):
             # Extract and format results
             results = []
             for item in data.get("results", []):
-                results.append({
-                    "title": item.get("title", ""),
-                    "url": item.get("url", ""),
-                    "content": item.get("content", ""),
-                    "score": item.get("score", 0.0),
-                })
+                results.append(
+                    {
+                        "title": item.get("title", ""),
+                        "url": item.get("url", ""),
+                        "content": item.get("content", ""),
+                        "score": item.get("score", 0.0),
+                    }
+                )
 
             # Build response
             result_data = {

@@ -3,7 +3,7 @@ Notification service for managing admin dashboard notifications
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from ..config.redis_config import get_redis_client
 from ..config.supabase_config import get_supabase_client
@@ -39,9 +39,7 @@ class NotificationService:
             # Calculate expiration timestamp
             expires_at = None
             if notification.expires_in_days:
-                expires_at = datetime.now(UTC) + timedelta(
-                    days=notification.expires_in_days
-                )
+                expires_at = datetime.now(UTC) + timedelta(days=notification.expires_in_days)
 
             # Prepare data for insertion
             data = {
@@ -110,9 +108,7 @@ class NotificationService:
 
             # Execute query with pagination
             response = (
-                query.order("created_at", desc=True)
-                .range(offset, offset + limit - 1)
-                .execute()
+                query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
             )
 
             if response.data:
@@ -182,9 +178,7 @@ class NotificationService:
 
             response = (
                 supabase.table("admin_notifications")
-                .update(
-                    {"is_read": True, "read_at": datetime.now(UTC).isoformat()}
-                )
+                .update({"is_read": True, "read_at": datetime.now(UTC).isoformat()})
                 .eq("id", notification_id)
                 .eq("user_id", user_id)  # Ensure user owns this notification
                 .execute()
@@ -221,9 +215,7 @@ class NotificationService:
 
             response = (  # noqa: F841
                 supabase.table("admin_notifications")
-                .update(
-                    {"is_read": True, "read_at": datetime.now(UTC).isoformat()}
-                )
+                .update({"is_read": True, "read_at": datetime.now(UTC).isoformat()})
                 .eq("user_id", user_id)
                 .eq("is_read", False)
                 .execute()
@@ -268,9 +260,7 @@ class NotificationService:
             return False
 
         except Exception as e:
-            logger.error(
-                f"Failed to delete notification {notification_id} for user {user_id}: {e}"
-            )
+            logger.error(f"Failed to delete notification {notification_id} for user {user_id}: {e}")
             return False
 
     async def _invalidate_user_cache(self, user_id: int) -> None:

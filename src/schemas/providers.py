@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class ProviderBase(BaseModel):
     """Base provider schema"""
+
     name: str = Field(..., description="Provider name")
     slug: str = Field(..., description="Provider slug (unique identifier)")
     description: str | None = Field(None, description="Provider description")
@@ -30,11 +31,13 @@ class ProviderBase(BaseModel):
 
 class ProviderCreate(ProviderBase):
     """Schema for creating a provider"""
+
     pass
 
 
 class ProviderUpdate(BaseModel):
     """Schema for updating a provider (all fields optional)"""
+
     name: str | None = None
     slug: str | None = None
     description: str | None = None
@@ -55,14 +58,22 @@ class ProviderUpdate(BaseModel):
 
 class ProviderHealthUpdate(BaseModel):
     """Schema for updating provider health"""
-    health_status: str = Field(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'")
-    average_response_time_ms: int | None = Field(None, description="Average response time in milliseconds")
+
+    health_status: str = Field(
+        ..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"
+    )
+    average_response_time_ms: int | None = Field(
+        None, description="Average response time in milliseconds"
+    )
 
 
 class ProviderResponse(ProviderBase):
     """Schema for provider response"""
+
     id: int = Field(..., description="Provider ID")
-    average_response_time_ms: int | None = Field(None, description="Average response time in milliseconds")
+    average_response_time_ms: int | None = Field(
+        None, description="Average response time in milliseconds"
+    )
     health_status: str = Field(..., description="Health status")
     last_health_check_at: datetime | None = Field(None, description="Last health check timestamp")
     created_at: datetime = Field(..., description="Creation timestamp")
@@ -74,6 +85,7 @@ class ProviderResponse(ProviderBase):
 
 class ProviderStats(BaseModel):
     """Schema for provider statistics"""
+
     total: int = Field(..., description="Total number of providers")
     active: int = Field(..., description="Number of active providers")
     inactive: int = Field(..., description="Number of inactive providers")
@@ -85,4 +97,5 @@ class ProviderStats(BaseModel):
 
 class ProviderWithModelCount(ProviderResponse):
     """Schema for provider with model count"""
+
     model_count: int = Field(0, description="Number of models from this provider")

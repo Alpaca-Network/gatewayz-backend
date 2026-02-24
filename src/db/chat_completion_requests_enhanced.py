@@ -118,7 +118,7 @@ def save_chat_completion_request_with_cost(
     except Exception as e:
         logger.error(
             f"Failed to save chat completion request {request_id} for model {model_name}: {e}",
-            exc_info=True
+            exc_info=True,
         )
         # Don't raise - request tracking should not break the main flow
         return None
@@ -129,7 +129,7 @@ def update_request_cost(
     cost_usd: float,
     input_cost_usd: float,
     output_cost_usd: float,
-    pricing_source: str = "updated"
+    pricing_source: str = "updated",
 ) -> bool:
     """
     Update cost information for an existing request
@@ -175,10 +175,7 @@ def update_request_cost(
         return False
 
 
-def backfill_request_costs(
-    limit: int = 1000,
-    offset: int = 0
-) -> dict[str, Any]:
+def backfill_request_costs(limit: int = 1000, offset: int = 0) -> dict[str, Any]:
     """
     Backfill cost calculations for requests that don't have cost data
 
@@ -197,7 +194,9 @@ def backfill_request_costs(
         # Get requests without cost data
         result = (
             client.table("chat_completion_requests")
-            .select("request_id, model_id, input_tokens, output_tokens, models(pricing_prompt, pricing_completion)")
+            .select(
+                "request_id, model_id, input_tokens, output_tokens, models(pricing_prompt, pricing_completion)"
+            )
             .is_("cost_usd", "null")
             .eq("status", "completed")
             .range(offset, offset + limit - 1)
@@ -231,7 +230,7 @@ def backfill_request_costs(
                 cost_usd=total_cost,
                 input_cost_usd=input_cost,
                 output_cost_usd=output_cost,
-                pricing_source="backfilled"
+                pricing_source="backfilled",
             ):
                 updated_count += 1
                 total_cost_calculated += total_cost
@@ -241,17 +240,12 @@ def backfill_request_costs(
             "updated": updated_count,
             "total_cost_calculated": round(total_cost_calculated, 6),
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
 
     except Exception as e:
         logger.error(f"Error during cost backfill: {e}", exc_info=True)
-        return {
-            "processed": 0,
-            "updated": 0,
-            "total_cost_calculated": 0.0,
-            "error": str(e)
-        }
+        return {"processed": 0, "updated": 0, "total_cost_calculated": 0.0, "error": str(e)}
 
 
 def get_requests_with_cost(
@@ -261,7 +255,7 @@ def get_requests_with_cost(
     start_date: str | None = None,
     end_date: str | None = None,
     limit: int = 100,
-    offset: int = 0
+    offset: int = 0,
 ) -> dict[str, Any]:
     """
     Get chat completion requests with cost information
@@ -306,7 +300,8 @@ def get_requests_with_cost(
         # Filter by provider slug if needed
         if provider_slug:
             requests = [
-                r for r in requests
+                r
+                for r in requests
                 if r.get("models", {}).get("providers", {}).get("slug") == provider_slug
             ]
 
@@ -314,9 +309,7 @@ def get_requests_with_cost(
         total_cost = sum(float(r.get("cost_usd", 0) or 0) for r in requests)
         total_input_cost = sum(float(r.get("input_cost_usd", 0) or 0) for r in requests)
         total_output_cost = sum(float(r.get("output_cost_usd", 0) or 0) for r in requests)
-        total_tokens = sum(
-            r.get("input_tokens", 0) + r.get("output_tokens", 0) for r in requests
-        )
+        total_tokens = sum(r.get("input_tokens", 0) + r.get("output_tokens", 0) for r in requests)
 
         return {
             "requests": requests,
@@ -329,7 +322,7 @@ def get_requests_with_cost(
                 "avg_cost_per_request": round(total_cost / len(requests), 6) if requests else 0,
             },
             "limit": limit,
-            "offset": offset
+            "offset": offset,
         }
 
     except Exception as e:
@@ -346,5 +339,5 @@ def get_requests_with_cost(
             },
             "limit": limit,
             "offset": offset,
-            "error": str(e)
+            "error": str(e),
         }

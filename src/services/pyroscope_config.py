@@ -124,8 +124,7 @@ def init_pyroscope() -> bool:
 
         _initialized = True
         logger.info(
-            "✅ Pyroscope profiling started — "
-            "pushing flamegraphs to %s (env=%s, rate=100 Hz)",
+            "✅ Pyroscope profiling started — " "pushing flamegraphs to %s (env=%s, rate=100 Hz)",
             server_address,
             environment,
         )

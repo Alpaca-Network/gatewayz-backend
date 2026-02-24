@@ -5,9 +5,10 @@ Tests ErrorContext, ErrorDetail, and ErrorResponse models to ensure
 proper validation and serialization.
 """
 
+from datetime import datetime
+
 import pytest
 from pydantic import ValidationError
-from datetime import datetime
 
 from src.schemas.errors import ErrorContext, ErrorDetail, ErrorResponse
 
@@ -39,9 +40,7 @@ class TestErrorContext:
 
     def test_insufficient_credits_context(self):
         """Test context for insufficient credits error."""
-        context = ErrorContext(
-            current_credits=0.5, required_credits=2.0, credit_deficit=1.5
-        )
+        context = ErrorContext(current_credits=0.5, required_credits=2.0, credit_deficit=1.5)
 
         assert context.current_credits == 0.5
         assert context.required_credits == 2.0
@@ -410,9 +409,7 @@ class TestErrorResponse:
 
     def test_example_insufficient_credits_response(self):
         """Test example insufficient credits error response."""
-        context = ErrorContext(
-            current_credits=0.50, required_credits=2.00, credit_deficit=1.50
-        )
+        context = ErrorContext(current_credits=0.50, required_credits=2.00, credit_deficit=1.50)
         detail = ErrorDetail(
             type="insufficient_credits",
             message="Insufficient credits. Required: $2.00, Current: $0.50",

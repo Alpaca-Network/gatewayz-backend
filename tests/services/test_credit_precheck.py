@@ -153,9 +153,7 @@ class TestEstimateAndCheckCredits:
 
     def test_complete_flow_with_sufficient_credits(self):
         """Test complete pre-check flow with sufficient credits."""
-        messages = [
-            {"role": "user", "content": "Write a short poem about Python programming"}
-        ]
+        messages = [{"role": "user", "content": "Write a short poem about Python programming"}]
 
         result = estimate_and_check_credits(
             model_id="gpt-4o",
@@ -172,9 +170,7 @@ class TestEstimateAndCheckCredits:
 
     def test_complete_flow_with_insufficient_credits(self):
         """Test complete pre-check flow with insufficient credits."""
-        messages = [
-            {"role": "user", "content": "Write a very long essay"}
-        ]
+        messages = [{"role": "user", "content": "Write a very long essay"}]
 
         result = estimate_and_check_credits(
             model_id="gpt-4o",

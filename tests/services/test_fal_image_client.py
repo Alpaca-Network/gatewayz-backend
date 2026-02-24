@@ -1,8 +1,8 @@
 from src.services.fal_image_client import (
-    load_fal_models_catalog,
     get_fal_models,
     get_fal_models_by_type,
-    validate_fal_model
+    load_fal_models_catalog,
+    validate_fal_model,
 )
 
 
@@ -119,7 +119,7 @@ class TestFalModelsCatalog:
             "text-to-audio",
             "image-to-3d",
             "training",
-            "utility"
+            "utility",
         }
 
         assert expected_types.issubset(model_types)

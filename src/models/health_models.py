@@ -37,9 +37,7 @@ class ModelHealthResponse(BaseModel):
     provider: str = Field(..., description="Provider name")
     gateway: str = Field(..., description="Gateway name")
     status: HealthStatus = Field(..., description="Current health status")
-    response_time_ms: float | None = Field(
-        None, description="Last response time in milliseconds"
-    )
+    response_time_ms: float | None = Field(None, description="Last response time in milliseconds")
     success_rate: float = Field(0.0, description="Success rate percentage (0-100)")
     last_checked: datetime | None = Field(None, description="Last health check timestamp")
     last_success: datetime | None = Field(None, description="Last successful request timestamp")
@@ -125,9 +123,7 @@ class HealthCheckRequest(BaseModel):
     """Request to perform health check"""
 
     models: list[str] | None = Field(None, description="Specific models to check (optional)")
-    providers: list[str] | None = Field(
-        None, description="Specific providers to check (optional)"
-    )
+    providers: list[str] | None = Field(None, description="Specific providers to check (optional)")
     gateways: list[str] | None = Field(None, description="Specific gateways to check (optional)")
     force_refresh: bool = Field(False, description="Force immediate health check")
 

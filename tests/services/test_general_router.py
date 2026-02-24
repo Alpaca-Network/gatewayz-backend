@@ -1,14 +1,15 @@
 """Tests for general router service."""
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.general_router import (
     GeneralRouter,
+    get_routing_metadata,
     normalize_model_string,
     parse_router_model_string,
     route_general_prompt,
-    get_routing_metadata,
 )
 
 
@@ -18,34 +19,21 @@ class TestNormalizeModelString:
     def test_normalize_general_router_hyphenated(self):
         """Test normalizing gatewayz-general aliases."""
         assert normalize_model_string("gatewayz-general") == "router:general"
-        assert (
-            normalize_model_string("gatewayz-general-quality")
-            == "router:general:quality"
-        )
+        assert normalize_model_string("gatewayz-general-quality") == "router:general:quality"
         assert normalize_model_string("gatewayz-general-cost") == "router:general:cost"
-        assert (
-            normalize_model_string("gatewayz-general-latency")
-            == "router:general:latency"
-        )
+        assert normalize_model_string("gatewayz-general-latency") == "router:general:latency"
 
     def test_normalize_code_router_hyphenated(self):
         """Test normalizing gatewayz-code aliases."""
         assert normalize_model_string("gatewayz-code") == "router:code"
         assert normalize_model_string("gatewayz-code-price") == "router:code:price"
-        assert (
-            normalize_model_string("gatewayz-code-quality") == "router:code:quality"
-        )
-        assert (
-            normalize_model_string("gatewayz-code-agentic") == "router:code:agentic"
-        )
+        assert normalize_model_string("gatewayz-code-quality") == "router:code:quality"
+        assert normalize_model_string("gatewayz-code-agentic") == "router:code:agentic"
 
     def test_normalize_already_normalized(self):
         """Test that already normalized strings pass through unchanged."""
         assert normalize_model_string("router:general") == "router:general"
-        assert (
-            normalize_model_string("router:general:quality")
-            == "router:general:quality"
-        )
+        assert normalize_model_string("router:general:quality") == "router:general:quality"
         assert normalize_model_string("router:code:price") == "router:code:price"
 
     def test_normalize_regular_model(self):
@@ -57,10 +45,7 @@ class TestNormalizeModelString:
     def test_normalize_case_insensitive(self):
         """Test case insensitivity."""
         assert normalize_model_string("GATEWAYZ-GENERAL") == "router:general"
-        assert (
-            normalize_model_string("Gatewayz-General-Quality")
-            == "router:general:quality"
-        )
+        assert normalize_model_string("Gatewayz-General-Quality") == "router:general:quality"
 
 
 class TestParseRouterModelString:
@@ -163,9 +148,7 @@ class TestGeneralRouterRoute:
         router.notdiamond_client = mock_client
         router.enabled = False
 
-        result = await router.route(
-            messages=[{"role": "user", "content": "test"}], mode="quality"
-        )
+        result = await router.route(messages=[{"role": "user", "content": "test"}], mode="quality")
 
         assert result["fallback_used"] is True
         assert result["fallback_reason"] == "disabled"
@@ -214,9 +197,7 @@ class TestGeneralRouterRoute:
         router.notdiamond_client = mock_client
         router.enabled = True
 
-        result = await router.route(
-            messages=[{"role": "user", "content": "test"}], mode="cost"
-        )
+        result = await router.route(messages=[{"role": "user", "content": "test"}], mode="cost")
 
         assert result["fallback_used"] is True
         assert result["fallback_reason"] == "exception"

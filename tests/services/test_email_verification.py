@@ -4,8 +4,9 @@ Tests for Email Verification Service using Emailable API.
 Run with: pytest tests/services/test_email_verification.py -v
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from src.services.email_verification import (
     EmailReason,
@@ -443,8 +444,10 @@ class TestEmailVerificationCaching:
         mock_redis = MagicMock()
         mock_redis.get.return_value = None  # No cached result
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+        with (
+            patch("httpx.AsyncClient") as mock_client,
+            patch("src.services.email_verification._get_redis_client", return_value=mock_redis),
+        ):
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -468,8 +471,10 @@ class TestEmailVerificationCaching:
         mock_redis = MagicMock()
         mock_redis.get.return_value = cached_data
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+        with (
+            patch("httpx.AsyncClient") as mock_client,
+            patch("src.services.email_verification._get_redis_client", return_value=mock_redis),
+        ):
             result = await service.verify_email("test@gmail.com")
 
             # Verify result matches cached data
@@ -490,8 +495,10 @@ class TestEmailVerificationCaching:
         mock_redis = MagicMock()
         mock_redis.get.return_value = None  # No cached result
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+        with (
+            patch("httpx.AsyncClient") as mock_client,
+            patch("src.services.email_verification._get_redis_client", return_value=mock_redis),
+        ):
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )
@@ -514,8 +521,10 @@ class TestEmailVerificationCaching:
         mock_redis = MagicMock()
         mock_redis.get.return_value = None
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("src.services.email_verification._get_redis_client", return_value=mock_redis):
+        with (
+            patch("httpx.AsyncClient") as mock_client,
+            patch("src.services.email_verification._get_redis_client", return_value=mock_redis),
+        ):
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 side_effect=httpx.TimeoutException("timeout")
             )
@@ -543,8 +552,10 @@ class TestEmailVerificationCaching:
             "domain": "gmail.com",
         }
 
-        with patch("httpx.AsyncClient") as mock_client, \
-             patch("src.services.email_verification._get_redis_client", return_value=None):
+        with (
+            patch("httpx.AsyncClient") as mock_client,
+            patch("src.services.email_verification._get_redis_client", return_value=None),
+        ):
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 return_value=mock_response
             )

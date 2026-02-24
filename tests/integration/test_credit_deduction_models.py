@@ -14,8 +14,9 @@ The tests verify:
 """
 
 import math
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 class TestCreditDeductionForOpenAIModels:
@@ -53,9 +54,7 @@ class TestCreditDeductionForOpenAIModels:
                 "pricing": {"prompt": "0.000005", "completion": "0.000015"},
             }
         ]
-        monkeypatch.setattr(
-            "src.services.models.get_cached_models", lambda _: mock_models
-        )
+        monkeypatch.setattr("src.services.models.get_cached_models", lambda _: mock_models)
         monkeypatch.setattr("src.services.models._is_building_catalog", lambda: False)
 
         # Test with full provider prefix
@@ -67,8 +66,8 @@ class TestCreditDeductionForOpenAIModels:
     @pytest.mark.asyncio
     async def test_gpt4o_without_prefix_uses_alias(self, monkeypatch):
         """Test that 'gpt-4o' (without openai/ prefix) resolves via alias"""
-        from src.services.pricing import get_model_pricing
         from src.services.model_transformations import apply_model_alias
+        from src.services.pricing import get_model_pricing
 
         # Verify alias is applied
         aliased = apply_model_alias("gpt-4o")
@@ -82,9 +81,7 @@ class TestCreditDeductionForOpenAIModels:
                 "pricing": {"prompt": "0.000005", "completion": "0.000015"},
             }
         ]
-        monkeypatch.setattr(
-            "src.services.models.get_cached_models", lambda _: mock_models
-        )
+        monkeypatch.setattr("src.services.models.get_cached_models", lambda _: mock_models)
         monkeypatch.setattr("src.services.models._is_building_catalog", lambda: False)
 
         # Test with just model name (no prefix)
@@ -113,8 +110,10 @@ class TestCreditDeductionForOpenAIModels:
         """Test that credit handler deducts credits for OpenAI model"""
         from src.services.credit_handler import handle_credits_and_usage
 
-        with patch("src.services.credit_handler.calculate_cost_async") as mock_cost, \
-             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread:
+        with (
+            patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
+            patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
+        ):
 
             mock_cost.return_value = 0.0125
             mock_to_thread.return_value = None
@@ -166,9 +165,7 @@ class TestCreditDeductionForAnthropicModels:
                 "pricing": {"prompt": "0.000015", "completion": "0.000075"},
             }
         ]
-        monkeypatch.setattr(
-            "src.services.models.get_cached_models", lambda _: mock_models
-        )
+        monkeypatch.setattr("src.services.models.get_cached_models", lambda _: mock_models)
         monkeypatch.setattr("src.services.models._is_building_catalog", lambda: False)
 
         pricing = get_model_pricing("anthropic/claude-3-opus")
@@ -188,9 +185,7 @@ class TestCreditDeductionForAnthropicModels:
                 "pricing": {"prompt": "0.000003", "completion": "0.000015"},
             }
         ]
-        monkeypatch.setattr(
-            "src.services.models.get_cached_models", lambda _: mock_models
-        )
+        monkeypatch.setattr("src.services.models.get_cached_models", lambda _: mock_models)
         monkeypatch.setattr("src.services.models._is_building_catalog", lambda: False)
 
         pricing = get_model_pricing("anthropic/claude-3-sonnet")
@@ -211,9 +206,7 @@ class TestCreditDeductionForAnthropicModels:
 
         # 1000 prompt + 500 completion
         # Cost = 1000 * 0.000015 + 500 * 0.000075 = 0.015 + 0.0375 = 0.0525
-        cost = calculate_cost(
-            "anthropic/claude-3-opus", prompt_tokens=1000, completion_tokens=500
-        )
+        cost = calculate_cost("anthropic/claude-3-opus", prompt_tokens=1000, completion_tokens=500)
         assert math.isclose(cost, 0.0525)
 
     @pytest.mark.asyncio
@@ -221,8 +214,10 @@ class TestCreditDeductionForAnthropicModels:
         """Test that credit handler deducts credits for Anthropic model"""
         from src.services.credit_handler import handle_credits_and_usage
 
-        with patch("src.services.credit_handler.calculate_cost_async") as mock_cost, \
-             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread:
+        with (
+            patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
+            patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
+        ):
 
             mock_cost.return_value = 0.0525
             mock_to_thread.return_value = None
@@ -280,15 +275,18 @@ class TestTrialUserCreditHandling:
             metadata = args[3] if len(args) > 3 else kwargs.get("metadata", {})
             assert metadata.get("is_trial") is True
 
-        with patch("src.services.credit_handler.calculate_cost_async") as mock_cost, \
-             patch("src.db.users.deduct_credits", mock_deduct_credits), \
-             patch("src.db.users.log_api_usage_transaction", mock_log_transaction), \
-             patch("src.db.trials.track_trial_usage", return_value=None), \
-             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread:
+        with (
+            patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
+            patch("src.db.users.deduct_credits", mock_deduct_credits),
+            patch("src.db.users.log_api_usage_transaction", mock_log_transaction),
+            patch("src.db.trials.track_trial_usage", return_value=None),
+            patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
+        ):
 
             # Make to_thread call the function directly
             async def call_func(func, *args, **kwargs):
                 return func(*args, **kwargs)
+
             mock_to_thread.side_effect = call_func
 
             mock_cost.return_value = 0.05  # Would be $0.05 if not trial
@@ -343,8 +341,10 @@ class TestTrialOverrideForPaidUsers:
             nonlocal deduct_credits_called
             deduct_credits_called = True
 
-        with patch("src.services.credit_handler.calculate_cost_async") as mock_cost, \
-             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread:
+        with (
+            patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
+            patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
+        ):
 
             mock_cost.return_value = 0.05
 
@@ -352,6 +352,7 @@ class TestTrialOverrideForPaidUsers:
                 if func.__name__ == "deduct_credits":
                     mock_deduct(*args, **kwargs)
                 return None
+
             mock_to_thread.side_effect = call_func
 
             cost = await handle_credits_and_usage(
@@ -378,7 +379,7 @@ class TestDefaultPricingAlerts:
     @pytest.mark.asyncio
     async def test_unknown_model_uses_default_pricing(self, monkeypatch):
         """Test that unknown models fall back to default pricing and are tracked"""
-        from src.services.pricing import get_model_pricing, get_default_pricing_stats
+        from src.services.pricing import get_default_pricing_stats, get_model_pricing
 
         # Mock empty models list (no pricing data)
         monkeypatch.setattr("src.services.models.get_cached_models", lambda _: [])
@@ -401,7 +402,7 @@ class TestDefaultPricingAlerts:
     @pytest.mark.asyncio
     async def test_high_value_model_default_pricing_alert(self, monkeypatch):
         """Test that high-value models (OpenAI, Anthropic) trigger alerts on default pricing"""
-        from src.services.pricing import _track_default_pricing_usage, _default_pricing_tracker
+        from src.services.pricing import _default_pricing_tracker, _track_default_pricing_usage
 
         # Clear tracker
         _default_pricing_tracker.clear()
@@ -437,9 +438,7 @@ class TestAsyncCostCalculation:
         async def mock_async_pricing(model_id):
             return {"prompt": 0.000005, "completion": 0.000015, "found": True}
 
-        monkeypatch.setattr(
-            "src.services.pricing.get_model_pricing_async", mock_async_pricing
-        )
+        monkeypatch.setattr("src.services.pricing.get_model_pricing_async", mock_async_pricing)
 
         cost = await calculate_cost_async("openai/gpt-4o", 1000, 500)
         # 1000 * 0.000005 + 500 * 0.000015 = 0.005 + 0.0075 = 0.0125
@@ -454,9 +453,7 @@ class TestAsyncCostCalculation:
         async def mock_async_pricing(model_id):
             return {"prompt": 0.00001, "completion": 0.00002, "found": True}
 
-        monkeypatch.setattr(
-            "src.services.pricing.get_model_pricing_async", mock_async_pricing
-        )
+        monkeypatch.setattr("src.services.pricing.get_model_pricing_async", mock_async_pricing)
 
         cost = await calculate_cost_async("google/gemini-2.0-flash-exp:free", 1000, 500)
         assert cost == 0.0

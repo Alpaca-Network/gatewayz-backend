@@ -35,6 +35,7 @@ _REDIS_TTL = 3600  # 1 hour — auto-expire stale entries
 @dataclass
 class ProviderState:
     """Track health state for a single provider."""
+
     failure_count: int = 0
     last_failure_time: float = 0.0
     last_success_time: float = 0.0
@@ -90,21 +91,24 @@ class ProviderCircuitBreaker:
         """
         try:
             from src.config.redis_config import get_redis_client
+
             client = get_redis_client()
             if client is None:
                 return
             state = self._states.get(provider)
             if state is None:
                 return
-            payload = json.dumps({
-                "failure_count": state.failure_count,
-                "last_failure_time": state.last_failure_time,
-                "last_success_time": state.last_success_time,
-                "consecutive_failures": state.consecutive_failures,
-                "is_open": state.is_open,
-                "total_requests": state.total_requests,
-                "total_failures": state.total_failures,
-            })
+            payload = json.dumps(
+                {
+                    "failure_count": state.failure_count,
+                    "last_failure_time": state.last_failure_time,
+                    "last_success_time": state.last_success_time,
+                    "consecutive_failures": state.consecutive_failures,
+                    "is_open": state.is_open,
+                    "total_requests": state.total_requests,
+                    "total_failures": state.total_failures,
+                }
+            )
             key = f"{_REDIS_KEY_PREFIX}:{provider}"
             client.setex(key, _REDIS_TTL, payload)
         except Exception as exc:
@@ -119,6 +123,7 @@ class ProviderCircuitBreaker:
         """
         try:
             from src.config.redis_config import get_redis_client
+
             client = get_redis_client()
             if client is None:
                 return
@@ -136,11 +141,11 @@ class ProviderCircuitBreaker:
             state.total_requests = int(data.get("total_requests", 0))
             state.total_failures = int(data.get("total_failures", 0))
             if state.is_open:
-                logger.info(
-                    f"Circuit breaker RESTORED OPEN state for {provider} from Redis"
-                )
+                logger.info(f"Circuit breaker RESTORED OPEN state for {provider} from Redis")
         except Exception as exc:
-            logger.debug(f"circuit_breaker: failed to restore state for {provider} from Redis: {exc}")
+            logger.debug(
+                f"circuit_breaker: failed to restore state for {provider} from Redis: {exc}"
+            )
 
     def _get_state(self, provider: str) -> ProviderState:
         """Get or create provider state, restoring from Redis on first access."""
@@ -222,11 +227,14 @@ class ProviderCircuitBreaker:
                 logger.info(f"Circuit breaker RESET for {provider}")
                 try:
                     from src.config.redis_config import get_redis_client
+
                     client = get_redis_client()
                     if client:
                         client.delete(f"{_REDIS_KEY_PREFIX}:{provider}")
                 except Exception as exc:
-                    logger.debug(f"circuit_breaker: failed to delete Redis key for {provider}: {exc}")
+                    logger.debug(
+                        f"circuit_breaker: failed to delete Redis key for {provider}: {exc}"
+                    )
 
     def reset_all(self) -> None:
         """Reset all circuit breakers."""
@@ -247,26 +255,19 @@ class ProviderCircuitBreaker:
                 "last_failure_time": state.last_failure_time,
                 "last_success_time": state.last_success_time,
                 "failure_rate": (
-                    state.total_failures / state.total_requests
-                    if state.total_requests > 0 else 0
+                    state.total_failures / state.total_requests if state.total_requests > 0 else 0
                 ),
             }
 
     def get_all_status(self) -> dict[str, dict[str, Any]]:
         """Get status for all tracked providers."""
         with self._lock:
-            return {
-                provider: self.get_status(provider)
-                for provider in self._states
-            }
+            return {provider: self.get_status(provider) for provider in self._states}
 
     def get_open_circuits(self) -> list[str]:
         """Get list of providers with open circuits."""
         with self._lock:
-            return [
-                provider for provider, state in self._states.items()
-                if state.is_open
-            ]
+            return [provider for provider, state in self._states.items() if state.is_open]
 
 
 # Global circuit breaker instance

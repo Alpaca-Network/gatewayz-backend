@@ -52,9 +52,7 @@ def safe_get_first(
     first_item = result.data[0]
 
     if not isinstance(first_item, dict):
-        raise DatabaseResultError(
-            f"Expected dict from database, got {type(first_item).__name__}"
-        )
+        raise DatabaseResultError(f"Expected dict from database, got {type(first_item).__name__}")
 
     # Validate required keys exist
     if validate_keys:
@@ -102,9 +100,7 @@ def safe_get_value(  # noqa: UP047
     # Handle None values
     if value is None:
         if not allow_none and default is not None:
-            logger.warning(
-                f"Key '{key}' is None but allow_none=False, using default: {default}"
-            )
+            logger.warning(f"Key '{key}' is None but allow_none=False, using default: {default}")
             return default
         return value
 
@@ -195,9 +191,7 @@ def safe_get_list(
         raise DatabaseResultError(f"Invalid result object: {error_message}")
 
     if not isinstance(result.data, list):
-        raise DatabaseResultError(
-            f"Expected list from database, got {type(result.data).__name__}"
-        )
+        raise DatabaseResultError(f"Expected list from database, got {type(result.data).__name__}")
 
     if len(result.data) < min_items:
         raise DatabaseResultError(
@@ -240,9 +234,7 @@ def safe_update_credits(
     try:
         credits = float(current_credits) if current_credits is not None else 0.0
     except (ValueError, TypeError) as e:
-        raise ValueError(
-            f"Invalid credit value in {operation_name}: {current_credits} ({e})"
-        )
+        raise ValueError(f"Invalid credit value in {operation_name}: {current_credits} ({e})")
 
     try:
         delta_float = float(delta)
@@ -286,9 +278,7 @@ def validate_dict_structure(
         >>> validated = validate_dict_structure(user_data, ["id", "email"], "user data")
     """
     if not isinstance(data, dict):
-        raise TypeError(
-            f"{context}: Expected dict, got {type(data).__name__}"
-        )
+        raise TypeError(f"{context}: Expected dict, got {type(data).__name__}")
 
     missing_keys = [key for key in required_keys if key not in data]
     if missing_keys:
@@ -326,9 +316,7 @@ def safe_int_convert(
     try:
         return int(value)
     except (ValueError, TypeError):
-        logger.warning(
-            f"{context}: Could not convert '{value}' to int, using default: {default}"
-        )
+        logger.warning(f"{context}: Could not convert '{value}' to int, using default: {default}")
         return default
 
 
@@ -358,7 +346,5 @@ def safe_float_convert(
     try:
         return float(value)
     except (ValueError, TypeError):
-        logger.warning(
-            f"{context}: Could not convert '{value}' to float, using default: {default}"
-        )
+        logger.warning(f"{context}: Could not convert '{value}' to float, using default: {default}")
         return default

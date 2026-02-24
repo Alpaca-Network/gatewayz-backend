@@ -70,15 +70,15 @@ class TestModelIdMappingsTopLevel:
 
     def test_expected_provider_count(self):
         # There should be at least 20 providers registered.
-        assert len(_MODEL_ID_MAPPINGS) >= 20, (
-            f"Expected at least 20 providers, found {len(_MODEL_ID_MAPPINGS)}"
-        )
+        assert (
+            len(_MODEL_ID_MAPPINGS) >= 20
+        ), f"Expected at least 20 providers, found {len(_MODEL_ID_MAPPINGS)}"
 
     def test_all_known_providers_present(self):
         for provider in _KNOWN_PROVIDERS:
-            assert provider in _MODEL_ID_MAPPINGS, (
-                f"Provider '{provider}' missing from _MODEL_ID_MAPPINGS"
-            )
+            assert (
+                provider in _MODEL_ID_MAPPINGS
+            ), f"Provider '{provider}' missing from _MODEL_ID_MAPPINGS"
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +90,9 @@ class TestPerProviderMappingType:
     @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
     def test_provider_mapping_is_dict(self, provider):
         mapping = _MODEL_ID_MAPPINGS[provider]
-        assert isinstance(mapping, dict), (
-            f"Mapping for provider '{provider}' must be a dict, got {type(mapping)}"
-        )
+        assert isinstance(
+            mapping, dict
+        ), f"Mapping for provider '{provider}' must be a dict, got {type(mapping)}"
 
 
 # ---------------------------------------------------------------------------
@@ -105,9 +105,9 @@ class TestMappingKeyValueTypes:
     def test_all_keys_are_non_empty_strings(self, provider):
         mapping = _MODEL_ID_MAPPINGS[provider]
         for key in mapping:
-            assert isinstance(key, str) and key, (
-                f"Provider '{provider}': key {key!r} is not a non-empty string"
-            )
+            assert (
+                isinstance(key, str) and key
+            ), f"Provider '{provider}': key {key!r} is not a non-empty string"
 
     @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
     def test_all_values_are_non_empty_strings(self, provider):
@@ -138,8 +138,7 @@ class TestNoSelfMappings:
         mapping = _MODEL_ID_MAPPINGS[provider]
         self_maps = [k for k, v in mapping.items() if k == v]
         assert not self_maps, (
-            f"Provider '{provider}' has {len(self_maps)} no-op self-mapping(s): "
-            f"{self_maps[:5]}"
+            f"Provider '{provider}' has {len(self_maps)} no-op self-mapping(s): " f"{self_maps[:5]}"
         )
 
 
@@ -183,8 +182,7 @@ class TestGetModelIdMapping:
     def test_result_keys_are_strings(self, provider):
         for key in get_model_id_mapping(provider):
             assert isinstance(key, str) and key, (
-                f"get_model_id_mapping('{provider}'): key {key!r} is not a "
-                "non-empty string"
+                f"get_model_id_mapping('{provider}'): key {key!r} is not a " "non-empty string"
             )
 
     @pytest.mark.parametrize("provider", _KNOWN_PROVIDERS)

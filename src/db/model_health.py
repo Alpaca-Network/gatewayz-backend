@@ -6,7 +6,7 @@ including response times, success rates, and health status.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from postgrest.exceptions import APIError
 
@@ -392,10 +392,7 @@ def get_provider_health_summary(provider: str) -> dict:
         supabase = get_supabase_client()
 
         result = (
-            supabase.table("model_health_tracking")
-            .select("*")
-            .eq("provider", provider)
-            .execute()
+            supabase.table("model_health_tracking").select("*").eq("provider", provider).execute()
         )
 
         if not result.data:
@@ -469,9 +466,9 @@ def delete_old_health_records(days: int = 30) -> int:
     """
     supabase = get_supabase_client()
 
-    cutoff_date = datetime.now(UTC).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=days)
+    cutoff_date = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=days
+    )
 
     result = (
         supabase.table("model_health_tracking")

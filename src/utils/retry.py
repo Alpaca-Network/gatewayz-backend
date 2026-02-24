@@ -24,27 +24,28 @@ def with_retry(
 ):
     """
     Decorator that retries a function with exponential backoff.
-    
+
     This is particularly useful for database operations that may fail due to
     stale connections when executed in background tasks after HTTP responses
     are sent.
-    
+
     Args:
         max_attempts: Maximum number of retry attempts (default: 3)
         initial_delay: Initial delay in seconds before first retry (default: 0.1s)
         max_delay: Maximum delay in seconds between retries (default: 2.0s)
         exponential_base: Base for exponential backoff calculation (default: 2.0)
         exceptions: Tuple of exception types to catch and retry (default: all exceptions)
-    
+
     Returns:
         Decorated function that will retry on specified exceptions
-    
+
     Example:
         @with_retry(max_attempts=3, exceptions=(ConnectionError, TimeoutError))
         def my_database_operation():
             # ... code that may fail with transient errors
             pass
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -73,17 +74,12 @@ def with_retry(
 
                     if not is_retryable:
                         # Don't retry non-transient errors
-                        logger.warning(
-                            f"{func.__name__} failed with non-retryable error: {e}"
-                        )
+                        logger.warning(f"{func.__name__} failed with non-retryable error: {e}")
                         raise
 
                     if attempt < max_attempts:
                         # Calculate delay with exponential backoff
-                        delay = min(
-                            initial_delay * (exponential_base ** (attempt - 1)),
-                            max_delay
-                        )
+                        delay = min(initial_delay * (exponential_base ** (attempt - 1)), max_delay)
 
                         logger.warning(
                             f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
@@ -92,14 +88,13 @@ def with_retry(
 
                         time.sleep(delay)
                     else:
-                        logger.error(
-                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
-                        )
+                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {e}")
 
             # All retries exhausted, raise the last exception
             raise last_exception
 
         return wrapper
+
     return decorator
 
 
@@ -112,27 +107,28 @@ def with_async_retry(
 ):
     """
     Async version of retry decorator with exponential backoff.
-    
+
     This is particularly useful for async database operations that may fail due to
     stale connections when executed in background tasks after HTTP responses
     are sent.
-    
+
     Args:
         max_attempts: Maximum number of retry attempts (default: 3)
         initial_delay: Initial delay in seconds before first retry (default: 0.1s)
         max_delay: Maximum delay in seconds between retries (default: 2.0s)
         exponential_base: Base for exponential backoff calculation (default: 2.0)
         exceptions: Tuple of exception types to catch and retry (default: all exceptions)
-    
+
     Returns:
         Decorated async function that will retry on specified exceptions
-    
+
     Example:
         @with_async_retry(max_attempts=3, exceptions=(ConnectionError, TimeoutError))
         async def my_async_database_operation():
             # ... async code that may fail with transient errors
             pass
     """
+
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         async def wrapper(*args, **kwargs):
@@ -161,17 +157,12 @@ def with_async_retry(
 
                     if not is_retryable:
                         # Don't retry non-transient errors
-                        logger.warning(
-                            f"{func.__name__} failed with non-retryable error: {e}"
-                        )
+                        logger.warning(f"{func.__name__} failed with non-retryable error: {e}")
                         raise
 
                     if attempt < max_attempts:
                         # Calculate delay with exponential backoff
-                        delay = min(
-                            initial_delay * (exponential_base ** (attempt - 1)),
-                            max_delay
-                        )
+                        delay = min(initial_delay * (exponential_base ** (attempt - 1)), max_delay)
 
                         logger.warning(
                             f"{func.__name__} failed (attempt {attempt}/{max_attempts}): {e}. "
@@ -180,12 +171,11 @@ def with_async_retry(
 
                         await asyncio.sleep(delay)
                     else:
-                        logger.error(
-                            f"{func.__name__} failed after {max_attempts} attempts: {e}"
-                        )
+                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {e}")
 
             # All retries exhausted, raise the last exception
             raise last_exception
 
         return wrapper
+
     return decorator

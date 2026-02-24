@@ -108,7 +108,10 @@ class ResilientSpanProcessor(SpanProcessor):
             # Check circuit breaker state
             if self._circuit_open:
                 # Check if cooldown period has passed
-                if self._last_failure_time and (time.time() - self._last_failure_time) > self.COOLDOWN_SECONDS:
+                if (
+                    self._last_failure_time
+                    and (time.time() - self._last_failure_time) > self.COOLDOWN_SECONDS
+                ):
                     logger.info("🔄 Circuit breaker cooldown complete - attempting recovery...")
                     self._circuit_open = False
                     self._failure_count = 0
@@ -168,7 +171,7 @@ class ResilientSpanProcessor(SpanProcessor):
 
             logger.warning(
                 f"Unexpected error during span export: {type(e).__name__}: {str(e)}",
-                exc_info=False  # Don't log full stack trace for common errors
+                exc_info=False,  # Don't log full stack trace for common errors
             )
             return False
 
@@ -178,7 +181,9 @@ class ResilientSpanProcessor(SpanProcessor):
             # Calculate success rate excluding dropped spans
             attempted_exports = self._total_exports - self._total_drops
             if attempted_exports > 0:
-                success_rate = ((attempted_exports - self._total_failures) / attempted_exports) * 100
+                success_rate = (
+                    (attempted_exports - self._total_failures) / attempted_exports
+                ) * 100
             else:
                 success_rate = 0.0
 

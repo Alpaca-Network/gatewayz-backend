@@ -6,15 +6,18 @@ This script verifies that Braintrust is properly configured and can log traces.
 
 import os
 import sys
+
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+
 def test_braintrust_import():
     """Test that Braintrust can be imported"""
     try:
         import braintrust
+
         print("✅ Braintrust import successful")
         return True
     except ImportError as e:
@@ -37,6 +40,7 @@ def test_logger_initialization():
     """Test that Braintrust logger can be initialized"""
     try:
         from braintrust import init_logger
+
         logger = init_logger(project="Gatewayz Backend Test")
         print("✅ Braintrust logger initialized successfully")
         return True
@@ -67,6 +71,7 @@ def test_basic_tracing():
     except Exception as e:
         print(f"❌ Basic tracing test failed: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -75,12 +80,14 @@ def test_endpoint_tracing_syntax():
     """Test that the chat endpoint tracing syntax is correct"""
     try:
         # Add parent directory to path
-        import sys
         import os
+        import sys
+
         sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
         # Import the chat module to check for syntax errors
         from src.routes import chat
+
         print("✅ Chat endpoint imports successfully (tracing syntax valid)")
         return True
     except Exception as e:

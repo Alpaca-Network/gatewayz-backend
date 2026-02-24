@@ -1,9 +1,10 @@
 """
 Comprehensive tests for Xai Client service
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestXaiClient:
@@ -12,12 +13,14 @@ class TestXaiClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.xai_client
+
         assert src.services.xai_client is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import xai_client
-        assert hasattr(xai_client, '__name__')
+
+        assert hasattr(xai_client, "__name__")
 
 
 class TestXaiReasoningDetection:
@@ -101,7 +104,7 @@ class TestXaiReasoningParams:
 class TestXaiRequestWithReasoning:
     """Test xAI request functions with reasoning parameters"""
 
-    @patch('src.services.xai_client.get_xai_client')
+    @patch("src.services.xai_client.get_xai_client")
     def test_make_request_adds_reasoning_params(self, mock_get_client):
         """Test that reasoning params are added to requests for reasoning models"""
         from src.services.xai_client import make_xai_request_openai
@@ -110,8 +113,7 @@ class TestXaiRequestWithReasoning:
         mock_get_client.return_value = mock_client
 
         make_xai_request_openai(
-            messages=[{"role": "user", "content": "Hello"}],
-            model="grok-4.1-fast"
+            messages=[{"role": "user", "content": "Hello"}], model="grok-4.1-fast"
         )
 
         # Verify reasoning param was passed
@@ -119,7 +121,7 @@ class TestXaiRequestWithReasoning:
         assert "reasoning" in call_kwargs
         assert call_kwargs["reasoning"] == {"enabled": True}
 
-    @patch('src.services.xai_client.get_xai_client')
+    @patch("src.services.xai_client.get_xai_client")
     def test_make_request_no_reasoning_for_old_models(self, mock_get_client):
         """Test that reasoning params are NOT added for non-reasoning models"""
         from src.services.xai_client import make_xai_request_openai
@@ -127,16 +129,13 @@ class TestXaiRequestWithReasoning:
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
 
-        make_xai_request_openai(
-            messages=[{"role": "user", "content": "Hello"}],
-            model="grok-2"
-        )
+        make_xai_request_openai(messages=[{"role": "user", "content": "Hello"}], model="grok-2")
 
         # Verify reasoning param was NOT passed
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "reasoning" not in call_kwargs
 
-    @patch('src.services.xai_client.get_xai_client')
+    @patch("src.services.xai_client.get_xai_client")
     def test_make_stream_request_adds_reasoning_params(self, mock_get_client):
         """Test that streaming requests also get reasoning params"""
         from src.services.xai_client import make_xai_request_openai_stream
@@ -145,8 +144,7 @@ class TestXaiRequestWithReasoning:
         mock_get_client.return_value = mock_client
 
         make_xai_request_openai_stream(
-            messages=[{"role": "user", "content": "Hello"}],
-            model="grok-4.1-fast"
+            messages=[{"role": "user", "content": "Hello"}], model="grok-4.1-fast"
         )
 
         # Verify reasoning param was passed
@@ -155,7 +153,7 @@ class TestXaiRequestWithReasoning:
         assert call_kwargs["reasoning"] == {"enabled": True}
         assert call_kwargs["stream"] is True
 
-    @patch('src.services.xai_client.get_xai_client')
+    @patch("src.services.xai_client.get_xai_client")
     def test_explicit_reasoning_override(self, mock_get_client):
         """Test that explicit enable_reasoning parameter works"""
         from src.services.xai_client import make_xai_request_openai
@@ -166,7 +164,7 @@ class TestXaiRequestWithReasoning:
         make_xai_request_openai(
             messages=[{"role": "user", "content": "Hello"}],
             model="grok-4.1-fast",
-            enable_reasoning=False
+            enable_reasoning=False,
         )
 
         # Verify reasoning was disabled

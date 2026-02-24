@@ -6,8 +6,9 @@ are properly associated with the project.
 """
 
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 class TestBraintrustService:
@@ -17,6 +18,7 @@ class TestBraintrustService:
         """Reset module state before each test."""
         # Import and reset module state
         from src.services import braintrust_service
+
         braintrust_service._braintrust_logger = None
         braintrust_service._braintrust_available = False
         braintrust_service._project_name = None
@@ -42,9 +44,14 @@ class TestBraintrustService:
         with patch.dict(os.environ, {"BRAINTRUST_API_KEY": "invalid-key"}):
             # Mock the braintrust import to avoid actual API calls
             mock_logger = MagicMock()
-            with patch.dict("sys.modules", {"braintrust": MagicMock(init_logger=MagicMock(return_value=mock_logger))}):
-                from src.services import braintrust_service
+            with patch.dict(
+                "sys.modules",
+                {"braintrust": MagicMock(init_logger=MagicMock(return_value=mock_logger))},
+            ):
                 import importlib
+
+                from src.services import braintrust_service
+
                 importlib.reload(braintrust_service)
 
                 result = braintrust_service.initialize_braintrust()
@@ -60,7 +67,7 @@ class TestBraintrustService:
 
     def test_create_span_returns_noop_when_unavailable(self):
         """Test create_span returns NoopSpan when Braintrust is unavailable."""
-        from src.services.braintrust_service import create_span, NoopSpan
+        from src.services.braintrust_service import NoopSpan, create_span
 
         span = create_span(name="test_span")
 
@@ -129,6 +136,7 @@ class TestBraintrustServiceWithMocking:
     def setup_method(self):
         """Reset module state before each test."""
         from src.services import braintrust_service
+
         braintrust_service._braintrust_logger = None
         braintrust_service._braintrust_available = False
         braintrust_service._project_name = None
@@ -140,9 +148,13 @@ class TestBraintrustServiceWithMocking:
         mock_init_logger.return_value = mock_logger
 
         with patch.dict(os.environ, {"BRAINTRUST_API_KEY": "sk-test-key"}):
-            with patch("src.services.braintrust_service.init_logger", mock_init_logger, create=True):
-                from src.services import braintrust_service
+            with patch(
+                "src.services.braintrust_service.init_logger", mock_init_logger, create=True
+            ):
                 import importlib
+
+                from src.services import braintrust_service
+
                 importlib.reload(braintrust_service)
 
                 # Patch the import inside the function
@@ -197,15 +209,17 @@ class TestBraintrustServiceWithMocking:
 
 @pytest.mark.skipif(
     not os.getenv("BRAINTRUST_API_KEY", "").startswith("sk-"),
-    reason="BRAINTRUST_API_KEY not configured - skipping real integration test"
+    reason="BRAINTRUST_API_KEY not configured - skipping real integration test",
 )
 class TestBraintrustRealIntegration:
     """Real integration tests that require a valid API key."""
 
     def test_real_initialization(self):
         """Test real Braintrust initialization."""
-        from src.services import braintrust_service
         import importlib
+
+        from src.services import braintrust_service
+
         importlib.reload(braintrust_service)
 
         result = braintrust_service.initialize_braintrust(project="Gatewayz Backend Test")
@@ -216,8 +230,10 @@ class TestBraintrustRealIntegration:
 
     def test_real_span_creation_and_logging(self):
         """Test real span creation and logging."""
-        from src.services import braintrust_service
         import importlib
+
+        from src.services import braintrust_service
+
         importlib.reload(braintrust_service)
 
         # Initialize
@@ -228,6 +244,7 @@ class TestBraintrustRealIntegration:
 
         # This should NOT be a NoopSpan
         from src.services.braintrust_service import NoopSpan
+
         assert not isinstance(span, NoopSpan)
 
         # Log some data

@@ -1,8 +1,8 @@
 """Integration tests for function calling/tools support"""
 
-import pytest
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -96,9 +96,7 @@ class TestFunctionCallingIntegration:
                 finish_reason="stop",
             )
         ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
+        mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         mock_request.return_value = mock_response
 
         mock_process.return_value = {
@@ -271,4 +269,3 @@ class TestFunctionCallingIntegration:
         # Verify tools were passed
         assert "tools" in kwargs, "Tools should be passed to HuggingFace client"
         assert kwargs["tools"] == tools, "Tools should match input"
-

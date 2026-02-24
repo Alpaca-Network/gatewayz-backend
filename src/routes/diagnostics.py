@@ -51,9 +51,13 @@ async def get_concurrency_stats() -> dict[str, Any]:
         queued = concurrency_queued._value._value
 
         # Calculate utilization percentages
-        utilization = (active / Config.CONCURRENCY_LIMIT) * 100 if Config.CONCURRENCY_LIMIT > 0 else 0
+        utilization = (
+            (active / Config.CONCURRENCY_LIMIT) * 100 if Config.CONCURRENCY_LIMIT > 0 else 0
+        )
         queue_utilization = (
-            (queued / Config.CONCURRENCY_QUEUE_SIZE) * 100 if Config.CONCURRENCY_QUEUE_SIZE > 0 else 0
+            (queued / Config.CONCURRENCY_QUEUE_SIZE) * 100
+            if Config.CONCURRENCY_QUEUE_SIZE > 0
+            else 0
         )
 
         # Determine status based on utilization

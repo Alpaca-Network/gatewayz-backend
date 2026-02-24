@@ -15,8 +15,9 @@ Mark: integration, auth
 """
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 from src.config.config import Config
 
@@ -130,9 +131,10 @@ class TestSupabaseHttpxClientAuth:
 
             # Verify the error message mentions missing API key
             response_json = response.json()
-            assert "api" in response_json.get("message", "").lower() or "key" in response_json.get("message", "").lower(), (
-                f"Expected error about missing API key, got: {response_json}"
-            )
+            assert (
+                "api" in response_json.get("message", "").lower()
+                or "key" in response_json.get("message", "").lower()
+            ), f"Expected error about missing API key, got: {response_json}"
         finally:
             httpx_client.close()
 
@@ -172,10 +174,10 @@ class TestSupabaseHttpxClientAuth:
         the custom httpx client injection.
         """
         # Import here to avoid initialization side effects during test collection
-        from src.config.supabase_config import get_supabase_client, _supabase_client
-
         # Reset the global client to force re-initialization
         import src.config.supabase_config as supabase_module
+        from src.config.supabase_config import _supabase_client, get_supabase_client
+
         original_client = supabase_module._supabase_client
         supabase_module._supabase_client = None
 
@@ -203,8 +205,8 @@ class TestSupabaseHttpxClientAuth:
 
         This directly verifies that the httpx client injection worked correctly.
         """
-        from src.config.supabase_config import get_supabase_client
         import src.config.supabase_config as supabase_module
+        from src.config.supabase_config import get_supabase_client
 
         # Reset and re-initialize
         original_client = supabase_module._supabase_client
@@ -214,13 +216,13 @@ class TestSupabaseHttpxClientAuth:
             client = get_supabase_client()
 
             # Check that the postgrest session has our custom httpx client
-            if hasattr(client, 'postgrest') and hasattr(client.postgrest, 'session'):
+            if hasattr(client, "postgrest") and hasattr(client.postgrest, "session"):
                 session = client.postgrest.session
 
                 # Verify it's an httpx client
-                assert isinstance(session, httpx.Client), (
-                    f"Expected httpx.Client, got {type(session)}"
-                )
+                assert isinstance(
+                    session, httpx.Client
+                ), f"Expected httpx.Client, got {type(session)}"
 
                 # Verify auth headers are present
                 headers = session.headers
@@ -230,18 +232,18 @@ class TestSupabaseHttpxClientAuth:
                     "This will cause 'No API key found in request' errors."
                 )
 
-                assert headers["apikey"] == Config.SUPABASE_KEY, (
-                    "apikey header value doesn't match SUPABASE_KEY"
-                )
+                assert (
+                    headers["apikey"] == Config.SUPABASE_KEY
+                ), "apikey header value doesn't match SUPABASE_KEY"
 
-                assert "authorization" in headers or "Authorization" in headers, (
-                    "Missing 'Authorization' header in postgrest session"
-                )
+                assert (
+                    "authorization" in headers or "Authorization" in headers
+                ), "Missing 'Authorization' header in postgrest session"
 
                 auth_header = headers.get("authorization") or headers.get("Authorization")
-                assert auth_header == f"Bearer {Config.SUPABASE_KEY}", (
-                    f"Authorization header value incorrect: {auth_header}"
-                )
+                assert (
+                    auth_header == f"Bearer {Config.SUPABASE_KEY}"
+                ), f"Authorization header value incorrect: {auth_header}"
 
         finally:
             supabase_module._supabase_client = original_client
@@ -263,9 +265,9 @@ class TestSupabaseConnectionHealth:
         response = httpx.get(f"{Config.SUPABASE_URL}/rest/v1/", timeout=10.0)
 
         # We expect either 200 or a 4xx (auth required), but not 5xx
-        assert response.status_code < 500, (
-            f"Supabase server error: {response.status_code} - {response.text}"
-        )
+        assert (
+            response.status_code < 500
+        ), f"Supabase server error: {response.status_code} - {response.text}"
 
     def test_supabase_url_has_correct_format(self):
         """
@@ -274,9 +276,9 @@ class TestSupabaseConnectionHealth:
         url = Config.SUPABASE_URL
 
         assert url, "SUPABASE_URL is empty"
-        assert url.startswith("https://") or url.startswith("http://"), (
-            f"SUPABASE_URL must start with http:// or https://, got: {url}"
-        )
-        assert "supabase" in url.lower() or "localhost" in url.lower(), (
-            f"SUPABASE_URL doesn't look like a Supabase URL: {url}"
-        )
+        assert url.startswith("https://") or url.startswith(
+            "http://"
+        ), f"SUPABASE_URL must start with http:// or https://, got: {url}"
+        assert (
+            "supabase" in url.lower() or "localhost" in url.lower()
+        ), f"SUPABASE_URL doesn't look like a Supabase URL: {url}"

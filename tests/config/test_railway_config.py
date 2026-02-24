@@ -97,9 +97,9 @@ class TestRailwayConfiguration:
         interval = deploy_config.get("healthcheckInterval")
 
         assert interval is not None, "healthcheckInterval must be configured in railway.toml"
-        assert 10 <= interval <= 60, (
-            f"healthcheckInterval should be between 10-60 seconds, got: {interval}s"
-        )
+        assert (
+            10 <= interval <= 60
+        ), f"healthcheckInterval should be between 10-60 seconds, got: {interval}s"
 
     def test_railway_configs_consistency(self, railway_toml, railway_json):
         """
@@ -114,10 +114,7 @@ class TestRailwayConfiguration:
 
         # Get gateway-api service config from railway.json
         services = railway_json.get("services", [])
-        gateway_service = next(
-            (s for s in services if s.get("name") == "gateway-api"),
-            None
-        )
+        gateway_service = next((s for s in services if s.get("name") == "gateway-api"), None)
 
         if gateway_service:
             json_healthchecks = gateway_service.get("deploy", {}).get("healthchecks", {})
@@ -154,13 +151,17 @@ class TestRailwayConfiguration:
 
         restart_type = deploy_config.get("restartPolicyType")
         assert restart_type is not None, "restartPolicyType must be configured"
-        assert restart_type in ["ON_FAILURE", "ALWAYS", "NEVER"], (
-            f"restartPolicyType must be one of: ON_FAILURE, ALWAYS, NEVER. Got: {restart_type}"
-        )
+        assert restart_type in [
+            "ON_FAILURE",
+            "ALWAYS",
+            "NEVER",
+        ], f"restartPolicyType must be one of: ON_FAILURE, ALWAYS, NEVER. Got: {restart_type}"
 
         max_retries = deploy_config.get("restartPolicyMaxRetries")
         if restart_type == "ON_FAILURE":
-            assert max_retries is not None, "restartPolicyMaxRetries must be set when using ON_FAILURE"
+            assert (
+                max_retries is not None
+            ), "restartPolicyMaxRetries must be set when using ON_FAILURE"
             assert max_retries > 0, "restartPolicyMaxRetries must be greater than 0"
 
 

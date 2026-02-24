@@ -3,15 +3,16 @@ Unit tests for database-based pricing lookup system
 Tests issue #895, #896, #897 implementation
 """
 
-import pytest
 import time
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 from src.services.pricing import (
-    get_model_pricing,
-    _get_pricing_from_database,
     _get_pricing_from_cache_fallback,
+    _get_pricing_from_database,
     clear_pricing_cache,
+    get_model_pricing,
     get_pricing_cache_stats,
 )
 
@@ -24,14 +25,18 @@ class TestDatabasePricingLookup:
         with patch("src.config.supabase_config.get_supabase_client") as mock_client:
             # Mock successful database response
             mock_result = Mock()
-            mock_result.data = [{
-                "model_id": "openai/gpt-4",
-                "pricing_prompt": 0.00003,
-                "pricing_completion": 0.00006
-            }]
+            mock_result.data = [
+                {
+                    "model_id": "openai/gpt-4",
+                    "pricing_prompt": 0.00003,
+                    "pricing_completion": 0.00006,
+                }
+            ]
 
             mock_table = Mock()
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = (
+                mock_result
+            )
             mock_client.return_value.table.return_value = mock_table
 
             # Test
@@ -52,7 +57,9 @@ class TestDatabasePricingLookup:
             mock_result.data = []
 
             mock_table = Mock()
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = (
+                mock_result
+            )
             mock_client.return_value.table.return_value = mock_table
 
             # Test
@@ -83,19 +90,25 @@ class TestPricingCache:
 
     def test_cache_stores_and_retrieves_pricing(self):
         """Test cache stores and retrieves pricing correctly"""
-        with patch("src.config.supabase_config.get_supabase_client") as mock_client, \
-             patch("src.services.models._is_building_catalog", return_value=False):
+        with (
+            patch("src.config.supabase_config.get_supabase_client") as mock_client,
+            patch("src.services.models._is_building_catalog", return_value=False),
+        ):
 
             # Mock database response
             mock_result = Mock()
-            mock_result.data = [{
-                "model_id": "openai/gpt-4",
-                "pricing_prompt": 0.00003,
-                "pricing_completion": 0.00006
-            }]
+            mock_result.data = [
+                {
+                    "model_id": "openai/gpt-4",
+                    "pricing_prompt": 0.00003,
+                    "pricing_completion": 0.00006,
+                }
+            ]
 
             mock_table = Mock()
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = (
+                mock_result
+            )
             mock_client.return_value.table.return_value = mock_table
 
             # First call - should query database
@@ -113,20 +126,26 @@ class TestPricingCache:
 
     def test_cache_expiration(self):
         """Test cache expires after TTL"""
-        with patch("src.config.supabase_config.get_supabase_client") as mock_client, \
-             patch("src.services.models._is_building_catalog", return_value=False), \
-             patch("src.services.pricing._pricing_cache_ttl", 1):  # 1 second TTL
+        with (
+            patch("src.config.supabase_config.get_supabase_client") as mock_client,
+            patch("src.services.models._is_building_catalog", return_value=False),
+            patch("src.services.pricing._pricing_cache_ttl", 1),
+        ):  # 1 second TTL
 
             # Mock database response
             mock_result = Mock()
-            mock_result.data = [{
-                "model_id": "openai/gpt-4",
-                "pricing_prompt": 0.00003,
-                "pricing_completion": 0.00006
-            }]
+            mock_result.data = [
+                {
+                    "model_id": "openai/gpt-4",
+                    "pricing_prompt": 0.00003,
+                    "pricing_completion": 0.00006,
+                }
+            ]
 
             mock_table = Mock()
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = (
+                mock_result
+            )
             mock_client.return_value.table.return_value = mock_table
 
             # First call
@@ -145,6 +164,7 @@ class TestPricingCache:
         """Test clearing pricing cache"""
         # Add some cache entries
         from src.services.pricing import _pricing_cache
+
         _pricing_cache["model1"] = {"data": {"prompt": 0.001}, "timestamp": time.time()}
         _pricing_cache["model2"] = {"data": {"prompt": 0.002}, "timestamp": time.time()}
 
@@ -180,21 +200,19 @@ class TestFallbackMechanism:
 
     def test_fallback_to_cache_on_database_failure(self):
         """Test fallback to provider API cache when database fails"""
-        with patch("src.config.supabase_config.get_supabase_client") as mock_db, \
-             patch("src.services.models.get_cached_models") as mock_cache, \
-             patch("src.services.models._is_building_catalog", return_value=False):
+        with (
+            patch("src.config.supabase_config.get_supabase_client") as mock_db,
+            patch("src.services.models.get_cached_models") as mock_cache,
+            patch("src.services.models._is_building_catalog", return_value=False),
+        ):
 
             # Mock database failure
             mock_db.side_effect = Exception("Database connection failed")
 
             # Mock provider API cache success
-            mock_cache.return_value = [{
-                "id": "openai/gpt-4",
-                "pricing": {
-                    "prompt": 0.00003,
-                    "completion": 0.00006
-                }
-            }]
+            mock_cache.return_value = [
+                {"id": "openai/gpt-4", "pricing": {"prompt": 0.00003, "completion": 0.00006}}
+            ]
 
             # Test
             result = get_model_pricing("openai/gpt-4")
@@ -206,9 +224,11 @@ class TestFallbackMechanism:
 
     def test_fallback_to_default_when_all_fail(self):
         """Test fallback to default pricing when both database and cache fail"""
-        with patch("src.config.supabase_config.get_supabase_client") as mock_db, \
-             patch("src.services.models.get_cached_models") as mock_cache, \
-             patch("src.services.models._is_building_catalog", return_value=False):
+        with (
+            patch("src.config.supabase_config.get_supabase_client") as mock_db,
+            patch("src.services.models.get_cached_models") as mock_cache,
+            patch("src.services.models._is_building_catalog", return_value=False),
+        ):
 
             # Mock database failure
             mock_db.side_effect = Exception("Database connection failed")
@@ -227,30 +247,38 @@ class TestFallbackMechanism:
 
     def test_database_takes_priority_over_cache(self):
         """Test database is queried before falling back to cache"""
-        with patch("src.config.supabase_config.get_supabase_client") as mock_db, \
-             patch("src.services.models.get_cached_models") as mock_cache, \
-             patch("src.services.models._is_building_catalog", return_value=False):
+        with (
+            patch("src.config.supabase_config.get_supabase_client") as mock_db,
+            patch("src.services.models.get_cached_models") as mock_cache,
+            patch("src.services.models._is_building_catalog", return_value=False),
+        ):
 
             # Mock database success with different price
             mock_result = Mock()
-            mock_result.data = [{
-                "model_id": "openai/gpt-4",
-                "pricing_prompt": 0.00005,  # Database price
-                "pricing_completion": 0.00010
-            }]
+            mock_result.data = [
+                {
+                    "model_id": "openai/gpt-4",
+                    "pricing_prompt": 0.00005,  # Database price
+                    "pricing_completion": 0.00010,
+                }
+            ]
 
             mock_table = Mock()
-            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = mock_result
+            mock_table.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value = (
+                mock_result
+            )
             mock_db.return_value.table.return_value = mock_table
 
             # Mock cache with different price
-            mock_cache.return_value = [{
-                "id": "openai/gpt-4",
-                "pricing": {
-                    "prompt": 0.00003,  # Cache price (different)
-                    "completion": 0.00006
+            mock_cache.return_value = [
+                {
+                    "id": "openai/gpt-4",
+                    "pricing": {
+                        "prompt": 0.00003,  # Cache price (different)
+                        "completion": 0.00006,
+                    },
                 }
-            }]
+            ]
 
             # Test
             result = get_model_pricing("openai/gpt-4")
@@ -270,8 +298,10 @@ class TestModelIDNormalization:
 
     def test_handles_provider_suffixes(self):
         """Test stripping provider-specific suffixes"""
-        with patch("src.services.pricing._get_pricing_from_database") as mock_db, \
-             patch("src.services.models._is_building_catalog", return_value=False):
+        with (
+            patch("src.services.pricing._get_pricing_from_database") as mock_db,
+            patch("src.services.models._is_building_catalog", return_value=False),
+        ):
 
             # Mock database to return None (to see candidate_ids being passed)
             mock_db.return_value = None

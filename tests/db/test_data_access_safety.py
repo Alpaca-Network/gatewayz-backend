@@ -6,9 +6,11 @@ database queries could return empty lists [] causing IndexError.
 """
 
 import time
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-from src.db import users, rate_limits
+
+from src.db import rate_limits, users
 
 
 class TestUsersDataAccessSafety:
@@ -48,9 +50,7 @@ class TestUsersDataAccessSafety:
 
         # Execute - should raise ValueError with "unknown" balance, not IndexError
         with pytest.raises(ValueError) as exc_info:
-            users.deduct_credits_v2(
-                user_id=1, tokens=10.0, model_id="test-model", provider="test"
-            )
+            users.deduct_credits_v2(user_id=1, tokens=10.0, model_id="test-model", provider="test")
 
         # Verify error message contains "unknown" instead of crashing
         assert "unknown" in str(exc_info.value).lower()
@@ -146,9 +146,9 @@ class TestRateLimitsDataAccessSafety:
         # Setup
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = (
-            Mock(data=[])  # Table exists check
-        )
+        mock_client.table.return_value.select.return_value.limit.return_value.execute.return_value = Mock(
+            data=[]
+        )  # Table exists check
 
         # Mock get_user returning a user
         with patch("src.db.rate_limits.get_user") as mock_get_user:
@@ -203,9 +203,10 @@ class TestAuthDataAccessSafety:
     @patch("src.routes.auth.get_supabase_client")
     def test_reset_password_handles_empty_token_result(self, mock_get_client):
         """Test reset password handles empty token result"""
+        from fastapi import HTTPException
+
         from src.routes.auth import reset_password
         from src.schemas.auth import PasswordResetConfirm
-        from fastapi import HTTPException
 
         # Setup
         mock_client = MagicMock()
@@ -221,9 +222,7 @@ class TestAuthDataAccessSafety:
 
         # Execute - should raise HTTPException, not IndexError
         with pytest.raises(HTTPException) as exc_info:
-            reset_password(
-                PasswordResetConfirm(token="invalid_token", new_password="newpass123")
-            )
+            reset_password(PasswordResetConfirm(token="invalid_token", new_password="newpass123"))
 
         # Verify correct error
         assert exc_info.value.status_code == 400
@@ -237,7 +236,7 @@ class TestRateLimitingConcurrencyReenabled:
     @patch("src.services.rate_limiting.logger")
     async def test_concurrency_limit_enforced(self, mock_logger):
         """Test that concurrency limits are now enforced (not disabled)"""
-        from src.services.rate_limiting import RateLimitService, RateLimitConfig
+        from src.services.rate_limiting import RateLimitConfig, RateLimitService
 
         # Setup
         service = RateLimitService()
@@ -295,7 +294,7 @@ class TestRateLimitingConcurrencyReenabled:
     @pytest.mark.asyncio
     async def test_concurrency_limit_allows_under_limit(self):
         """Test that requests under concurrency limit are allowed"""
-        from src.services.rate_limiting import RateLimitService, RateLimitConfig
+        from src.services.rate_limiting import RateLimitConfig, RateLimitService
 
         # Setup
         service = RateLimitService()
@@ -322,14 +321,14 @@ class TestRateLimitingConcurrencyReenabled:
 
     @pytest.mark.asyncio
     @patch("src.services.rate_limiting.get_fallback_rate_limit_manager")
-    async def test_main_limiter_increments_concurrency_on_allowed_request(
-        self, mock_get_fallback
-    ):
+    async def test_main_limiter_increments_concurrency_on_allowed_request(self, mock_get_fallback):
         """Test that SlidingWindowRateLimiter increments concurrency counter when request allowed"""
         from src.services.rate_limiting import (
-            SlidingWindowRateLimiter,
             RateLimitConfig,
-            RateLimitResult as FallbackResult,
+        )
+        from src.services.rate_limiting import RateLimitResult as FallbackResult
+        from src.services.rate_limiting import (
+            SlidingWindowRateLimiter,
         )
 
         # Setup mock fallback manager
@@ -367,14 +366,14 @@ class TestRateLimitingConcurrencyReenabled:
 
     @pytest.mark.asyncio
     @patch("src.services.rate_limiting.get_fallback_rate_limit_manager")
-    async def test_main_limiter_does_not_increment_on_rejected_request(
-        self, mock_get_fallback
-    ):
+    async def test_main_limiter_does_not_increment_on_rejected_request(self, mock_get_fallback):
         """Test that concurrency counter is NOT incremented when request is rejected"""
         from src.services.rate_limiting import (
-            SlidingWindowRateLimiter,
             RateLimitConfig,
-            RateLimitResult as FallbackResult,
+        )
+        from src.services.rate_limiting import RateLimitResult as FallbackResult
+        from src.services.rate_limiting import (
+            SlidingWindowRateLimiter,
         )
 
         # Setup mock fallback manager

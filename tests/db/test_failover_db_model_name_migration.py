@@ -7,9 +7,9 @@ Tests that failover queries correctly use model_name instead of dropped model_id
 from unittest.mock import Mock, patch
 
 from src.db.failover_db import (
-    get_providers_for_model,
-    get_provider_model_id,
     check_model_available_on_provider,
+    get_provider_model_id,
+    get_providers_for_model,
 )
 
 
@@ -26,36 +26,40 @@ class TestFailoverDbModelNameMigration:
 
         # Create mock response
         mock_execute = Mock()
-        mock_execute.execute.return_value = Mock(data=[{
-            "id": 1,
-            "model_name": model_name,
-            "provider_model_id": "openai/gpt-4",
-            "average_response_time_ms": 150,
-            "health_status": "healthy",
-            "success_rate": 98.5,
-            "is_active": True,
-            "supports_streaming": True,
-            "supports_function_calling": True,
-            "supports_vision": False,
-            "context_length": 8192,
-            "model_pricing": {
-                "price_per_input_token": 0.00003,
-                "price_per_output_token": 0.00006,
-                "price_per_image_token": 0,
-                "price_per_request": 0,
-            },
-            "providers": {
-                "id": 1,
-                "slug": "openrouter",
-                "name": "OpenRouter",
-                "health_status": "healthy",
-                "average_response_time_ms": 100,
-                "is_active": True,
-                "supports_streaming": True,
-                "supports_function_calling": True,
-                "supports_vision": False,
-            }
-        }])
+        mock_execute.execute.return_value = Mock(
+            data=[
+                {
+                    "id": 1,
+                    "model_name": model_name,
+                    "provider_model_id": "openai/gpt-4",
+                    "average_response_time_ms": 150,
+                    "health_status": "healthy",
+                    "success_rate": 98.5,
+                    "is_active": True,
+                    "supports_streaming": True,
+                    "supports_function_calling": True,
+                    "supports_vision": False,
+                    "context_length": 8192,
+                    "model_pricing": {
+                        "price_per_input_token": 0.00003,
+                        "price_per_output_token": 0.00006,
+                        "price_per_image_token": 0,
+                        "price_per_request": 0,
+                    },
+                    "providers": {
+                        "id": 1,
+                        "slug": "openrouter",
+                        "name": "OpenRouter",
+                        "health_status": "healthy",
+                        "average_response_time_ms": 100,
+                        "is_active": True,
+                        "supports_streaming": True,
+                        "supports_function_calling": True,
+                        "supports_vision": False,
+                    },
+                }
+            ]
+        )
 
         # Build query chain
         mock_eq_active = Mock()
@@ -94,36 +98,40 @@ class TestFailoverDbModelNameMigration:
         mock_get_client.return_value = mock_client
 
         mock_execute = Mock()
-        mock_execute.execute.return_value = Mock(data=[{
-            "id": 1,
-            "model_name": "test-model",
-            "provider_model_id": "test/model",
-            "average_response_time_ms": 200,
-            "health_status": "healthy",
-            "success_rate": 95.0,
-            "is_active": True,
-            "supports_streaming": False,
-            "supports_function_calling": False,
-            "supports_vision": False,
-            "context_length": 4096,
-            "model_pricing": {  # Pricing from model_pricing table
-                "price_per_input_token": 0.000001,
-                "price_per_output_token": 0.000002,
-                "price_per_image_token": 0.000003,
-                "price_per_request": 0.01,
-            },
-            "providers": {
-                "id": 2,
-                "slug": "test-provider",
-                "name": "Test Provider",
-                "health_status": "healthy",
-                "average_response_time_ms": 150,
-                "is_active": True,
-                "supports_streaming": False,
-                "supports_function_calling": False,
-                "supports_vision": False,
-            }
-        }])
+        mock_execute.execute.return_value = Mock(
+            data=[
+                {
+                    "id": 1,
+                    "model_name": "test-model",
+                    "provider_model_id": "test/model",
+                    "average_response_time_ms": 200,
+                    "health_status": "healthy",
+                    "success_rate": 95.0,
+                    "is_active": True,
+                    "supports_streaming": False,
+                    "supports_function_calling": False,
+                    "supports_vision": False,
+                    "context_length": 4096,
+                    "model_pricing": {  # Pricing from model_pricing table
+                        "price_per_input_token": 0.000001,
+                        "price_per_output_token": 0.000002,
+                        "price_per_image_token": 0.000003,
+                        "price_per_request": 0.01,
+                    },
+                    "providers": {
+                        "id": 2,
+                        "slug": "test-provider",
+                        "name": "Test Provider",
+                        "health_status": "healthy",
+                        "average_response_time_ms": 150,
+                        "is_active": True,
+                        "supports_streaming": False,
+                        "supports_function_calling": False,
+                        "supports_vision": False,
+                    },
+                }
+            ]
+        )
 
         mock_eq_active = Mock()
         mock_eq_active.execute = mock_execute.execute
@@ -157,36 +165,42 @@ class TestFailoverDbModelNameMigration:
         mock_get_client.return_value = mock_client
 
         mock_execute = Mock()
-        mock_execute.execute.return_value = Mock(data=[{
-            "id": 1,
-            "model_name": "test-model",
-            "provider_model_id": "test/model",
-            "average_response_time_ms": 200,
-            "health_status": "healthy",
-            "success_rate": 95.0,
-            "is_active": True,
-            "supports_streaming": False,
-            "supports_function_calling": False,
-            "supports_vision": False,
-            "context_length": 4096,
-            "model_pricing": [{  # Pricing as list
-                "price_per_input_token": 0.00005,
-                "price_per_output_token": 0.0001,
-                "price_per_image_token": 0,
-                "price_per_request": 0,
-            }],
-            "providers": {
-                "id": 2,
-                "slug": "test-provider",
-                "name": "Test Provider",
-                "health_status": "healthy",
-                "average_response_time_ms": 150,
-                "is_active": True,
-                "supports_streaming": False,
-                "supports_function_calling": False,
-                "supports_vision": False,
-            }
-        }])
+        mock_execute.execute.return_value = Mock(
+            data=[
+                {
+                    "id": 1,
+                    "model_name": "test-model",
+                    "provider_model_id": "test/model",
+                    "average_response_time_ms": 200,
+                    "health_status": "healthy",
+                    "success_rate": 95.0,
+                    "is_active": True,
+                    "supports_streaming": False,
+                    "supports_function_calling": False,
+                    "supports_vision": False,
+                    "context_length": 4096,
+                    "model_pricing": [
+                        {  # Pricing as list
+                            "price_per_input_token": 0.00005,
+                            "price_per_output_token": 0.0001,
+                            "price_per_image_token": 0,
+                            "price_per_request": 0,
+                        }
+                    ],
+                    "providers": {
+                        "id": 2,
+                        "slug": "test-provider",
+                        "name": "Test Provider",
+                        "health_status": "healthy",
+                        "average_response_time_ms": 150,
+                        "is_active": True,
+                        "supports_streaming": False,
+                        "supports_function_calling": False,
+                        "supports_vision": False,
+                    },
+                }
+            ]
+        )
 
         mock_eq_active = Mock()
         mock_eq_active.execute = mock_execute.execute
@@ -218,31 +232,35 @@ class TestFailoverDbModelNameMigration:
         mock_get_client.return_value = mock_client
 
         mock_execute = Mock()
-        mock_execute.execute.return_value = Mock(data=[{
-            "id": 1,
-            "model_name": "test-model",
-            "provider_model_id": "test/model",
-            "average_response_time_ms": 200,
-            "health_status": "healthy",
-            "success_rate": 95.0,
-            "is_active": True,
-            "supports_streaming": False,
-            "supports_function_calling": False,
-            "supports_vision": False,
-            "context_length": 4096,
-            "model_pricing": None,  # No pricing data
-            "providers": {
-                "id": 2,
-                "slug": "test-provider",
-                "name": "Test Provider",
-                "health_status": "healthy",
-                "average_response_time_ms": 150,
-                "is_active": True,
-                "supports_streaming": False,
-                "supports_function_calling": False,
-                "supports_vision": False,
-            }
-        }])
+        mock_execute.execute.return_value = Mock(
+            data=[
+                {
+                    "id": 1,
+                    "model_name": "test-model",
+                    "provider_model_id": "test/model",
+                    "average_response_time_ms": 200,
+                    "health_status": "healthy",
+                    "success_rate": 95.0,
+                    "is_active": True,
+                    "supports_streaming": False,
+                    "supports_function_calling": False,
+                    "supports_vision": False,
+                    "context_length": 4096,
+                    "model_pricing": None,  # No pricing data
+                    "providers": {
+                        "id": 2,
+                        "slug": "test-provider",
+                        "name": "Test Provider",
+                        "health_status": "healthy",
+                        "average_response_time_ms": 150,
+                        "is_active": True,
+                        "supports_streaming": False,
+                        "supports_function_calling": False,
+                        "supports_vision": False,
+                    },
+                }
+            ]
+        )
 
         mock_eq_active = Mock()
         mock_eq_active.execute = mock_execute.execute
@@ -280,7 +298,9 @@ class TestFailoverDbModelNameMigration:
         mock_get_client.return_value = mock_client
 
         mock_execute = Mock()
-        mock_execute.execute.return_value = Mock(data={"provider_model_id": expected_provider_model_id})
+        mock_execute.execute.return_value = Mock(
+            data={"provider_model_id": expected_provider_model_id}
+        )
 
         mock_single = Mock()
         mock_single.single.return_value = mock_execute
@@ -307,7 +327,9 @@ class TestFailoverDbModelNameMigration:
 
         # Verify query uses model_name
         eq_calls = mock_select.eq.call_args_list
-        assert any(call[0][0] == "model_name" and call[0][1] == canonical_model_id for call in eq_calls)
+        assert any(
+            call[0][0] == "model_name" and call[0][1] == canonical_model_id for call in eq_calls
+        )
 
     @patch("src.db.failover_db.get_supabase_client")
     def test_check_model_available_uses_model_name(self, mock_get_client):

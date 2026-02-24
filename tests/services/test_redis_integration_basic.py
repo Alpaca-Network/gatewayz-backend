@@ -4,37 +4,36 @@ Basic integration tests for Redis caching functionality.
 These tests verify that the caching layer works correctly with Redis.
 """
 
-import pytest
 import time
 from unittest.mock import Mock, patch
 
+import pytest
+
 from src.services.auth_cache import (
     cache_user_by_api_key,
-    get_cached_user_by_api_key,
-    invalidate_api_key_cache,
     cache_user_by_id,
-    get_cached_user_by_id,
-    invalidate_user_by_id,
-    get_auth_cache_stats,
     clear_all_auth_caches,
+    get_auth_cache_stats,
+    get_cached_user_by_api_key,
+    get_cached_user_by_id,
+    invalidate_api_key_cache,
+    invalidate_user_by_id,
 )
-
 from src.services.db_cache import (
     DBCache,
-    get_db_cache,
     cache_user,
-    get_cached_user,
-    invalidate_user,
     get_cache_stats,
+    get_cached_user,
+    get_db_cache,
+    invalidate_user,
 )
-
 from src.services.model_catalog_cache import (
     ModelCatalogCache,
     cache_full_catalog,
-    get_cached_full_catalog,
-    invalidate_full_catalog,
     cache_provider_catalog,
+    get_cached_full_catalog,
     get_cached_provider_catalog,
+    invalidate_full_catalog,
 )
 
 
@@ -44,12 +43,7 @@ class TestAuthCacheBasic:
     def test_cache_and_retrieve_user_by_api_key(self):
         """Test caching user data by API key"""
         api_key = "test_key_123"
-        user_data = {
-            "id": 1,
-            "username": "testuser",
-            "email": "test@example.com",
-            "credits": 100
-        }
+        user_data = {"id": 1, "username": "testuser", "email": "test@example.com", "credits": 100}
 
         # Cache the user
         result = cache_user_by_api_key(api_key, user_data)
@@ -179,9 +173,7 @@ class TestModelCatalogCache:
     def test_cache_provider_catalog(self):
         """Test caching provider-specific catalog"""
         provider = "openrouter"
-        catalog = [
-            {"id": "openrouter/model1", "name": "OpenRouter Model 1"}
-        ]
+        catalog = [{"id": "openrouter/model1", "name": "OpenRouter Model 1"}]
 
         result = cache_provider_catalog(provider, catalog)
         cached = get_cached_provider_catalog(provider)
@@ -205,7 +197,7 @@ class TestModelCatalogCache:
 class TestCacheWithRedisUnavailable:
     """Tests for graceful degradation when Redis is unavailable"""
 
-    @patch('src.services.auth_cache.get_redis_client')
+    @patch("src.services.auth_cache.get_redis_client")
     def test_cache_fails_gracefully_when_redis_unavailable(self, mock_get_redis):
         """Test that cache operations don't crash when Redis is down"""
         mock_get_redis.return_value = None
@@ -217,7 +209,7 @@ class TestCacheWithRedisUnavailable:
         cached = get_cached_user_by_api_key("test_key")
         assert cached is None  # No cache, but no exception
 
-    @patch('src.config.redis_config.get_redis_client')
+    @patch("src.config.redis_config.get_redis_client")
     def test_db_cache_fails_gracefully(self, mock_get_redis):
         """Test DB cache fails gracefully without Redis"""
         mock_get_redis.return_value = None

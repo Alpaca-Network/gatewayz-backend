@@ -8,7 +8,7 @@ on assistant responses.
 
 import logging
 import time
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError

@@ -4,8 +4,10 @@ Tests for error monitor Loki logging improvements.
 Tests the fix for suppressing empty Loki errors.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+
 from src.services.error_monitor import ErrorMonitor
 
 
@@ -104,7 +106,7 @@ class TestLokiErrorLogging:
                     {
                         "values": [
                             ["1234567890", '{"message": "Test error", "level": "ERROR"}'],
-                            ["1234567891", '{"message": "Another error", "level": "ERROR"}']
+                            ["1234567891", '{"message": "Another error", "level": "ERROR"}'],
                         ]
                     }
                 ]

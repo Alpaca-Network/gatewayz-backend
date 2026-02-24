@@ -5,6 +5,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 class NormalizedChunk:
     def __init__(self, id: str, object: str, created: int, model: str, choices: list[dict]):
         self.id = id
@@ -19,9 +20,10 @@ class NormalizedChunk:
             "object": self.object,
             "created": self.created,
             "model": self.model,
-            "choices": self.choices
+            "choices": self.choices,
         }
         return f"data: {json.dumps(data)}\n\n"
+
 
 class StreamNormalizer:
     def __init__(self, provider: str, model: str):
@@ -54,7 +56,7 @@ class StreamNormalizer:
 
         # Handle Gemini format (candidates list)
         elif "candidates" in chunk_data and isinstance(chunk_data["candidates"], list):
-             for i, candidate in enumerate(chunk_data["candidates"]):
+            for i, candidate in enumerate(chunk_data["candidates"]):
                 normalized_choice = self._normalize_gemini_candidate(candidate, i)
                 if normalized_choice:
                     choices.append(normalized_choice)
@@ -63,14 +65,14 @@ class StreamNormalizer:
         # Note: This is a simplified handler; actual Anthropic response structures might need more specific checks
         # depending on the client library used.
         elif "type" in chunk_data:
-             normalized_choice = self._normalize_anthropic_event(chunk_data)
-             if normalized_choice:
-                 choices.append(normalized_choice)
+            normalized_choice = self._normalize_anthropic_event(chunk_data)
+            if normalized_choice:
+                choices.append(normalized_choice)
 
         # If we couldn't find choices/candidates but there is 'output' (Fireworks, etc. sometimes use this)
         elif "output" in chunk_data and isinstance(chunk_data["output"], list):
-             # Similar to choices
-             for choice in chunk_data["output"]:
+            # Similar to choices
+            for choice in chunk_data["output"]:
                 normalized_choice = self._normalize_choice(choice)
                 if normalized_choice:
                     choices.append(normalized_choice)
@@ -79,12 +81,14 @@ class StreamNormalizer:
             # Fallback: check if it looks like a single choice flat structure
             # (Some custom providers might do this)
             if "content" in chunk_data or "delta" in chunk_data:
-                 normalized_choice = self._normalize_choice(chunk_data) # Treat the whole chunk as a choice-like dict
-                 if normalized_choice:
-                     # It needs an index
-                     if "index" not in normalized_choice:
-                         normalized_choice["index"] = 0
-                     choices.append(normalized_choice)
+                normalized_choice = self._normalize_choice(
+                    chunk_data
+                )  # Treat the whole chunk as a choice-like dict
+                if normalized_choice:
+                    # It needs an index
+                    if "index" not in normalized_choice:
+                        normalized_choice["index"] = 0
+                    choices.append(normalized_choice)
 
         if not choices:
             return None
@@ -94,7 +98,7 @@ class StreamNormalizer:
             object="chat.completion.chunk",
             created=created,
             model=model,
-            choices=choices
+            choices=choices,
         )
 
     def _to_dict(self, obj: Any) -> dict:
@@ -149,16 +153,19 @@ class StreamNormalizer:
             normalized_delta["reasoning_content"] = reasoning
             self.accumulated_reasoning += reasoning
 
-        return {
-            "index": index,
-            "delta": normalized_delta,
-            "finish_reason": finish_reason
-        }
+        return {"index": index, "delta": normalized_delta, "finish_reason": finish_reason}
 
     def _extract_reasoning(self, data: dict) -> str | None:
         fields = [
-            "reasoning", "reasoning_content", "thinking", "analysis",
-            "inner_thought", "thoughts", "thought", "chain_of_thought", "cot"
+            "reasoning",
+            "reasoning_content",
+            "thinking",
+            "analysis",
+            "inner_thought",
+            "thoughts",
+            "thought",
+            "chain_of_thought",
+            "cot",
         ]
         for field in fields:
             if field in data and data[field]:
@@ -218,11 +225,7 @@ class StreamNormalizer:
             delta["content"] = content
             self.accumulated_content += content
 
-        return {
-            "index": index,
-            "delta": delta,
-            "finish_reason": finish_reason
-        }
+        return {"index": index, "delta": delta, "finish_reason": finish_reason}
 
     def _normalize_anthropic_event(self, chunk: dict) -> dict | None:
         """Normalize Anthropic streaming events to OpenAI format.
@@ -313,11 +316,7 @@ class StreamNormalizer:
         if not delta and not finish_reason:
             return None
 
-        return {
-            "index": 0,
-            "delta": delta,
-            "finish_reason": finish_reason
-        }
+        return {"index": 0, "delta": delta, "finish_reason": finish_reason}
 
     def get_accumulated_content(self) -> str:
         return self.accumulated_content
@@ -325,16 +324,20 @@ class StreamNormalizer:
     def get_accumulated_reasoning(self) -> str:
         return self.accumulated_reasoning
 
-def create_error_sse_chunk(error_message: str, error_type: str, provider: str = None, model: str = None) -> str:
+
+def create_error_sse_chunk(
+    error_message: str, error_type: str, provider: str = None, model: str = None
+) -> str:
     error_data = {
         "error": {
             "message": error_message,
             "type": error_type,
             "provider": provider,
-            "model": model
+            "model": model,
         }
     }
     return f"data: {json.dumps(error_data)}\n\n"
+
 
 def create_done_sse() -> str:
     return "data: [DONE]\n\n"

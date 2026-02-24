@@ -61,9 +61,7 @@ class RequestTimeoutMiddleware:
         self.app = app
         self.timeout_seconds = timeout_seconds
         self.exempt_paths = exempt_paths or TIMEOUT_EXEMPT_PATHS
-        logger.info(
-            f"Request timeout middleware initialized with {timeout_seconds}s timeout"
-        )
+        logger.info(f"Request timeout middleware initialized with {timeout_seconds}s timeout")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         # Only process HTTP requests
@@ -90,8 +88,7 @@ class RequestTimeoutMiddleware:
             # Request exceeded timeout - log and return 504
             method = scope.get("method", "UNKNOWN")
             logger.error(
-                f"Request timeout after {self.timeout_seconds}s: "
-                f"{method} {request_path}"
+                f"Request timeout after {self.timeout_seconds}s: " f"{method} {request_path}"
             )
 
             # Send 504 Gateway Timeout response

@@ -37,10 +37,10 @@ def _record_credit_metrics(
     """Record Prometheus metrics for credit deduction operations."""
     try:
         from src.services.prometheus_metrics import (
-            credit_deduction_total,
             credit_deduction_amount_usd,
             credit_deduction_latency,
             credit_deduction_retry_count,
+            credit_deduction_total,
         )
 
         streaming_str = "true" if is_streaming else "false"
@@ -119,6 +119,7 @@ def _send_critical_billing_alert(
     """
     try:
         import sentry_sdk
+
         from src.utils.sentry_context import capture_payment_error
 
         context = {
@@ -266,6 +267,7 @@ async def handle_credits_and_usage(
             if indicator_count >= 3:
                 try:
                     import sentry_sdk
+
                     sentry_sdk.capture_message(
                         f"Trial flag override for user {user.get('id')} with {indicator_count}/4 subscription indicators",
                         level="warning",
@@ -278,7 +280,7 @@ async def handle_credits_and_usage(
                             "has_paid_tier": has_paid_tier,
                             "has_subscription_allowance": has_subscription_allowance,
                             "endpoint": endpoint,
-                        }
+                        },
                     )
                 except Exception:
                     pass
@@ -566,6 +568,7 @@ async def handle_credits_and_usage_with_fallback(
     # Send critical Sentry alert for streaming failures
     try:
         import sentry_sdk
+
         sentry_sdk.capture_message(
             f"CRITICAL: Streaming credit deduction failed completely for user {user.get('id')}",
             level="error",
@@ -580,7 +583,7 @@ async def handle_credits_and_usage_with_fallback(
                 "endpoint": endpoint,
                 "error": str(e),
                 "background_retries": MAX_BACKGROUND_RETRIES,
-            }
+            },
         )
     except Exception:
         pass

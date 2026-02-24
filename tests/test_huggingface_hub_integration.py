@@ -23,14 +23,17 @@ from src.main import create_app
 
 try:
     from huggingface_hub import ModelInfo
+
     HAS_HUGGINGFACE_HUB = True
 except ImportError:
     HAS_HUGGINGFACE_HUB = False
+
     # Create a mock ModelInfo class for testing
     class ModelInfo:
         def __init__(self, **kwargs):
             for key, value in kwargs.items():
                 setattr(self, key, value)
+
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Skip these tests on Python 3.10
 pytestmark = pytest.mark.skipif(
     sys.version_info < (3, 11),
-    reason="HuggingFace endpoint routing not fully compatible with Python 3.10"
+    reason="HuggingFace endpoint routing not fully compatible with Python 3.10",
 )
 
 
@@ -94,9 +97,7 @@ class TestHuggingFaceDiscoveryEndpoint:
 
     def test_discover_models_default_params(self, client):
         """Test discovering models with default parameters."""
-        with patch(
-            "src.services.huggingface_hub_service.list_huggingface_models"
-        ) as mock_list:
+        with patch("src.services.huggingface_hub_service.list_huggingface_models") as mock_list:
             mock_list.return_value = [
                 {
                     "id": "meta-llama/Llama-2-7b",
@@ -123,9 +124,7 @@ class TestHuggingFaceDiscoveryEndpoint:
 
     def test_discover_models_custom_params(self, client):
         """Test discovering models with custom parameters."""
-        with patch(
-            "src.services.huggingface_hub_service.list_huggingface_models"
-        ) as mock_list:
+        with patch("src.services.huggingface_hub_service.list_huggingface_models") as mock_list:
             mock_list.return_value = []
 
             response = client.get(
@@ -149,9 +148,7 @@ class TestHuggingFaceDiscoveryEndpoint:
 
     def test_discover_models_error_handling(self, client):
         """Test error handling in discovery endpoint."""
-        with patch(
-            "src.services.huggingface_hub_service.list_huggingface_models"
-        ) as mock_list:
+        with patch("src.services.huggingface_hub_service.list_huggingface_models") as mock_list:
             mock_list.side_effect = Exception("API error")
 
             response = client.get("/v1/huggingface/discovery")
@@ -165,9 +162,7 @@ class TestHuggingFaceSearchEndpoint:
 
     def test_search_models_basic(self, client):
         """Test basic model search."""
-        with patch(
-            "src.services.huggingface_hub_service.search_models_by_query"
-        ) as mock_search:
+        with patch("src.services.huggingface_hub_service.search_models_by_query") as mock_search:
             mock_search.return_value = [
                 {
                     "id": "meta-llama/Llama-2-7b",
@@ -186,14 +181,10 @@ class TestHuggingFaceSearchEndpoint:
 
     def test_search_models_with_task_filter(self, client):
         """Test search with task filter."""
-        with patch(
-            "src.services.huggingface_hub_service.search_models_by_query"
-        ) as mock_search:
+        with patch("src.services.huggingface_hub_service.search_models_by_query") as mock_search:
             mock_search.return_value = []
 
-            response = client.get(
-                "/v1/huggingface/search?q=llama&task=text-generation&limit=50"
-            )
+            response = client.get("/v1/huggingface/search?q=llama&task=text-generation&limit=50")
 
             assert response.status_code == 200
             mock_search.assert_called_once_with(
@@ -209,9 +200,7 @@ class TestHuggingFaceSearchEndpoint:
 
     def test_search_models_error_handling(self, client):
         """Test error handling in search endpoint."""
-        with patch(
-            "src.services.huggingface_hub_service.search_models_by_query"
-        ) as mock_search:
+        with patch("src.services.huggingface_hub_service.search_models_by_query") as mock_search:
             mock_search.side_effect = Exception("Search failed")
 
             response = client.get("/v1/huggingface/search?q=llama")
@@ -224,9 +213,7 @@ class TestHuggingFaceModelDetailsEndpoint:
 
     def test_get_model_details_success(self, client):
         """Test retrieving model details successfully."""
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.return_value = {
                 "id": "meta-llama/Llama-2-7b",
                 "name": "Llama 2 7B",
@@ -247,9 +234,7 @@ class TestHuggingFaceModelDetailsEndpoint:
 
     def test_get_model_details_not_found(self, client):
         """Test handling of non-existent model."""
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.return_value = None
 
             response = client.get("/v1/huggingface/models/nonexistent/model/details")
@@ -259,9 +244,7 @@ class TestHuggingFaceModelDetailsEndpoint:
 
     def test_get_model_details_error_handling(self, client):
         """Test error handling in model details endpoint."""
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.side_effect = Exception("API error")
 
             response = client.get("/v1/huggingface/models/test/model/details")
@@ -311,9 +294,7 @@ class TestHuggingFaceAuthorModelsEndpoint:
 
     def test_list_author_models_success(self, client):
         """Test listing author models successfully."""
-        with patch(
-            "src.services.huggingface_hub_service.list_models_by_author"
-        ) as mock_author:
+        with patch("src.services.huggingface_hub_service.list_models_by_author") as mock_author:
             mock_author.return_value = [
                 {
                     "id": "meta-llama/Llama-2-7b",
@@ -337,9 +318,7 @@ class TestHuggingFaceAuthorModelsEndpoint:
 
     def test_list_author_models_empty(self, client):
         """Test listing models for author with no models."""
-        with patch(
-            "src.services.huggingface_hub_service.list_models_by_author"
-        ) as mock_author:
+        with patch("src.services.huggingface_hub_service.list_models_by_author") as mock_author:
             mock_author.return_value = []
 
             response = client.get("/v1/huggingface/author/unknown-author/models")
@@ -350,9 +329,7 @@ class TestHuggingFaceAuthorModelsEndpoint:
 
     def test_list_author_models_limit(self, client):
         """Test limit parameter for author models."""
-        with patch(
-            "src.services.huggingface_hub_service.list_models_by_author"
-        ) as mock_author:
+        with patch("src.services.huggingface_hub_service.list_models_by_author") as mock_author:
             mock_author.return_value = []
 
             response = client.get("/v1/huggingface/author/meta-llama/models?limit=100")
@@ -532,9 +509,7 @@ class TestHuggingFaceServiceFunctions:
         """Test checking model inference availability."""
         from src.services.huggingface_hub_service import check_model_inference_availability
 
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.return_value = {
                 "id": "test/model",
                 "gated": False,
@@ -544,9 +519,7 @@ class TestHuggingFaceServiceFunctions:
             result = check_model_inference_availability("test/model")
             assert result is True
 
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.return_value = {
                 "id": "test/model",
                 "gated": True,
@@ -562,24 +535,18 @@ class TestHuggingFaceIntegrationEdgeCases:
 
     def test_endpoint_with_special_characters_in_model_id(self, client):
         """Test endpoints handle special characters in model IDs."""
-        with patch(
-            "src.services.huggingface_hub_service.get_model_details"
-        ) as mock_details:
+        with patch("src.services.huggingface_hub_service.get_model_details") as mock_details:
             mock_details.return_value = None
 
             # Model IDs with slashes are properly handled by {model_id:path}
-            response = client.get(
-                "/v1/huggingface/models/org/model-with-slashes/details"
-            )
+            response = client.get("/v1/huggingface/models/org/model-with-slashes/details")
 
             # Should return 404 since model not found
             assert response.status_code == 404
 
     def test_concurrent_requests_to_discovery_endpoint(self, client):
         """Test that concurrent requests are handled safely."""
-        with patch(
-            "src.services.huggingface_hub_service.list_huggingface_models"
-        ) as mock_list:
+        with patch("src.services.huggingface_hub_service.list_huggingface_models") as mock_list:
             mock_list.return_value = []
 
             # Make multiple concurrent requests (simulated sequentially)
@@ -589,9 +556,7 @@ class TestHuggingFaceIntegrationEdgeCases:
 
     def test_large_result_set_handling(self, client):
         """Test handling of large result sets."""
-        with patch(
-            "src.services.huggingface_hub_service.list_huggingface_models"
-        ) as mock_list:
+        with patch("src.services.huggingface_hub_service.list_huggingface_models") as mock_list:
             # Create a large result set
             large_results = [{"id": f"model-{i}", "name": f"Model {i}"} for i in range(500)]
             mock_list.return_value = large_results

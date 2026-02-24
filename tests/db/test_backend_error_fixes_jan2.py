@@ -10,8 +10,10 @@ Fixes tested:
 3. src/services/ai_sdk_client.py - Unsafe provider response.choices[0] access
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch
+
 from src.utils.db_safety import DatabaseResultError
 from src.utils.provider_safety import ProviderError
 
@@ -19,7 +21,7 @@ from src.utils.provider_safety import ProviderError
 class TestAPIKeysDataAccessSafety:
     """Test safe database access patterns in src/db/api_keys.py"""
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_create_api_key_handles_empty_result(self, mock_get_client):
         """Test that create_api_key handles empty database result safely"""
         from src.db.api_keys import create_api_key
@@ -35,7 +37,7 @@ class TestAPIKeysDataAccessSafety:
         with pytest.raises(ValueError, match="Failed to create API key"):
             create_api_key(user_id=123, key_name="test")
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_get_api_key_usage_stats_handles_empty_result(self, mock_get_client):
         """Test that get_api_key_usage_stats handles missing API key safely"""
         from src.db.api_keys import get_api_key_usage_stats
@@ -44,7 +46,9 @@ class TestAPIKeysDataAccessSafety:
         mock_client = Mock()
         mock_result = Mock()
         mock_result.data = []
-        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_result
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+            mock_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should return default stats dict, not crash with IndexError
@@ -55,7 +59,7 @@ class TestAPIKeysDataAccessSafety:
         assert result["is_active"] is False
         assert result["requests_used"] == 0
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_update_api_key_handles_empty_key_lookup(self, mock_get_client):
         """Test that update_api_key handles missing API key safely"""
         from src.db.api_keys import update_api_key
@@ -64,18 +68,16 @@ class TestAPIKeysDataAccessSafety:
         mock_client = Mock()
         mock_result = Mock()
         mock_result.data = []
-        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should raise ValueError (wrapped DatabaseResultError)
         with pytest.raises(ValueError, match="API key not found or not owned by user"):
-            update_api_key(
-                user_id=123,
-                api_key="sk_test_missing",
-                updates={"key_name": "new_name"}
-            )
+            update_api_key(user_id=123, api_key="sk_test_missing", updates={"key_name": "new_name"})
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_update_api_key_handles_empty_update_result(self, mock_get_client):
         """Test that update_api_key handles failed update safely"""
         from src.db.api_keys import update_api_key
@@ -91,19 +93,19 @@ class TestAPIKeysDataAccessSafety:
         update_result = Mock()
         update_result.data = []
 
-        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = lookup_result
-        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = update_result
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            lookup_result
+        )
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            update_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should raise ValueError (wrapped DatabaseResultError)
         with pytest.raises(ValueError, match="Failed to update API key"):
-            update_api_key(
-                user_id=123,
-                api_key="sk_test_valid",
-                updates={"key_name": "new_name"}
-            )
+            update_api_key(user_id=123, api_key="sk_test_valid", updates={"key_name": "new_name"})
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_delete_api_key_handles_empty_lookup(self, mock_get_client):
         """Test that delete_api_key handles missing API key safely"""
         from src.db.api_keys import delete_api_key
@@ -112,14 +114,16 @@ class TestAPIKeysDataAccessSafety:
         mock_client = Mock()
         mock_result = Mock()
         mock_result.data = []
-        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+        mock_client.table.return_value.delete.return_value.eq.return_value.eq.return_value.execute.return_value = (
+            mock_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should return False (not crash)
         result = delete_api_key("sk_test_missing", user_id=123)
         assert result is False
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_create_api_key_audit_log_uses_safe_id(self, mock_get_client):
         """Test that create_api_key uses safely extracted ID for audit logs"""
         from src.db.api_keys import create_api_key
@@ -137,7 +141,8 @@ class TestAPIKeysDataAccessSafety:
             return Mock(execute=Mock(return_value=Mock(data=[{}])))
 
         mock_client.table.return_value.insert.side_effect = lambda data: (
-            Mock(execute=Mock(return_value=api_key_result)) if "api_key" in str(data)
+            Mock(execute=Mock(return_value=api_key_result))
+            if "api_key" in str(data)
             else track_audit_insert(data)
         )
         mock_get_client.return_value = mock_client
@@ -153,7 +158,7 @@ class TestAPIKeysDataAccessSafety:
             # May fail due to rate limit config, but audit log should still use safe ID
             pass
 
-    @patch('src.db.api_keys.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
     def test_delete_api_key_uses_safe_id_for_cleanup(self, mock_get_client):
         """Test that delete_api_key uses safely extracted ID for cleanup operations"""
         from src.db.api_keys import delete_api_key
@@ -178,13 +183,17 @@ class TestAPIKeysDataAccessSafety:
         def table_router(table_name):
             if table_name == "api_keys_new":
                 return Mock(
-                    delete=Mock(return_value=Mock(
-                        eq=Mock(return_value=Mock(
-                            eq=Mock(return_value=Mock(
-                                execute=Mock(return_value=delete_result)
-                            ))
-                        ))
-                    ))
+                    delete=Mock(
+                        return_value=Mock(
+                            eq=Mock(
+                                return_value=Mock(
+                                    eq=Mock(
+                                        return_value=Mock(execute=Mock(return_value=delete_result))
+                                    )
+                                )
+                            )
+                        )
+                    )
                 )
             elif table_name == "rate_limit_configs":
                 return Mock(delete=Mock(return_value=Mock(eq=track_rate_limit_delete)))
@@ -207,7 +216,7 @@ class TestAPIKeysDataAccessSafety:
 class TestChatCompletionRequestsDataAccessSafety:
     """Test safe database access patterns in src/db/chat_completion_requests.py"""
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_get_model_id_by_name_handles_empty_provider_result(self, mock_get_client):
         """Test that get_model_id_by_name handles missing provider safely"""
         from src.db.chat_completion_requests import get_model_id_by_name
@@ -216,14 +225,16 @@ class TestChatCompletionRequestsDataAccessSafety:
         mock_client = Mock()
         provider_result = Mock()
         provider_result.data = []
-        mock_client.table.return_value.select.return_value.or_.return_value.execute.return_value = provider_result
+        mock_client.table.return_value.select.return_value.or_.return_value.execute.return_value = (
+            provider_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should not crash, should fall back to searching without provider filter
         result = get_model_id_by_name("gpt-4", provider_name="nonexistent")
         assert result is None  # No model found
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_get_model_id_by_name_handles_empty_model_result(self, mock_get_client):
         """Test that get_model_id_by_name handles missing model safely"""
         from src.db.chat_completion_requests import get_model_id_by_name
@@ -234,15 +245,19 @@ class TestChatCompletionRequestsDataAccessSafety:
         model_result.data = []
 
         # Both provider search and fallback search return empty
-        mock_client.table.return_value.select.return_value.eq.return_value.or_.return_value.execute.return_value = model_result
-        mock_client.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = model_result
+        mock_client.table.return_value.select.return_value.eq.return_value.or_.return_value.execute.return_value = (
+            model_result
+        )
+        mock_client.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = (
+            model_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should return None (not crash)
         result = get_model_id_by_name("nonexistent_model")
         assert result is None
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_save_chat_completion_request_handles_empty_insert_result(self, mock_get_client):
         """Test that save_chat_completion_request handles failed insert safely"""
         from src.db.chat_completion_requests import save_chat_completion_request
@@ -260,11 +275,11 @@ class TestChatCompletionRequestsDataAccessSafety:
             model_name="gpt-4",
             input_tokens=10,
             output_tokens=20,
-            processing_time_ms=100
+            processing_time_ms=100,
         )
         assert result is None
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_get_model_performance_metrics_handles_empty_model_data(self, mock_get_client):
         """Test that get_model_performance_metrics handles missing model info safely"""
         from src.db.chat_completion_requests import get_model_performance_metrics
@@ -285,7 +300,9 @@ class TestChatCompletionRequestsDataAccessSafety:
         def mock_table_select(*args, **kwargs):
             mock_select = Mock()
             if "chat_completion_requests" in str(args):
-                mock_select.eq.return_value.order.return_value.limit.return_value.execute.return_value = requests_result
+                mock_select.eq.return_value.order.return_value.limit.return_value.execute.return_value = (
+                    requests_result
+                )
             else:  # models table
                 mock_select.eq.return_value.execute.return_value = model_result
             return mock_select
@@ -321,7 +338,7 @@ class TestAISDKClientProviderSafety:
 
         # Mock response without choices attribute
         mock_response = Mock(spec=[])  # spec=[] means no attributes
-        delattr(mock_response, 'choices')  # Ensure no choices attribute
+        delattr(mock_response, "choices")  # Ensure no choices attribute
 
         # Should raise ProviderError (not AttributeError)
         with pytest.raises(ProviderError):
@@ -332,7 +349,7 @@ class TestAISDKClientProviderSafety:
         from src.services.ai_sdk_client import _process_ai_sdk_response
 
         # Mock response with choice but missing message attributes
-        mock_choice = Mock(spec=['message', 'finish_reason'])
+        mock_choice = Mock(spec=["message", "finish_reason"])
         mock_choice.message = Mock(spec=[])  # Message without role/content
         mock_choice.finish_reason = "stop"
 
@@ -378,8 +395,8 @@ class TestAISDKClientProviderSafety:
 class TestIntegrationScenarios:
     """Test integration scenarios combining multiple fixes"""
 
-    @patch('src.db.api_keys.get_supabase_client')
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.api_keys.get_supabase_client")
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_concurrent_empty_result_handling(self, mock_chat_client, mock_api_client):
         """Test that multiple concurrent empty results don't cause crashes"""
         from src.db.api_keys import get_api_key_usage_stats
@@ -389,8 +406,12 @@ class TestIntegrationScenarios:
         empty_result = Mock()
         empty_result.data = []
 
-        mock_api_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = empty_result
-        mock_chat_client.return_value.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = empty_result
+        mock_api_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+            empty_result
+        )
+        mock_chat_client.return_value.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = (
+            empty_result
+        )
 
         # Both should handle gracefully
         api_stats = get_api_key_usage_stats("sk_test_missing")
@@ -411,7 +432,7 @@ class TestIntegrationScenarios:
         with pytest.raises(DatabaseResultError, match="Test error"):
             safe_get_first(mock_result, error_message="Test error")
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_model_lookup_fallback_chain(self, mock_get_client):
         """Test that model lookup gracefully falls through multiple strategies"""
         from src.db.chat_completion_requests import get_model_id_by_name
@@ -421,9 +442,15 @@ class TestIntegrationScenarios:
         empty_result.data = []
 
         mock_client = Mock()
-        mock_client.table.return_value.select.return_value.or_.return_value.execute.return_value = empty_result
-        mock_client.table.return_value.select.return_value.eq.return_value.or_.return_value.execute.return_value = empty_result
-        mock_client.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = empty_result
+        mock_client.table.return_value.select.return_value.or_.return_value.execute.return_value = (
+            empty_result
+        )
+        mock_client.table.return_value.select.return_value.eq.return_value.or_.return_value.execute.return_value = (
+            empty_result
+        )
+        mock_client.table.return_value.select.return_value.or_.return_value.limit.return_value.execute.return_value = (
+            empty_result
+        )
         mock_get_client.return_value = mock_client
 
         # Should try provider lookup, then provider-scoped search, then global search
@@ -478,14 +505,14 @@ class TestEdgeCases:
         with pytest.raises(DatabaseResultError):
             safe_get_first(mock_result)
 
-    @patch('src.services.ai_sdk_client.safe_get_choices')
-    @patch('src.services.ai_sdk_client.safe_get_usage')
+    @patch("src.services.ai_sdk_client.safe_get_choices")
+    @patch("src.services.ai_sdk_client.safe_get_usage")
     def test_ai_sdk_response_with_malformed_choice_attributes(self, mock_usage, mock_choices):
         """Test AI SDK handles choices with missing or malformed attributes"""
         from src.services.ai_sdk_client import _process_ai_sdk_response
 
         # Mock choice with partial attributes
-        mock_choice = Mock(spec=['message'])
+        mock_choice = Mock(spec=["message"])
         mock_choice.message = Mock(spec=[])  # No role or content
 
         mock_choices.return_value = [mock_choice]
@@ -500,7 +527,7 @@ class TestEdgeCases:
         assert result["choices"][0]["message"]["content"] == ""
         assert result["choices"][0]["finish_reason"] == "stop"
 
-    @patch('src.db.chat_completion_requests.get_supabase_client')
+    @patch("src.db.chat_completion_requests.get_supabase_client")
     def test_save_chat_completion_request_preserves_result_on_success(self, mock_get_client):
         """Test that save_chat_completion_request returns the created record"""
         from src.db.chat_completion_requests import save_chat_completion_request
@@ -508,13 +535,15 @@ class TestEdgeCases:
         # Mock successful insert
         mock_client = Mock()
         insert_result = Mock()
-        insert_result.data = [{
-            "id": 999,
-            "request_id": "req_123",
-            "model_name": "gpt-4",
-            "input_tokens": 10,
-            "output_tokens": 20
-        }]
+        insert_result.data = [
+            {
+                "id": 999,
+                "request_id": "req_123",
+                "model_name": "gpt-4",
+                "input_tokens": 10,
+                "output_tokens": 20,
+            }
+        ]
         mock_client.table.return_value.insert.return_value.execute.return_value = insert_result
         mock_get_client.return_value = mock_client
 
@@ -524,7 +553,7 @@ class TestEdgeCases:
             model_name="gpt-4",
             input_tokens=10,
             output_tokens=20,
-            processing_time_ms=100
+            processing_time_ms=100,
         )
 
         assert result is not None

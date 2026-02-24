@@ -4,7 +4,7 @@ Fetches models from all provider APIs and syncs to database
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -13,39 +13,39 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
+from src.services.aihubmix_client import fetch_models_from_aihubmix
+from src.services.aimo_client import fetch_models_from_aimo
+from src.services.alibaba_cloud_client import fetch_models_from_alibaba
+from src.services.anannas_client import fetch_models_from_anannas
+from src.services.anthropic_client import fetch_models_from_anthropic
+from src.services.canopywave_client import fetch_models_from_canopywave
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.chutes_client import fetch_models_from_chutes
 from src.services.clarifai_client import fetch_models_from_clarifai
 from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
 from src.services.cohere_client import fetch_models_from_cohere
 from src.services.deepinfra_client import fetch_models_from_deepinfra
+from src.services.fal_image_client import fetch_models_from_fal
 from src.services.featherless_client import fetch_models_from_featherless
 from src.services.fireworks_client import fetch_models_from_fireworks
 from src.services.google_vertex_client import fetch_models_from_google_vertex
 from src.services.groq_client import fetch_models_from_groq
-from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.services.aihubmix_client import fetch_models_from_aihubmix
-from src.services.aimo_client import fetch_models_from_aimo
-from src.services.fal_image_client import fetch_models_from_fal
-from src.services.near_client import fetch_models_from_near
-from src.services.openrouter_client import fetch_models_from_openrouter
-from src.services.together_client import fetch_models_from_together
-from src.services.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
-from src.services.anannas_client import fetch_models_from_anannas
 from src.services.helicone_client import fetch_models_from_helicone
-from src.services.alibaba_cloud_client import fetch_models_from_alibaba
-from src.services.openai_client import fetch_models_from_openai
-from src.services.anthropic_client import fetch_models_from_anthropic
-from src.services.zai_client import fetch_models_from_zai
+from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.modelz_client import fetch_models_from_modelz
+from src.services.morpheus_client import fetch_models_from_morpheus
+from src.services.near_client import fetch_models_from_near
 from src.services.nebius_client import fetch_models_from_nebius
 from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
+from src.services.openai_client import fetch_models_from_openai
+from src.services.openrouter_client import fetch_models_from_openrouter
 from src.services.simplismart_client import fetch_models_from_simplismart
-from src.services.xai_client import fetch_models_from_xai
-from src.services.morpheus_client import fetch_models_from_morpheus
 from src.services.sybil_client import fetch_models_from_sybil
-from src.services.canopywave_client import fetch_models_from_canopywave
+from src.services.together_client import fetch_models_from_together
+from src.services.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
+from src.services.xai_client import fetch_models_from_xai
+from src.services.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,8 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
         if isinstance(supported_params, list) and supported_params:
             # Provider API returned a parameter list — check for tool/function support
             supports_function_calling = any(
-                p in supported_params for p in ("tools", "tool_choice", "function_call", "functions")
+                p in supported_params
+                for p in ("tools", "tool_choice", "function_call", "functions")
             )
         else:
             # Fall back to name-based detection only if metadata is missing.
@@ -194,7 +195,14 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
             model_id = (model.get("id") or model.get("slug") or "").lower()
             supports_function_calling = any(
                 pattern in model_id
-                for pattern in ("gpt-4", "gpt-3.5-turbo", "claude-3", "gemini", "mistral", "llama-3")
+                for pattern in (
+                    "gpt-4",
+                    "gpt-3.5-turbo",
+                    "claude-3",
+                    "gemini",
+                    "mistral",
+                    "llama-3",
+                )
             )
 
     # --- supports_vision ---
@@ -368,8 +376,8 @@ def transform_normalized_model_to_db_schema(
         return model_data
 
     except Exception as e:
-        model_id = normalized_model.get('id', 'UNKNOWN')
-        model_name = normalized_model.get('name', 'UNKNOWN')
+        model_id = normalized_model.get("id", "UNKNOWN")
+        model_name = normalized_model.get("name", "UNKNOWN")
         logger.error(
             f"[{provider_slug.upper()}] Transformation EXCEPTION | "
             f"Model ID: {model_id} | "
@@ -378,7 +386,7 @@ def transform_normalized_model_to_db_schema(
             f"Error: {str(e)} | "
             f"Available Keys: {list(normalized_model.keys())[:10]} | "
             f"Provider ID: {provider_id}",
-            exc_info=False  # Don't include full traceback for transformation errors
+            exc_info=False,  # Don't include full traceback for transformation errors
         )
         return None
 
@@ -751,9 +759,9 @@ def sync_provider_models(
             cache_invalidation_start = time.time()
             try:
                 from src.services.model_catalog_cache import (
+                    invalidate_catalog_stats,
                     invalidate_provider_catalog,
                     invalidate_unique_models,
-                    invalidate_catalog_stats,
                 )
 
                 if batch_mode:
@@ -861,7 +869,9 @@ def sync_all_providers(
         import gc
 
         for i, provider_slug in enumerate(providers_to_sync, 1):
-            logger.info(f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}")
+            logger.info(
+                f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}"
+            )
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
 
@@ -884,10 +894,11 @@ def sync_all_providers(
         if total_synced > 0 and not dry_run:
             try:
                 from src.services.model_catalog_cache import (
+                    invalidate_catalog_stats,
                     invalidate_full_catalog,
                     invalidate_unique_models,
-                    invalidate_catalog_stats,
                 )
+
                 invalidate_full_catalog()
                 invalidate_unique_models()
                 invalidate_catalog_stats()
@@ -901,12 +912,14 @@ def sync_all_providers(
         total_duration = time.time() - sync_start_time
 
         # Calculate performance metrics
-        avg_duration_per_provider = total_duration / len(providers_to_sync) if providers_to_sync else 0
+        avg_duration_per_provider = (
+            total_duration / len(providers_to_sync) if providers_to_sync else 0
+        )
         overall_models_per_sec = total_fetched / total_duration if total_duration > 0 else 0
 
         # Find slowest and fastest providers
-        slowest = max(results, key=lambda r: r.get('total_duration', 0)) if results else None
-        fastest = min(results, key=lambda r: r.get('total_duration', 999999)) if results else None
+        slowest = max(results, key=lambda r: r.get("total_duration", 0)) if results else None
+        fastest = min(results, key=lambda r: r.get("total_duration", 999999)) if results else None
 
         # Calculate success rate
         success_count = sum(1 for r in results if r.get("success"))
@@ -928,9 +941,15 @@ def sync_all_providers(
         # Model Statistics
         logger.info(f"{'MODEL STATISTICS':-<80}")
         logger.info(f"{'Total Fetched':<40} {total_fetched:>20}")
-        logger.info(f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)")
-        logger.info(f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)")
-        logger.info(f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n")
+        logger.info(
+            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)"
+        )
+        logger.info(
+            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)"
+        )
+        logger.info(
+            f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n"
+        )
 
         # Performance Metrics
         logger.info(f"{'PERFORMANCE METRICS':-<80}")
@@ -938,9 +957,13 @@ def sync_all_providers(
         logger.info(f"{'Avg Duration per Provider':<40} {avg_duration_per_provider:>19.2f}s")
 
         if slowest:
-            logger.info(f"{'Slowest Provider':<40} {slowest['provider']:>20} ({slowest.get('total_duration', 0):.2f}s)")
+            logger.info(
+                f"{'Slowest Provider':<40} {slowest['provider']:>20} ({slowest.get('total_duration', 0):.2f}s)"
+            )
         if fastest:
-            logger.info(f"{'Fastest Provider':<40} {fastest['provider']:>20} ({fastest.get('total_duration', 0):.2f}s)\n")
+            logger.info(
+                f"{'Fastest Provider':<40} {fastest['provider']:>20} ({fastest.get('total_duration', 0):.2f}s)\n"
+            )
 
         # Top 5 Largest Providers (by models synced)
         top_providers = sorted(results, key=lambda r: r.get("models_synced", 0), reverse=True)[:5]
@@ -979,8 +1002,8 @@ def sync_all_providers(
             "total_duration": round(total_duration, 2),
             "avg_duration_per_provider": round(avg_duration_per_provider, 2),
             "overall_models_per_sec": round(overall_models_per_sec, 2),
-            "slowest_provider": slowest['provider'] if slowest else None,
-            "fastest_provider": fastest['provider'] if fastest else None,
+            "slowest_provider": slowest["provider"] if slowest else None,
+            "fastest_provider": fastest["provider"] if fastest else None,
             "errors": errors,
             "results": results,
             "dry_run": dry_run,

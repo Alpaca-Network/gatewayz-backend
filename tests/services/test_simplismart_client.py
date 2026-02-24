@@ -1,19 +1,20 @@
 """Tests for Simplismart client"""
 
-import pytest
 from unittest.mock import Mock, patch
 
+import pytest
+
 from src.services.simplismart_client import (
+    SIMPLISMART_BASE_URL,
+    SIMPLISMART_MODEL_ALIASES,
+    SIMPLISMART_MODELS,
+    fetch_models_from_simplismart,
     get_simplismart_client,
+    is_simplismart_model,
     make_simplismart_request_openai,
     make_simplismart_request_openai_stream,
     process_simplismart_response,
     resolve_simplismart_model,
-    fetch_models_from_simplismart,
-    is_simplismart_model,
-    SIMPLISMART_MODELS,
-    SIMPLISMART_MODEL_ALIASES,
-    SIMPLISMART_BASE_URL,
 )
 
 
@@ -168,8 +169,7 @@ class TestSimplismartModelResolution:
     def test_resolve_alias_mixtral(self):
         """Test resolving mixtral aliases"""
         assert (
-            resolve_simplismart_model("mixtral-8x7b")
-            == "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8"
+            resolve_simplismart_model("mixtral-8x7b") == "mistralai/Mixtral-8x7B-Instruct-v0.1-FP8"
         )
         assert (
             resolve_simplismart_model("mixtral-8x7b-instruct")
@@ -303,7 +303,9 @@ class TestSimplismartConstants:
     def test_all_aliases_resolve_to_catalog_models(self):
         """Test that all aliases resolve to models in the catalog"""
         for alias, model_id in SIMPLISMART_MODEL_ALIASES.items():
-            assert model_id in SIMPLISMART_MODELS, f"Alias '{alias}' resolves to unknown model '{model_id}'"
+            assert (
+                model_id in SIMPLISMART_MODELS
+            ), f"Alias '{alias}' resolves to unknown model '{model_id}'"
 
     def test_models_have_required_metadata(self):
         """Test that all models have required metadata"""
@@ -324,7 +326,9 @@ class TestSimplismartConstants:
             assert "completion" in pricing, f"Model '{model_id}' missing 'completion' pricing"
             # Verify pricing is a valid number string
             assert float(pricing["prompt"]) >= 0, f"Model '{model_id}' has invalid prompt pricing"
-            assert float(pricing["completion"]) >= 0, f"Model '{model_id}' has invalid completion pricing"
+            assert (
+                float(pricing["completion"]) >= 0
+            ), f"Model '{model_id}' has invalid completion pricing"
 
 
 class TestSimplismartPricing:
@@ -347,7 +351,9 @@ class TestSimplismartPricing:
         # Verify specific pricing values
         assert models_by_id["meta-llama/Meta-Llama-3.1-8B-Instruct"]["pricing"]["prompt"] == "0.13"
         assert models_by_id["meta-llama/Meta-Llama-3.1-70B-Instruct"]["pricing"]["prompt"] == "0.74"
-        assert models_by_id["meta-llama/Meta-Llama-3.1-405B-Instruct"]["pricing"]["prompt"] == "3.00"
+        assert (
+            models_by_id["meta-llama/Meta-Llama-3.1-405B-Instruct"]["pricing"]["prompt"] == "3.00"
+        )
         assert models_by_id["deepseek-ai/DeepSeek-R1"]["pricing"]["prompt"] == "3.90"
         assert models_by_id["deepseek-ai/DeepSeek-V3"]["pricing"]["prompt"] == "0.90"
         assert models_by_id["google/gemma-3-1b-it"]["pricing"]["prompt"] == "0.06"
@@ -378,7 +384,9 @@ class TestSimplismartPricing:
         assert resolve_simplismart_model("deepseek-v3") == "deepseek-ai/DeepSeek-V3"
 
         # Llama 405B aliases
-        assert resolve_simplismart_model("llama-3.1-405b") == "meta-llama/Meta-Llama-3.1-405B-Instruct"
+        assert (
+            resolve_simplismart_model("llama-3.1-405b") == "meta-llama/Meta-Llama-3.1-405B-Instruct"
+        )
 
         # Phi-3 aliases
         assert resolve_simplismart_model("phi-3-medium") == "microsoft/Phi-3-medium-128k-instruct"

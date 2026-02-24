@@ -14,7 +14,7 @@ Features:
 
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -48,16 +48,15 @@ async def warm_caches_after_sync(changed_providers: list[str]) -> None:
     full cache rebuild cost on the first request after sync.
     Failures are non-fatal — logged as warnings only.
     """
+    from src.db.models_catalog_db import get_models_stats
     from src.services.model_catalog_cache import (
+        cache_catalog_stats,
         get_cached_full_catalog,
         warm_unique_models_cache_all_variants,
-        cache_catalog_stats,
     )
-    from src.db.models_catalog_db import get_models_stats
 
     logger.info(
-        f"Cache warming started after sync "
-        f"(providers with changes: {changed_providers})"
+        f"Cache warming started after sync " f"(providers with changes: {changed_providers})"
     )
 
     # Brief delay to let DB writes propagate
@@ -133,9 +132,7 @@ async def run_scheduled_model_sync():
             _last_sync_status["last_success_time"] = end_time
             _last_sync_status["last_error"] = None
             _last_sync_status["last_duration_seconds"] = duration
-            _last_sync_status["last_models_synced"] = result.get(
-                "total_models_synced", 0
-            )
+            _last_sync_status["last_models_synced"] = result.get("total_models_synced", 0)
 
             logger.info("=" * 80)
             logger.info("✅ Scheduled incremental sync SUCCESSFUL")
@@ -158,9 +155,7 @@ async def run_scheduled_model_sync():
                     warm_caches_after_sync(changed),
                     name="post_sync_cache_warm",
                 )
-                logger.info(
-                    f"Cache warming task queued for {len(changed)} changed providers"
-                )
+                logger.info(f"Cache warming task queued for {len(changed)} changed providers")
 
         else:
             # Failed
@@ -293,7 +288,9 @@ def get_sync_status() -> dict[str, Any]:
     if total_runs == 0:
         is_healthy = False
         health_reason = "No syncs run yet"
-    elif minutes_since_last_sync and minutes_since_last_sync > Config.MODEL_SYNC_INTERVAL_MINUTES * 2:
+    elif (
+        minutes_since_last_sync and minutes_since_last_sync > Config.MODEL_SYNC_INTERVAL_MINUTES * 2
+    ):
         is_healthy = False
         health_reason = f"Last successful sync {minutes_since_last_sync:.0f} minutes ago (expected every {Config.MODEL_SYNC_INTERVAL_MINUTES} minutes)"
     elif success_rate < 50:
@@ -305,23 +302,29 @@ def get_sync_status() -> dict[str, Any]:
         "is_healthy": is_healthy,
         "health_reason": health_reason,
         "enabled": Config.ENABLE_SCHEDULED_MODEL_SYNC,
-
         # Times
-        "last_run_time": _last_sync_status["last_run_time"].isoformat() if _last_sync_status["last_run_time"] else None,
-        "last_success_time": _last_sync_status["last_success_time"].isoformat() if _last_sync_status["last_success_time"] else None,
-        "minutes_since_last_sync": round(minutes_since_last_sync, 1) if minutes_since_last_sync else None,
-
+        "last_run_time": (
+            _last_sync_status["last_run_time"].isoformat()
+            if _last_sync_status["last_run_time"]
+            else None
+        ),
+        "last_success_time": (
+            _last_sync_status["last_success_time"].isoformat()
+            if _last_sync_status["last_success_time"]
+            else None
+        ),
+        "minutes_since_last_sync": (
+            round(minutes_since_last_sync, 1) if minutes_since_last_sync else None
+        ),
         # Counts
         "total_runs": total_runs,
         "successful_runs": successful_runs,
         "failed_runs": _last_sync_status["failed_runs"],
         "success_rate": round(success_rate, 1),
-
         # Last run details
         "last_error": _last_sync_status["last_error"],
         "last_duration_seconds": _last_sync_status["last_duration_seconds"],
         "last_models_synced": _last_sync_status["last_models_synced"],
-
         # Config
         "sync_interval_minutes": Config.MODEL_SYNC_INTERVAL_MINUTES,
     }

@@ -37,9 +37,7 @@ class TestMessagesE2E:
             assert "text" in data["content"][0]
             assert data["content"][0]["type"] == "text"
 
-    def test_messages_with_system_prompt(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_system_prompt(self, client: TestClient, auth_headers: dict):
         """Test messages API with system prompt (Anthropic style)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -62,9 +60,7 @@ class TestMessagesE2E:
             data = response.json()
             assert data["content"][0]["type"] == "text"
 
-    def test_messages_with_all_parameters(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_all_parameters(self, client: TestClient, auth_headers: dict):
         """Test messages API with all optional parameters."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -131,9 +127,7 @@ class TestMessagesE2E:
             data = response.json()
             assert "content" in data
 
-    def test_messages_with_provider_featherless(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_provider_featherless(self, client: TestClient, auth_headers: dict):
         """Test messages API with Featherless provider."""
         payload = {
             "model": "meta-llama/llama-2-70b-chat",
@@ -151,9 +145,7 @@ class TestMessagesE2E:
         # Should succeed or fail gracefully with provider error
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_messages_missing_api_key(
-        self, client: TestClient, base_messages_payload: dict
-    ):
+    def test_messages_missing_api_key(self, client: TestClient, base_messages_payload: dict):
         """Test messages API without API key."""
         response = client.post(
             "/v1/messages",
@@ -164,9 +156,7 @@ class TestMessagesE2E:
         data = response.json()
         assert "detail" in data
 
-    def test_messages_missing_max_tokens(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_missing_max_tokens(self, client: TestClient, auth_headers: dict):
         """Test messages API without required max_tokens (Anthropic requirement)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -183,9 +173,7 @@ class TestMessagesE2E:
         # Should fail validation - max_tokens is required
         assert response.status_code == 422
 
-    def test_messages_invalid_max_tokens(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_invalid_max_tokens(self, client: TestClient, auth_headers: dict):
         """Test messages API with invalid max_tokens."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -201,9 +189,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_messages_empty_messages(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_empty_messages(self, client: TestClient, auth_headers: dict):
         """Test messages API with empty messages array."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -219,9 +205,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_messages_invalid_role(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_invalid_role(self, client: TestClient, auth_headers: dict):
         """Test messages API with invalid message role (Anthropic only allows user/assistant)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -237,9 +221,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_messages_empty_content(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_empty_content(self, client: TestClient, auth_headers: dict):
         """Test messages API with empty message content."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -255,9 +237,7 @@ class TestMessagesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_messages_conversation_history(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_conversation_history(self, client: TestClient, auth_headers: dict):
         """Test messages API with conversation history."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -281,9 +261,7 @@ class TestMessagesE2E:
             data = response.json()
             assert "content" in data
 
-    def test_messages_with_tools(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_tools(self, client: TestClient, auth_headers: dict):
         """Test messages API with tool definitions (Claude tool use)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -316,9 +294,7 @@ class TestMessagesE2E:
         # Should succeed or fail gracefully
         assert response.status_code in [200, 400]
 
-    def test_messages_with_tool_choice(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_tool_choice(self, client: TestClient, auth_headers: dict):
         """Test messages API with tool_choice parameter."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -343,9 +319,7 @@ class TestMessagesE2E:
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_messages_with_stop_sequences(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_stop_sequences(self, client: TestClient, auth_headers: dict):
         """Test messages API with stop_sequences (Claude feature)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -363,9 +337,7 @@ class TestMessagesE2E:
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_messages_with_top_k(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_with_top_k(self, client: TestClient, auth_headers: dict):
         """Test messages API with top_k parameter (Anthropic-specific)."""
         payload = {
             "model": "claude-3.5-sonnet",
@@ -383,9 +355,7 @@ class TestMessagesE2E:
         # Messages tests may fail with various errors if backend doesn't support all parameters
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_messages_very_long_content(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_very_long_content(self, client: TestClient, auth_headers: dict):
         """Test messages API with very long message."""
         long_content = "This is a test. " * 1000  # ~16KB message
 
@@ -404,9 +374,7 @@ class TestMessagesE2E:
         # Should either succeed or fail with appropriate error
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503, 413]
 
-    def test_messages_metadata(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_messages_metadata(self, client: TestClient, auth_headers: dict):
         """Test messages API with metadata parameter."""
         payload = {
             "model": "claude-3.5-sonnet",

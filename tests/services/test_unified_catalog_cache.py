@@ -4,21 +4,22 @@ Test unified Redis-based catalog caching system
 Tests the enhanced ModelCatalogCache class with gateway, stats, and unique models caching.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.services.model_catalog_cache import (
     ModelCatalogCache,
-    get_model_catalog_cache,
-    get_cached_gateway_catalog,
-    get_cached_unique_models,
+    cache_catalog_stats,
     cache_gateway_catalog,
     cache_unique_models,
+    get_cached_catalog_stats,
+    get_cached_gateway_catalog,
+    get_cached_unique_models,
+    get_model_catalog_cache,
+    invalidate_catalog_stats,
     invalidate_gateway_catalog,
     invalidate_unique_models,
-    get_cached_catalog_stats,
-    cache_catalog_stats,
-    invalidate_catalog_stats,
 )
 
 
@@ -424,7 +425,7 @@ class TestCacheIntegration:
         assert all(isinstance(ttl, int) and ttl > 0 for ttl in ttls)
         # Gateway and unique should have longer TTLs than stats
         assert any(ttl >= 1800 for ttl in ttls)  # 30 minutes
-        assert any(ttl >= 900 for ttl in ttls)   # 15 minutes
+        assert any(ttl >= 900 for ttl in ttls)  # 15 minutes
 
     def test_cache_invalidation_cascade(self, mock_redis, mock_redis_available):
         """Test that invalidating a gateway catalog also invalidates full catalog"""

@@ -3,11 +3,13 @@
 
 import os
 import sys
-from openai import OpenAI
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
+
 
 def test_fireworks_api():
     """Test Fireworks API directly"""
@@ -20,10 +22,7 @@ def test_fireworks_api():
     print(f"Using Fireworks API Key: ...{api_key[-8:]}")
 
     # Create Fireworks client using OpenAI-compatible interface
-    client = OpenAI(
-        base_url="https://api.fireworks.ai/inference/v1",
-        api_key=api_key
-    )
+    client = OpenAI(base_url="https://api.fireworks.ai/inference/v1", api_key=api_key)
 
     # Test with the exact model ID from the catalog
     model = "accounts/fireworks/models/deepseek-v3p1"
@@ -35,11 +34,9 @@ def test_fireworks_api():
         # Make a simple test request
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": "Say hello"}
-            ],
+            messages=[{"role": "user", "content": "Say hello"}],
             max_tokens=50,
-            temperature=0.7
+            temperature=0.7,
         )
 
         print("SUCCESS!")
@@ -53,12 +50,13 @@ def test_fireworks_api():
         print(f"Error type: {type(e).__name__}")
 
         # Try to get more details from the error
-        if hasattr(e, 'response'):
+        if hasattr(e, "response"):
             print(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
             print(f"Response text: {getattr(e.response, 'text', 'N/A')}")
 
-        if hasattr(e, 'body'):
+        if hasattr(e, "body"):
             print(f"Error body: {e.body}")
+
 
 if __name__ == "__main__":
     test_fireworks_api()

@@ -303,9 +303,7 @@ def check_model_inference_availability(model_id: str) -> bool:
             return False
 
         # Check if model has inference_provider info or is not gated
-        is_available = not model_info.get("gated", False) and not model_info.get(
-            "private", False
-        )
+        is_available = not model_info.get("gated", False) and not model_info.get("private", False)
 
         logger.info(f"Model {model_id} inference availability: {is_available}")
         return is_available

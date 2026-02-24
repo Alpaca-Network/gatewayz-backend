@@ -12,16 +12,16 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
-from src.utils.model_name_validator import clean_model_name
-from src.utils.security_validators import sanitize_for_logging
 
 # NOTE: extract_message_with_tools is a provider-agnostic utility for OpenAI-compatible
 # responses. It lives in anthropic_transformer.py for historical reasons but is used
 # across all provider clients. Consider moving to a shared module in a future refactor.
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_openai_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
+from src.utils.model_name_validator import clean_model_name
+from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -198,7 +198,11 @@ def normalize_openai_model(openai_model: dict) -> dict | None:
         modality = MODALITY_TEXT_TO_TEXT
         input_modalities = ["text"]
         output_modalities = ["text"]
-        if "vision" in provider_model_id or "gpt-4o" in provider_model_id or "gpt-4-turbo" in provider_model_id:
+        if (
+            "vision" in provider_model_id
+            or "gpt-4o" in provider_model_id
+            or "gpt-4-turbo" in provider_model_id
+        ):
             modality = "text+image->text"
             input_modalities = ["text", "image"]
 

@@ -3,9 +3,10 @@
 
 import os
 import sys
+
 import pytest
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
@@ -28,18 +29,16 @@ class TestCerebrasQwen:
         return OpenAI(
             base_url="https://api.cerebras.ai/v1",
             api_key=cerebras_api_key,
-            timeout=120.0  # Extended timeout for inference
+            timeout=120.0,  # Extended timeout for inference
         )
 
     def test_cerebras_qwen_basic(self, cerebras_client):
         """Test basic Qwen model inference"""
         response = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
-            messages=[
-                {"role": "user", "content": "Say hello and tell me what model you are."}
-            ],
+            messages=[{"role": "user", "content": "Say hello and tell me what model you are."}],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
 
         assert response is not None
@@ -54,12 +53,10 @@ class TestCerebrasQwen:
         """Test streaming Qwen model inference"""
         stream = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
-            messages=[
-                {"role": "user", "content": "Count to 5"}
-            ],
+            messages=[{"role": "user", "content": "Count to 5"}],
             max_tokens=50,
             temperature=0.7,
-            stream=True
+            stream=True,
         )
 
         full_content = ""
@@ -81,11 +78,14 @@ class TestCerebrasQwen:
         response = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant. Always respond in exactly 2 sentences."},
-                {"role": "user", "content": "What is Python?"}
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant. Always respond in exactly 2 sentences.",
+                },
+                {"role": "user", "content": "What is Python?"},
             ],
             max_tokens=100,
-            temperature=0.5
+            temperature=0.5,
         )
 
         assert response.choices
@@ -102,10 +102,10 @@ class TestCerebrasQwen:
             messages=[
                 {"role": "user", "content": "What is 2+2?"},
                 {"role": "assistant", "content": "2+2 equals 4."},
-                {"role": "user", "content": "What is 4+4?"}
+                {"role": "user", "content": "What is 4+4?"},
             ],
             max_tokens=50,
-            temperature=0.7
+            temperature=0.7,
         )
 
         assert response.choices
@@ -120,11 +120,9 @@ class TestCerebrasQwen:
         for temp in [0.1, 0.7, 1.5]:
             response = cerebras_client.chat.completions.create(
                 model="qwen-3-32b",
-                messages=[
-                    {"role": "user", "content": "Say a sentence."}
-                ],
+                messages=[{"role": "user", "content": "Say a sentence."}],
                 max_tokens=50,
-                temperature=temp
+                temperature=temp,
             )
 
             assert response.choices
@@ -135,20 +133,16 @@ class TestCerebrasQwen:
         """Test Qwen model with different max_tokens settings"""
         response_short = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
-            messages=[
-                {"role": "user", "content": "Tell me a long story"}
-            ],
+            messages=[{"role": "user", "content": "Tell me a long story"}],
             max_tokens=20,
-            temperature=0.7
+            temperature=0.7,
         )
 
         response_long = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
-            messages=[
-                {"role": "user", "content": "Tell me a long story"}
-            ],
+            messages=[{"role": "user", "content": "Tell me a long story"}],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
 
         short_len = len(response_short.choices[0].message.content)
@@ -165,11 +159,9 @@ class TestCerebrasQwen:
         """Test response format from Qwen model"""
         response = cerebras_client.chat.completions.create(
             model="qwen-3-32b",
-            messages=[
-                {"role": "user", "content": "Hello"}
-            ],
+            messages=[{"role": "user", "content": "Hello"}],
             max_tokens=50,
-            temperature=0.7
+            temperature=0.7,
         )
 
         # Verify response structure
@@ -205,11 +197,7 @@ def test_cerebras_qwen_api_direct():
 
     print(f"Using Cerebras API Key: ...{api_key[-8:]}")
 
-    client = OpenAI(
-        base_url="https://api.cerebras.ai/v1",
-        api_key=api_key,
-        timeout=120.0
-    )
+    client = OpenAI(base_url="https://api.cerebras.ai/v1", api_key=api_key, timeout=120.0)
 
     model = "qwen-3-32b"
     print(f"\nTesting model: {model}")
@@ -219,11 +207,9 @@ def test_cerebras_qwen_api_direct():
         print("Sending request...")
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": "Say hello and tell me what model you are."}
-            ],
+            messages=[{"role": "user", "content": "Say hello and tell me what model you are."}],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
 
         print("\n✓ SUCCESS!")
@@ -239,6 +225,7 @@ def test_cerebras_qwen_api_direct():
         print(f"\n✗ ERROR: {type(e).__name__}")
         print(f"Message: {str(e)}")
         import traceback
+
         traceback.print_exc()
 
 

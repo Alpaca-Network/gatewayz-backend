@@ -1,6 +1,7 @@
 # tests/services/test_trial_validation.py
 import importlib
 import math
+
 import pytest
 
 MODULE_PATH = "src.services.trial_validation"  # <- change if your module path differs
@@ -69,6 +70,7 @@ class _FakeSupabase:
 
 # ----------------------------- tests: validate_trial_access -----------------------------
 
+
 def test_validate_missing_key_returns_not_found(monkeypatch, mod):
     client = _FakeSupabase(rows_by_key={})
     monkeypatch.setattr(mod, "get_supabase_client", lambda: client)
@@ -81,9 +83,7 @@ def test_validate_missing_key_returns_not_found(monkeypatch, mod):
 
 
 def test_validate_non_trial_key(monkeypatch, mod):
-    rows = {
-        "sk-live": {"api_key": "sk-live", "is_trial": False}
-    }
+    rows = {"sk-live": {"api_key": "sk-live", "is_trial": False}}
     monkeypatch.setattr(mod, "get_supabase_client", lambda: _FakeSupabase(rows))
 
     out = mod.validate_trial_access("sk-live")
@@ -115,6 +115,7 @@ def test_validate_expired_iso_z_marked_expired(monkeypatch, mod):
     assert out["is_trial"] is True
     assert out["is_expired"] is True
     assert "expired" in out["error"].lower()
+
 
 def test_validate_tokens_cap_exceeded(monkeypatch, mod):
     rows = {
@@ -217,6 +218,7 @@ def test_validate_valid_trial(monkeypatch, mod):
 def test_validate_handles_exception(monkeypatch, mod):
     def boom():
         raise RuntimeError("supabase down")
+
     monkeypatch.setattr(mod, "get_supabase_client", boom)
 
     out = mod.validate_trial_access("sk-any")
@@ -227,6 +229,7 @@ def test_validate_handles_exception(monkeypatch, mod):
 
 
 # ----------------------------- tests: track_trial_usage -----------------------------
+
 
 def test_track_usage_success_updates(monkeypatch, mod):
     rows = {
@@ -261,6 +264,7 @@ def test_track_usage_key_not_found(monkeypatch, mod):
 def test_track_usage_handles_exception(monkeypatch, mod):
     def boom():
         raise RuntimeError("supabase down")
+
     monkeypatch.setattr(mod, "get_supabase_client", boom)
 
     ok = mod.track_trial_usage("sk-any", tokens_used=10, requests_used=1)
@@ -373,6 +377,7 @@ def test_track_usage_unknown_model_uses_flat_rate(monkeypatch, mod):
 
 
 # ----------------------------- tests: trial validation cache -----------------------------
+
 
 def test_trial_cache_hit_skips_database(monkeypatch, mod):
     """Second call with same API key should use cache (not hit database)"""
@@ -538,15 +543,14 @@ def test_track_usage_invalidates_cache(monkeypatch, mod):
 
 # ----------------------------- tests: HTTP/2 connection error handling -----------------------------
 
+
 def test_validate_retries_on_http2_connection_error(monkeypatch, mod):
     """HTTP/2 connection errors should trigger retry with client refresh"""
     mod.clear_trial_cache()
 
     call_count = 0
     refresh_called = False
-    rows = {
-        "sk-retry": {"api_key": "sk-retry", "is_trial": False}
-    }
+    rows = {"sk-retry": {"api_key": "sk-retry", "is_trial": False}}
 
     def failing_then_succeeding_client():
         nonlocal call_count
@@ -578,15 +582,15 @@ def test_validate_retries_on_connection_terminated_error(monkeypatch, mod):
 
     call_count = 0
     refresh_called = False
-    rows = {
-        "sk-retry-ct": {"api_key": "sk-retry-ct", "is_trial": False}
-    }
+    rows = {"sk-retry-ct": {"api_key": "sk-retry-ct", "is_trial": False}}
 
     def failing_then_succeeding_client():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise Exception("<ConnectionTerminated error_code:9, last_stream_id:191, additional_data:None>")
+            raise Exception(
+                "<ConnectionTerminated error_code:9, last_stream_id:191, additional_data:None>"
+            )
         return _FakeSupabase(rows)
 
     def mock_refresh():
@@ -609,9 +613,7 @@ def test_validate_retries_on_send_headers_state_error(monkeypatch, mod):
 
     call_count = 0
     refresh_called = False
-    rows = {
-        "sk-retry-sh": {"api_key": "sk-retry-sh", "is_trial": False}
-    }
+    rows = {"sk-retry-sh": {"api_key": "sk-retry-sh", "is_trial": False}}
 
     def failing_then_succeeding_client():
         nonlocal call_count

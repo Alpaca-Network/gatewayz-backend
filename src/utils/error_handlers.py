@@ -23,9 +23,7 @@ from src.utils.error_factory import DetailedErrorFactory
 logger = logging.getLogger(__name__)
 
 
-async def detailed_http_exception_handler(
-    request: Request, exc: HTTPException
-) -> JSONResponse:
+async def detailed_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     """
     Convert HTTPException to detailed error response.
 
@@ -149,9 +147,7 @@ def _map_http_exception_to_detailed_error(
         if "trial" in detail_lower and "expired" in detail_lower:
             return DetailedErrorFactory.trial_expired(request_id=request_id)
         elif "plan" in detail_lower and "limit" in detail_lower:
-            return DetailedErrorFactory.plan_limit_reached(
-                reason=detail, request_id=request_id
-            )
+            return DetailedErrorFactory.plan_limit_reached(reason=detail, request_id=request_id)
         elif "ip" in detail_lower:
             # Try to extract IP address
             ip = _extract_ip_address(detail)
@@ -160,9 +156,7 @@ def _map_http_exception_to_detailed_error(
             )
         else:
             # Generic forbidden - use plan_limit_reached
-            return DetailedErrorFactory.plan_limit_reached(
-                reason=detail, request_id=request_id
-            )
+            return DetailedErrorFactory.plan_limit_reached(reason=detail, request_id=request_id)
 
     elif status_code == 404:
         # Not found - check if it's a model error
@@ -176,9 +170,7 @@ def _map_http_exception_to_detailed_error(
             )
         else:
             # Generic not found
-            return DetailedErrorFactory.model_not_found(
-                model_id="resource", request_id=request_id
-            )
+            return DetailedErrorFactory.model_not_found(model_id="resource", request_id=request_id)
 
     elif status_code == 429:
         # Rate limit exceeded
@@ -211,9 +203,7 @@ def _map_http_exception_to_detailed_error(
                 request_id=request_id,
             )
         elif status_code == 503:
-            return DetailedErrorFactory.service_unavailable(
-                request_id=request_id
-            )
+            return DetailedErrorFactory.service_unavailable(request_id=request_id)
         else:
             # Generic provider error
             return DetailedErrorFactory.provider_error(

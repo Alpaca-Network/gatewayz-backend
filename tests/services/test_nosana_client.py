@@ -1,26 +1,27 @@
 """Tests for Nosana GPU Computing Network client"""
 
-import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from src.services.nosana_client import (
-    get_nosana_client,
-    make_nosana_request_openai,
-    make_nosana_request_openai_stream,
-    process_nosana_response,
-    get_credits_balance,
-    list_deployments,
-    create_deployment,
-    create_job,
-    extend_job,
-    list_markets,
-    get_market,
+    DEPLOYMENT_STATUSES,
+    DEPLOYMENT_STRATEGIES,
     build_container_job_definition,
     build_llm_inference_job_definition,
     build_stable_diffusion_job_definition,
     build_whisper_job_definition,
-    DEPLOYMENT_STRATEGIES,
-    DEPLOYMENT_STATUSES,
+    create_deployment,
+    create_job,
+    extend_job,
+    get_credits_balance,
+    get_market,
+    get_nosana_client,
+    list_deployments,
+    list_markets,
+    make_nosana_request_openai,
+    make_nosana_request_openai_stream,
+    process_nosana_response,
 )
 
 
@@ -68,9 +69,7 @@ class TestNosanaClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_nosana_request_openai_stream(
-            messages, "meta-llama/Llama-3.3-70B-Instruct"
-        )
+        stream = make_nosana_request_openai_stream(messages, "meta-llama/Llama-3.3-70B-Instruct")
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

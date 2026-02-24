@@ -15,14 +15,13 @@ from starlette.testclient import TestClient
 
 from src.middleware.observability_middleware import ObservabilityMiddleware
 from src.services.prometheus_metrics import (
-    http_request_duration,
-    fastapi_requests_in_progress,
     fastapi_request_size_bytes,
-    fastapi_response_size_bytes,
-    fastapi_requests_total,
     fastapi_requests_duration_seconds,
+    fastapi_requests_in_progress,
+    fastapi_requests_total,
+    fastapi_response_size_bytes,
+    http_request_duration,
 )
-
 
 # ==================== Test Fixtures ====================
 
@@ -52,6 +51,7 @@ def test_app():
     @app.get("/slow")
     async def slow():
         import time
+
         time.sleep(0.1)
         return {"status": "slow"}
 
@@ -122,17 +122,13 @@ class TestPathNormalization:
 
     def test_deep_path_limited(self):
         """Deep paths should be limited to first 6 segments."""
-        result = ObservabilityMiddleware._normalize_path(
-            "/a/b/c/d/e/f/g/h/i/j"
-        )
+        result = ObservabilityMiddleware._normalize_path("/a/b/c/d/e/f/g/h/i/j")
         # Should be limited to first 6 segments
         assert len(result.split("/")) <= 7  # +1 for empty string from leading /
 
     def test_mixed_path_normalization(self):
         """Mixed paths should normalize ids but keep structure."""
-        result = ObservabilityMiddleware._normalize_path(
-            "/api/v1/users/123/posts/456"
-        )
+        result = ObservabilityMiddleware._normalize_path("/api/v1/users/123/posts/456")
         assert result == "/api/v1/users/{id}/posts/{id}"
 
 
@@ -163,7 +159,10 @@ class TestHTTPMetrics:
         # Verify metrics are being collected (even if format varies)
         metrics_output = generate_latest(REGISTRY).decode("utf-8")
         assert "http_request_duration" in metrics_output
-        assert "http_requests_total" in metrics_output or "http_requests_total" in metrics_output.lower()
+        assert (
+            "http_requests_total" in metrics_output
+            or "http_requests_total" in metrics_output.lower()
+        )
 
     def test_status_code_tracked(self, client):
         """Status codes should be tracked in metrics."""
@@ -316,7 +315,10 @@ class TestDurationTracking:
         # Verify duration metrics are being collected
         metrics_output = generate_latest(REGISTRY).decode("utf-8")
         # Duration metrics should be present
-        assert "http_request_duration" in metrics_output or "request_duration" in metrics_output.lower()
+        assert (
+            "http_request_duration" in metrics_output
+            or "request_duration" in metrics_output.lower()
+        )
 
 
 # ==================== Integration Tests ====================

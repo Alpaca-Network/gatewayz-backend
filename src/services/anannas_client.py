@@ -2,9 +2,9 @@ import logging
 
 from openai import OpenAI
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 

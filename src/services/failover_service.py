@@ -6,7 +6,7 @@ Uses database to track model availability across providers and provider health.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from src.db.failover_db import get_providers_for_model
 from src.db.model_health import record_model_call
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 class ProviderFailoverError(Exception):
     """Raised when all providers fail"""
+
     def __init__(self, message: str, attempts: list[dict], last_error: Exception):
         super().__init__(message)
         self.attempts = attempts
@@ -23,10 +24,7 @@ class ProviderFailoverError(Exception):
 
 
 async def route_with_failover(
-    model: str,
-    request_data: dict,
-    user_preferences: dict | None = None,
-    max_attempts: int = 3
+    model: str, request_data: dict, user_preferences: dict | None = None, max_attempts: int = 3
 ) -> dict:
     """
     Route a request with automatic provider failover
@@ -65,20 +63,24 @@ async def route_with_failover(
     available_providers = get_providers_for_model(
         model_id=model,
         active_only=True,
-        healthy_only=False  # Include degraded providers for fallback
+        healthy_only=False,  # Include degraded providers for fallback
     )
 
     if not available_providers:
-        raise ValueError(f"Model '{model}' not available on any provider. "
-                        f"Run 'python scripts/sync_models.py' to populate database.")
+        raise ValueError(
+            f"Model '{model}' not available on any provider. "
+            f"Run 'python scripts/sync_models.py' to populate database."
+        )
 
     # Apply user preferences (move preferred provider to front)
     if user_preferences and user_preferences.get("preferred_provider"):
         preferred = user_preferences["preferred_provider"]
         available_providers.sort(
-            key=lambda p: (0 if p["provider_slug"] == preferred else 1,
-                          0 if p["provider_health_status"] == "healthy" else 1,
-                          p["provider_response_time_ms"] or 9999)
+            key=lambda p: (
+                0 if p["provider_slug"] == preferred else 1,
+                0 if p["provider_health_status"] == "healthy" else 1,
+                p["provider_response_time_ms"] or 9999,
+            )
         )
 
     # Limit attempts
@@ -94,8 +96,10 @@ async def route_with_failover(
         provider_model_id = provider["provider_model_id"]
 
         try:
-            logger.info(f"Attempt {idx + 1}/{len(providers_to_try)}: "
-                       f"Trying '{model}' on {provider_slug} (as '{provider_model_id}')")
+            logger.info(
+                f"Attempt {idx + 1}/{len(providers_to_try)}: "
+                f"Trying '{model}' on {provider_slug} (as '{provider_model_id}')"
+            )
 
             # Track attempt start time
             start_time = datetime.now(UTC)
@@ -104,7 +108,7 @@ async def route_with_failover(
             response = await _call_provider(
                 provider_slug=provider_slug,
                 provider_model_id=provider_model_id,
-                request_data=request_data
+                request_data=request_data,
             )
 
             # Track success
@@ -117,7 +121,7 @@ async def route_with_failover(
                 success=True,
                 response_time_ms=response_time_ms,
                 input_tokens=response.get("usage", {}).get("prompt_tokens", 0),
-                output_tokens=response.get("usage", {}).get("completion_tokens", 0)
+                output_tokens=response.get("usage", {}).get("completion_tokens", 0),
             )
 
             logger.info(f"✓ Success on {provider_slug} ({response_time_ms}ms)")
@@ -132,8 +136,8 @@ async def route_with_failover(
                 "response_time_ms": response_time_ms,
                 "pricing": {
                     "prompt": provider["pricing_prompt"],
-                    "completion": provider["pricing_completion"]
-                }
+                    "completion": provider["pricing_completion"],
+                },
             }
 
             return response
@@ -143,18 +147,17 @@ async def route_with_failover(
 
             # Track failure
             await record_model_call(
-                provider=provider_slug,
-                model=provider_model_id,
-                success=False,
-                error_message=str(e)
+                provider=provider_slug, model=provider_model_id, success=False, error_message=str(e)
             )
 
-            attempts.append({
-                "provider": provider_slug,
-                "provider_model_id": provider_model_id,
-                "error": str(e),
-                "timestamp": datetime.now(UTC).isoformat()
-            })
+            attempts.append(
+                {
+                    "provider": provider_slug,
+                    "provider_model_id": provider_model_id,
+                    "error": str(e),
+                    "timestamp": datetime.now(UTC).isoformat(),
+                }
+            )
 
             last_error = e
 
@@ -165,15 +168,11 @@ async def route_with_failover(
     raise ProviderFailoverError(
         f"All {len(providers_to_try)} providers failed for model '{model}'",
         attempts=attempts,
-        last_error=last_error
+        last_error=last_error,
     )
 
 
-async def _call_provider(
-    provider_slug: str,
-    provider_model_id: str,
-    request_data: dict
-) -> dict:
+async def _call_provider(provider_slug: str, provider_model_id: str, request_data: dict) -> dict:
     """
     Internal function to call a specific provider
 
@@ -239,20 +238,22 @@ def explain_failover_for_model(model: str) -> dict:
             "model": model,
             "providers_available": 0,
             "failover_order": [],
-            "recommendation": "Model not available on any provider"
+            "recommendation": "Model not available on any provider",
         }
 
     failover_order = []
     for idx, p in enumerate(providers[:5]):  # Show top 5
-        failover_order.append({
-            "priority": idx + 1,
-            "provider": p["provider_slug"],
-            "provider_model_id": p["provider_model_id"],
-            "health": p["provider_health_status"],
-            "response_time_ms": p["provider_response_time_ms"],
-            "pricing_prompt": p["pricing_prompt"],
-            "success_rate": p["success_rate"]
-        })
+        failover_order.append(
+            {
+                "priority": idx + 1,
+                "provider": p["provider_slug"],
+                "provider_model_id": p["provider_model_id"],
+                "health": p["provider_health_status"],
+                "response_time_ms": p["provider_response_time_ms"],
+                "pricing_prompt": p["pricing_prompt"],
+                "success_rate": p["success_rate"],
+            }
+        )
 
     recommendation = "Not available"
     if len(providers) >= 1:
@@ -267,7 +268,7 @@ def explain_failover_for_model(model: str) -> dict:
         "model": model,
         "providers_available": len(providers),
         "failover_order": failover_order,
-        "recommendation": recommendation
+        "recommendation": recommendation,
     }
 
 

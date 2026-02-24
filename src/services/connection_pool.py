@@ -189,7 +189,9 @@ def get_pooled_client(
                 old_client.close()
             except Exception as e:
                 logger.warning(f"Error closing evicted client: {e}")
-            logger.info(f"Evicted oldest client from pool: {oldest_key} (pool size: {len(_client_pool)})")
+            logger.info(
+                f"Evicted oldest client from pool: {oldest_key} (pool size: {len(_client_pool)})"
+            )
 
         # API key rotated: evict any stale clients for this provider/base pair
         _evict_sync_clients(prefix)
@@ -252,7 +254,9 @@ def get_pooled_async_client(
                 asyncio.create_task(old_client.close())
             except Exception as e:
                 logger.warning(f"Error closing evicted async client: {e}")
-            logger.info(f"Evicted oldest async client from pool: {oldest_key} (pool size: {len(_async_client_pool)})")
+            logger.info(
+                f"Evicted oldest async client from pool: {oldest_key} (pool size: {len(_async_client_pool)})"
+            )
 
         _evict_async_clients(prefix)
 
@@ -270,7 +274,9 @@ def get_pooled_async_client(
         )
 
         _async_client_pool[cache_key] = (client, time.time())
-        logger.info(f"Created pooled async client for {provider} (pool size: {len(_async_client_pool)})")
+        logger.info(
+            f"Created pooled async client for {provider} (pool size: {len(_async_client_pool)})"
+        )
 
         return client
 

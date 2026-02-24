@@ -111,6 +111,7 @@ class CacheWarmer:
                 # Fetch fresh data using dedicated DB executor to avoid starving
                 # the default thread pool used by asyncio.to_thread()
                 from src.services.background_tasks import _db_executor
+
                 loop = asyncio.get_event_loop()
                 fresh_data = await loop.run_in_executor(_db_executor, fetch_fn)
 

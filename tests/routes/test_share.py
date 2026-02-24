@@ -9,11 +9,12 @@ Tests cover:
 """
 
 import importlib
+from datetime import UTC, datetime, timezone
+from unittest.mock import patch
+
 import pytest
-from datetime import datetime, timezone, UTC
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from unittest.mock import patch
 
 # Import the share module
 MODULE_PATH = "src.routes.share"
@@ -255,9 +256,7 @@ def test_get_my_share_links_success(
 
 @patch("src.routes.share.get_user_shared_chats")
 @patch("src.routes.share.get_user")
-def test_get_my_share_links_empty(
-    mock_get_user, mock_get_shares, client, auth_headers, mock_user
-):
+def test_get_my_share_links_empty(mock_get_user, mock_get_shares, client, auth_headers, mock_user):
     """Test getting share links when none exist"""
     mock_get_user.return_value = mock_user
     mock_get_shares.return_value = []
@@ -287,9 +286,7 @@ def test_get_my_share_links_unauthenticated(mock_get_user, client, auth_headers)
 
 
 @patch("src.routes.share.get_shared_chat_by_token")
-def test_get_shared_chat_success(
-    mock_get_shared, client, mock_shared_chat_data
-):
+def test_get_shared_chat_success(mock_get_shared, client, mock_shared_chat_data):
     """Test getting shared chat by token (public endpoint)"""
     mock_get_shared.return_value = mock_shared_chat_data
 

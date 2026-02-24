@@ -2,9 +2,11 @@
 E2E Tests for Coupon Feature
 Tests all coupon endpoints with real database interactions
 """
+
 import os
+from datetime import UTC, datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timedelta, timezone, UTC
 from fastapi.testclient import TestClient
 
 from src.main import app
@@ -43,11 +45,11 @@ def test_api_keys(supabase_client, test_prefix):
             raise Exception("Failed to create test user")
 
         user = user_result.data[0]
-        created_users.append(user['id'])
+        created_users.append(user["id"])
 
         # Create API key in api_keys_new table
         key_data = {
-            "user_id": user['id'],
+            "user_id": user["id"],
             "api_key": api_key,
             "key_name": f"Test Key {username_suffix}",
             "is_primary": True,
@@ -60,14 +62,14 @@ def test_api_keys(supabase_client, test_prefix):
         key_result = supabase_client.table("api_keys_new").insert(key_data).execute()
 
         if key_result.data:
-            created_keys.append(key_result.data[0]['id'])
+            created_keys.append(key_result.data[0]["id"])
 
         return {
-            "user_id": user['id'],
+            "user_id": user["id"],
             "api_key": api_key,
             "username": username,
             "email": email,
-            "credits": credits
+            "credits": credits,
         }
 
     yield _create_test_user
@@ -79,7 +81,9 @@ def test_api_keys(supabase_client, test_prefix):
 
         if created_users:
             # Clean up coupon redemptions first
-            supabase_client.table("coupon_redemptions").delete().in_("user_id", created_users).execute()
+            supabase_client.table("coupon_redemptions").delete().in_(
+                "user_id", created_users
+            ).execute()
             # Clean up users
             supabase_client.table("users").delete().in_("id", created_users).execute()
     except Exception as e:
@@ -115,7 +119,7 @@ def admin_api_key(supabase_client, test_prefix):
         raise Exception("Failed to create admin user")
 
     admin_user = admin_user_result.data[0]
-    admin_user_id = admin_user['id']
+    admin_user_id = admin_user["id"]
 
     # Create API key for admin
     admin_key_data = {
@@ -134,7 +138,7 @@ def admin_api_key(supabase_client, test_prefix):
     if not admin_key_result.data:
         raise Exception("Failed to create admin API key")
 
-    admin_key_id = admin_key_result.data[0]['id']
+    admin_key_id = admin_key_result.data[0]["id"]
 
     yield admin_api_key_value
 
@@ -161,7 +165,9 @@ def cleanup_coupons(supabase_client, test_prefix):
     try:
         if created_coupon_ids:
             # Delete redemptions first
-            supabase_client.table("coupon_redemptions").delete().in_("coupon_id", created_coupon_ids).execute()
+            supabase_client.table("coupon_redemptions").delete().in_(
+                "coupon_id", created_coupon_ids
+            ).execute()
             # Delete coupons
             supabase_client.table("coupons").delete().in_("id", created_coupon_ids).execute()
     except Exception as e:
@@ -186,8 +192,8 @@ class TestCouponAdminEndpoints:
                 "max_uses": 100,
                 "valid_until": valid_until,
                 "coupon_type": "promotional",
-                "description": "Test global coupon"
-            }
+                "description": "Test global coupon",
+            },
         )
 
         assert response.status_code == 200
@@ -203,7 +209,9 @@ class TestCouponAdminEndpoints:
 
         cleanup_coupons(data["id"])
 
-    def test_create_user_specific_coupon(self, client, admin_api_key, test_api_keys, test_prefix, cleanup_coupons):
+    def test_create_user_specific_coupon(
+        self, client, admin_api_key, test_api_keys, test_prefix, cleanup_coupons
+    ):
         """Test creating a user-specific coupon"""
         user = test_api_keys(credits=50.0, username_suffix="coupon_user")
         code = f"USER{test_prefix}"
@@ -220,8 +228,8 @@ class TestCouponAdminEndpoints:
                 "valid_until": valid_until,
                 "coupon_type": "compensation",
                 "assigned_to_user_id": user["user_id"],
-                "description": "Test user-specific coupon"
-            }
+                "description": "Test user-specific coupon",
+            },
         )
 
         assert response.status_code == 200
@@ -248,8 +256,8 @@ class TestCouponAdminEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 1,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         assert response.status_code == 422  # Validation error
@@ -268,8 +276,8 @@ class TestCouponAdminEndpoints:
                 "coupon_scope": "user_specific",
                 "max_uses": 1,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         assert response.status_code == 422  # Validation error
@@ -289,16 +297,15 @@ class TestCouponAdminEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 50,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         cleanup_coupons(create_response.json()["id"])
 
         # List coupons
         response = client.get(
-            "/admin/coupons",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            "/admin/coupons", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert response.status_code == 200
@@ -314,7 +321,7 @@ class TestCouponAdminEndpoints:
         """Test listing coupons with filters"""
         response = client.get(
             "/admin/coupons?scope=global&is_active=true&limit=10",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            headers={"Authorization": f"Bearer {admin_api_key}"},
         )
 
         assert response.status_code == 200
@@ -341,8 +348,8 @@ class TestCouponAdminEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 75,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         coupon_id = create_response.json()["id"]
@@ -350,8 +357,7 @@ class TestCouponAdminEndpoints:
 
         # Get coupon by ID
         response = client.get(
-            f"/admin/coupons/{coupon_id}",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            f"/admin/coupons/{coupon_id}", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert response.status_code == 200
@@ -364,8 +370,7 @@ class TestCouponAdminEndpoints:
     def test_get_nonexistent_coupon(self, client, admin_api_key):
         """Test getting a coupon that doesn't exist"""
         response = client.get(
-            "/admin/coupons/999999999",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            "/admin/coupons/999999999", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert response.status_code == 404
@@ -386,8 +391,8 @@ class TestCouponAdminEndpoints:
                 "max_uses": 100,
                 "valid_until": valid_until,
                 "coupon_type": "promotional",
-                "description": "Original description"
-            }
+                "description": "Original description",
+            },
         )
 
         coupon_id = create_response.json()["id"]
@@ -397,7 +402,7 @@ class TestCouponAdminEndpoints:
         response = client.patch(
             f"/admin/coupons/{coupon_id}",
             headers={"Authorization": f"Bearer {admin_api_key}"},
-            json={"description": "Updated description"}
+            json={"description": "Updated description"},
         )
 
         assert response.status_code == 200
@@ -420,8 +425,8 @@ class TestCouponAdminEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         coupon_id = create_response.json()["id"]
@@ -429,8 +434,7 @@ class TestCouponAdminEndpoints:
 
         # Deactivate
         response = client.delete(
-            f"/admin/coupons/{coupon_id}",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            f"/admin/coupons/{coupon_id}", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert response.status_code == 200
@@ -440,8 +444,7 @@ class TestCouponAdminEndpoints:
 
         # Verify it's deactivated
         get_response = client.get(
-            f"/admin/coupons/{coupon_id}",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            f"/admin/coupons/{coupon_id}", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert get_response.json()["is_active"] is False
@@ -450,7 +453,9 @@ class TestCouponAdminEndpoints:
 class TestCouponUserEndpoints:
     """Test user-facing coupon endpoints"""
 
-    def test_get_available_coupons(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_get_available_coupons(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test getting available coupons for a user"""
         user = test_api_keys(credits=50.0, username_suffix="avail_user")
 
@@ -467,8 +472,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
         cleanup_coupons(global_response.json()["id"])
 
@@ -484,15 +489,14 @@ class TestCouponUserEndpoints:
                 "max_uses": 1,
                 "valid_until": valid_until,
                 "coupon_type": "compensation",
-                "assigned_to_user_id": user["user_id"]
-            }
+                "assigned_to_user_id": user["user_id"],
+            },
         )
         cleanup_coupons(user_response.json()["id"])
 
         # Get available coupons
         response = client.get(
-            "/coupons/available",
-            headers={"Authorization": f"Bearer {user['api_key']}"}
+            "/coupons/available", headers={"Authorization": f"Bearer {user['api_key']}"}
         )
 
         assert response.status_code == 200
@@ -511,7 +515,9 @@ class TestCouponUserEndpoints:
         # HTTPBearer returns 403 when no credentials provided
         assert response.status_code in [401, 403]
 
-    def test_redeem_global_coupon(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_redeem_global_coupon(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test redeeming a global coupon"""
         user = test_api_keys(credits=50.0, username_suffix="redeem_user")
 
@@ -528,8 +534,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -537,7 +543,7 @@ class TestCouponUserEndpoints:
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert response.status_code == 200
@@ -549,7 +555,9 @@ class TestCouponUserEndpoints:
         assert data["new_balance"] == 65.0
         assert data["coupon_code"] == code
 
-    def test_redeem_user_specific_coupon(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_redeem_user_specific_coupon(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test redeeming a user-specific coupon"""
         user = test_api_keys(credits=100.0, username_suffix="specific_user")
 
@@ -567,8 +575,8 @@ class TestCouponUserEndpoints:
                 "max_uses": 1,
                 "valid_until": valid_until,
                 "coupon_type": "compensation",
-                "assigned_to_user_id": user["user_id"]
-            }
+                "assigned_to_user_id": user["user_id"],
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -576,7 +584,7 @@ class TestCouponUserEndpoints:
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert response.status_code == 200
@@ -586,7 +594,9 @@ class TestCouponUserEndpoints:
         assert data["coupon_value"] == 25.00
         assert data["new_balance"] == 125.0
 
-    def test_redeem_coupon_twice_rejected(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_redeem_coupon_twice_rejected(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test that redeeming the same coupon twice is rejected"""
         user = test_api_keys(credits=50.0, username_suffix="twice_user")
 
@@ -603,8 +613,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -612,7 +622,7 @@ class TestCouponUserEndpoints:
         first_response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert first_response.status_code == 200
@@ -622,7 +632,7 @@ class TestCouponUserEndpoints:
         second_response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert second_response.status_code == 400
@@ -638,7 +648,7 @@ class TestCouponUserEndpoints:
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": "INVALID-NOTEXIST"}
+            json={"code": "INVALID-NOTEXIST"},
         )
 
         assert response.status_code == 400
@@ -647,7 +657,9 @@ class TestCouponUserEndpoints:
         assert data["success"] is False
         assert "error_code" in data
 
-    def test_redeem_expired_coupon(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_redeem_expired_coupon(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test that expired coupons cannot be redeemed"""
         user = test_api_keys(credits=50.0, username_suffix="expired_user")
 
@@ -664,8 +676,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": expired_date,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -673,7 +685,7 @@ class TestCouponUserEndpoints:
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert response.status_code == 400
@@ -681,7 +693,9 @@ class TestCouponUserEndpoints:
 
         assert data["success"] is False
 
-    def test_redeem_deactivated_coupon(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_redeem_deactivated_coupon(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test that deactivated coupons cannot be redeemed"""
         user = test_api_keys(credits=50.0, username_suffix="deact_user")
 
@@ -698,8 +712,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         coupon_id = create_response.json()["id"]
@@ -707,15 +721,14 @@ class TestCouponUserEndpoints:
 
         # Deactivate it
         client.delete(
-            f"/admin/coupons/{coupon_id}",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            f"/admin/coupons/{coupon_id}", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         # Try to redeem
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert response.status_code == 400
@@ -723,7 +736,9 @@ class TestCouponUserEndpoints:
 
         assert data["success"] is False
 
-    def test_get_redemption_history(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_get_redemption_history(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test getting user redemption history"""
         user = test_api_keys(credits=50.0, username_suffix="history_user")
 
@@ -740,8 +755,8 @@ class TestCouponUserEndpoints:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -749,13 +764,12 @@ class TestCouponUserEndpoints:
         client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         # Get history
         response = client.get(
-            "/coupons/history",
-            headers={"Authorization": f"Bearer {user['api_key']}"}
+            "/coupons/history", headers={"Authorization": f"Bearer {user['api_key']}"}
         )
 
         assert response.status_code == 200
@@ -772,8 +786,7 @@ class TestCouponUserEndpoints:
         user = test_api_keys(credits=50.0, username_suffix="limit_user")
 
         response = client.get(
-            "/coupons/history?limit=5",
-            headers={"Authorization": f"Bearer {user['api_key']}"}
+            "/coupons/history?limit=5", headers={"Authorization": f"Bearer {user['api_key']}"}
         )
 
         assert response.status_code == 200
@@ -786,7 +799,9 @@ class TestCouponUserEndpoints:
 class TestCouponAnalytics:
     """Test coupon analytics endpoints"""
 
-    def test_get_coupon_analytics(self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons):
+    def test_get_coupon_analytics(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test getting analytics for a specific coupon"""
         user = test_api_keys(credits=100.0, username_suffix="analytics_user")
 
@@ -803,8 +818,8 @@ class TestCouponAnalytics:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         coupon_id = create_response.json()["id"]
@@ -814,13 +829,13 @@ class TestCouponAnalytics:
         client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         # Get analytics
         response = client.get(
             f"/admin/coupons/{coupon_id}/analytics",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            headers={"Authorization": f"Bearer {admin_api_key}"},
         )
 
         assert response.status_code == 200
@@ -841,8 +856,7 @@ class TestCouponAnalytics:
     def test_get_system_stats(self, client, admin_api_key):
         """Test getting system-wide coupon statistics"""
         response = client.get(
-            "/admin/coupons/stats/overview",
-            headers={"Authorization": f"Bearer {admin_api_key}"}
+            "/admin/coupons/stats/overview", headers={"Authorization": f"Bearer {admin_api_key}"}
         )
 
         assert response.status_code == 200
@@ -874,8 +888,8 @@ class TestCouponEdgeCases:
                 "coupon_scope": "global",
                 "max_uses": 100,
                 "valid_until": valid_until,
-                "coupon_type": "promotional"
-            }
+                "coupon_type": "promotional",
+            },
         )
 
         # HTTPBearer returns 403 when no credentials provided
@@ -883,16 +897,14 @@ class TestCouponEdgeCases:
 
     def test_redeem_without_authentication(self, client):
         """Test that redeeming requires authentication"""
-        response = client.post(
-            "/coupons/redeem",
-            json={"code": "SOMECODDE"}
-        )
+        response = client.post("/coupons/redeem", json={"code": "SOMECODDE"})
 
         # HTTPBearer returns 403 when no credentials provided
         assert response.status_code in [401, 403]
 
-    def test_wrong_user_cannot_redeem_user_specific_coupon(self, client, test_api_keys, admin_api_key, test_prefix,
-                                                           cleanup_coupons):
+    def test_wrong_user_cannot_redeem_user_specific_coupon(
+        self, client, test_api_keys, admin_api_key, test_prefix, cleanup_coupons
+    ):
         """Test that user-specific coupons can only be redeemed by the assigned user"""
         user1 = test_api_keys(credits=50.0, username_suffix="user1")
         user2 = test_api_keys(credits=50.0, username_suffix="user2")
@@ -911,8 +923,8 @@ class TestCouponEdgeCases:
                 "max_uses": 1,
                 "valid_until": valid_until,
                 "coupon_type": "compensation",
-                "assigned_to_user_id": user1["user_id"]
-            }
+                "assigned_to_user_id": user1["user_id"],
+            },
         )
         cleanup_coupons(create_response.json()["id"])
 
@@ -920,7 +932,7 @@ class TestCouponEdgeCases:
         response = client.post(
             "/coupons/redeem",
             headers={"Authorization": f"Bearer {user2['api_key']}"},
-            json={"code": code}
+            json={"code": code},
         )
 
         assert response.status_code == 400

@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 """Test script to verify Vercel AI Gateway integration"""
 
-import sys
 import os
+import sys
 
 # Add repo to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
+import importlib.util
+
 from src.config import Config
 from src.services.model_transformations import (
-    transform_model_id,
     detect_provider_from_model_id,
-    get_model_id_mapping
+    get_model_id_mapping,
+    transform_model_id,
 )
 from src.services.provider_failover import build_provider_failover_chain
-import importlib.util
 
 
 def test_vercel_config():
@@ -23,7 +24,7 @@ def test_vercel_config():
     print("-" * 60)
 
     # Check if the config attribute exists
-    has_api_key_attr = hasattr(Config, 'VERCEL_AI_GATEWAY_API_KEY')
+    has_api_key_attr = hasattr(Config, "VERCEL_AI_GATEWAY_API_KEY")
     print(f"✓ VERCEL_AI_GATEWAY_API_KEY attribute exists: {has_api_key_attr}")
 
     if has_api_key_attr:
@@ -49,12 +50,15 @@ def test_vercel_client_import():
             get_vercel_ai_gateway_client,
             make_vercel_ai_gateway_request_openai,
             make_vercel_ai_gateway_request_openai_stream,
-            process_vercel_ai_gateway_response
+            process_vercel_ai_gateway_response,
         )
+
         print("✓ Successfully imported all Vercel AI Gateway client functions")
         print(f"  - get_vercel_ai_gateway_client: {get_vercel_ai_gateway_client}")
         print(f"  - make_vercel_ai_gateway_request_openai: {make_vercel_ai_gateway_request_openai}")
-        print(f"  - make_vercel_ai_gateway_request_openai_stream: {make_vercel_ai_gateway_request_openai_stream}")
+        print(
+            f"  - make_vercel_ai_gateway_request_openai_stream: {make_vercel_ai_gateway_request_openai_stream}"
+        )
         print(f"  - process_vercel_ai_gateway_response: {process_vercel_ai_gateway_response}")
         return True
     except ImportError as e:
@@ -152,16 +156,19 @@ def test_chat_route_integration():
         from src.routes import chat
 
         # Check for Vercel imports
-        if hasattr(chat, 'make_vercel_ai_gateway_request_openai'):
+        if hasattr(chat, "make_vercel_ai_gateway_request_openai"):
             print("✓ Vercel AI Gateway request function imported in chat route")
         else:
             # Try reading the source file
             import inspect
+
             source = inspect.getsource(chat)
-            if 'vercel_ai_gateway' in source:
+            if "vercel_ai_gateway" in source:
                 print("✓ Vercel AI Gateway is referenced in chat route")
             else:
-                print("⚠ Could not verify Vercel AI Gateway in chat route (import may be conditional)")
+                print(
+                    "⚠ Could not verify Vercel AI Gateway in chat route (import may be conditional)"
+                )
 
         return True
     except Exception as e:

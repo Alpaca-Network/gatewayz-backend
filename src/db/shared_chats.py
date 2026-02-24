@@ -3,7 +3,7 @@
 import logging
 import secrets
 import time
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from httpx import ConnectError, ReadTimeout, RemoteProtocolError
@@ -189,13 +189,16 @@ def get_shared_chat_by_token(token: str) -> dict[str, Any] | None:
 
         # Update view count
         try:
+
             def update_view_count():
                 return (
                     client.table("shared_chats")
-                    .update({
-                        "view_count": share["view_count"] + 1,
-                        "last_viewed_at": datetime.now(UTC).isoformat(),
-                    })
+                    .update(
+                        {
+                            "view_count": share["view_count"] + 1,
+                            "last_viewed_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
                     .eq("id", share["id"])
                     .execute()
                 )
@@ -225,9 +228,7 @@ def get_shared_chat_by_token(token: str) -> dict[str, Any] | None:
         raise RuntimeError(f"Failed to get shared chat by token: {e}") from e
 
 
-def get_user_shared_chats(
-    user_id: int, limit: int = 50, offset: int = 0
-) -> list[dict[str, Any]]:
+def get_user_shared_chats(user_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
     """Get all share links created by a user."""
     try:
         client = get_supabase_client()
@@ -274,9 +275,11 @@ def delete_shared_chat(token: str, user_id: int) -> bool:
         def soft_delete_share():
             return (
                 client.table("shared_chats")
-                .update({
-                    "is_active": False,
-                })
+                .update(
+                    {
+                        "is_active": False,
+                    }
+                )
                 .eq("share_token", token)
                 .eq("created_by_user_id", user_id)
                 .execute()
@@ -332,9 +335,7 @@ def check_share_rate_limit(user_id: int, max_shares_per_hour: int = 10) -> bool:
     """
     try:
         client = get_supabase_client()
-        one_hour_ago = datetime.now(UTC).replace(
-            minute=0, second=0, microsecond=0
-        ).isoformat()
+        one_hour_ago = datetime.now(UTC).replace(minute=0, second=0, microsecond=0).isoformat()
 
         def count_recent_shares():
             return (

@@ -7,18 +7,19 @@ Tests cover:
 - Stale-while-revalidate caching
 """
 
-import pytest
-from datetime import datetime, timezone, timezone, UTC
-from unittest.mock import MagicMock, patch, call
-import httpx
+from datetime import UTC, datetime, timezone
+from unittest.mock import MagicMock, call, patch
 
-from src.services.models import (
-    fetch_models_from_aimo,
-    _get_fresh_or_stale_cached_models,
-    _fresh_cached_models,
-)
+import httpx
+import pytest
+
 from src.cache import _aimo_models_cache
 from src.config import Config
+from src.services.models import (
+    _fresh_cached_models,
+    _get_fresh_or_stale_cached_models,
+    fetch_models_from_aimo,
+)
 
 
 @pytest.fixture
@@ -208,8 +209,9 @@ class TestAIMORetryLogic:
             mock_response,
         ]
 
-        with patch("src.config.Config.AIMO_API_KEY", "test-key"), patch(
-            "src.config.Config.AIMO_ENABLE_HTTP_FALLBACK", True
+        with (
+            patch("src.config.Config.AIMO_API_KEY", "test-key"),
+            patch("src.config.Config.AIMO_ENABLE_HTTP_FALLBACK", True),
         ):
             result = fetch_models_from_aimo()
 

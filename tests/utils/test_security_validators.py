@@ -1,13 +1,15 @@
 """
 Comprehensive tests for Security Validators
 """
+
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 
 from src.utils.security_validators import (
+    TEMPORARY_EMAIL_DOMAINS,
     is_temporary_email_domain,
     is_valid_email,
-    TEMPORARY_EMAIL_DOMAINS,
 )
 
 
@@ -17,12 +19,14 @@ class TestSecurityValidators:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.utils.security_validators
+
         assert src.utils.security_validators is not None
 
     def test_module_has_expected_attributes(self):
         """Test module has expected public API"""
         from src.utils import security_validators
-        assert hasattr(security_validators, '__name__')
+
+        assert hasattr(security_validators, "__name__")
 
 
 class TestIsTemporaryEmailDomain:
@@ -91,7 +95,9 @@ class TestIsTemporaryEmailDomain:
     def test_whitespace_handling(self):
         """Test that whitespace is handled correctly"""
         assert is_temporary_email_domain("user@tempmail.com ") is True
-        assert is_temporary_email_domain(" user@tempmail.com") is False  # local part with space is different
+        assert (
+            is_temporary_email_domain(" user@tempmail.com") is False
+        )  # local part with space is different
         assert is_temporary_email_domain("user@ tempmail.com") is False  # space in domain
 
     def test_temporary_email_domains_set_is_frozen(self):

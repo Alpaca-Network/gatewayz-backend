@@ -13,28 +13,29 @@ Tests cover:
 - Error handling
 """
 
-import pytest
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import Mock, patch
-from datetime import datetime, timedelta, timezone, UTC
+
+import pytest
 
 from src.db.payments import (
     create_payment,
+    delete_payment,
     get_payment,
     get_payment_by_stripe_intent,
-    get_user_payments,
-    get_recent_payments,
-    update_payment_status,
-    update_payment_metadata,
-    delete_payment,
     get_payment_statistics,
+    get_payment_trends,
+    get_recent_payments,
     get_total_revenue,
-    get_payment_trends
+    get_user_payments,
+    update_payment_metadata,
+    update_payment_status,
 )
-
 
 # ============================================================
 # FIXTURES
 # ============================================================
+
 
 @pytest.fixture
 def mock_supabase_client():
@@ -49,21 +50,21 @@ def mock_supabase_client():
 def mock_payment_data():
     """Sample payment data"""
     return {
-        'id': 1,
-        'user_id': 123,
-        'amount_usd': 29.99,
-        'amount_cents': 2999,
-        'credits_purchased': 2999,
-        'bonus_credits': 0,
-        'currency': 'usd',
-        'payment_method': 'stripe',
-        'status': 'completed',
-        'stripe_payment_intent_id': 'pi_abc123',
-        'stripe_checkout_session_id': 'cs_def456',
-        'stripe_customer_id': 'cus_xyz789',
-        'metadata': {},
-        'created_at': datetime.now(UTC).isoformat(),
-        'completed_at': datetime.now(UTC).isoformat()
+        "id": 1,
+        "user_id": 123,
+        "amount_usd": 29.99,
+        "amount_cents": 2999,
+        "credits_purchased": 2999,
+        "bonus_credits": 0,
+        "currency": "usd",
+        "payment_method": "stripe",
+        "status": "completed",
+        "stripe_payment_intent_id": "pi_abc123",
+        "stripe_checkout_session_id": "cs_def456",
+        "stripe_customer_id": "cus_xyz789",
+        "metadata": {},
+        "created_at": datetime.now(UTC).isoformat(),
+        "completed_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -71,10 +72,11 @@ def mock_payment_data():
 # TEST CLASS: Create Payment
 # ============================================================
 
+
 class TestCreatePayment:
     """Test payment record creation"""
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_create_payment_success(self, mock_get_client, mock_supabase_client, mock_payment_data):
         """Test successful payment creation"""
         client, table_mock = mock_supabase_client
@@ -87,31 +89,31 @@ class TestCreatePayment:
         payment = create_payment(
             user_id=123,
             amount=29.99,
-            stripe_payment_intent_id='pi_abc123',
-            stripe_session_id='cs_def456',
-            stripe_customer_id='cus_xyz789'
+            stripe_payment_intent_id="pi_abc123",
+            stripe_session_id="cs_def456",
+            stripe_customer_id="cus_xyz789",
         )
 
         assert payment is not None
-        assert payment['user_id'] == 123
-        assert payment['amount_usd'] == 29.99
-        assert payment['amount_cents'] == 2999
-        assert payment['credits_purchased'] == 2999
+        assert payment["user_id"] == 123
+        assert payment["amount_usd"] == 29.99
+        assert payment["amount_cents"] == 2999
+        assert payment["credits_purchased"] == 2999
 
         # Verify insert was called
         table_mock.insert.assert_called_once()
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_create_payment_with_metadata(self, mock_get_client, mock_supabase_client):
         """Test payment creation with metadata"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         payment_data = {
-            'id': 1,
-            'user_id': 123,
-            'amount_usd': 10.00,
-            'metadata': {'source': 'web', 'campaign': 'promo2024'}
+            "id": 1,
+            "user_id": 123,
+            "amount_usd": 10.00,
+            "metadata": {"source": "web", "campaign": "promo2024"},
         }
 
         result_mock = Mock()
@@ -119,16 +121,14 @@ class TestCreatePayment:
         table_mock.insert.return_value.execute.return_value = result_mock
 
         payment = create_payment(
-            user_id=123,
-            amount=10.00,
-            metadata={'source': 'web', 'campaign': 'promo2024'}
+            user_id=123, amount=10.00, metadata={"source": "web", "campaign": "promo2024"}
         )
 
         assert payment is not None
-        assert payment['metadata']['source'] == 'web'
-        assert payment['metadata']['campaign'] == 'promo2024'
+        assert payment["metadata"]["source"] == "web"
+        assert payment["metadata"]["campaign"] == "promo2024"
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_create_payment_no_data_returned(self, mock_get_client, mock_supabase_client):
         """Test handling when no data returned"""
         client, table_mock = mock_supabase_client
@@ -142,7 +142,7 @@ class TestCreatePayment:
 
         assert payment is None
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_create_payment_exception(self, mock_get_client):
         """Test exception handling during creation"""
         mock_get_client.side_effect = Exception("Database error")
@@ -156,10 +156,11 @@ class TestCreatePayment:
 # TEST CLASS: Retrieve Payments
 # ============================================================
 
+
 class TestRetrievePayments:
     """Test payment retrieval operations"""
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_payment_success(self, mock_get_client, mock_supabase_client, mock_payment_data):
         """Test retrieving payment by ID"""
         client, table_mock = mock_supabase_client
@@ -172,10 +173,10 @@ class TestRetrievePayments:
         payment = get_payment(1)
 
         assert payment is not None
-        assert payment['id'] == 1
-        assert payment['user_id'] == 123
+        assert payment["id"] == 1
+        assert payment["user_id"] == 123
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_payment_not_found(self, mock_get_client, mock_supabase_client):
         """Test getting non-existent payment"""
         client, table_mock = mock_supabase_client
@@ -189,7 +190,7 @@ class TestRetrievePayments:
 
         assert payment is None
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_payment_by_stripe_intent_payment_intent(
         self, mock_get_client, mock_supabase_client, mock_payment_data
     ):
@@ -201,12 +202,12 @@ class TestRetrievePayments:
         result_mock.data = [mock_payment_data]
         table_mock.select.return_value.eq.return_value.execute.return_value = result_mock
 
-        payment = get_payment_by_stripe_intent('pi_abc123')
+        payment = get_payment_by_stripe_intent("pi_abc123")
 
         assert payment is not None
-        assert payment['stripe_payment_intent_id'] == 'pi_abc123'
+        assert payment["stripe_payment_intent_id"] == "pi_abc123"
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_payment_by_stripe_intent_session_id(
         self, mock_get_client, mock_supabase_client, mock_payment_data
     ):
@@ -225,25 +226,25 @@ class TestRetrievePayments:
         eq_mock = select_mock.eq.return_value
         eq_mock.execute.side_effect = [result_empty, result_found]
 
-        payment = get_payment_by_stripe_intent('cs_def456')
+        payment = get_payment_by_stripe_intent("cs_def456")
 
         assert payment is not None
-        assert payment['stripe_checkout_session_id'] == 'cs_def456'
+        assert payment["stripe_checkout_session_id"] == "cs_def456"
 
         # Verify fallback query targets the checkout session column
         eq_calls = select_mock.eq.call_args_list
-        assert eq_calls[0].args == ('stripe_payment_intent_id', 'cs_def456')
-        assert eq_calls[1].args == ('stripe_checkout_session_id', 'cs_def456')
+        assert eq_calls[0].args == ("stripe_payment_intent_id", "cs_def456")
+        assert eq_calls[1].args == ("stripe_checkout_session_id", "cs_def456")
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_user_payments(self, mock_get_client, mock_supabase_client):
         """Test getting all payments for a user"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         payments_data = [
-            {'id': 1, 'user_id': 123, 'amount_usd': 10.00},
-            {'id': 2, 'user_id': 123, 'amount_usd': 20.00}
+            {"id": 1, "user_id": 123, "amount_usd": 10.00},
+            {"id": 2, "user_id": 123, "amount_usd": 20.00},
         ]
 
         result_mock = Mock()
@@ -263,20 +264,16 @@ class TestRetrievePayments:
         payments = get_user_payments(123)
 
         assert len(payments) == 2
-        assert payments[0]['id'] == 1
-        assert payments[1]['id'] == 2
+        assert payments[0]["id"] == 1
+        assert payments[1]["id"] == 2
 
-    @patch('src.db.payments.get_supabase_client')
-    def test_get_user_payments_with_status_filter(
-        self, mock_get_client, mock_supabase_client
-    ):
+    @patch("src.db.payments.get_supabase_client")
+    def test_get_user_payments_with_status_filter(self, mock_get_client, mock_supabase_client):
         """Test getting user payments filtered by status"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        completed_payments = [
-            {'id': 1, 'user_id': 123, 'status': 'completed'}
-        ]
+        completed_payments = [{"id": 1, "user_id": 123, "status": "completed"}]
 
         result_mock = Mock()
         result_mock.data = completed_payments
@@ -294,18 +291,18 @@ class TestRetrievePayments:
         order_mock.range.return_value = range_mock
         range_mock.execute.return_value = result_mock
 
-        payments = get_user_payments(123, status='completed')
+        payments = get_user_payments(123, status="completed")
 
         assert len(payments) == 1
-        assert payments[0]['status'] == 'completed'
+        assert payments[0]["status"] == "completed"
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_recent_payments(self, mock_get_client, mock_supabase_client):
         """Test getting recent payments (admin function)"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        recent_payments = [{'id': i} for i in range(1, 21)]
+        recent_payments = [{"id": i} for i in range(1, 21)]
 
         result_mock = Mock()
         result_mock.data = recent_payments
@@ -328,18 +325,17 @@ class TestRetrievePayments:
 # TEST CLASS: Update Payments
 # ============================================================
 
+
 class TestUpdatePayments:
     """Test payment update operations"""
 
-    @patch('src.db.payments.get_supabase_client')
-    def test_update_payment_status_to_completed(
-        self, mock_get_client, mock_supabase_client
-    ):
+    @patch("src.db.payments.get_supabase_client")
+    def test_update_payment_status_to_completed(self, mock_get_client, mock_supabase_client):
         """Test updating payment status to completed"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        updated_payment = {'id': 1, 'status': 'completed'}
+        updated_payment = {"id": 1, "status": "completed"}
 
         result_mock = Mock()
         result_mock.data = [updated_payment]
@@ -351,16 +347,16 @@ class TestUpdatePayments:
         update_mock.eq.return_value = eq_mock
         eq_mock.execute.return_value = result_mock
 
-        payment = update_payment_status(1, 'completed')
+        payment = update_payment_status(1, "completed")
 
         assert payment is not None
-        assert payment['status'] == 'completed'
+        assert payment["status"] == "completed"
 
         # Verify update called with completed_at timestamp
         update_call_args = table_mock.update.call_args[0][0]
-        assert 'completed_at' in update_call_args
+        assert "completed_at" in update_call_args
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_update_payment_status_sets_checkout_session_id(
         self, mock_get_client, mock_supabase_client
     ):
@@ -368,7 +364,7 @@ class TestUpdatePayments:
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
-        updated_payment = {'id': 1, 'status': 'processing'}
+        updated_payment = {"id": 1, "status": "processing"}
         result_mock = Mock()
         result_mock.data = [updated_payment]
 
@@ -379,17 +375,13 @@ class TestUpdatePayments:
         update_mock.eq.return_value = eq_mock
         eq_mock.execute.return_value = result_mock
 
-        update_payment_status(
-            1,
-            'processing',
-            stripe_session_id='cs_new_session'
-        )
+        update_payment_status(1, "processing", stripe_session_id="cs_new_session")
 
         update_call_args = table_mock.update.call_args[0][0]
-        assert update_call_args['stripe_checkout_session_id'] == 'cs_new_session'
+        assert update_call_args["stripe_checkout_session_id"] == "cs_new_session"
 
-    @patch('src.db.payments.get_supabase_client')
-    @patch('src.db.payments.get_payment')
+    @patch("src.db.payments.get_supabase_client")
+    @patch("src.db.payments.get_payment")
     def test_update_payment_status_to_failed_with_error(
         self, mock_get_payment, mock_get_client, mock_supabase_client
     ):
@@ -398,10 +390,10 @@ class TestUpdatePayments:
         mock_get_client.return_value = client
 
         # Mock existing payment
-        existing_payment = {'id': 1, 'status': 'pending', 'metadata': {}}
+        existing_payment = {"id": 1, "status": "pending", "metadata": {}}
         mock_get_payment.return_value = existing_payment
 
-        updated_payment = {'id': 1, 'status': 'failed'}
+        updated_payment = {"id": 1, "status": "failed"}
         result_mock = Mock()
         result_mock.data = [updated_payment]
 
@@ -412,42 +404,30 @@ class TestUpdatePayments:
         update_mock.eq.return_value = eq_mock
         eq_mock.execute.return_value = result_mock
 
-        payment = update_payment_status(
-            1,
-            'failed',
-            error_message='Card declined'
-        )
+        payment = update_payment_status(1, "failed", error_message="Card declined")
 
         assert payment is not None
 
         # Verify update includes failed_at and error in metadata
         update_call_args = table_mock.update.call_args[0][0]
-        assert 'failed_at' in update_call_args
-        assert update_call_args['metadata']['error'] == 'Card declined'
+        assert "failed_at" in update_call_args
+        assert update_call_args["metadata"]["error"] == "Card declined"
 
-    @patch('src.db.payments.get_supabase_client')
-    @patch('src.db.payments.get_payment')
-    def test_update_payment_metadata(
-        self, mock_get_payment, mock_get_client, mock_supabase_client
-    ):
+    @patch("src.db.payments.get_supabase_client")
+    @patch("src.db.payments.get_payment")
+    def test_update_payment_metadata(self, mock_get_payment, mock_get_client, mock_supabase_client):
         """Test updating payment metadata"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         # Mock existing payment
-        existing_payment = {
-            'id': 1,
-            'metadata': {'existing_key': 'existing_value'}
-        }
+        existing_payment = {"id": 1, "metadata": {"existing_key": "existing_value"}}
         mock_get_payment.return_value = existing_payment
 
         # Updated payment
         updated_payment = {
-            'id': 1,
-            'metadata': {
-                'existing_key': 'existing_value',
-                'new_key': 'new_value'
-            }
+            "id": 1,
+            "metadata": {"existing_key": "existing_value", "new_key": "new_value"},
         }
         result_mock = Mock()
         result_mock.data = [updated_payment]
@@ -459,28 +439,29 @@ class TestUpdatePayments:
         update_mock.eq.return_value = eq_mock
         eq_mock.execute.return_value = result_mock
 
-        payment = update_payment_metadata(1, {'new_key': 'new_value'})
+        payment = update_payment_metadata(1, {"new_key": "new_value"})
 
         assert payment is not None
-        assert payment['metadata']['existing_key'] == 'existing_value'
-        assert payment['metadata']['new_key'] == 'new_value'
+        assert payment["metadata"]["existing_key"] == "existing_value"
+        assert payment["metadata"]["new_key"] == "new_value"
 
 
 # ============================================================
 # TEST CLASS: Delete Payment
 # ============================================================
 
+
 class TestDeletePayment:
     """Test payment deletion (rare operation)"""
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_delete_payment_success(self, mock_get_client, mock_supabase_client):
         """Test successful payment deletion"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         result_mock = Mock()
-        result_mock.data = [{'id': 1}]
+        result_mock.data = [{"id": 1}]
 
         delete_mock = Mock()
         eq_mock = Mock()
@@ -493,7 +474,7 @@ class TestDeletePayment:
 
         assert result is True
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_delete_payment_failure(self, mock_get_client, mock_supabase_client):
         """Test payment deletion failure"""
         client, table_mock = mock_supabase_client
@@ -518,23 +499,22 @@ class TestDeletePayment:
 # TEST CLASS: Payment Statistics
 # ============================================================
 
+
 class TestPaymentStatistics:
     """Test payment statistics and analytics"""
 
-    @patch('src.db.payments.get_supabase_client')
-    def test_get_payment_statistics_user_specific(
-        self, mock_get_client, mock_supabase_client
-    ):
+    @patch("src.db.payments.get_supabase_client")
+    def test_get_payment_statistics_user_specific(self, mock_get_client, mock_supabase_client):
         """Test getting payment statistics for specific user"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         payments = [
-            {'status': 'completed', 'amount_usd': 10.00},
-            {'status': 'completed', 'amount_usd': 20.00},
-            {'status': 'pending', 'amount_usd': 5.00},
-            {'status': 'failed', 'amount_usd': 15.00},
-            {'status': 'refunded', 'amount_usd': 10.00}
+            {"status": "completed", "amount_usd": 10.00},
+            {"status": "completed", "amount_usd": 20.00},
+            {"status": "pending", "amount_usd": 5.00},
+            {"status": "failed", "amount_usd": 15.00},
+            {"status": "refunded", "amount_usd": 10.00},
         ]
 
         result_mock = Mock()
@@ -549,26 +529,26 @@ class TestPaymentStatistics:
 
         stats = get_payment_statistics(user_id=123)
 
-        assert stats['total_payments'] == 5
-        assert stats['completed'] == 2
-        assert stats['pending'] == 1
-        assert stats['failed'] == 1
-        assert stats['refunded'] == 1
-        assert stats['total_amount'] == 30.00  # 10 + 20
-        assert stats['refunded_amount'] == 10.00
-        assert stats['net_amount'] == 20.00
-        assert stats['average_payment'] == 15.00  # 30 / 2
+        assert stats["total_payments"] == 5
+        assert stats["completed"] == 2
+        assert stats["pending"] == 1
+        assert stats["failed"] == 1
+        assert stats["refunded"] == 1
+        assert stats["total_amount"] == 30.00  # 10 + 20
+        assert stats["refunded_amount"] == 10.00
+        assert stats["net_amount"] == 20.00
+        assert stats["average_payment"] == 15.00  # 30 / 2
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_total_revenue(self, mock_get_client, mock_supabase_client):
         """Test getting total revenue statistics"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client
 
         payments = [
-            {'amount_usd': 100.00, 'currency': 'usd'},
-            {'amount_usd': 200.00, 'currency': 'usd'},
-            {'amount_usd': 50.00, 'currency': 'eur'}
+            {"amount_usd": 100.00, "currency": "usd"},
+            {"amount_usd": 200.00, "currency": "usd"},
+            {"amount_usd": 50.00, "currency": "eur"},
         ]
 
         result_mock = Mock()
@@ -590,11 +570,11 @@ class TestPaymentStatistics:
 
         revenue = get_total_revenue(start_date=start, end_date=end)
 
-        assert revenue['total_transactions'] == 3
-        assert revenue['revenue_by_currency']['usd'] == 300.00
-        assert revenue['revenue_by_currency']['eur'] == 50.00
+        assert revenue["total_transactions"] == 3
+        assert revenue["revenue_by_currency"]["usd"] == 300.00
+        assert revenue["revenue_by_currency"]["eur"] == 50.00
 
-    @patch('src.db.payments.get_supabase_client')
+    @patch("src.db.payments.get_supabase_client")
     def test_get_payment_trends(self, mock_get_client, mock_supabase_client):
         """Test getting payment trends over time"""
         client, table_mock = mock_supabase_client
@@ -604,21 +584,9 @@ class TestPaymentStatistics:
         yesterday = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
 
         payments = [
-            {
-                'created_at': f'{today}T10:00:00Z',
-                'status': 'completed',
-                'amount_usd': 10.00
-            },
-            {
-                'created_at': f'{today}T11:00:00Z',
-                'status': 'failed',
-                'amount_usd': 5.00
-            },
-            {
-                'created_at': f'{yesterday}T10:00:00Z',
-                'status': 'completed',
-                'amount_usd': 20.00
-            }
+            {"created_at": f"{today}T10:00:00Z", "status": "completed", "amount_usd": 10.00},
+            {"created_at": f"{today}T11:00:00Z", "status": "failed", "amount_usd": 5.00},
+            {"created_at": f"{yesterday}T10:00:00Z", "status": "completed", "amount_usd": 20.00},
         ]
 
         result_mock = Mock()
@@ -633,11 +601,11 @@ class TestPaymentStatistics:
 
         trends = get_payment_trends(days=30)
 
-        assert trends['period_days'] == 30
-        assert trends['total_payments'] == 3
-        assert today in trends['daily_stats']
-        assert yesterday in trends['daily_stats']
-        assert trends['daily_stats'][today]['total'] == 2
-        assert trends['daily_stats'][today]['completed'] == 1
-        assert trends['daily_stats'][today]['failed'] == 1
-        assert trends['daily_stats'][yesterday]['amount'] == 20.00
+        assert trends["period_days"] == 30
+        assert trends["total_payments"] == 3
+        assert today in trends["daily_stats"]
+        assert yesterday in trends["daily_stats"]
+        assert trends["daily_stats"][today]["total"] == 2
+        assert trends["daily_stats"][today]["completed"] == 1
+        assert trends["daily_stats"][today]["failed"] == 1
+        assert trends["daily_stats"][yesterday]["amount"] == 20.00

@@ -17,7 +17,6 @@ These tests validate:
 import pytest
 from fastapi.testclient import TestClient
 
-
 # AllenAI OLMo models available via OpenRouter
 ALLENAI_MODELS = [
     "allenai/olmo-3.1-32b-think",
@@ -31,9 +30,7 @@ class TestAllenAIModelsE2E:
     """E2E tests for AllenAI OLMo models via chat completions endpoint."""
 
     @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_basic_request(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_allenai_model_basic_request(self, client: TestClient, auth_headers: dict, model: str):
         """Test basic chat completion request for each AllenAI model."""
         payload = {
             "model": model,
@@ -62,9 +59,7 @@ class TestAllenAIModelsE2E:
             assert data["choices"][0]["message"]["content"]
 
     @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_streaming(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_allenai_model_streaming(self, client: TestClient, auth_headers: dict, model: str):
         """Test streaming chat completion for each AllenAI model."""
         payload = {
             "model": model,
@@ -167,9 +162,7 @@ class TestAllenAIModelsE2E:
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
     @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_allenai_model_with_top_p(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_allenai_model_with_top_p(self, client: TestClient, auth_headers: dict, model: str):
         """Test AllenAI models with top_p parameter."""
         payload = {
             "model": model,
@@ -186,9 +179,7 @@ class TestAllenAIModelsE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_olmo_instruct_follows_instructions(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_olmo_instruct_follows_instructions(self, client: TestClient, auth_headers: dict):
         """Test that OLMo instruct model follows instructions."""
         payload = {
             "model": "allenai/olmo-3-7b-instruct",
@@ -299,9 +290,7 @@ class TestAllenAIModelsE2E:
                 assert "prompt_tokens" in data["usage"] or data["usage"] == {}
                 assert "completion_tokens" in data["usage"] or data["usage"] == {}
 
-    def test_allenai_model_invalid_should_fail(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_allenai_model_invalid_should_fail(self, client: TestClient, auth_headers: dict):
         """Test that invalid AllenAI model ID returns appropriate error."""
         payload = {
             "model": "allenai/invalid-model-name",
@@ -323,9 +312,7 @@ class TestAllenAIModelsStreamingE2E:
     """Dedicated streaming tests for AllenAI models."""
 
     @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_streaming_with_custom_params(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_streaming_with_custom_params(self, client: TestClient, auth_headers: dict, model: str):
         """Test streaming with custom temperature and max_tokens."""
         payload = {
             "model": model,
@@ -347,9 +334,7 @@ class TestAllenAIModelsStreamingE2E:
             assert "[DONE]" in response.text
 
     @pytest.mark.parametrize("model", ALLENAI_MODELS)
-    def test_streaming_response_structure(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_streaming_response_structure(self, client: TestClient, auth_headers: dict, model: str):
         """Test that streaming responses have correct SSE structure."""
         payload = {
             "model": model,

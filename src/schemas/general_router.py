@@ -10,9 +10,7 @@ GeneralRouterMode = Literal["balanced", "quality", "cost", "latency"]
 class GeneralRouterSettings(BaseModel):
     """User-configurable settings for general router."""
 
-    use_general_router: bool = Field(
-        default=True, description="Use NotDiamond routing"
-    )
+    use_general_router: bool = Field(default=True, description="Use NotDiamond routing")
 
     optimization_mode: GeneralRouterMode = Field(
         default="balanced", description="Optimization target"
@@ -61,15 +59,9 @@ class RouteTestResponse(BaseModel):
     provider: str = Field(..., description="Provider name")
     mode: str = Field(..., description="Routing mode used")
     routing_latency_ms: float = Field(..., description="Routing decision latency")
-    confidence: float | None = Field(
-        None, description="NotDiamond confidence score (0-1)"
-    )
-    fallback_used: bool = Field(
-        default=False, description="Whether fallback was used"
-    )
-    fallback_reason: str | None = Field(
-        None, description="Reason for fallback if used"
-    )
+    confidence: float | None = Field(None, description="NotDiamond confidence score (0-1)")
+    fallback_used: bool = Field(default=False, description="Whether fallback was used")
+    fallback_reason: str | None = Field(None, description="Reason for fallback if used")
 
 
 class ModelMappingInfo(BaseModel):
@@ -86,9 +78,7 @@ class ModelMappingInfo(BaseModel):
 class RouterStats(BaseModel):
     """General router statistics."""
 
-    notdiamond_enabled: bool = Field(
-        ..., description="Whether NotDiamond client is enabled"
-    )
+    notdiamond_enabled: bool = Field(..., description="Whether NotDiamond client is enabled")
     fallback_models: dict[str, str] = Field(
         default_factory=dict, description="Fallback models per mode"
     )
@@ -102,8 +92,6 @@ class RoutingMetadata(BaseModel):
     selected_model: str = Field(..., description="Selected model ID")
     routing_latency_ms: float = Field(..., description="Routing latency")
     fallback_used: bool = Field(default=False, description="Whether fallback was used")
-    notdiamond_session_id: str | None = Field(
-        None, description="NotDiamond session ID"
-    )
+    notdiamond_session_id: str | None = Field(None, description="NotDiamond session ID")
     confidence: float | None = Field(None, description="Routing confidence")
     fallback_reason: str | None = Field(None, description="Fallback reason if used")

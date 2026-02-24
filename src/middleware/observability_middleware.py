@@ -21,10 +21,6 @@ import time
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-# Pyroscope tag_wrapper is imported lazily inside __call__ via pyroscope_config
-# so the middleware can be loaded even when pyroscope-io is not installed.
-from src.services.pyroscope_config import tag_wrapper as _pyroscope_tag_wrapper
-
 from src.services.prometheus_metrics import (
     APP_NAME,
     fastapi_request_size_bytes,
@@ -35,6 +31,10 @@ from src.services.prometheus_metrics import (
     http_request_duration,
     record_http_response,
 )
+
+# Pyroscope tag_wrapper is imported lazily inside __call__ via pyroscope_config
+# so the middleware can be loaded even when pyroscope-io is not installed.
+from src.services.pyroscope_config import tag_wrapper as _pyroscope_tag_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -88,9 +88,7 @@ class ObservabilityMiddleware:
             request_size = 0
 
         # Increment in-progress requests gauge
-        fastapi_requests_in_progress.labels(
-            app_name=APP_NAME, method=method, path=endpoint
-        ).inc()
+        fastapi_requests_in_progress.labels(app_name=APP_NAME, method=method, path=endpoint).inc()
 
         # Record start time
         start_time = time.time()
@@ -110,12 +108,14 @@ class ObservabilityMiddleware:
                 # Use safe decoding to handle potentially malformed headers
                 response_headers = dict(message.get("headers", []))
                 try:
-                    response_content_length = response_headers.get(
-                        b"content-length", b""
-                    ).decode("utf-8", errors="replace")
-                    content_type = response_headers.get(
-                        b"content-type", b""
-                    ).decode("utf-8", errors="replace").lower()
+                    response_content_length = response_headers.get(b"content-length", b"").decode(
+                        "utf-8", errors="replace"
+                    )
+                    content_type = (
+                        response_headers.get(b"content-type", b"")
+                        .decode("utf-8", errors="replace")
+                        .lower()
+                    )
                 except (AttributeError, UnicodeDecodeError):
                     response_content_length = ""
                     content_type = ""
@@ -128,15 +128,14 @@ class ObservabilityMiddleware:
                 else:
                     # Check if this is a streaming response
                     try:
-                        x_accel = response_headers.get(
-                            b"x-accel-buffering", b""
-                        ).decode("utf-8", errors="replace").lower()
+                        x_accel = (
+                            response_headers.get(b"x-accel-buffering", b"")
+                            .decode("utf-8", errors="replace")
+                            .lower()
+                        )
                     except (AttributeError, UnicodeDecodeError):
                         x_accel = ""
-                    is_streaming = (
-                        "text/event-stream" in content_type
-                        or x_accel == "no"
-                    )
+                    is_streaming = "text/event-stream" in content_type or x_accel == "no"
 
             elif message["type"] == "http.response.body":
                 # Accumulate body size for non-streaming responses
@@ -236,9 +235,7 @@ class ObservabilityMiddleware:
                 # Replace numeric segments with {id}
                 normalized_parts.append("{id}")
             # Check if this looks like a UUID (36 chars: 8-4-4-4-12 hex with hyphens)
-            elif len(part) == 36 and all(
-                c in "0123456789abcdef-" for c in part.lower()
-            ):
+            elif len(part) == 36 and all(c in "0123456789abcdef-" for c in part.lower()):
                 # UUID format detected, replace with {id}
                 normalized_parts.append("{id}")
             # Check if this looks like a hex string ID (hex characters without hyphens)

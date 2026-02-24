@@ -6,9 +6,10 @@ Reference: https://platform.openai.com/docs/api-reference/chat
 """
 
 import json
-import time
 import logging
+import time
 from typing import Any, AsyncIterator
+
 from src.adapters.chat.base import BaseChatAdapter
 from src.schemas.internal.chat import (
     InternalChatRequest,

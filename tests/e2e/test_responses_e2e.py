@@ -35,9 +35,7 @@ class TestResponsesE2E:
             assert len(data["output"]) > 0
             assert "content" in data["output"][0]
 
-    def test_responses_with_all_parameters(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_with_all_parameters(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with all optional parameters."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -101,9 +99,7 @@ class TestResponsesE2E:
             data = response.json()
             assert "output" in data
 
-    def test_responses_with_json_response_format(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_with_json_response_format(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with JSON response format."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -125,9 +121,7 @@ class TestResponsesE2E:
         # Response format may not be supported by all models
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_responses_multimodal_input(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_multimodal_input(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with multimodal input (text + image)."""
         payload = {
             "model": "gpt-4-vision-preview",
@@ -156,9 +150,7 @@ class TestResponsesE2E:
         # Vision models should handle this
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_responses_multiple_input_items(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_multiple_input_items(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with multiple input items."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -181,9 +173,7 @@ class TestResponsesE2E:
             data = response.json()
             assert "output" in data
 
-    def test_responses_missing_api_key(
-        self, client: TestClient, base_responses_payload: dict
-    ):
+    def test_responses_missing_api_key(self, client: TestClient, base_responses_payload: dict):
         """Test responses endpoint without API key."""
         response = client.post(
             "/v1/responses",
@@ -192,9 +182,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 401
 
-    def test_responses_empty_input(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_empty_input(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with empty input array."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -209,9 +197,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_responses_missing_model(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_missing_model(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint without model."""
         payload = {
             "input": [{"role": "user", "content": "Hello"}],
@@ -225,9 +211,7 @@ class TestResponsesE2E:
 
         assert response.status_code == 422  # Validation error
 
-    def test_responses_with_tools(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_with_tools(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with tool definitions."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -253,9 +237,7 @@ class TestResponsesE2E:
         # Responses tests may fail with various errors if backend doesn't support parameters or auth fails
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_responses_very_long_input(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_very_long_input(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with very long input."""
         long_content = "This is a test. " * 1000
 
@@ -272,9 +254,7 @@ class TestResponsesE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503, 413]
 
-    def test_responses_default_max_tokens(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_default_max_tokens(self, client: TestClient, auth_headers: dict):
         """Test that max_tokens defaults to 950."""
         payload = {
             "model": "gpt-3.5-turbo",
@@ -295,9 +275,7 @@ class TestResponsesE2E:
         if "usage" in data:
             assert data["usage"]["output_tokens"] <= 950
 
-    def test_responses_with_featherless_provider(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_with_featherless_provider(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with Featherless provider."""
         payload = {
             "model": "meta-llama/llama-2-70b-chat",
@@ -313,9 +291,7 @@ class TestResponsesE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_responses_with_fireworks_provider(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_responses_with_fireworks_provider(self, client: TestClient, auth_headers: dict):
         """Test responses endpoint with Fireworks provider."""
         payload = {
             "model": "deepseek-ai/deepseek-v3",

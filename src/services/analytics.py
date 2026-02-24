@@ -17,7 +17,7 @@ Provides analytics for:
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -119,7 +119,9 @@ class AnalyticsService:
 
             for user in result.data:
                 try:
-                    reg_date = datetime.fromisoformat(user["registration_date"].replace("Z", "+00:00"))
+                    reg_date = datetime.fromisoformat(
+                        user["registration_date"].replace("Z", "+00:00")
+                    )
                     updated_at = datetime.fromisoformat(user["updated_at"].replace("Z", "+00:00"))
                     days = (updated_at - reg_date).days
                     total_days += days
@@ -198,9 +200,7 @@ class AnalyticsService:
             logger.error(f"Failed to get cost by provider: {e}", exc_info=True)
             return {"error": str(e), "providers": {}}
 
-    async def get_latency_trends(
-        self, provider: str, hours: int = 24
-    ) -> dict[str, Any]:
+    async def get_latency_trends(self, provider: str, hours: int = 24) -> dict[str, Any]:
         """
         Get latency trends for a provider over time.
 
@@ -305,9 +305,7 @@ class AnalyticsService:
             logger.error(f"Failed to get error rate by model: {e}", exc_info=True)
             return {"error": str(e)}
 
-    async def get_token_efficiency(
-        self, provider: str, model: str
-    ) -> dict[str, Any]:
+    async def get_token_efficiency(self, provider: str, model: str) -> dict[str, Any]:
         """
         Get token efficiency metrics (cost per token, tokens per request).
 
@@ -377,22 +375,28 @@ class AnalyticsService:
 
             providers = []
             for row in result.data:
-                providers.append({
-                    "provider": row["provider"],
-                    "total_requests": row["total_requests"],
-                    "successful_requests": row["successful_requests"],
-                    "failed_requests": row["failed_requests"],
-                    "avg_latency_ms": float(row["avg_latency_ms"]) if row["avg_latency_ms"] else 0,
-                    "total_cost": float(row["total_cost"]),
-                    "total_tokens": row["total_tokens"],
-                    "avg_error_rate": float(row["avg_error_rate"]) if row["avg_error_rate"] else 0,
-                    "unique_models": row["unique_models"],
-                    "success_rate": (
-                        row["successful_requests"] / row["total_requests"]
-                        if row["total_requests"] > 0
-                        else 0
-                    ),
-                })
+                providers.append(
+                    {
+                        "provider": row["provider"],
+                        "total_requests": row["total_requests"],
+                        "successful_requests": row["successful_requests"],
+                        "failed_requests": row["failed_requests"],
+                        "avg_latency_ms": (
+                            float(row["avg_latency_ms"]) if row["avg_latency_ms"] else 0
+                        ),
+                        "total_cost": float(row["total_cost"]),
+                        "total_tokens": row["total_tokens"],
+                        "avg_error_rate": (
+                            float(row["avg_error_rate"]) if row["avg_error_rate"] else 0
+                        ),
+                        "unique_models": row["unique_models"],
+                        "success_rate": (
+                            row["successful_requests"] / row["total_requests"]
+                            if row["total_requests"] > 0
+                            else 0
+                        ),
+                    }
+                )
 
             # Sort by total requests descending
             providers.sort(key=lambda x: x["total_requests"], reverse=True)
@@ -441,14 +445,16 @@ class AnalyticsService:
                 avg_cost = sum(costs) / len(costs) if costs else 0
                 for i, hour_data in enumerate(hours):
                     if hour_data["total_cost_credits"] > avg_cost * 2 and avg_cost > 0:
-                        anomalies.append({
-                            "type": "cost_spike",
-                            "provider": provider,
-                            "hour": hour_data["hour"],
-                            "value": hour_data["total_cost_credits"],
-                            "expected": avg_cost,
-                            "severity": "warning",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "cost_spike",
+                                "provider": provider,
+                                "hour": hour_data["hour"],
+                                "value": hour_data["total_cost_credits"],
+                                "expected": avg_cost,
+                                "severity": "warning",
+                            }
+                        )
 
                 # Check for latency spikes
                 latencies = [h["avg_latency_ms"] for h in hours if h["avg_latency_ms"]]
@@ -459,26 +465,32 @@ class AnalyticsService:
                         and hour_data["avg_latency_ms"] > avg_latency * 2
                         and avg_latency > 0
                     ):
-                        anomalies.append({
-                            "type": "latency_spike",
-                            "provider": provider,
-                            "hour": hour_data["hour"],
-                            "value": hour_data["avg_latency_ms"],
-                            "expected": avg_latency,
-                            "severity": "warning",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "latency_spike",
+                                "provider": provider,
+                                "hour": hour_data["hour"],
+                                "value": hour_data["avg_latency_ms"],
+                                "expected": avg_latency,
+                                "severity": "warning",
+                            }
+                        )
 
                 # Check for error rate increases (>10%)
                 for hour_data in hours:
                     if hour_data["error_rate"] and hour_data["error_rate"] > 0.10:
-                        anomalies.append({
-                            "type": "high_error_rate",
-                            "provider": provider,
-                            "hour": hour_data["hour"],
-                            "value": hour_data["error_rate"],
-                            "expected": 0.05,  # Normal is <5%
-                            "severity": "critical" if hour_data["error_rate"] > 0.25 else "warning",
-                        })
+                        anomalies.append(
+                            {
+                                "type": "high_error_rate",
+                                "provider": provider,
+                                "hour": hour_data["hour"],
+                                "value": hour_data["error_rate"],
+                                "expected": 0.05,  # Normal is <5%
+                                "severity": (
+                                    "critical" if hour_data["error_rate"] > 0.25 else "warning"
+                                ),
+                            }
+                        )
 
             return anomalies
 

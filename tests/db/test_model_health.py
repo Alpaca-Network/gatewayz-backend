@@ -5,8 +5,9 @@ These tests verify the upsert behavior and race condition handling
 for the model_health_tracking table.
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from postgrest.exceptions import APIError
 
 
@@ -152,8 +153,8 @@ class TestRecordModelCall:
         mock_get_client.return_value = mock_client
 
         # Mock table not found error
-        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.side_effect = (
-            APIError({"message": "Could not find the table", "code": "PGRST205"})
+        mock_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.side_effect = APIError(
+            {"message": "Could not find the table", "code": "PGRST205"}
         )
 
         result = record_model_call(
@@ -182,13 +183,11 @@ class TestRecordModelCall:
         )
 
         # Mock duplicate key error on upsert (simulating race condition)
-        mock_client.table.return_value.upsert.return_value.execute.side_effect = (
-            APIError(
-                {
-                    "message": "duplicate key value violates unique constraint",
-                    "code": "23505",
-                }
-            )
+        mock_client.table.return_value.upsert.return_value.execute.side_effect = APIError(
+            {
+                "message": "duplicate key value violates unique constraint",
+                "code": "23505",
+            }
         )
 
         result = record_model_call(

@@ -9,13 +9,13 @@ Tests cover:
 - Error handling and retry behavior
 """
 
-import pytest
+from datetime import UTC, datetime, timezone
 from unittest.mock import Mock, patch
-from datetime import datetime, timezone, UTC
+
+import pytest
 from httpcore import LocalProtocolError, RemoteProtocolError
 
 from src.db.payments import create_payment, update_payment_status
-
 
 # ============================================================
 # FIXTURES
@@ -309,9 +309,7 @@ class TestUpdatePaymentStatusWithRetry:
     @patch("src.db.payments.execute_with_retry")
     def test_update_payment_status_remote_protocol_error(self, mock_execute_retry):
         """Test RemoteProtocolError during status update"""
-        mock_execute_retry.side_effect = RemoteProtocolError(
-            "ConnectionTerminated: error_code=9"
-        )
+        mock_execute_retry.side_effect = RemoteProtocolError("ConnectionTerminated: error_code=9")
 
         payment = update_payment_status(payment_id=1, status="completed")
 
@@ -480,9 +478,7 @@ class TestPaymentErrorHandling:
 
     @patch("src.db.payments.execute_with_retry")
     @patch("src.db.payments.get_supabase_client")
-    def test_get_payment_not_found(
-        self, mock_get_client, mock_execute_retry, mock_supabase_client
-    ):
+    def test_get_payment_not_found(self, mock_get_client, mock_execute_retry, mock_supabase_client):
         """Test get_payment when payment not found"""
         client, table_mock = mock_supabase_client
         mock_get_client.return_value = client

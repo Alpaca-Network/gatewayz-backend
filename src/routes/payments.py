@@ -6,7 +6,7 @@ Endpoints for handling Stripe webhooks and payment operations
 
 import inspect
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -647,16 +647,20 @@ async def get_current_subscription(
             "subscription_id": subscription.subscription_id,
             "status": subscription.status,
             "tier": subscription.tier,
-            "current_period_start": subscription.current_period_start.isoformat()
-            if subscription.current_period_start
-            else None,
-            "current_period_end": subscription.current_period_end.isoformat()
-            if subscription.current_period_end
-            else None,
+            "current_period_start": (
+                subscription.current_period_start.isoformat()
+                if subscription.current_period_start
+                else None
+            ),
+            "current_period_end": (
+                subscription.current_period_end.isoformat()
+                if subscription.current_period_end
+                else None
+            ),
             "cancel_at_period_end": subscription.cancel_at_period_end,
-            "canceled_at": subscription.canceled_at.isoformat()
-            if subscription.canceled_at
-            else None,
+            "canceled_at": (
+                subscription.canceled_at.isoformat() if subscription.canceled_at else None
+            ),
             "product_id": subscription.product_id,
             "price_id": subscription.price_id,
         }
@@ -713,9 +717,7 @@ async def upgrade_subscription(
             "status": result.status,
             "current_tier": result.current_tier,
             "message": result.message,
-            "effective_date": result.effective_date.isoformat()
-            if result.effective_date
-            else None,
+            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
             "proration_amount": result.proration_amount,
         }
 
@@ -775,9 +777,7 @@ async def downgrade_subscription(
             "status": result.status,
             "current_tier": result.current_tier,
             "message": result.message,
-            "effective_date": result.effective_date.isoformat()
-            if result.effective_date
-            else None,
+            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
             "proration_amount": result.proration_amount,
         }
 
@@ -787,9 +787,7 @@ async def downgrade_subscription(
 
     except Exception as e:
         logger.error(f"Error downgrading subscription: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to downgrade subscription: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to downgrade subscription: {str(e)}")
 
 
 @router.post("/subscription/cancel", response_model=dict[str, Any])
@@ -841,9 +839,7 @@ async def cancel_subscription(
             "status": result.status,
             "current_tier": result.current_tier,
             "message": result.message,
-            "effective_date": result.effective_date.isoformat()
-            if result.effective_date
-            else None,
+            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
         }
 
     except ValueError as e:

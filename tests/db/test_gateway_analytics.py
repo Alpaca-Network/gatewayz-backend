@@ -4,13 +4,15 @@ Comprehensive tests for gateway_analytics database module
 Tests use properly spec'd mocks to catch API mismatches and include
 meaningful assertions to verify actual behavior.
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, create_autospec
+
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, create_autospec, patch
+
+import pytest
 
 from src.db.gateway_analytics import (
-    get_provider_stats,
     get_gateway_stats,
+    get_provider_stats,
 )
 
 
@@ -52,7 +54,7 @@ class TestGetProviderStats:
                 "tokens": 1000,
                 "cost": 0.03,
                 "created_at": "2024-01-01",
-                "metadata": {"gateway": "openrouter"}
+                "metadata": {"gateway": "openrouter"},
             }
         ]
         execute_mock.data = mock_data

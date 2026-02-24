@@ -113,9 +113,7 @@ class SelectiveGZipMiddleware:
                             compressed_body = self._compress(full_body)
 
                             # Update headers
-                            headers = MutableHeaders(
-                                raw=list(initial_message.get("headers", []))
-                            )
+                            headers = MutableHeaders(raw=list(initial_message.get("headers", [])))
                             headers["content-encoding"] = "gzip"
                             headers["content-length"] = str(len(compressed_body))
                             # Remove vary header conflicts
@@ -152,8 +150,6 @@ class SelectiveGZipMiddleware:
     def _compress(self, data: bytes) -> bytes:
         """Compress data using gzip."""
         buffer = io.BytesIO()
-        with gzip.GzipFile(
-            mode="wb", fileobj=buffer, compresslevel=self.compresslevel
-        ) as f:
+        with gzip.GzipFile(mode="wb", fileobj=buffer, compresslevel=self.compresslevel) as f:
             f.write(data)
         return buffer.getvalue()

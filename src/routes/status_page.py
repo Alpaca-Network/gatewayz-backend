@@ -6,7 +6,7 @@ Optimized for performance with caching and pre-aggregated data.
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -27,11 +27,7 @@ async def get_overall_status():
     """
     try:
         # Get overall system health from view
-        response = (
-            supabase.table("provider_health_current")
-            .select("*")
-            .execute()
-        )
+        response = supabase.table("provider_health_current").select("*").execute()
 
         providers = response.data or []
 
@@ -103,9 +99,7 @@ async def get_overall_status():
 
         # Calculate gateway health percentage
         gateway_health_percentage = (
-            round((healthy_gateways / total_gateways) * 100, 1)
-            if total_gateways > 0
-            else 0.0
+            round((healthy_gateways / total_gateways) * 100, 1) if total_gateways > 0 else 0.0
         )
 
         return {
@@ -137,12 +131,7 @@ async def get_providers_status():
     Returns health status for each provider/gateway combination.
     """
     try:
-        response = (
-            supabase.table("provider_health_current")
-            .select("*")
-            .order("provider")
-            .execute()
-        )
+        response = supabase.table("provider_health_current").select("*").order("provider").execute()
 
         providers = response.data or []
 
@@ -160,18 +149,20 @@ async def get_providers_status():
                 )
                 healthy = total
 
-            formatted.append({
-                "name": provider["provider"],
-                "gateway": provider["gateway"],
-                "status": provider["status_indicator"],
-                "uptime_24h": round(provider["avg_uptime_24h"] or 0, 2),
-                "uptime_7d": round(provider["avg_uptime_7d"] or 0, 2),
-                "total_models": total,
-                "healthy_models": healthy,
-                "offline_models": provider["offline_models"],
-                "avg_response_time_ms": round(provider["avg_response_time_ms"] or 0, 0),
-                "last_checked": provider["last_checked_at"],
-            })
+            formatted.append(
+                {
+                    "name": provider["provider"],
+                    "gateway": provider["gateway"],
+                    "status": provider["status_indicator"],
+                    "uptime_24h": round(provider["avg_uptime_24h"] or 0, 2),
+                    "uptime_7d": round(provider["avg_uptime_7d"] or 0, 2),
+                    "total_models": total,
+                    "healthy_models": healthy,
+                    "offline_models": provider["offline_models"],
+                    "avg_response_time_ms": round(provider["avg_response_time_ms"] or 0, 0),
+                    "last_checked": provider["last_checked_at"],
+                }
+            )
 
         return formatted
 
@@ -218,22 +209,24 @@ async def get_models_status(
         # Format for frontend
         formatted = []
         for model in models:
-            formatted.append({
-                "model_id": model["model"],
-                "provider": model["provider"],
-                "gateway": model["gateway"],
-                "status": model["status_indicator"],
-                "tier": model["monitoring_tier"],
-                "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-                "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
-                "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
-                "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
-                "last_checked": model["last_called_at"],
-                "last_success": model["last_success_at"],
-                "last_failure": model["last_failure_at"],
-                "circuit_breaker_state": model["circuit_breaker_state"],
-                "active_incidents": model["active_incidents_count"],
-            })
+            formatted.append(
+                {
+                    "model_id": model["model"],
+                    "provider": model["provider"],
+                    "gateway": model["gateway"],
+                    "status": model["status_indicator"],
+                    "tier": model["monitoring_tier"],
+                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
+                    "uptime_7d": round(model["uptime_percentage_7d"] or 0, 2),
+                    "uptime_30d": round(model["uptime_percentage_30d"] or 0, 2),
+                    "avg_response_time_ms": round(model["average_response_time_ms"] or 0, 0),
+                    "last_checked": model["last_called_at"],
+                    "last_success": model["last_success_at"],
+                    "last_failure": model["last_failure_at"],
+                    "circuit_breaker_state": model["circuit_breaker_state"],
+                    "active_incidents": model["active_incidents_count"],
+                }
+            )
 
         return formatted
 
@@ -338,22 +331,24 @@ async def get_incidents(
                 started = datetime.fromisoformat(incident["started_at"])
                 duration = int((datetime.now(UTC) - started).total_seconds())
 
-            formatted.append({
-                "id": incident["id"],
-                "provider": incident["provider"],
-                "model": incident["model"],
-                "gateway": incident["gateway"],
-                "type": incident["incident_type"],
-                "severity": incident["severity"],
-                "status": incident["status"],
-                "started_at": incident["started_at"],
-                "resolved_at": incident["resolved_at"],
-                "duration_seconds": duration,
-                "duration_human": _format_duration(duration) if duration else None,
-                "error_message": incident["error_message"],
-                "error_count": incident["error_count"],
-                "resolution_notes": incident.get("resolution_notes"),
-            })
+            formatted.append(
+                {
+                    "id": incident["id"],
+                    "provider": incident["provider"],
+                    "model": incident["model"],
+                    "gateway": incident["gateway"],
+                    "type": incident["incident_type"],
+                    "severity": incident["severity"],
+                    "status": incident["status"],
+                    "started_at": incident["started_at"],
+                    "resolved_at": incident["resolved_at"],
+                    "duration_seconds": duration,
+                    "duration_human": _format_duration(duration) if duration else None,
+                    "error_message": incident["error_message"],
+                    "error_count": incident["error_count"],
+                    "resolution_notes": incident.get("resolution_notes"),
+                }
+            )
 
         return formatted
 
@@ -409,14 +404,16 @@ async def get_model_uptime_history(
         # Format for charting
         points = []
         for point in data:
-            points.append({
-                "timestamp": point["period_start"],
-                "uptime_percentage": round(point["uptime_percentage"] or 0, 2),
-                "avg_response_time_ms": round(point["avg_response_time_ms"] or 0, 0),
-                "total_checks": point["total_checks"],
-                "successful_checks": point["successful_checks"],
-                "failed_checks": point["failed_checks"],
-            })
+            points.append(
+                {
+                    "timestamp": point["period_start"],
+                    "uptime_percentage": round(point["uptime_percentage"] or 0, 2),
+                    "avg_response_time_ms": round(point["avg_response_time_ms"] or 0, 0),
+                    "total_checks": point["total_checks"],
+                    "successful_checks": point["successful_checks"],
+                    "failed_checks": point["failed_checks"],
+                }
+            )
 
         return {
             "provider": provider,
@@ -459,14 +456,16 @@ async def search_models(
 
         formatted = []
         for model in models:
-            formatted.append({
-                "model_id": model["model"],
-                "provider": model["provider"],
-                "gateway": model["gateway"],
-                "status": model["status_indicator"],
-                "tier": model["monitoring_tier"],
-                "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
-            })
+            formatted.append(
+                {
+                    "model_id": model["model"],
+                    "provider": model["provider"],
+                    "gateway": model["gateway"],
+                    "status": model["status_indicator"],
+                    "tier": model["monitoring_tier"],
+                    "uptime_24h": round(model["uptime_percentage_24h"] or 0, 2),
+                }
+            )
 
         return formatted
 

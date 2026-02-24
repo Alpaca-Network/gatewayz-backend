@@ -10,16 +10,17 @@ Tests cover:
 - Relationships and constraints
 """
 
-import pytest
-from unittest.mock import Mock, patch
 from datetime import datetime
+from unittest.mock import Mock, patch
 
-from src.db.referral import generate_referral_code, User, CouponUsage, Purchase
+import pytest
 
+from src.db.referral import CouponUsage, Purchase, User, generate_referral_code
 
 # ============================================================
 # TEST: Referral Code Generation
 # ============================================================
+
 
 class TestReferralCodeGeneration:
     """Test referral code generation"""
@@ -46,15 +47,16 @@ class TestReferralCodeGeneration:
 # TEST: User Model
 # ============================================================
 
+
 class TestUserModel:
     """Test User model"""
 
     def test_user_init(self):
         """Test User initialization"""
-        user = User(email='test@example.com', username='testuser')
+        user = User(email="test@example.com", username="testuser")
 
-        assert user.email == 'test@example.com'
-        assert user.username == 'testuser'
+        assert user.email == "test@example.com"
+        assert user.username == "testuser"
         assert user.referral_code is not None
         assert len(user.referral_code) == 8
         assert user.referred_by_code is None
@@ -63,37 +65,33 @@ class TestUserModel:
 
     def test_user_init_with_referral(self):
         """Test User initialization with referral code"""
-        user = User(
-            email='test@example.com',
-            username='testuser',
-            referred_by_code='REFER123'
-        )
+        user = User(email="test@example.com", username="testuser", referred_by_code="REFER123")
 
-        assert user.referred_by_code == 'REFER123'
+        assert user.referred_by_code == "REFER123"
 
     def test_user_to_dict(self):
         """Test User to_dict method"""
-        user = User(email='test@example.com', username='testuser')
+        user = User(email="test@example.com", username="testuser")
         user.id = 1
         user.created_at = datetime(2025, 1, 1)
 
-        with patch.object(user, 'get_remaining_referral_uses', return_value=5):
+        with patch.object(user, "get_remaining_referral_uses", return_value=5):
             result = user.to_dict()
 
-            assert result['id'] == 1
-            assert result['email'] == 'test@example.com'
-            assert result['username'] == 'testuser'
-            assert result['credits'] == 0.0
-            assert result['has_made_first_purchase'] is False
-            assert result['remaining_referral_uses'] == 5
-            assert 'created_at' in result
+            assert result["id"] == 1
+            assert result["email"] == "test@example.com"
+            assert result["username"] == "testuser"
+            assert result["credits"] == 0.0
+            assert result["has_made_first_purchase"] is False
+            assert result["remaining_referral_uses"] == 5
+            assert "created_at" in result
 
     def test_user_get_remaining_referral_uses_zero_used(self):
         """Test remaining uses when none used"""
-        user = User(email='test@example.com', username='testuser')
-        user.referral_code = 'TEST1234'
+        user = User(email="test@example.com", username="testuser")
+        user.referral_code = "TEST1234"
 
-        with patch('src.db.referral.CouponUsage') as mock_coupon:
+        with patch("src.db.referral.CouponUsage") as mock_coupon:
             mock_coupon.query.filter_by().count.return_value = 0
 
             remaining = user.get_remaining_referral_uses()
@@ -101,10 +99,10 @@ class TestUserModel:
 
     def test_user_get_remaining_referral_uses_some_used(self):
         """Test remaining uses when partially used"""
-        user = User(email='test@example.com', username='testuser')
-        user.referral_code = 'TEST1234'
+        user = User(email="test@example.com", username="testuser")
+        user.referral_code = "TEST1234"
 
-        with patch('src.db.referral.CouponUsage') as mock_coupon:
+        with patch("src.db.referral.CouponUsage") as mock_coupon:
             mock_coupon.query.filter_by().count.return_value = 3
 
             remaining = user.get_remaining_referral_uses()
@@ -112,10 +110,10 @@ class TestUserModel:
 
     def test_user_get_remaining_referral_uses_max_used(self):
         """Test remaining uses when max reached"""
-        user = User(email='test@example.com', username='testuser')
-        user.referral_code = 'TEST1234'
+        user = User(email="test@example.com", username="testuser")
+        user.referral_code = "TEST1234"
 
-        with patch('src.db.referral.CouponUsage') as mock_coupon:
+        with patch("src.db.referral.CouponUsage") as mock_coupon:
             mock_coupon.query.filter_by().count.return_value = 5
 
             remaining = user.get_remaining_referral_uses()
@@ -123,10 +121,10 @@ class TestUserModel:
 
     def test_user_get_remaining_referral_uses_over_max(self):
         """Test remaining uses when over max (edge case)"""
-        user = User(email='test@example.com', username='testuser')
-        user.referral_code = 'TEST1234'
+        user = User(email="test@example.com", username="testuser")
+        user.referral_code = "TEST1234"
 
-        with patch('src.db.referral.CouponUsage') as mock_coupon:
+        with patch("src.db.referral.CouponUsage") as mock_coupon:
             mock_coupon.query.filter_by().count.return_value = 10
 
             remaining = user.get_remaining_referral_uses()
@@ -137,6 +135,7 @@ class TestUserModel:
 # TEST: CouponUsage Model
 # ============================================================
 
+
 class TestCouponUsageModel:
     """Test CouponUsage model"""
 
@@ -144,7 +143,7 @@ class TestCouponUsageModel:
         """Test CouponUsage to_dict method"""
         coupon = CouponUsage()
         coupon.id = 1
-        coupon.referral_code = 'TEST1234'
+        coupon.referral_code = "TEST1234"
         coupon.user_id = 100
         coupon.referrer_id = 200
         coupon.purchase_amount = 50.0
@@ -154,14 +153,14 @@ class TestCouponUsageModel:
 
         result = coupon.to_dict()
 
-        assert result['id'] == 1
-        assert result['referral_code'] == 'TEST1234'
-        assert result['user_id'] == 100
-        assert result['referrer_id'] == 200
-        assert result['purchase_amount'] == 50.0
-        assert result['bonus_amount'] == 10.0
-        assert result['is_valid'] is True
-        assert 'used_at' in result
+        assert result["id"] == 1
+        assert result["referral_code"] == "TEST1234"
+        assert result["user_id"] == 100
+        assert result["referrer_id"] == 200
+        assert result["purchase_amount"] == 50.0
+        assert result["bonus_amount"] == 10.0
+        assert result["is_valid"] is True
+        assert "used_at" in result
 
     def test_coupon_usage_default_bonus(self):
         """Test CouponUsage default bonus amount"""
@@ -178,6 +177,7 @@ class TestCouponUsageModel:
 # TEST: Purchase Model
 # ============================================================
 
+
 class TestPurchaseModel:
     """Test Purchase model"""
 
@@ -188,17 +188,17 @@ class TestPurchaseModel:
         purchase.user_id = 100
         purchase.amount = 99.99
         purchase.referral_bonus_applied = True
-        purchase.referral_code_used = 'TEST1234'
+        purchase.referral_code_used = "TEST1234"
         purchase.created_at = datetime(2025, 1, 1)
 
         result = purchase.to_dict()
 
-        assert result['id'] == 1
-        assert result['user_id'] == 100
-        assert result['amount'] == 99.99
-        assert result['referral_bonus_applied'] is True
-        assert result['referral_code_used'] == 'TEST1234'
-        assert 'created_at' in result
+        assert result["id"] == 1
+        assert result["user_id"] == 100
+        assert result["amount"] == 99.99
+        assert result["referral_bonus_applied"] is True
+        assert result["referral_code_used"] == "TEST1234"
+        assert "created_at" in result
 
     def test_purchase_default_referral_bonus(self):
         """Test Purchase default referral bonus"""

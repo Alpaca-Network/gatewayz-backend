@@ -1,9 +1,10 @@
 """
 Comprehensive tests for Providers service
 """
-import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 
 
 class TestProviders:
@@ -12,9 +13,11 @@ class TestProviders:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.providers
+
         assert src.services.providers is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import providers
-        assert hasattr(providers, '__name__')
+
+        assert hasattr(providers, "__name__")

@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -412,14 +412,10 @@ async def set_admin_rate_limit_config(
         config_dict = request.config.model_dump()
 
         # Update rate limit configuration
-        success = await asyncio.to_thread(
-            update_rate_limit_config, request.api_key, config_dict
-        )
+        success = await asyncio.to_thread(update_rate_limit_config, request.api_key, config_dict)
 
         if not success:
-            raise HTTPException(
-                status_code=500, detail="Failed to update rate limit configuration"
-            )
+            raise HTTPException(status_code=500, detail="Failed to update rate limit configuration")
 
         logger.info(
             f"Admin {admin_user.get('username')} updated rate limits for key {request.api_key[:15]}..."
@@ -462,9 +458,7 @@ async def reset_rate_limit_config(
         )
 
         if not success:
-            raise HTTPException(
-                status_code=500, detail="Failed to reset rate limit configuration"
-            )
+            raise HTTPException(status_code=500, detail="Failed to reset rate limit configuration")
 
         logger.info(
             f"Admin {admin_user.get('username')} reset rate limits to defaults for key {api_key[:15]}..."
@@ -560,11 +554,21 @@ async def delete_rate_limits(
 
         try:
             # Get API key ID and user_id
-            key_record = client.table("api_keys_new").select("id, user_id").eq("api_key", target_api_key).execute()
+            key_record = (
+                client.table("api_keys_new")
+                .select("id, user_id")
+                .eq("api_key", target_api_key)
+                .execute()
+            )
             if key_record.data and len(key_record.data) > 0:
                 api_key_id = key_record.data[0]["id"]
                 user_id = key_record.data[0]["user_id"]
-                result = client.table("rate_limit_configs").delete().eq("api_key_id", api_key_id).execute()
+                result = (
+                    client.table("rate_limit_configs")
+                    .delete()
+                    .eq("api_key_id", api_key_id)
+                    .execute()
+                )
                 deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
         except Exception as e:
             logger.debug(f"Could not delete from rate_limit_configs table: {e}")
@@ -574,10 +578,12 @@ async def delete_rate_limits(
         try:
             result = (
                 client.table("api_keys_new")
-                .update({
-                    "rate_limit_config": None,
-                    "updated_at": datetime.now(UTC).isoformat(),
-                })
+                .update(
+                    {
+                        "rate_limit_config": None,
+                        "updated_at": datetime.now(UTC).isoformat(),
+                    }
+                )
                 .eq("api_key", target_api_key)
                 .execute()
             )
@@ -588,17 +594,19 @@ async def delete_rate_limits(
         # Add audit log entry
         if user_id and api_key_id:
             try:
-                client.table("api_key_audit_logs").insert({
-                    "user_id": user_id,
-                    "api_key_id": api_key_id,
-                    "action": "rate_limits_deleted",
-                    "details": {
-                        "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
-                        "reset_in_api_keys": reset_in_api_keys,
-                        "admin_user": admin_user.get('username'),
-                    },
-                    "timestamp": datetime.now(UTC).isoformat(),
-                }).execute()
+                client.table("api_key_audit_logs").insert(
+                    {
+                        "user_id": user_id,
+                        "api_key_id": api_key_id,
+                        "action": "rate_limits_deleted",
+                        "details": {
+                            "deleted_from_rate_limit_configs": deleted_from_rate_limit_configs,
+                            "reset_in_api_keys": reset_in_api_keys,
+                            "admin_user": admin_user.get("username"),
+                        },
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    }
+                ).execute()
             except Exception as audit_error:
                 logger.debug(f"Failed to create audit log: {audit_error}")
 
@@ -652,6 +660,7 @@ async def get_users_rate_limits(
     - List of users with their rate limit configurations
     - Pagination info
     """
+
     def _fetch_users_rate_limits_sync(
         q_limit: int, q_offset: int, q_user_id: int | None, q_has_custom: bool | None
     ) -> dict:
@@ -726,16 +735,18 @@ async def get_users_rate_limits(
                 except Exception:
                     pass
 
-            users_rate_limits.append({
-                "key_id": key["id"],
-                "api_key": key["api_key"][:15] + "...",
-                "key_name": key.get("key_name"),
-                "user_id": key["user_id"],
-                "environment_tag": key.get("environment_tag"),
-                "has_custom_config": key_has_custom,
-                "config": config,
-                "created_at": key.get("created_at"),
-            })
+            users_rate_limits.append(
+                {
+                    "key_id": key["id"],
+                    "api_key": key["api_key"][:15] + "...",
+                    "key_name": key.get("key_name"),
+                    "user_id": key["user_id"],
+                    "environment_tag": key.get("environment_tag"),
+                    "has_custom_config": key_has_custom,
+                    "config": config,
+                    "created_at": key.get("created_at"),
+                }
+            )
 
         return {"users": users_rate_limits, "has_more": q_has_more}
 

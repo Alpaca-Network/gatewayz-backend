@@ -27,14 +27,12 @@ MODEL_MAX_TOKENS = {
     "gpt-4o": 4096,
     "gpt-4o-mini": 16384,
     "gpt-3.5-turbo": 4096,
-
     # Claude models
     "claude-3-opus": 4096,
     "claude-3-sonnet": 4096,
     "claude-3-haiku": 4096,
     "claude-3-5-sonnet": 8192,
     "claude-sonnet-4": 8192,
-
     # Other models
     "llama-3": 8192,
     "llama-3.1": 128000,

@@ -2,17 +2,18 @@
 Tests for provider credit monitoring service.
 """
 
-import pytest
-from datetime import datetime, timezone, timedelta, UTC
+from datetime import UTC, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from src.services.provider_credit_monitor import (
-    check_openrouter_credits,
-    check_all_provider_credits,
-    send_low_credit_alert,
-    clear_credit_cache,
-    _determine_credit_status,
     CREDIT_THRESHOLDS,
+    _determine_credit_status,
+    check_all_provider_credits,
+    check_openrouter_credits,
+    clear_credit_cache,
+    send_low_credit_alert,
 )
 
 
@@ -48,11 +49,7 @@ class TestOpenRouterCreditCheck:
     async def test_successful_credit_check(self):
         """Test successful credit balance check"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data": {
-                "limit_remaining": 123.45
-            }
-        }
+        mock_response.json.return_value = {"data": {"limit_remaining": 123.45}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
@@ -72,11 +69,7 @@ class TestOpenRouterCreditCheck:
     async def test_credit_check_with_warning_balance(self):
         """Test credit check with low balance triggering warning"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data": {
-                "limit_remaining": 15.0
-            }
-        }
+        mock_response.json.return_value = {"data": {"limit_remaining": 15.0}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
@@ -93,11 +86,7 @@ class TestOpenRouterCreditCheck:
     async def test_credit_check_with_critical_balance(self):
         """Test credit check with very low balance triggering critical"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data": {
-                "limit_remaining": 2.0
-            }
-        }
+        mock_response.json.return_value = {"data": {"limit_remaining": 2.0}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
@@ -126,7 +115,7 @@ class TestOpenRouterCreditCheck:
     @pytest.mark.asyncio
     async def test_credit_check_http_error(self):
         """Test credit check handles HTTP errors"""
-        from httpx import HTTPStatusError, Response, Request
+        from httpx import HTTPStatusError, Request, Response
 
         mock_request = Request("GET", "https://test.com")
         mock_response = Response(500, request=mock_request)
@@ -134,9 +123,7 @@ class TestOpenRouterCreditCheck:
         with patch("httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
                 side_effect=HTTPStatusError(
-                    "Server error",
-                    request=mock_request,
-                    response=mock_response
+                    "Server error", request=mock_request, response=mock_response
                 )
             )
 
@@ -151,11 +138,7 @@ class TestOpenRouterCreditCheck:
     async def test_credit_check_caching(self):
         """Test that credit checks are cached"""
         mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "data": {
-                "limit_remaining": 50.0
-            }
-        }
+        mock_response.json.return_value = {"data": {"limit_remaining": 50.0}}
 
         with patch("httpx.AsyncClient") as mock_client:
             mock_client.return_value.__aenter__.return_value.get = AsyncMock(
@@ -189,7 +172,7 @@ class TestCheckAllProviderCredits:
                 "balance": 100.0,
                 "status": "healthy",
                 "checked_at": datetime.now(UTC),
-                "cached": False
+                "cached": False,
             }
 
             results = await check_all_provider_credits()
@@ -205,9 +188,11 @@ class TestLowCreditAlerts:
     @pytest.mark.asyncio
     async def test_send_critical_alert(self):
         """Test sending critical credit alert"""
-        with patch("src.services.provider_credit_monitor.capture_provider_error") as mock_capture, \
-             patch("src.services.provider_credit_monitor.send_email") as mock_email, \
-             patch("src.services.provider_credit_monitor.Config") as mock_config:
+        with (
+            patch("src.services.provider_credit_monitor.capture_provider_error") as mock_capture,
+            patch("src.services.provider_credit_monitor.send_email") as mock_email,
+            patch("src.services.provider_credit_monitor.Config") as mock_config,
+        ):
 
             mock_config.ADMIN_EMAIL = "admin@test.com"
 
@@ -241,14 +226,8 @@ class TestCreditCacheManagement:
         from src.services.provider_credit_monitor import _credit_balance_cache
 
         # Populate cache
-        _credit_balance_cache["openrouter"] = {
-            "balance": 50.0,
-            "checked_at": datetime.now(UTC)
-        }
-        _credit_balance_cache["portkey"] = {
-            "balance": 100.0,
-            "checked_at": datetime.now(UTC)
-        }
+        _credit_balance_cache["openrouter"] = {"balance": 50.0, "checked_at": datetime.now(UTC)}
+        _credit_balance_cache["portkey"] = {"balance": 100.0, "checked_at": datetime.now(UTC)}
 
         # Clear specific provider
         clear_credit_cache("openrouter")

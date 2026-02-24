@@ -6,7 +6,7 @@ optimal models based on price/performance trade-offs.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 

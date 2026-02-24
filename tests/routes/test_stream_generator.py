@@ -3,10 +3,12 @@
 Tests the stream_generator function from src/routes/chat.py to ensure
 correct behavior for different user scenarios including anonymous users.
 """
+
 import asyncio
 import json
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 
 
 def create_mock_stream_chunks(content_chunks: list[str], model: str = "gpt-3.5-turbo"):
@@ -22,14 +24,11 @@ def create_mock_stream_chunks(content_chunks: list[str], model: str = "gpt-3.5-t
                 choices=[
                     Mock(
                         index=0,
-                        delta=Mock(
-                            role="assistant" if i == 0 else None,
-                            content=content
-                        ),
-                        finish_reason=None
+                        delta=Mock(role="assistant" if i == 0 else None, content=content),
+                        finish_reason=None,
                     )
                 ],
-                usage=None
+                usage=None,
             )
         )
 
@@ -40,18 +39,8 @@ def create_mock_stream_chunks(content_chunks: list[str], model: str = "gpt-3.5-t
             object="chat.completion.chunk",
             created=1234567890,
             model=model,
-            choices=[
-                Mock(
-                    index=0,
-                    delta=Mock(role=None, content=None),
-                    finish_reason="stop"
-                )
-            ],
-            usage=Mock(
-                prompt_tokens=10,
-                completion_tokens=20,
-                total_tokens=30
-            )
+            choices=[Mock(index=0, delta=Mock(role=None, content=None), finish_reason="stop")],
+            usage=Mock(prompt_tokens=10, completion_tokens=20, total_tokens=30),
         )
     )
     return chunks
@@ -74,7 +63,9 @@ def mock_enforce_plan_limits():
 @pytest.fixture
 def mock_process_stream_completion():
     """Mock the background processing function."""
-    with patch("src.routes.chat._process_stream_completion_background", new_callable=AsyncMock) as mock:
+    with patch(
+        "src.routes.chat._process_stream_completion_background", new_callable=AsyncMock
+    ) as mock:
         yield mock
 
 
@@ -202,9 +193,7 @@ class TestStreamGeneratorAuthenticated:
         assert call_args[0][0] == 123  # First arg should be user["id"]
 
     @pytest.mark.asyncio
-    async def test_authenticated_stream_plan_limit_exceeded(
-        self, mock_process_stream_completion
-    ):
+    async def test_authenticated_stream_plan_limit_exceeded(self, mock_process_stream_completion):
         """Test that plan limit exceeded error is properly returned."""
         from src.routes.chat import stream_generator
 

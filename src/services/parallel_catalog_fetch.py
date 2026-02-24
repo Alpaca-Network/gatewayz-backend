@@ -80,7 +80,9 @@ def get_executor() -> ThreadPoolExecutor:
     global _executor
     if _executor is None:
         # Use configurable worker count to avoid overwhelming the database
-        _executor = ThreadPoolExecutor(max_workers=CATALOG_FETCH_WORKERS, thread_name_prefix="catalog_fetch")
+        _executor = ThreadPoolExecutor(
+            max_workers=CATALOG_FETCH_WORKERS, thread_name_prefix="catalog_fetch"
+        )
         logger.info(f"Created catalog fetch thread pool with {CATALOG_FETCH_WORKERS} workers")
     return _executor
 
@@ -170,9 +172,7 @@ def fetch_provider_with_circuit_breaker(
     if retry_deadline is not None:
         remaining = retry_deadline - time.time()
         if remaining > 0:
-            logger.info(
-                f"Skipping {provider} (Retry-After: {remaining:.1f}s remaining)"
-            )
+            logger.info(f"Skipping {provider} (Retry-After: {remaining:.1f}s remaining)")
             return provider, []
         else:
             # Deadline has passed — clear it
@@ -219,12 +219,9 @@ def fetch_provider_with_circuit_breaker(
             category = "rate_limited"
             # PV-L5: Respect Retry-After header when the exception carries one.
             # Try both e.headers (httpx/requests style) and e.response.headers.
-            retry_after_raw = (
-                (getattr(e, "headers", None) or {}).get("Retry-After")
-                or (
-                    getattr(getattr(e, "response", None), "headers", None) or {}
-                ).get("Retry-After")
-            )
+            retry_after_raw = (getattr(e, "headers", None) or {}).get("Retry-After") or (
+                getattr(getattr(e, "response", None), "headers", None) or {}
+            ).get("Retry-After")
             if retry_after_raw:
                 try:
                     retry_after_secs = float(retry_after_raw)
@@ -241,14 +238,20 @@ def fetch_provider_with_circuit_breaker(
                     )
             else:
                 logger.warning(f"Provider {provider} rate-limited (no Retry-After header)")
-        elif status_code in (401, 403) or any(c in error_str for c in ("401", "403", "unauthorized", "forbidden")):
+        elif status_code in (401, 403) or any(
+            c in error_str for c in ("401", "403", "unauthorized", "forbidden")
+        ):
             category = "auth_failure"
-        elif (status_code is not None and 500 <= status_code < 600) or any(c in error_str for c in ("500", "502", "503", "504")):
+        elif (status_code is not None and 500 <= status_code < 600) or any(
+            c in error_str for c in ("500", "502", "503", "504")
+        ):
             category = "server_error"
         else:
             category = "unknown"
 
-        logger.warning(f"Provider {provider} fetch failed: {category} - {e} (elapsed: {elapsed:.2f}s)")
+        logger.warning(
+            f"Provider {provider} fetch failed: {category} - {e} (elapsed: {elapsed:.2f}s)"
+        )
         return provider, []
 
 
@@ -273,7 +276,9 @@ async def fetch_all_providers_parallel(
     results: dict[str, list[dict[str, Any]]] = {}
 
     start_time = time.time()
-    logger.info(f"Starting parallel fetch for {len(providers)} providers (timeout: {overall_timeout}s)")
+    logger.info(
+        f"Starting parallel fetch for {len(providers)} providers (timeout: {overall_timeout}s)"
+    )
 
     # Create futures for all providers
     # Use get_running_loop() instead of deprecated get_event_loop()
@@ -307,7 +312,9 @@ async def fetch_all_providers_parallel(
                     results[provider_name] = models
                 else:
                     # Task didn't complete in time (shouldn't happen with per-provider timeout)
-                    logger.warning(f"Provider {provider} still pending after {overall_timeout}s overall timeout")
+                    logger.warning(
+                        f"Provider {provider} still pending after {overall_timeout}s overall timeout"
+                    )
                     results[provider] = []
                     # Record as failure for circuit breaker
                     breaker = get_provider_circuit_breaker()
@@ -321,9 +328,13 @@ async def fetch_all_providers_parallel(
                     category = "connection_error"
                 elif status_code == 429 or "429" in error_str:
                     category = "rate_limited"
-                elif status_code in (401, 403) or any(c in error_str for c in ("401", "403", "unauthorized", "forbidden")):
+                elif status_code in (401, 403) or any(
+                    c in error_str for c in ("401", "403", "unauthorized", "forbidden")
+                ):
                     category = "auth_failure"
-                elif (status_code is not None and 500 <= status_code < 600) or any(c in error_str for c in ("500", "502", "503", "504")):
+                elif (status_code is not None and 500 <= status_code < 600) or any(
+                    c in error_str for c in ("500", "502", "503", "504")
+                ):
                     category = "server_error"
                 else:
                     category = "unknown"

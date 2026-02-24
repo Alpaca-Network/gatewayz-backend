@@ -1,20 +1,21 @@
 """Tests for Google Vertex client tools extraction and translation"""
 
-import pytest
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Mock vertexai modules before importing our module (needed for lazy imports)
-sys.modules['vertexai'] = MagicMock()
-sys.modules['vertexai.generative_models'] = MagicMock()
-sys.modules['google.protobuf'] = MagicMock()
-sys.modules['google.protobuf.json_format'] = MagicMock()
+sys.modules["vertexai"] = MagicMock()
+sys.modules["vertexai.generative_models"] = MagicMock()
+sys.modules["google.protobuf"] = MagicMock()
+sys.modules["google.protobuf.json_format"] = MagicMock()
 
 from src.config import Config
 from src.services.google_vertex_client import (
-    make_google_vertex_request_openai,
     _translate_openai_tools_to_vertex,
     _translate_tool_choice_to_vertex,
+    make_google_vertex_request_openai,
 )
 
 
@@ -327,11 +328,7 @@ class TestGoogleVertexToolsSupport:
             all_calls.extend(mock_logger.warning.call_args_list)
             all_calls.extend(mock_logger.info.call_args_list)
 
-            tools_logged = any(
-                "tools" in str(call).lower()
-                for call in all_calls
-                if call
-            )
+            tools_logged = any("tools" in str(call).lower() for call in all_calls if call)
             assert tools_logged, "Should log about tools parameter"
 
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
@@ -369,4 +366,3 @@ class TestGoogleVertexToolsSupport:
         # Check that result has expected structure
         assert "choices" in result
         assert "usage" in result
-

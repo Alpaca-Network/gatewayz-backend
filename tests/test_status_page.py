@@ -4,7 +4,7 @@ Tests for the Public Status Page API
 Tests the status page endpoints that provide public health information.
 """
 
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -93,7 +93,9 @@ async def test_get_overall_status(mock_supabase, client, mock_supabase_data):
     # Mock incidents count
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        mock_incidents
+    )
 
     response = client.get("/v1/status/")
 
@@ -113,7 +115,9 @@ async def test_get_providers_status(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/providers endpoint"""
     mock_response = MagicMock()
     mock_response.data = mock_supabase_data["providers"]
-    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = mock_response
+    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = (
+        mock_response
+    )
 
     response = client.get("/v1/status/providers")
 
@@ -330,7 +334,9 @@ async def test_get_stats(mock_supabase, client):
         elif table_name == "model_health_incidents":
             mock_table.select.return_value.execute.return_value = mock_incidents_response
         elif table_name == "model_health_history":
-            mock_table.select.return_value.gte.return_value.execute.return_value = mock_checks_response
+            mock_table.select.return_value.gte.return_value.execute.return_value = (
+                mock_checks_response
+            )
         return mock_table
 
     mock_supabase.table.side_effect = table_side_effect
@@ -455,7 +461,9 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
     # Mock incidents count
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        mock_incidents
+    )
 
     response = client.get("/v1/status/")
 
@@ -543,7 +551,9 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
 
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        mock_incidents
+    )
 
     response = client.get("/v1/status/")
 
@@ -608,7 +618,9 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
 
     mock_incidents = MagicMock()
     mock_incidents.count = 5
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = mock_incidents
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        mock_incidents
+    )
 
     response = client.get("/v1/status/")
 
@@ -647,7 +659,9 @@ async def test_providers_endpoint_caps_healthy_models(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = inconsistent_providers
-    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = mock_response
+    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = (
+        mock_response
+    )
 
     response = client.get("/v1/status/providers")
 

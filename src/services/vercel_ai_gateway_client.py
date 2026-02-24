@@ -2,10 +2,10 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -180,7 +180,9 @@ def fetch_vercel_pricing_from_public_api() -> dict | None:
                         "prompt": str(prompt_per_1m),
                         "completion": str(completion_per_1m),
                         "request": "0",
-                        "image": str(float(pricing.get("image", "0")) if pricing.get("image") else "0"),
+                        "image": str(
+                            float(pricing.get("image", "0")) if pricing.get("image") else "0"
+                        ),
                     }
 
                     # Also store without provider prefix
@@ -196,7 +198,9 @@ def fetch_vercel_pricing_from_public_api() -> dict | None:
         _vercel_pricing_cache["data"] = pricing_map
         _vercel_pricing_cache["timestamp"] = time.time()
 
-        logger.info(f"Fetched pricing for {len(pricing_map)} models from Vercel AI Gateway public API")
+        logger.info(
+            f"Fetched pricing for {len(pricing_map)} models from Vercel AI Gateway public API"
+        )
         return pricing_map
 
     except (httpx.RequestError, httpx.TimeoutException) as e:

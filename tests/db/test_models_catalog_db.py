@@ -26,7 +26,6 @@ from src.db.models_catalog_db import (
     transform_db_models_batch,
 )
 
-
 # ============================================================================
 # FIXTURES
 # ============================================================================
@@ -460,9 +459,7 @@ def test_count_query_performance():
 @pytest.mark.integration
 def test_empty_result_handling():
     """Test handling of queries that return no results"""
-    models = get_models_for_catalog_with_filters(
-        gateway_slug="nonexistent-provider-xyz"
-    )
+    models = get_models_for_catalog_with_filters(gateway_slug="nonexistent-provider-xyz")
 
     assert isinstance(models, list)
     assert len(models) == 0
@@ -518,9 +515,7 @@ def test_transformed_models_match_api_schema():
 
     for api_model in api_models:
         for field in required_api_fields:
-            assert (
-                field in api_model
-            ), f"Transformed model missing API field: {field}"
+            assert field in api_model, f"Transformed model missing API field: {field}"
 
 
 @pytest.mark.integration

@@ -2,8 +2,9 @@
 Comprehensive tests for Prometheus Remote Write service
 """
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
 
 class TestPrometheusProtobuf:
@@ -186,8 +187,9 @@ class TestPrometheusRemoteWrite:
     @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_push_metrics_http_error(self, mock_serialize):
         """Test metrics push with HTTP error"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
         import httpx
+
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
 
         # Mock the serialization
         mock_serialize.return_value = b"compressed_protobuf_data"
@@ -278,8 +280,9 @@ class TestPrometheusRemoteWrite:
 
     def test_circuit_breaker_closes_after_timeout(self):
         """Test circuit breaker allows retry after timeout"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
         import time
+
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
 
@@ -294,8 +297,9 @@ class TestPrometheusRemoteWrite:
     @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_push_metrics_skipped_when_circuit_open(self, mock_serialize):
         """Test push_metrics is skipped when circuit is open"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
         import time
+
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
         writer.client = AsyncMock()
@@ -311,8 +315,9 @@ class TestPrometheusRemoteWrite:
     @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_circuit_breaker_opens_on_connection_errors(self, mock_serialize):
         """Test circuit breaker opens after repeated connection errors"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
         import httpx
+
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
 
         mock_serialize.return_value = b"compressed_data"
 
@@ -331,8 +336,9 @@ class TestPrometheusRemoteWrite:
     @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_circuit_breaker_opens_on_timeout_errors(self, mock_serialize):
         """Test circuit breaker opens after repeated timeout errors"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
         import httpx
+
+        from src.services.prometheus_remote_write import PrometheusRemoteWriter
 
         mock_serialize.return_value = b"compressed_data"
 
@@ -353,8 +359,8 @@ class TestPrometheusRemoteWrite:
         """Test init_prometheus_remote_write when Prometheus is disabled"""
         import src.services.prometheus_remote_write
         from src.services.prometheus_remote_write import (
-            init_prometheus_remote_write,
             get_prometheus_writer,
+            init_prometheus_remote_write,
         )
 
         # Reset the global writer
@@ -373,8 +379,8 @@ class TestPrometheusRemoteWrite:
         """Test init_prometheus_remote_write creates and starts writer"""
         import src.services.prometheus_remote_write
         from src.services.prometheus_remote_write import (
-            init_prometheus_remote_write,
             get_prometheus_writer,
+            init_prometheus_remote_write,
         )
 
         # Reset the global writer
@@ -398,13 +404,11 @@ class TestPrometheusRemoteWrite:
             mock_start.assert_called_once()
 
     @patch("src.services.prometheus_remote_write.prometheus_writer")
-    async def test_shutdown_prometheus_remote_write_with_writer(
-        self, mock_prometheus_writer
-    ):
+    async def test_shutdown_prometheus_remote_write_with_writer(self, mock_prometheus_writer):
         """Test shutdown_prometheus_remote_write with active writer"""
         from src.services.prometheus_remote_write import (
-            shutdown_prometheus_remote_write,
             PrometheusRemoteWriter,
+            shutdown_prometheus_remote_write,
         )
 
         # Set up a mock writer
@@ -433,8 +437,8 @@ class TestPrometheusRemoteWrite:
         """Test get_prometheus_writer returns the global instance"""
         import src.services.prometheus_remote_write
         from src.services.prometheus_remote_write import (
-            get_prometheus_writer,
             PrometheusRemoteWriter,
+            get_prometheus_writer,
         )
 
         # Set up a test writer as the global instance

@@ -6,10 +6,10 @@ Handles activity logging and other I/O operations in the background
 import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC
 from typing import Any
 
 from src.db.activity import log_activity as db_log_activity
-from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ _db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-backgrou
 
 # Queue for background tasks
 _background_tasks = []
-_task_lock = asyncio.Lock() if hasattr(asyncio, 'Lock') else None
+_task_lock = asyncio.Lock() if hasattr(asyncio, "Lock") else None
 
 
 async def log_activity_async(
@@ -241,7 +241,8 @@ async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
     # If no health data, assume all models are healthy
     if not health_data:
         from datetime import datetime
-        from src.services.health_snapshots import SMALL_TIER_POOL, MEDIUM_TIER_POOL
+
+        from src.services.health_snapshots import MEDIUM_TIER_POOL, SMALL_TIER_POOL
 
         now = datetime.now(UTC)
         all_models = set(SMALL_TIER_POOL) | set(MEDIUM_TIER_POOL)
@@ -314,8 +315,9 @@ def _split_and_cache_gateway_catalogs(full_catalog: list[dict]) -> None:
     the background refresh loop and the startup preload.
     """
     from collections import defaultdict
-    from src.services.model_catalog_cache import get_model_catalog_cache
+
     from src.services.local_memory_cache import set_local_catalog
+    from src.services.model_catalog_cache import get_model_catalog_cache
 
     by_gateway: dict[str, list[dict]] = defaultdict(list)
     for model in full_catalog:
@@ -395,8 +397,8 @@ async def update_full_model_catalog_loop() -> None:
                 consecutive_errors += 1
                 if consecutive_errors >= 3:
                     logger.error(
-                        "Background Refresh: %d consecutive empty results - "
-                        "cache may go stale!", consecutive_errors
+                        "Background Refresh: %d consecutive empty results - " "cache may go stale!",
+                        consecutive_errors,
                     )
             else:
                 elapsed = time.monotonic() - refresh_start
@@ -418,7 +420,7 @@ async def update_full_model_catalog_loop() -> None:
                     "Next request will trigger expensive DB queries.",
                     consecutive_errors,
                 )
-            
+
         # Wait for next interval
         try:
             # Use wait_for to allow immediate cancellation
@@ -442,7 +444,7 @@ async def update_full_model_catalog_loop() -> None:
 def start_model_catalog_refresh_task() -> None:
     """Start the model catalog refresh background task."""
     global _catalog_refresh_task, _catalog_refresh_stop_event
-    
+
     try:
         if _catalog_refresh_task and not _catalog_refresh_task.done():
             logger.warning("Model catalog refresh task already running")
@@ -461,11 +463,10 @@ def start_model_catalog_refresh_task() -> None:
 def stop_model_catalog_refresh_task() -> None:
     """Stop the model catalog refresh background task."""
     global _catalog_refresh_task, _catalog_refresh_stop_event
-    
+
     if _catalog_refresh_stop_event:
         _catalog_refresh_stop_event.set()
-        
+
     if _catalog_refresh_task:
         _catalog_refresh_task.cancel()
         logger.info("Model catalog refresh background task stopped")
-

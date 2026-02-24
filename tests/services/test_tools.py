@@ -10,9 +10,18 @@ Tests cover:
 - SSRF protection
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from src.services.chatterbox_tts_client import (
+    CHATTERBOX_MODELS,
+    LANGUAGE_NAMES,
+    _is_safe_url,
+    get_chatterbox_models,
+    validate_chatterbox_model,
+    validate_language,
+)
 from src.services.tools import (
     AVAILABLE_TOOLS,
     BaseTool,
@@ -23,15 +32,6 @@ from src.services.tools import (
     get_tool_definitions,
 )
 from src.services.tools.text_to_speech import TextToSpeechTool
-from src.services.chatterbox_tts_client import (
-    CHATTERBOX_MODELS,
-    LANGUAGE_NAMES,
-    _is_safe_url,
-    get_chatterbox_models,
-    validate_chatterbox_model,
-    validate_language,
-)
-
 
 # =============================================================================
 # BASE TOOL TESTS
@@ -43,11 +43,7 @@ class TestToolResult:
 
     def test_success_result(self):
         """Test creating a successful result."""
-        result = ToolResult(
-            success=True,
-            result={"value": 42},
-            metadata={"execution_time": 0.1}
-        )
+        result = ToolResult(success=True, result={"value": 42}, metadata={"execution_time": 0.1})
         assert result.success is True
         assert result.result == {"value": 42}
         assert result.error is None
@@ -55,27 +51,20 @@ class TestToolResult:
 
     def test_error_result(self):
         """Test creating an error result."""
-        result = ToolResult(
-            success=False,
-            error="Something went wrong"
-        )
+        result = ToolResult(success=False, error="Something went wrong")
         assert result.success is False
         assert result.result is None
         assert result.error == "Something went wrong"
 
     def test_to_dict(self):
         """Test converting result to dictionary."""
-        result = ToolResult(
-            success=True,
-            result={"key": "value"},
-            metadata={"info": "data"}
-        )
+        result = ToolResult(success=True, result={"key": "value"}, metadata={"info": "data"})
         result_dict = result.to_dict()
         assert result_dict == {
             "success": True,
             "result": {"key": "value"},
             "error": None,
-            "metadata": {"info": "data"}
+            "metadata": {"info": "data"},
         }
 
 
@@ -89,6 +78,7 @@ class TestBaseTool:
 
     def test_concrete_implementation(self):
         """Test implementing a concrete tool."""
+
         class TestTool(BaseTool):
             @classmethod
             def get_definition(cls) -> ToolDefinition:
@@ -97,12 +87,8 @@ class TestBaseTool:
                     "function": {
                         "name": "test_tool",
                         "description": "A test tool",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {},
-                            "required": []
-                        }
-                    }
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
                 }
 
             async def execute(self, **kwargs) -> ToolResult:
@@ -115,10 +101,14 @@ class TestBaseTool:
     @pytest.mark.asyncio
     async def test_success_helper(self):
         """Test the _success helper method."""
+
         class TestTool(BaseTool):
             @classmethod
             def get_definition(cls) -> ToolDefinition:
-                return {"type": "function", "function": {"name": "test", "description": "", "parameters": {}}}
+                return {
+                    "type": "function",
+                    "function": {"name": "test", "description": "", "parameters": {}},
+                }
 
             async def execute(self, **kwargs) -> ToolResult:
                 return self._success(result={"data": "test"}, extra_meta="value")
@@ -132,10 +122,14 @@ class TestBaseTool:
     @pytest.mark.asyncio
     async def test_error_helper(self):
         """Test the _error helper method."""
+
         class TestTool(BaseTool):
             @classmethod
             def get_definition(cls) -> ToolDefinition:
-                return {"type": "function", "function": {"name": "test", "description": "", "parameters": {}}}
+                return {
+                    "type": "function",
+                    "function": {"name": "test", "description": "", "parameters": {}},
+                }
 
             async def execute(self, **kwargs) -> ToolResult:
                 return self._error("Something failed", error_type="test_error")
@@ -194,8 +188,7 @@ class TestToolRegistry:
         """Test executing a tool by name with parameter validation."""
         with patch.object(TextToSpeechTool, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
-                success=True,
-                result={"audio_base64": "test_audio"}
+                success=True, result={"audio_base64": "test_audio"}
             )
 
             result = await execute_tool("text_to_speech", {"text": "Hello world"})
@@ -411,7 +404,9 @@ class TestTextToSpeechTool:
     @pytest.mark.asyncio
     async def test_execute_success(self):
         """Test successful TTS execution."""
-        with patch("src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock) as mock_generate:
+        with patch(
+            "src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock
+        ) as mock_generate:
             mock_generate.return_value = {
                 "audio_url": None,
                 "audio_base64": "data:audio/wav;base64,SGVsbG8=",
@@ -445,7 +440,9 @@ class TestTextToSpeechTool:
     @pytest.mark.asyncio
     async def test_execute_runtime_error(self):
         """Test TTS execution with runtime error."""
-        with patch("src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock) as mock_generate:
+        with patch(
+            "src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock
+        ) as mock_generate:
             mock_generate.side_effect = RuntimeError("TTS generation failed")
 
             tool = TextToSpeechTool()
@@ -458,7 +455,9 @@ class TestTextToSpeechTool:
     @pytest.mark.asyncio
     async def test_execute_with_all_options(self):
         """Test TTS execution with all options and parameter validation."""
-        with patch("src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock) as mock_generate:
+        with patch(
+            "src.services.tools.text_to_speech.generate_speech", new_callable=AsyncMock
+        ) as mock_generate:
             mock_generate.return_value = {
                 "audio_url": None,
                 "audio_base64": "data:audio/wav;base64,SGVsbG8=",
@@ -535,11 +534,7 @@ class TestGenerateSpeech:
         from src.services.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Language.*not supported"):
-            await generate_speech(
-                "Hello",
-                model="chatterbox-multilingual",
-                language="invalid_lang"
-            )
+            await generate_speech("Hello", model="chatterbox-multilingual", language="invalid_lang")
 
     @pytest.mark.asyncio
     async def test_ssrf_url_raises_error(self):
@@ -548,8 +543,7 @@ class TestGenerateSpeech:
 
         with pytest.raises(ValueError, match="Invalid voice reference URL"):
             await generate_speech(
-                "Hello",
-                voice_reference_url="http://169.254.169.254/latest/meta-data/"
+                "Hello", voice_reference_url="http://169.254.169.254/latest/meta-data/"
             )
 
     @pytest.mark.asyncio
@@ -558,10 +552,7 @@ class TestGenerateSpeech:
         from src.services.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Invalid voice reference URL"):
-            await generate_speech(
-                "Hello",
-                voice_reference_url="http://localhost:8080/audio.wav"
-            )
+            await generate_speech("Hello", voice_reference_url="http://localhost:8080/audio.wav")
 
 
 class TestVoiceReferenceFileSize:
@@ -586,15 +577,17 @@ class TestToolsRoute:
     @pytest.fixture
     def client(self):
         """Create test client with mocked auth."""
-        from fastapi.testclient import TestClient
-        from src.routes.tools import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.routes.tools import router
 
         app = FastAPI()
         app.include_router(router)
 
         # Override auth dependency for testing
         from src.security.deps import get_api_key
+
         app.dependency_overrides[get_api_key] = lambda: "test-api-key"
 
         return TestClient(app)
@@ -637,15 +630,13 @@ class TestToolsRoute:
         """Test executing a tool successfully with auth."""
         with patch.object(TextToSpeechTool, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
-                success=True,
-                result={"audio_base64": "test_audio"},
-                metadata={}
+                success=True, result={"audio_base64": "test_audio"}, metadata={}
             )
 
-            response = client.post("/tools/execute", json={
-                "name": "text_to_speech",
-                "parameters": {"text": "Hello world"}
-            })
+            response = client.post(
+                "/tools/execute",
+                json={"name": "text_to_speech", "parameters": {"text": "Hello world"}},
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -654,10 +645,7 @@ class TestToolsRoute:
 
     def test_execute_tool_not_found(self, client):
         """Test executing a non-existent tool."""
-        response = client.post("/tools/execute", json={
-            "name": "nonexistent",
-            "parameters": {}
-        })
+        response = client.post("/tools/execute", json={"name": "nonexistent", "parameters": {}})
 
         assert response.status_code == 404
 
@@ -666,10 +654,9 @@ class TestToolsRoute:
         with patch.object(TextToSpeechTool, "execute", new_callable=AsyncMock) as mock_execute:
             mock_execute.side_effect = ValueError("Invalid parameter")
 
-            response = client.post("/tools/execute", json={
-                "name": "text_to_speech",
-                "parameters": {"text": ""}
-            })
+            response = client.post(
+                "/tools/execute", json={"name": "text_to_speech", "parameters": {"text": ""}}
+            )
 
             assert response.status_code == 400
 
@@ -728,15 +715,17 @@ class TestSearchAugmentRoute:
     @pytest.fixture
     def client(self):
         """Create test client with mocked auth."""
-        from fastapi.testclient import TestClient
-        from src.routes.tools import router
         from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.routes.tools import router
 
         app = FastAPI()
         app.include_router(router)
 
         # Override auth dependency for testing
         from src.security.deps import get_optional_api_key
+
         app.dependency_overrides[get_optional_api_key] = lambda: None
 
         return TestClient(app)
@@ -751,19 +740,18 @@ class TestSearchAugmentRoute:
                         {
                             "title": "Test Title",
                             "content": "Test content about the query",
-                            "url": "https://example.com/test"
+                            "url": "https://example.com/test",
                         }
                     ],
-                    "answer": "This is a summary of the search results"
+                    "answer": "This is a summary of the search results",
                 },
-                metadata={}
+                metadata={},
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "test query",
-                "max_results": 5,
-                "include_answer": True
-            })
+            response = client.post(
+                "/tools/search/augment",
+                json={"query": "test query", "max_results": 5, "include_answer": True},
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -778,36 +766,34 @@ class TestSearchAugmentRoute:
         """Test search augmentation passes correct parameters."""
         with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
-                success=True,
-                result={"results": [], "answer": None},
-                metadata={}
+                success=True, result={"results": [], "answer": None}, metadata={}
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "specific query",
-                "max_results": 3,
-                "include_answer": False
-            })
+            response = client.post(
+                "/tools/search/augment",
+                json={"query": "specific query", "max_results": 3, "include_answer": False},
+            )
 
-            mock_execute.assert_called_once_with("web_search", {
-                "query": "specific query",
-                "max_results": 3,
-                "include_answer": False,
-                "search_depth": "basic",
-            })
+            mock_execute.assert_called_once_with(
+                "web_search",
+                {
+                    "query": "specific query",
+                    "max_results": 3,
+                    "include_answer": False,
+                    "search_depth": "basic",
+                },
+            )
 
     def test_search_augment_no_results(self, client):
         """Test search augmentation with no results."""
         with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
-                success=True,
-                result={"results": [], "answer": None},
-                metadata={}
+                success=True, result={"results": [], "answer": None}, metadata={}
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "obscure query with no results"
-            })
+            response = client.post(
+                "/tools/search/augment", json={"query": "obscure query with no results"}
+            )
 
             assert response.status_code == 200
             data = response.json()
@@ -820,14 +806,10 @@ class TestSearchAugmentRoute:
         """Test search augmentation when tool execution fails."""
         with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.return_value = ToolResult(
-                success=False,
-                error="Search service unavailable",
-                metadata={}
+                success=False, error="Search service unavailable", metadata={}
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "test query"
-            })
+            response = client.post("/tools/search/augment", json={"query": "test query"})
 
             assert response.status_code == 200
             data = response.json()
@@ -837,18 +819,16 @@ class TestSearchAugmentRoute:
 
     def test_search_augment_validation_empty_query(self, client):
         """Test search augmentation with empty query."""
-        response = client.post("/tools/search/augment", json={
-            "query": ""
-        })
+        response = client.post("/tools/search/augment", json={"query": ""})
 
         assert response.status_code == 422  # Validation error
 
     def test_search_augment_validation_invalid_max_results(self, client):
         """Test search augmentation with invalid max_results."""
-        response = client.post("/tools/search/augment", json={
-            "query": "test",
-            "max_results": 100  # Too high, max is 10
-        })
+        response = client.post(
+            "/tools/search/augment",
+            json={"query": "test", "max_results": 100},  # Too high, max is 10
+        )
 
         assert response.status_code == 422  # Validation error
 
@@ -864,17 +844,15 @@ class TestSearchAugmentRoute:
                         {
                             "title": "Test Title",
                             "content": long_content,
-                            "url": "https://example.com/test"
+                            "url": "https://example.com/test",
                         }
                     ],
-                    "answer": None
+                    "answer": None,
                 },
-                metadata={}
+                metadata={},
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "test query"
-            })
+            response = client.post("/tools/search/augment", json={"query": "test query"})
 
             assert response.status_code == 200
             data = response.json()
@@ -890,18 +868,28 @@ class TestSearchAugmentRoute:
                 success=True,
                 result={
                     "results": [
-                        {"title": "First Result", "content": "First content", "url": "https://first.com"},
-                        {"title": "Second Result", "content": "Second content", "url": "https://second.com"},
-                        {"title": "Third Result", "content": "Third content", "url": "https://third.com"},
+                        {
+                            "title": "First Result",
+                            "content": "First content",
+                            "url": "https://first.com",
+                        },
+                        {
+                            "title": "Second Result",
+                            "content": "Second content",
+                            "url": "https://second.com",
+                        },
+                        {
+                            "title": "Third Result",
+                            "content": "Third content",
+                            "url": "https://third.com",
+                        },
                     ],
-                    "answer": "Combined answer"
+                    "answer": "Combined answer",
                 },
-                metadata={}
+                metadata={},
             )
 
-            response = client.post("/tools/search/augment", json={
-                "query": "test query"
-            })
+            response = client.post("/tools/search/augment", json={"query": "test query"})
 
             assert response.status_code == 200
             data = response.json()
@@ -916,9 +904,7 @@ class TestSearchAugmentRoute:
         with patch("src.routes.tools.execute_tool", new_callable=AsyncMock) as mock_execute:
             mock_execute.side_effect = RuntimeError("Unexpected error")
 
-            response = client.post("/tools/search/augment", json={
-                "query": "test query"
-            })
+            response = client.post("/tools/search/augment", json={"query": "test query"})
 
             assert response.status_code == 200
             data = response.json()

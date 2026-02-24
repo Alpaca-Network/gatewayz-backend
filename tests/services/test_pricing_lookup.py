@@ -1,8 +1,10 @@
 """
 Comprehensive tests for Pricing Lookup service
 """
+
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
 
 from src.services.pricing_lookup import (
     enrich_model_with_pricing,
@@ -16,12 +18,14 @@ class TestPricingLookup:
     def test_module_imports(self):
         """Test that module imports successfully"""
         import src.services.pricing_lookup
+
         assert src.services.pricing_lookup is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
         from src.services import pricing_lookup
-        assert hasattr(pricing_lookup, '__name__')
+
+        assert hasattr(pricing_lookup, "__name__")
 
 
 class TestEnrichModelWithPricing:
@@ -34,7 +38,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -50,7 +54,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0.001", "completion": "0.002"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_not_called()
@@ -64,7 +68,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "1e-6", "completion": "2e-6"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_not_called()
@@ -77,7 +81,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": 0.0, "completion": 0.0},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -92,7 +96,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0.00", "completion": "0.000"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -106,7 +110,7 @@ class TestEnrichModelWithPricing:
             "id": "test-model",
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -121,7 +125,7 @@ class TestEnrichModelWithPricing:
             "pricing": {},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -136,7 +140,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": None, "completion": None},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -151,7 +155,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "", "completion": ""},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -165,7 +169,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0", "completion": "0"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_not_called()
@@ -178,7 +182,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0", "completion": "0"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = None
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -194,7 +198,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "0", "completion": "0.001", "image": "0"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             result = enrich_model_with_pricing(model_data, "test-gateway")
 
             mock_get_pricing.assert_not_called()
@@ -207,7 +211,7 @@ class TestEnrichModelWithPricing:
             "pricing": {"prompt": "invalid", "completion": "not-a-number"},
         }
 
-        with patch('src.services.pricing_lookup.get_model_pricing') as mock_get_pricing:
+        with patch("src.services.pricing_lookup.get_model_pricing") as mock_get_pricing:
             mock_get_pricing.return_value = {"prompt": "0.001", "completion": "0.002"}
 
             result = enrich_model_with_pricing(model_data, "test-gateway")
@@ -224,12 +228,10 @@ class TestGetModelPricing:
     def test_returns_pricing_for_existing_model(self):
         """Should return pricing for model in manual pricing data"""
         mock_pricing_data = {
-            "test-gateway": {
-                "test-model": {"prompt": "0.001", "completion": "0.002"}
-            }
+            "test-gateway": {"test-model": {"prompt": "0.001", "completion": "0.002"}}
         }
 
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = mock_pricing_data
 
             result = get_model_pricing("test-gateway", "test-model")
@@ -239,12 +241,10 @@ class TestGetModelPricing:
     def test_returns_none_for_missing_gateway(self):
         """Should return None for unknown gateway"""
         mock_pricing_data = {
-            "other-gateway": {
-                "test-model": {"prompt": "0.001", "completion": "0.002"}
-            }
+            "other-gateway": {"test-model": {"prompt": "0.001", "completion": "0.002"}}
         }
 
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = mock_pricing_data
 
             result = get_model_pricing("test-gateway", "test-model")
@@ -254,12 +254,10 @@ class TestGetModelPricing:
     def test_returns_none_for_missing_model(self):
         """Should return None for unknown model"""
         mock_pricing_data = {
-            "test-gateway": {
-                "other-model": {"prompt": "0.001", "completion": "0.002"}
-            }
+            "test-gateway": {"other-model": {"prompt": "0.001", "completion": "0.002"}}
         }
 
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = mock_pricing_data
 
             result = get_model_pricing("test-gateway", "test-model")
@@ -269,12 +267,10 @@ class TestGetModelPricing:
     def test_case_insensitive_gateway_match(self):
         """Should match gateway case-insensitively"""
         mock_pricing_data = {
-            "test-gateway": {
-                "test-model": {"prompt": "0.001", "completion": "0.002"}
-            }
+            "test-gateway": {"test-model": {"prompt": "0.001", "completion": "0.002"}}
         }
 
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = mock_pricing_data
 
             result = get_model_pricing("TEST-GATEWAY", "test-model")
@@ -284,12 +280,10 @@ class TestGetModelPricing:
     def test_case_insensitive_model_match(self):
         """Should match model case-insensitively"""
         mock_pricing_data = {
-            "test-gateway": {
-                "Test-Model": {"prompt": "0.001", "completion": "0.002"}
-            }
+            "test-gateway": {"Test-Model": {"prompt": "0.001", "completion": "0.002"}}
         }
 
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = mock_pricing_data
 
             result = get_model_pricing("test-gateway", "test-model")
@@ -298,7 +292,7 @@ class TestGetModelPricing:
 
     def test_returns_none_for_empty_pricing_data(self):
         """Should return None when no pricing data loaded"""
-        with patch('src.services.pricing_lookup.load_manual_pricing') as mock_load:
+        with patch("src.services.pricing_lookup.load_manual_pricing") as mock_load:
             mock_load.return_value = {}
 
             result = get_model_pricing("test-gateway", "test-model")
@@ -356,8 +350,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_returns_none_when_no_openrouter_models(self):
         """Test that cross-reference returns None when OpenRouter cache is empty"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(models, "get_cached_models", return_value=None):
@@ -368,8 +362,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_finds_matching_model(self):
         """Test that cross-reference finds pricing for matching model"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         mock_openrouter_models = [
             {
@@ -385,7 +379,8 @@ class TestCrossReferencePricing:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 result = _get_cross_reference_pricing("gpt-4o")
@@ -397,8 +392,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_handles_provider_prefix(self):
         """Test that cross-reference works with provider/model format"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         mock_openrouter_models = [
             {
@@ -412,7 +407,8 @@ class TestCrossReferencePricing:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 result = _get_cross_reference_pricing("anthropic/claude-3-opus")
@@ -423,8 +419,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_returns_none_for_unknown_model(self):
         """Test that cross-reference returns None for models not in OpenRouter"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         mock_openrouter_models = [
             {
@@ -435,7 +431,8 @@ class TestCrossReferencePricing:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 result = _get_cross_reference_pricing("unknown-model-xyz")
@@ -445,8 +442,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_handles_versioned_model_ids(self):
         """Test that cross-reference matches versioned OpenRouter model IDs"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         # OpenRouter uses date-versioned IDs like "anthropic/claude-3-opus-20240229"
         mock_openrouter_models = [
@@ -461,7 +458,8 @@ class TestCrossReferencePricing:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 # Should match "claude-3-opus" to "claude-3-opus-20240229"
@@ -473,8 +471,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_does_not_match_different_model_variants(self):
         """Test that cross-reference does NOT match different model variants incorrectly"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         # gpt-4o-mini should NOT match gpt-4o (different model entirely)
         mock_openrouter_models = [
@@ -489,7 +487,8 @@ class TestCrossReferencePricing:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 # gpt-4o-mini should NOT match openai/gpt-4o
@@ -500,8 +499,8 @@ class TestCrossReferencePricing:
     def test_cross_reference_pricing_matches_correct_model_with_variants(self):
         """Test that cross-reference matches the correct model when variants exist"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         # Both gpt-4o and gpt-4o-mini should match their correct models
         mock_openrouter_models = [
@@ -518,12 +517,13 @@ class TestCrossReferencePricing:
                     "prompt": "0.0000001",
                     "completion": "0.0000004",
                 },
-            }
+            },
         ]
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 # gpt-4o should get gpt-4o pricing
@@ -547,7 +547,12 @@ class TestEnrichModelWithPricingGatewayProviders:
             "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
         }
 
-        mock_cross_ref = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+        mock_cross_ref = {
+            "prompt": "0.000005",
+            "completion": "0.000015",
+            "request": "0",
+            "image": "0",
+        }
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
             with patch(
@@ -602,7 +607,12 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         manual_pricing = {"prompt": "0.00001", "completion": "0.00002"}
-        cross_ref_pricing = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+        cross_ref_pricing = {
+            "prompt": "0.000005",
+            "completion": "0.000015",
+            "request": "0",
+            "image": "0",
+        }
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=manual_pricing):
             with patch(
@@ -638,9 +648,7 @@ class TestEnrichModelWithPricingGatewayProviders:
         }
 
         with patch("src.services.pricing_lookup.get_model_pricing") as mock_manual:
-            with patch(
-                "src.services.pricing_lookup._get_cross_reference_pricing"
-            ) as mock_cross:
+            with patch("src.services.pricing_lookup._get_cross_reference_pricing") as mock_cross:
                 # Test with alibaba-cloud as a gateway provider
                 result = enrich_model_with_pricing(model_data, "alibaba-cloud")
                 assert result is not None
@@ -655,7 +663,9 @@ class TestEnrichModelWithPricingGatewayProviders:
             "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
         }
 
-        with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
+        with patch(
+            "src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")
+        ):
             # Test with aihubmix as a gateway provider
             result = enrich_model_with_pricing(model_data, "aihubmix")
             # Gateway provider should be filtered out on error
@@ -668,7 +678,9 @@ class TestEnrichModelWithPricingGatewayProviders:
             "pricing": {"prompt": "0", "completion": "0", "request": "0", "image": "0"},
         }
 
-        with patch("src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")):
+        with patch(
+            "src.services.pricing_lookup.get_model_pricing", side_effect=Exception("Test error")
+        ):
             # Use openrouter as non-gateway provider (primary source, not a gateway)
             result = enrich_model_with_pricing(model_data, "openrouter")
             # Non-gateway provider should return model data even on error
@@ -708,7 +720,12 @@ class TestGatewayProviderZeroPricingFiltering:
         }
 
         # Cross-reference returns non-zero pricing
-        nonzero_cross_ref = {"prompt": "0.000005", "completion": "0.000015", "request": "0", "image": "0"}
+        nonzero_cross_ref = {
+            "prompt": "0.000005",
+            "completion": "0.000015",
+            "request": "0",
+            "image": "0",
+        }
 
         with patch("src.services.pricing_lookup.get_model_pricing", return_value=None):
             with patch(
@@ -965,8 +982,8 @@ class TestCrossReferencePricingNullHandling:
     def test_cross_reference_handles_none_pricing_values(self):
         """Cross-reference should handle None pricing values correctly"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         # OpenRouter model with None values in pricing
         mock_openrouter_models = [
@@ -983,7 +1000,8 @@ class TestCrossReferencePricingNullHandling:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 result = _get_cross_reference_pricing("gpt-4o")
@@ -998,8 +1016,8 @@ class TestCrossReferencePricingNullHandling:
     def test_cross_reference_handles_empty_string_pricing(self):
         """Cross-reference should handle empty string pricing values correctly"""
         pytest.importorskip("fastapi")  # Skip if fastapi not available
-        from src.services.pricing_lookup import _get_cross_reference_pricing
         from src.services import models
+        from src.services.pricing_lookup import _get_cross_reference_pricing
 
         mock_openrouter_models = [
             {
@@ -1013,7 +1031,8 @@ class TestCrossReferencePricingNullHandling:
 
         with patch("src.services.pricing_lookup._is_building_catalog", return_value=False):
             with patch.object(
-                models, "get_cached_models",
+                models,
+                "get_cached_models",
                 return_value=mock_openrouter_models,
             ):
                 result = _get_cross_reference_pricing("gpt-4o")
@@ -1081,7 +1100,10 @@ class TestIsFreeField:
             "pricing": {"prompt": "0.56", "completion": "1.68"},
         }
 
-        with patch("src.services.pricing_lookup.get_model_pricing", return_value={"prompt": "0.56", "completion": "1.68"}):
+        with patch(
+            "src.services.pricing_lookup.get_model_pricing",
+            return_value={"prompt": "0.56", "completion": "1.68"},
+        ):
             result = enrich_model_with_pricing(model_data, "fireworks")
 
         assert result is not None

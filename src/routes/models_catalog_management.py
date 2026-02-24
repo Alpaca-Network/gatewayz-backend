@@ -68,15 +68,12 @@ async def list_models(
             if not provider:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Provider with slug '{provider_slug}' not found"
+                    detail=f"Provider with slug '{provider_slug}' not found",
                 )
             provider_id = provider["id"]
 
         models = get_all_models(
-            provider_id=provider_id,
-            is_active_only=is_active_only,
-            limit=limit,
-            offset=offset
+            provider_id=provider_id, is_active_only=is_active_only, limit=limit, offset=offset
         )
 
         # Apply additional filters if needed
@@ -92,8 +89,7 @@ async def list_models(
     except Exception as e:
         logger.error(f"Error fetching models: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch models"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch models"
         )
 
 
@@ -117,7 +113,7 @@ async def get_model_statistics(
         logger.error(f"Error fetching model stats: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch model statistics"
+            detail="Failed to fetch model statistics",
         )
 
 
@@ -141,14 +137,15 @@ async def search_models_endpoint(
     except Exception as e:
         logger.error(f"Error searching models: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to search models"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to search models"
         )
 
 
 @router.get("/health/{health_status}", response_model=list[ModelWithProvider])
 async def get_models_by_health(
-    health_status: str = Path(..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"),
+    health_status: str = Path(
+        ..., description="Health status: 'healthy', 'degraded', 'down', 'unknown'"
+    ),
 ):
     """
     Get models by health status
@@ -162,7 +159,7 @@ async def get_models_by_health(
         if health_status not in ["healthy", "degraded", "down", "unknown"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'"
+                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'",
             )
 
         models = get_models_by_health_status(health_status)
@@ -173,7 +170,7 @@ async def get_models_by_health(
         logger.error(f"Error fetching models by health status: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch models by health status"
+            detail="Failed to fetch models by health status",
         )
 
 
@@ -197,7 +194,7 @@ async def get_models_by_provider(
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with slug '{provider_slug}' not found"
+                detail=f"Provider with slug '{provider_slug}' not found",
             )
 
         models = get_models_by_provider_slug(provider_slug, is_active_only)
@@ -208,7 +205,7 @@ async def get_models_by_provider(
         logger.error(f"Error fetching models for provider {provider_slug}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch models for provider"
+            detail="Failed to fetch models for provider",
         )
 
 
@@ -226,8 +223,7 @@ async def get_model(model_id: int):
         model = get_model_by_id(model_id)
         if not model:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
         return model
     except HTTPException:
@@ -235,8 +231,7 @@ async def get_model(model_id: int):
     except Exception as e:
         logger.error(f"Error fetching model {model_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to fetch model"
         )
 
 
@@ -259,8 +254,7 @@ async def get_model_health_history_endpoint(
         model = get_model_by_id(model_id)
         if not model:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         history = get_model_health_history(model_id, limit)
@@ -271,7 +265,7 @@ async def get_model_health_history_endpoint(
         logger.error(f"Error fetching health history for model {model_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to fetch health history"
+            detail="Failed to fetch health history",
         )
 
 
@@ -291,25 +285,21 @@ async def create_model_endpoint(model: ModelCreate):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {model.provider_id} not found"
+                detail=f"Provider with ID {model.provider_id} not found",
             )
 
         # Check if model already exists for this provider
-        existing = get_model_by_provider_and_model_id(
-            model.provider_id,
-            model.provider_model_id
-        )
+        existing = get_model_by_provider_and_model_id(model.provider_id, model.provider_model_id)
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"Model '{model.provider_model_id}' already exists for provider {model.provider_id}"
+                detail=f"Model '{model.provider_model_id}' already exists for provider {model.provider_id}",
             )
 
         created_model = create_model(model.model_dump())
         if not created_model:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create model"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model"
             )
         return created_model
     except HTTPException:
@@ -317,8 +307,7 @@ async def create_model_endpoint(model: ModelCreate):
     except Exception as e:
         logger.error(f"Error creating model: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create model"
         )
 
 
@@ -335,8 +324,7 @@ async def bulk_create_models_endpoint(bulk_data: ModelBulkCreate):
     try:
         if not bulk_data.models:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No models provided"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No models provided"
             )
 
         # Verify all providers exist
@@ -346,7 +334,7 @@ async def bulk_create_models_endpoint(bulk_data: ModelBulkCreate):
             if not provider:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Provider with ID {provider_id} not found"
+                    detail=f"Provider with ID {provider_id} not found",
                 )
 
         models_data = [m.model_dump() for m in bulk_data.models]
@@ -354,8 +342,7 @@ async def bulk_create_models_endpoint(bulk_data: ModelBulkCreate):
 
         if not created_models:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create models"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create models"
             )
 
         return created_models
@@ -364,8 +351,7 @@ async def bulk_create_models_endpoint(bulk_data: ModelBulkCreate):
     except Exception as e:
         logger.error(f"Error bulk creating models: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to bulk create models"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to bulk create models"
         )
 
 
@@ -385,14 +371,13 @@ async def upsert_model_endpoint(model: ModelCreate):
         if not provider:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Provider with ID {model.provider_id} not found"
+                detail=f"Provider with ID {model.provider_id} not found",
             )
 
         upserted_model = upsert_model(model.model_dump())
         if not upserted_model:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upsert model"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upsert model"
             )
         return upserted_model
     except HTTPException:
@@ -400,8 +385,7 @@ async def upsert_model_endpoint(model: ModelCreate):
     except Exception as e:
         logger.error(f"Error upserting model: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upsert model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upsert model"
         )
 
 
@@ -418,8 +402,7 @@ async def bulk_upsert_models_endpoint(bulk_data: ModelBulkCreate):
     try:
         if not bulk_data.models:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No models provided"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No models provided"
             )
 
         # Verify all providers exist
@@ -429,7 +412,7 @@ async def bulk_upsert_models_endpoint(bulk_data: ModelBulkCreate):
             if not provider:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Provider with ID {provider_id} not found"
+                    detail=f"Provider with ID {provider_id} not found",
                 )
 
         models_data = [m.model_dump() for m in bulk_data.models]
@@ -437,8 +420,7 @@ async def bulk_upsert_models_endpoint(bulk_data: ModelBulkCreate):
 
         if not upserted_models:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upsert models"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upsert models"
             )
 
         return upserted_models
@@ -447,8 +429,7 @@ async def bulk_upsert_models_endpoint(bulk_data: ModelBulkCreate):
     except Exception as e:
         logger.error(f"Error bulk upserting models: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to bulk upsert models"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to bulk upsert models"
         )
 
 
@@ -468,16 +449,14 @@ async def update_model_endpoint(model_id: int, model: ModelUpdate):
         existing = get_model_by_id(model_id)
         if not existing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         # Only include fields that were actually set
         update_data = model.model_dump(exclude_unset=True)
         if not update_data:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No fields to update"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No fields to update"
             )
 
         # If provider_id is being updated, verify it exists
@@ -486,14 +465,13 @@ async def update_model_endpoint(model_id: int, model: ModelUpdate):
             if not provider:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Provider with ID {update_data['provider_id']} not found"
+                    detail=f"Provider with ID {update_data['provider_id']} not found",
                 )
 
         updated_model = update_model(model_id, update_data)
         if not updated_model:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update model"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model"
             )
         return updated_model
     except HTTPException:
@@ -501,16 +479,12 @@ async def update_model_endpoint(model_id: int, model: ModelUpdate):
     except Exception as e:
         logger.error(f"Error updating model {model_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to update model"
         )
 
 
 @router.patch("/{model_id}/health", response_model=ModelResponse)
-async def update_model_health_endpoint(
-    model_id: int,
-    health_update: ModelHealthUpdate
-):
+async def update_model_health_endpoint(model_id: int, health_update: ModelHealthUpdate):
     """
     Update model health status
 
@@ -525,28 +499,27 @@ async def update_model_health_endpoint(
         existing = get_model_by_id(model_id)
         if not existing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         # Validate health status
         if health_update.health_status not in ["healthy", "degraded", "down", "unknown"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'"
+                detail="Invalid health status. Must be: 'healthy', 'degraded', 'down', or 'unknown'",
             )
 
         updated_model = update_model_health(
             model_id,
             health_update.health_status,
             health_update.response_time_ms,
-            health_update.error_message
+            health_update.error_message,
         )
 
         if not updated_model:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to update model health"
+                detail="Failed to update model health",
             )
         return updated_model
     except HTTPException:
@@ -555,7 +528,7 @@ async def update_model_health_endpoint(
         logger.error(f"Error updating model health {model_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update model health"
+            detail="Failed to update model health",
         )
 
 
@@ -573,15 +546,13 @@ async def activate_model_endpoint(model_id: int):
         model = get_model_by_id(model_id)
         if not model:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         activated_model = activate_model(model_id)
         if not activated_model:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to activate model"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to activate model"
             )
         return activated_model
     except HTTPException:
@@ -589,8 +560,7 @@ async def activate_model_endpoint(model_id: int):
     except Exception as e:
         logger.error(f"Error activating model {model_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to activate model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to activate model"
         )
 
 
@@ -608,15 +578,14 @@ async def deactivate_model_endpoint(model_id: int):
         model = get_model_by_id(model_id)
         if not model:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         deactivated_model = deactivate_model(model_id)
         if not deactivated_model:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to deactivate model"
+                detail="Failed to deactivate model",
             )
         return deactivated_model
     except HTTPException:
@@ -624,8 +593,7 @@ async def deactivate_model_endpoint(model_id: int):
     except Exception as e:
         logger.error(f"Error deactivating model {model_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to deactivate model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to deactivate model"
         )
 
 
@@ -641,21 +609,18 @@ async def delete_model_endpoint(model_id: int):
         model = get_model_by_id(model_id)
         if not model:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Model with ID {model_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Model with ID {model_id} not found"
             )
 
         success = delete_model(model_id)
         if not success:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete model"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model"
             )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error deleting model {model_id}: {e}")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete model"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to delete model"
         )

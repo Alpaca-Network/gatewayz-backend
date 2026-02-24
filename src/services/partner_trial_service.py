@@ -7,7 +7,7 @@ the standard 3-day basic trial.
 """
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -449,8 +449,8 @@ class PartnerTrialService:
             client = get_supabase_client()
             partner_code = partner_code.upper()
 
-            query = client.table("partner_trial_analytics").select("*").eq(
-                "partner_code", partner_code
+            query = (
+                client.table("partner_trial_analytics").select("*").eq("partner_code", partner_code)
             )
 
             if start_date:

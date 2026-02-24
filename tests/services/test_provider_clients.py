@@ -9,12 +9,13 @@ Tests all provider clients for:
 - Authentication validation
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
 import os
+from unittest.mock import MagicMock, patch
 
-os.environ['APP_ENV'] = 'testing'
-os.environ['TESTING'] = 'true'
+import pytest
+
+os.environ["APP_ENV"] = "testing"
+os.environ["TESTING"] = "true"
 
 
 class TestCerebrasClient:
@@ -23,17 +24,20 @@ class TestCerebrasClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import cerebras_client
+
         assert cerebras_client is not None
 
     def test_default_models_defined(self):
         """Test that default models are defined"""
         from src.services.cerebras_client import DEFAULT_CEREBRAS_MODELS
+
         assert isinstance(DEFAULT_CEREBRAS_MODELS, list)
         assert len(DEFAULT_CEREBRAS_MODELS) > 0
 
     def test_default_models_have_required_fields(self):
         """Test that default models have required fields"""
         from src.services.cerebras_client import DEFAULT_CEREBRAS_MODELS
+
         for model in DEFAULT_CEREBRAS_MODELS:
             assert "id" in model
             assert "name" in model
@@ -43,6 +47,7 @@ class TestCerebrasClient:
     def test_default_supported_parameters(self):
         """Test default supported parameters"""
         from src.services.cerebras_client import DEFAULT_SUPPORTED_PARAMETERS
+
         assert isinstance(DEFAULT_SUPPORTED_PARAMETERS, list)
         assert "max_tokens" in DEFAULT_SUPPORTED_PARAMETERS
         assert "temperature" in DEFAULT_SUPPORTED_PARAMETERS
@@ -51,7 +56,8 @@ class TestCerebrasClient:
     def test_get_cerebras_client_no_api_key(self):
         """Test client raises ValueError without API key"""
         from src.services.cerebras_client import get_cerebras_client
-        with patch('src.config.Config') as mock_config:
+
+        with patch("src.config.Config") as mock_config:
             mock_config.CEREBRAS_API_KEY = None
             with pytest.raises(ValueError, match="Cerebras API key not configured"):
                 get_cerebras_client()
@@ -59,6 +65,7 @@ class TestCerebrasClient:
     def test_get_cerebras_client_fallback_info(self):
         """Test client fallback mechanism is documented"""
         from src.services.cerebras_client import get_cerebras_client
+
         # The get_cerebras_client function has fallback to OpenAI SDK
         # if Cerebras SDK is not available
         assert callable(get_cerebras_client)
@@ -71,7 +78,7 @@ class TestCerebrasClient:
             "id": "llama3.1-8b",
             "name": "Llama 3.1 8B",
             "owned_by": "meta",
-            "context_length": 131072
+            "context_length": 131072,
         }
 
         result = _normalize_cerebras_model(model)
@@ -107,11 +114,7 @@ class TestCerebrasClient:
         from src.services.cerebras_client import _normalize_pricing
 
         # Test with various formats
-        pricing = {
-            "prompt": 0.001,
-            "completion": 0.002,
-            "request": "0.0001"
-        }
+        pricing = {"prompt": 0.001, "completion": 0.002, "request": "0.0001"}
         result = _normalize_pricing(pricing)
         assert result["prompt"] == "0.001"
         assert result["completion"] == "0.002"
@@ -166,9 +169,10 @@ class TestGroqClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import groq_client
+
         assert groq_client is not None
 
-    @patch('src.services.groq_client.Config')
+    @patch("src.services.groq_client.Config")
     def test_get_groq_client_no_api_key(self, mock_config):
         """Test client fails without API key"""
         mock_config.GROQ_API_KEY = None
@@ -177,18 +181,19 @@ class TestGroqClient:
         with pytest.raises(ValueError, match="Groq API key not configured"):
             get_groq_client()
 
-    @patch('src.services.groq_client.Config')
-    @patch('src.services.groq_client.get_groq_pooled_client')
+    @patch("src.services.groq_client.Config")
+    @patch("src.services.groq_client.get_groq_pooled_client")
     def test_get_groq_client_success(self, mock_pooled_client, mock_config):
         """Test successful client initialization"""
         mock_config.GROQ_API_KEY = "test-key"
         mock_pooled_client.return_value = MagicMock()
 
         from src.services.groq_client import get_groq_client
+
         client = get_groq_client()
         assert client is not None
 
-    @patch('src.services.groq_client.get_groq_client')
+    @patch("src.services.groq_client.get_groq_client")
     def test_make_groq_request_openai(self, mock_get_client):
         """Test Groq request making"""
         mock_client = MagicMock()
@@ -198,13 +203,14 @@ class TestGroqClient:
         mock_get_client.return_value = mock_client
 
         from src.services.groq_client import make_groq_request_openai
+
         messages = [{"role": "user", "content": "Hello"}]
         result = make_groq_request_openai(messages, "llama-3.3-70b-versatile")
 
         assert result is not None
         mock_client.chat.completions.create.assert_called_once()
 
-    @patch('src.services.groq_client.get_groq_client')
+    @patch("src.services.groq_client.get_groq_client")
     def test_make_groq_request_stream(self, mock_get_client):
         """Test Groq streaming request"""
         mock_client = MagicMock()
@@ -213,6 +219,7 @@ class TestGroqClient:
         mock_get_client.return_value = mock_client
 
         from src.services.groq_client import make_groq_request_openai_stream
+
         messages = [{"role": "user", "content": "Hello"}]
         result = make_groq_request_openai_stream(messages, "llama-3.3-70b-versatile")
 
@@ -257,6 +264,7 @@ class TestGoogleVertexClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import google_vertex_client
+
         assert google_vertex_client is not None
 
     def test_sanitize_system_content_string(self):
@@ -270,10 +278,7 @@ class TestGoogleVertexClient:
         """Test system content sanitization with list"""
         from src.services.google_vertex_client import _sanitize_system_content
 
-        content = [
-            {"type": "text", "text": "Part 1"},
-            {"type": "text", "text": "Part 2"}
-        ]
+        content = [{"type": "text", "text": "Part 1"}, {"type": "text", "text": "Part 2"}]
         result = _sanitize_system_content(content)
         assert "Part 1" in result
         assert "Part 2" in result
@@ -288,11 +293,12 @@ class TestGoogleVertexClient:
     @patch.dict(os.environ, {"GOOGLE_PROJECT_ID": "", "GOOGLE_VERTEX_LOCATION": ""}, clear=False)
     def test_prepare_vertex_environment_missing_project(self):
         """Test environment preparation fails without project ID"""
-        with patch('src.services.google_vertex_client.Config') as mock_config:
+        with patch("src.services.google_vertex_client.Config") as mock_config:
             mock_config.GOOGLE_PROJECT_ID = None
             mock_config.GOOGLE_VERTEX_LOCATION = "us-central1"
 
             from src.services.google_vertex_client import _prepare_vertex_environment
+
             with pytest.raises(ValueError, match="GOOGLE_PROJECT_ID"):
                 _prepare_vertex_environment()
 
@@ -303,6 +309,7 @@ class TestOpenRouterClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import openrouter_client
+
         assert openrouter_client is not None
 
 
@@ -312,6 +319,7 @@ class TestDeepInfraClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import deepinfra_client
+
         assert deepinfra_client is not None
 
 
@@ -321,6 +329,7 @@ class TestFireworksClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import fireworks_client
+
         assert fireworks_client is not None
 
 
@@ -330,6 +339,7 @@ class TestTogetherClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import together_client
+
         assert together_client is not None
 
 
@@ -339,6 +349,7 @@ class TestXAIClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import xai_client
+
         assert xai_client is not None
 
 
@@ -348,6 +359,7 @@ class TestHuggingFaceClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import huggingface_client
+
         assert huggingface_client is not None
 
 
@@ -357,6 +369,7 @@ class TestNovitaClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import novita_client
+
         assert novita_client is not None
 
 
@@ -366,6 +379,7 @@ class TestNebiusClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import nebius_client
+
         assert nebius_client is not None
 
 
@@ -375,6 +389,7 @@ class TestMorpheusClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import morpheus_client
+
         assert morpheus_client is not None
 
 
@@ -384,6 +399,7 @@ class TestCloudflareWorkersAIClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import cloudflare_workers_ai_client
+
         assert cloudflare_workers_ai_client is not None
 
 
@@ -393,6 +409,7 @@ class TestFeatherlessClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import featherless_client
+
         assert featherless_client is not None
 
 
@@ -402,6 +419,7 @@ class TestChutesClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import chutes_client
+
         assert chutes_client is not None
 
 
@@ -411,6 +429,7 @@ class TestAimoClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import aimo_client
+
         assert aimo_client is not None
 
 
@@ -420,6 +439,7 @@ class TestNearClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import near_client
+
         assert near_client is not None
 
 
@@ -429,6 +449,7 @@ class TestFalImageClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import fal_image_client
+
         assert fal_image_client is not None
 
 
@@ -438,6 +459,7 @@ class TestImageGenerationClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import image_generation_client
+
         assert image_generation_client is not None
 
 
@@ -447,6 +469,7 @@ class TestHeliconeClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import helicone_client
+
         assert helicone_client is not None
 
 
@@ -456,6 +479,7 @@ class TestAiHubMixClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import aihubmix_client
+
         assert aihubmix_client is not None
 
 
@@ -465,6 +489,7 @@ class TestAnannasClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import anannas_client
+
         assert anannas_client is not None
 
 
@@ -474,6 +499,7 @@ class TestVercelAIGatewayClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import vercel_ai_gateway_client
+
         assert vercel_ai_gateway_client is not None
 
 
@@ -483,6 +509,7 @@ class TestAlpacaNetworkClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import alpaca_network_client
+
         assert alpaca_network_client is not None
 
 
@@ -492,6 +519,7 @@ class TestOneRouterClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import onerouter_client
+
         assert onerouter_client is not None
 
 
@@ -501,6 +529,7 @@ class TestAkashClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import akash_client
+
         assert akash_client is not None
 
 
@@ -510,6 +539,7 @@ class TestClarifaiClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import clarifai_client
+
         assert clarifai_client is not None
 
 
@@ -519,6 +549,7 @@ class TestModelzClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import modelz_client
+
         assert modelz_client is not None
 
 
@@ -528,6 +559,7 @@ class TestAISDKClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import ai_sdk_client
+
         assert ai_sdk_client is not None
 
 
@@ -537,4 +569,5 @@ class TestAlibabaCloudClient:
     def test_module_imports(self):
         """Test that module imports successfully"""
         from src.services import alibaba_cloud_client
+
         assert alibaba_cloud_client is not None

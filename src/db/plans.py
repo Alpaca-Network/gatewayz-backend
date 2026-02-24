@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
@@ -327,7 +327,12 @@ def check_plan_entitlements(user_id: int, required_feature: str = None) -> dict[
                 "monthly_request_limit": 2147483647,
                 "daily_token_limit": 2147483647,
                 "monthly_token_limit": 2147483647,
-                "features": ["unlimited_access", "priority_support", "admin_features", "all_models"],
+                "features": [
+                    "unlimited_access",
+                    "priority_support",
+                    "admin_features",
+                    "all_models",
+                ],
                 "can_access_feature": True,  # Admin can access any feature
                 "plan_expires": None,  # Admin plans don't expire
             }
@@ -572,7 +577,9 @@ def get_user_usage_within_plan_limits(user_id: int) -> dict[str, Any]:
         entry = _usage_cache[cache_key]
         cache_time = entry["timestamp"]
         if datetime.now(UTC) - cache_time < timedelta(seconds=_usage_cache_ttl):
-            logger.debug(f"Usage cache hit for user {user_id} (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)")
+            logger.debug(
+                f"Usage cache hit for user {user_id} (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s)"
+            )
             return entry["data"]
         else:
             # Cache expired, remove it

@@ -21,14 +21,14 @@ logger = logging.getLogger(__name__)
 
 class PricingFormat:
     """Enum for pricing formats from different providers"""
+
     PER_TOKEN = "per_token"
     PER_1K_TOKENS = "per_1k"
     PER_1M_TOKENS = "per_1m"
 
 
 def normalize_to_per_token(
-    price: float | str | Decimal | None,
-    source_format: str = PricingFormat.PER_1M_TOKENS
+    price: float | str | Decimal | None, source_format: str = PricingFormat.PER_1M_TOKENS
 ) -> Decimal | None:
     """
     Normalize pricing from any format to per-token format.
@@ -87,10 +87,7 @@ def normalize_to_per_token(
         return None
 
 
-def normalize_pricing_dict(
-    pricing: dict,
-    source_format: str = PricingFormat.PER_1M_TOKENS
-) -> dict:
+def normalize_pricing_dict(pricing: dict, source_format: str = PricingFormat.PER_1M_TOKENS) -> dict:
     """
     Normalize all pricing fields in a dictionary.
 
@@ -111,7 +108,9 @@ def normalize_pricing_dict(
 
     return {
         "prompt": str(normalize_to_per_token(pricing.get("prompt", 0), source_format) or "0"),
-        "completion": str(normalize_to_per_token(pricing.get("completion", 0), source_format) or "0"),
+        "completion": str(
+            normalize_to_per_token(pricing.get("completion", 0), source_format) or "0"
+        ),
         "image": str(normalize_to_per_token(pricing.get("image", 0), source_format) or "0"),
         "request": str(normalize_to_per_token(pricing.get("request", 0), source_format) or "0"),
     }
@@ -122,7 +121,6 @@ def normalize_pricing_dict(
 PROVIDER_PRICING_FORMATS = {
     # Per-token format (already normalized)
     "openrouter": PricingFormat.PER_TOKEN,  # FIXED: OpenRouter returns per-token pricing, not per-1M
-
     # Per-1M tokens (most common)
     "anthropic": PricingFormat.PER_1M_TOKENS,  # Anthropic manual pricing is per-1M
     "deepinfra": PricingFormat.PER_1M_TOKENS,
@@ -142,10 +140,8 @@ PROVIDER_PRICING_FORMATS = {
     "morpheus": PricingFormat.PER_1M_TOKENS,
     "helicone": PricingFormat.PER_1M_TOKENS,  # Helicone API returns per-1M pricing
     "vercel-ai-gateway": PricingFormat.PER_1M_TOKENS,  # Vercel API returns per-token, but we convert to per-1M in client
-
     # Per-1K tokens
     "aihubmix": PricingFormat.PER_1K_TOKENS,
-
     # Special cases
     "chutes": PricingFormat.PER_1M_TOKENS,  # Uses per-hour, but normalized to per-1M first
 }
@@ -169,7 +165,7 @@ def get_provider_format(provider_slug: str) -> str:
     """
     return PROVIDER_PRICING_FORMATS.get(
         provider_slug.lower(),
-        PricingFormat.PER_1M_TOKENS  # Default assumption for unknown providers
+        PricingFormat.PER_1M_TOKENS,  # Default assumption for unknown providers
     )
 
 
@@ -214,9 +210,7 @@ def auto_detect_format(price: float | str | Decimal) -> str:
 
 
 def convert_between_formats(
-    price: float | str | Decimal,
-    from_format: str,
-    to_format: str
+    price: float | str | Decimal, from_format: str, to_format: str
 ) -> Decimal | None:
     """
     Convert price from one format to another.
@@ -290,8 +284,7 @@ def validate_normalized_price(price: Decimal | float | str) -> bool:
 
 # Convenience function for backward compatibility
 def normalize_price_from_provider(
-    price: float | str | Decimal | None,
-    provider_slug: str
+    price: float | str | Decimal | None, provider_slug: str
 ) -> Decimal | None:
     """
     Normalize price from a specific provider to per-token format.

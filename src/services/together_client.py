@@ -2,11 +2,15 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
-from src.services.circuit_breaker import CircuitBreakerConfig, CircuitBreakerError, get_circuit_breaker
+from src.services.circuit_breaker import (
+    CircuitBreakerConfig,
+    CircuitBreakerError,
+    get_circuit_breaker,
+)
 from src.services.connection_pool import get_together_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.sentry_context import capture_provider_error
 
@@ -62,34 +66,29 @@ def make_together_request_openai(messages, model, **kwargs):
 
     try:
         response = circuit_breaker.call(
-            _make_together_request_openai_internal,
-            messages,
-            model,
-            **kwargs
+            _make_together_request_openai_internal, messages, model, **kwargs
         )
         return response
     except CircuitBreakerError as e:
         logger.warning(f"Together circuit breaker OPEN: {e.message}")
         capture_provider_error(
             e,
-            provider='together',
+            provider="together",
             model=model,
-            endpoint='/chat/completions',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except Exception as e:
         logger.error(f"Together request failed: {e}")
-        capture_provider_error(e, provider='together', model=model, endpoint='/chat/completions')
+        capture_provider_error(e, provider="together", model=model, endpoint="/chat/completions")
         raise
 
 
 def _make_together_request_openai_stream_internal(messages, model, **kwargs):
     """Internal function to make streaming request to Together.ai (called by circuit breaker)."""
     client = get_together_client()
-    stream = client.chat.completions.create(
-        model=model, messages=messages, stream=True, **kwargs
-    )
+    stream = client.chat.completions.create(model=model, messages=messages, stream=True, **kwargs)
     return stream
 
 
@@ -105,25 +104,24 @@ def make_together_request_openai_stream(messages, model, **kwargs):
 
     try:
         stream = circuit_breaker.call(
-            _make_together_request_openai_stream_internal,
-            messages,
-            model,
-            **kwargs
+            _make_together_request_openai_stream_internal, messages, model, **kwargs
         )
         return stream
     except CircuitBreakerError as e:
         logger.warning(f"Together circuit breaker OPEN (streaming): {e.message}")
         capture_provider_error(
             e,
-            provider='together',
+            provider="together",
             model=model,
-            endpoint='/chat/completions (stream)',
-            extra_context={"circuit_breaker_state": e.state.value}
+            endpoint="/chat/completions (stream)",
+            extra_context={"circuit_breaker_state": e.state.value},
         )
         raise
     except Exception as e:
         logger.error(f"Together streaming request failed: {e}")
-        capture_provider_error(e, provider='together', model=model, endpoint='/chat/completions (stream)')
+        capture_provider_error(
+            e, provider="together", model=model, endpoint="/chat/completions (stream)"
+        )
         raise
 
 
@@ -187,7 +185,9 @@ def normalize_together_model(together_model: dict) -> dict:
     # Clean malformed model names (remove parentheses with size info, etc.)
     display_name = clean_model_name(raw_display_name)
     owned_by = together_model.get("owned_by") or together_model.get("organization")
-    base_description = together_model.get("description") or f"Together hosted model {provider_model_id}."
+    base_description = (
+        together_model.get("description") or f"Together hosted model {provider_model_id}."
+    )
     if owned_by and owned_by.lower() not in base_description.lower():
         description = f"{base_description} Owned by {owned_by}."
     else:
@@ -244,14 +244,15 @@ def normalize_together_model(together_model: dict) -> dict:
 
 def fetch_models_from_together():
     """Fetch models from Together.ai API with step-by-step logging"""
-    from src.utils.step_logger import StepLogger
+    import time
+
     from src.utils.provider_error_logging import (
         ProviderErrorType,
         ProviderFetchContext,
         log_provider_fetch_error,
         log_provider_fetch_success,
     )
-    import time
+    from src.utils.step_logger import StepLogger
 
     start_time = time.time()
     step_logger = StepLogger("Together Model Fetch", total_steps=4)
@@ -287,7 +288,9 @@ def fetch_models_from_together():
         raw_models = payload if isinstance(payload, list) else payload.get("data", [])
 
         step_logger.success(
-            raw_count=len(raw_models), status_code=response.status_code, response_type=type(payload).__name__
+            raw_count=len(raw_models),
+            status_code=response.status_code,
+            response_type=type(payload).__name__,
         )
 
         # Step 3: Normalize and filter models
@@ -305,14 +308,18 @@ def fetch_models_from_together():
         step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count)
 
         # Step 4: Cache the models
-        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+        step_logger.step(
+            4, "Caching models", cache_type="redis+local", model_count=len(normalized_models)
+        )
 
         cache_gateway_catalog("together", normalized_models)
         step_logger.success(cached_count=len(normalized_models))
 
         # Complete with summary
         duration = time.time() - start_time
-        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+        step_logger.complete(
+            total_models=len(normalized_models), duration_seconds=f"{duration:.2f}"
+        )
 
         # Log success with provider_error_logging utility
         log_provider_fetch_success(
@@ -417,7 +424,10 @@ def fetch_models_from_together():
         step_logger.failure(e)
 
         context = ProviderFetchContext(
-            provider_slug="together", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+            provider_slug="together",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.UNKNOWN,
         )
         log_provider_fetch_error("together", e, context)
 

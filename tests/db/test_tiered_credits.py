@@ -9,8 +9,9 @@ Tests cover:
 - Edge cases (partial deductions, zero balances, etc.)
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 class TestTieredCreditDeduction:
@@ -19,9 +20,7 @@ class TestTieredCreditDeduction:
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_deduct_from_allowance_first(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_deduct_from_allowance_first(self, mock_log_tx, mock_invalidate, mock_client):
         """Verify allowance is consumed before purchased credits."""
         from src.db.users import deduct_credits
 
@@ -68,9 +67,7 @@ class TestTieredCreditDeduction:
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_deduct_split_across_both(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_deduct_split_across_both(self, mock_log_tx, mock_invalidate, mock_client):
         """Test deduction that spans both allowance and purchased credits."""
         from src.db.users import deduct_credits
 
@@ -201,9 +198,7 @@ class TestAllowanceReset:
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache_by_id")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_reset_sets_correct_amount_pro(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_reset_sets_correct_amount_pro(self, mock_log_tx, mock_invalidate, mock_client):
         """PRO tier should get $15 allowance on reset."""
         from src.db.users import reset_subscription_allowance
 
@@ -237,9 +232,7 @@ class TestAllowanceReset:
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache_by_id")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_reset_sets_correct_amount_max(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_reset_sets_correct_amount_max(self, mock_log_tx, mock_invalidate, mock_client):
         """MAX tier should get $150 allowance on reset."""
         from src.db.users import reset_subscription_allowance
 
@@ -268,9 +261,7 @@ class TestSubscriptionCancellation:
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache_by_id")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_allowance_forfeited_on_cancel(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_allowance_forfeited_on_cancel(self, mock_log_tx, mock_invalidate, mock_client):
         """Verify allowance is zeroed on cancellation."""
         from src.db.users import forfeit_subscription_allowance
 
@@ -296,15 +287,15 @@ class TestSubscriptionCancellation:
         # Verify update set allowance to 0
         update_call = mock_supabase.table.return_value.update.call_args
         assert update_call is not None
-        update_data = update_call.args[0] if update_call.args else update_call.kwargs.get("data", {})
+        update_data = (
+            update_call.args[0] if update_call.args else update_call.kwargs.get("data", {})
+        )
         assert update_data.get("subscription_allowance") == 0
 
     @patch("src.db.users.get_supabase_client")
     @patch("src.db.users.invalidate_user_cache_by_id")
     @patch("src.db.credit_transactions.log_credit_transaction")
-    def test_purchased_credits_preserved_on_cancel(
-        self, mock_log_tx, mock_invalidate, mock_client
-    ):
+    def test_purchased_credits_preserved_on_cancel(self, mock_log_tx, mock_invalidate, mock_client):
         """Verify purchased credits remain after cancellation."""
         from src.db.users import forfeit_subscription_allowance
 

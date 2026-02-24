@@ -10,7 +10,7 @@ import os
 import secrets
 import threading
 import time
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 try:
@@ -483,9 +483,7 @@ The {self.app_name} Team
         try:
             # Validate email before attempting to send
             if not self._is_valid_email_for_sending(to_email):
-                logger.info(
-                    f"Skipping email to '{to_email}': invalid or placeholder email address"
-                )
+                logger.info(f"Skipping email to '{to_email}': invalid or placeholder email address")
                 return True  # Return True to avoid error logging for expected cases
 
             logger.info(f"Attempting to send email to: {to_email}")

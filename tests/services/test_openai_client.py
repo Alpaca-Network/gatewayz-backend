@@ -1,7 +1,8 @@
 """Tests for OpenAI client"""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.openai_client import (
     get_openai_client,
@@ -55,9 +56,7 @@ class TestOpenAIClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        response = make_openai_request(
-            messages, "gpt-4o", max_tokens=100, temperature=0.7
-        )
+        response = make_openai_request(messages, "gpt-4o", max_tokens=100, temperature=0.7)
 
         assert response is not None
         mock_client.chat.completions.create.assert_called_once_with(
@@ -104,9 +103,7 @@ class TestOpenAIClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_openai_request_stream(
-            messages, "gpt-4-turbo", max_tokens=500
-        )
+        stream = make_openai_request_stream(messages, "gpt-4-turbo", max_tokens=500)
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

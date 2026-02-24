@@ -2,10 +2,10 @@ import logging
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -195,14 +195,14 @@ def normalize_near_model(near_model: dict) -> dict:
         input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
         # Per-token price = amount × 10^scale
         if input_amount > 0:
-            pricing["prompt"] = str(input_amount * (10 ** input_scale))
+            pricing["prompt"] = str(input_amount * (10**input_scale))
 
     if output_cost and isinstance(output_cost, dict):
         output_amount = output_cost.get("amount", 0)
         output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
         # Per-token price = amount × 10^scale
         if output_amount > 0:
-            pricing["completion"] = str(output_amount * (10 ** output_scale))
+            pricing["completion"] = str(output_amount * (10**output_scale))
 
     # Fallback to old pricing format for backward compatibility
     if not pricing["prompt"] and not pricing["completion"]:
@@ -315,7 +315,9 @@ def fetch_models_from_near():
         # Try database fallback first (dynamic, from last successful sync)
         db_fallback_models = get_fallback_models_from_db("near")
         if db_fallback_models:
-            normalized_models = [normalize_near_model(model) for model in db_fallback_models if model]
+            normalized_models = [
+                normalize_near_model(model) for model in db_fallback_models if model
+            ]
             normalized_models = [m for m in normalized_models if m]  # Filter out None
 
             if normalized_models:

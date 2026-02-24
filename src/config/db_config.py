@@ -216,11 +216,9 @@ class DatabaseConfig:
                 current_user = cursor.fetchone()[0]
 
                 # Get database size
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT pg_size_pretty(pg_database_size(current_database()));
-                """
-                )
+                """)
                 db_size = cursor.fetchone()[0]
 
                 cursor.close()

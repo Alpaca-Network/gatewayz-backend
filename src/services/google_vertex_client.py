@@ -110,7 +110,9 @@ def _get_model_location(model_name: str, try_regional_fallback: bool = False) ->
 
     # Generally available models (e.g., gemini-2.5-flash-lite, gemini-2.0-flash-exp)
     # use regional endpoints by default for better performance
-    logger.debug(f"Model {model_name} using regional endpoint ({Config.GOOGLE_VERTEX_LOCATION}) for optimal performance")
+    logger.debug(
+        f"Model {model_name} using regional endpoint ({Config.GOOGLE_VERTEX_LOCATION}) for optimal performance"
+    )
     return Config.GOOGLE_VERTEX_LOCATION
 
 
@@ -1465,7 +1467,9 @@ def _fetch_models_from_vertex_api() -> list[dict] | None:
         return None
 
     except Exception as e:
-        logger.warning(f"Failed to fetch models from Vertex AI API: {e}. Using fallback configuration.")
+        logger.warning(
+            f"Failed to fetch models from Vertex AI API: {e}. Using fallback configuration."
+        )
         return None
 
 
@@ -1494,7 +1498,10 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
             "streamGenerateContent"
         ):
             # Check if it's an embedding model we want to include
-            if not supported_actions.get("computeTokens") and "embedding" not in provider_model_id.lower():
+            if (
+                not supported_actions.get("computeTokens")
+                and "embedding" not in provider_model_id.lower()
+            ):
                 return None
 
         # Get version info
@@ -1518,7 +1525,11 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
 
         # Default context lengths based on model family
         if input_token_limit is None:
-            if "gemini-3" in provider_model_id or "gemini-2.5" in provider_model_id or "gemini-2.0" in provider_model_id:
+            if (
+                "gemini-3" in provider_model_id
+                or "gemini-2.5" in provider_model_id
+                or "gemini-2.0" in provider_model_id
+            ):
                 input_token_limit = 1000000  # 1M context for newer models
             elif "gemini-1.5" in provider_model_id:
                 input_token_limit = 1000000
@@ -1555,7 +1566,9 @@ def _normalize_vertex_api_model(api_model: dict) -> dict | None:
         description = api_model.get("description", "") or f"Google {provider_model_id} model"
 
         # Create display name
-        name_display = api_model.get("displayName", "") or provider_model_id.replace("-", " ").title()
+        name_display = (
+            api_model.get("displayName", "") or provider_model_id.replace("-", " ").title()
+        )
 
         prefixed_slug = f"google-vertex/{provider_model_id}"
 

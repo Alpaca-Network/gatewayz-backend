@@ -1,7 +1,8 @@
 """Tests for Groq client"""
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.groq_client import (
     get_groq_client,
@@ -104,9 +105,7 @@ class TestGroqClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_groq_request_openai_stream(
-            messages, "llama-3.1-8b-instant", max_tokens=500
-        )
+        stream = make_groq_request_openai_stream(messages, "llama-3.1-8b-instant", max_tokens=500)
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

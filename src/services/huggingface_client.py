@@ -7,8 +7,8 @@ from typing import Any
 import httpx
 from fastapi import HTTPException
 
-from src.services.model_catalog_cache import get_cached_gateway_catalog
 from src.config import Config
+from src.services.model_catalog_cache import get_cached_gateway_catalog
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -268,14 +268,14 @@ def make_huggingface_request_openai(messages, model, **kwargs):
     except httpx.HTTPStatusError as e:
         # Log detailed error information for 400 errors to help diagnose issues
         if e.response.status_code == 400:
-            error_body = e.response.text[:500] if hasattr(e.response, 'text') else str(e)
+            error_body = e.response.text[:500] if hasattr(e.response, "text") else str(e)
             logger.error(
                 "Hugging Face 400 Bad Request for model '%s': %s. "
                 "This model may not be available on HF Inference Router despite appearing in the catalog. "
                 "Request payload: %s",
                 model,
                 error_body,
-                json.dumps(payload, default=str)[:500]
+                json.dumps(payload, default=str)[:500],
             )
         logger.error("Hugging Face request failed for model '%s': %s", model, e)
         raise
@@ -327,14 +327,14 @@ def make_huggingface_request_openai_stream(
     except httpx.HTTPStatusError as e:
         # Log detailed error information for 400 errors to help diagnose issues
         if e.response.status_code == 400:
-            error_body = e.response.text[:500] if hasattr(e.response, 'text') else str(e)
+            error_body = e.response.text[:500] if hasattr(e.response, "text") else str(e)
             logger.error(
                 "Hugging Face 400 Bad Request (streaming) for model '%s': %s. "
                 "This model may not be available on HF Inference Router despite appearing in the catalog. "
                 "Request payload: %s",
                 model,
                 error_body,
-                json.dumps(payload, default=str)[:500]
+                json.dumps(payload, default=str)[:500],
             )
         logger.error("Hugging Face streaming request failed for model '%s': %s", model, e)
         raise

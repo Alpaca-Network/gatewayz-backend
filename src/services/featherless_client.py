@@ -4,10 +4,10 @@ from pathlib import Path
 
 import httpx
 
-from src.services.model_catalog_cache import cache_gateway_catalog
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_featherless_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -53,16 +53,16 @@ def _sanitize_messages_for_featherless(messages: list[dict]) -> list[dict]:
         clean_msg = msg.copy()
 
         # Remove null tool_calls (Featherless rejects null, expects array or omitted)
-        if 'tool_calls' in clean_msg and clean_msg['tool_calls'] is None:
+        if "tool_calls" in clean_msg and clean_msg["tool_calls"] is None:
             logger.debug("Removing null tool_calls from message")
-            del clean_msg['tool_calls']
+            del clean_msg["tool_calls"]
 
         # Ensure tool_calls is array if present
-        if 'tool_calls' in clean_msg and not isinstance(clean_msg['tool_calls'], list):
+        if "tool_calls" in clean_msg and not isinstance(clean_msg["tool_calls"], list):
             logger.warning(
                 f"Invalid tool_calls type: {type(clean_msg['tool_calls'])}, removing field"
             )
-            del clean_msg['tool_calls']
+            del clean_msg["tool_calls"]
 
         sanitized.append(clean_msg)
 
@@ -83,9 +83,7 @@ def make_featherless_request_openai(messages, model, **kwargs):
 
         client = get_featherless_client()
         response = client.chat.completions.create(
-            model=model,
-            messages=sanitized_messages,
-            **kwargs
+            model=model, messages=sanitized_messages, **kwargs
         )
         return response
     except Exception as e:
@@ -107,10 +105,7 @@ def make_featherless_request_openai_stream(messages, model, **kwargs):
 
         client = get_featherless_client()
         stream = client.chat.completions.create(
-            model=model,
-            messages=sanitized_messages,
-            stream=True,
-            **kwargs
+            model=model, messages=sanitized_messages, stream=True, **kwargs
         )
         return stream
     except Exception as e:
@@ -329,14 +324,15 @@ def fetch_models_from_featherless():
     Note: Featherless API ignores the 'limit' and 'offset' parameters and returns
     ALL models (~6,452) in a single request. We only need one API call.
     """
-    from src.utils.step_logger import StepLogger
+    import time
+
     from src.utils.provider_error_logging import (
         ProviderErrorType,
         ProviderFetchContext,
         log_provider_fetch_error,
         log_provider_fetch_success,
     )
-    import time
+    from src.utils.step_logger import StepLogger
 
     start_time = time.time()
     step_logger = StepLogger("Featherless Model Fetch", total_steps=4)
@@ -357,7 +353,9 @@ def fetch_models_from_featherless():
         step_logger.success(status="configured")
 
         # Step 2: Fetch all models from API (single request)
-        step_logger.step(2, "Fetching all models from API (single request)", endpoint=url, timeout="30s")
+        step_logger.step(
+            2, "Fetching all models from API (single request)", endpoint=url, timeout="30s"
+        )
 
         headers = {"Authorization": f"Bearer {Config.FEATHERLESS_API_KEY}"}
         response = httpx.get(url, headers=headers, params={"limit": 10000}, timeout=30.0)
@@ -415,20 +413,28 @@ def fetch_models_from_featherless():
                 )
             else:
                 step_logger.success(
-                    normalized_count=len(normalized_models), filtered_count=filtered_count, export_added=0
+                    normalized_count=len(normalized_models),
+                    filtered_count=filtered_count,
+                    export_added=0,
                 )
         else:
-            step_logger.success(normalized_count=len(normalized_models), filtered_count=filtered_count, source="API")
+            step_logger.success(
+                normalized_count=len(normalized_models), filtered_count=filtered_count, source="API"
+            )
 
         # Step 4: Cache the models
-        step_logger.step(4, "Caching models", cache_type="redis+local", model_count=len(normalized_models))
+        step_logger.step(
+            4, "Caching models", cache_type="redis+local", model_count=len(normalized_models)
+        )
 
         cache_gateway_catalog("featherless", normalized_models)
         step_logger.success(cached_count=len(normalized_models))
 
         # Complete with summary
         duration = time.time() - start_time
-        step_logger.complete(total_models=len(normalized_models), duration_seconds=f"{duration:.2f}")
+        step_logger.complete(
+            total_models=len(normalized_models), duration_seconds=f"{duration:.2f}"
+        )
 
         # Log success with provider_error_logging utility
         log_provider_fetch_success(
@@ -497,7 +503,10 @@ def fetch_models_from_featherless():
         step_logger.failure(e)
 
         context = ProviderFetchContext(
-            provider_slug="featherless", endpoint_url=url, duration=duration, error_type=ProviderErrorType.UNKNOWN
+            provider_slug="featherless",
+            endpoint_url=url,
+            duration=duration,
+            error_type=ProviderErrorType.UNKNOWN,
         )
         log_provider_fetch_error("featherless", e, context)
 

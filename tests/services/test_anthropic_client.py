@@ -5,8 +5,9 @@ NOTE: The Anthropic client uses Anthropic's OpenAI-compatible API endpoint
 Therefore, tests mock `chat.completions.create` as per the OpenAI SDK interface.
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 
 from src.services.anthropic_client import (
     get_anthropic_client,
@@ -109,9 +110,7 @@ class TestAnthropicClient:
         mock_get_client.return_value = mock_client
 
         messages = [{"role": "user", "content": "Hello"}]
-        stream = make_anthropic_request_stream(
-            messages, "claude-3-opus-20240229", max_tokens=500
-        )
+        stream = make_anthropic_request_stream(messages, "claude-3-opus-20240229", max_tokens=500)
 
         assert stream is not None
         mock_client.chat.completions.create.assert_called_once_with(

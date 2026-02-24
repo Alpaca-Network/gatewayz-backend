@@ -7,7 +7,7 @@ Monitors errors continuously and generates fixes without manual intervention.
 
 import asyncio
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from src.config import Config
 from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator

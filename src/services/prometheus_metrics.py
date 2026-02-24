@@ -44,6 +44,7 @@ def get_trace_exemplar() -> dict[str, str] | None:
         pass
     return None
 
+
 # Clear any existing metrics from the registry to avoid duplication issues
 # This is necessary because Prometheus uses a global registry that persists across imports
 try:
@@ -946,13 +947,19 @@ def record_http_response(method: str, endpoint: str, status_code: int, app_name:
 
     # Record in new Grafana-compatible metrics
     fastapi_requests_total.labels(
-        app_name=app, method=method, path=endpoint, status_code=status_code,
+        app_name=app,
+        method=method,
+        path=endpoint,
+        status_code=status_code,
         status_class=status_class,
     ).inc()
 
     # Also record in legacy metrics for backward compatibility
     http_request_count.labels(
-        method=method, endpoint=endpoint, status_code=status_code, status_class=status_class,
+        method=method,
+        endpoint=endpoint,
+        status_code=status_code,
+        status_class=status_class,
     ).inc()
 
 

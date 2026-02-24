@@ -31,6 +31,7 @@ Related files:
 """
 
 import os
+
 import pytest
 
 
@@ -59,8 +60,9 @@ def test_gemini_provider_detection_logic():
         override_provider = detect_provider_from_model_id(original_model)
 
         # Verify detection returns openrouter (fallback when no credentials)
-        assert override_provider == "openrouter", \
-            f"Expected 'openrouter', got '{override_provider}'"
+        assert (
+            override_provider == "openrouter"
+        ), f"Expected 'openrouter', got '{override_provider}'"
 
         if override_provider:
             override_provider = override_provider.lower()
@@ -70,10 +72,8 @@ def test_gemini_provider_detection_logic():
             req_provider_missing = False
 
         # Verify the fix works
-        assert req_provider_missing is False, \
-            "req_provider_missing should be False after detection"
-        assert provider == "openrouter", \
-            f"Provider should be 'openrouter', got '{provider}'"
+        assert req_provider_missing is False, "req_provider_missing should be False after detection"
+        assert provider == "openrouter", f"Provider should be 'openrouter', got '{provider}'"
 
         # Verify fallback logic will NOT run
         if req_provider_missing:
@@ -100,21 +100,23 @@ def test_gemini_with_vertex_credentials():
         model_id = "google/gemini-2.0-flash-001"
         provider = detect_provider_from_model_id(model_id)
 
-        assert provider == "google-vertex", \
-            f"Expected 'google-vertex', got '{provider}'"
+        assert provider == "google-vertex", f"Expected 'google-vertex', got '{provider}'"
 
     finally:
         # Clean up
         os.environ.pop("GOOGLE_VERTEX_CREDENTIALS_JSON", None)
 
 
-@pytest.mark.parametrize("model_id", [
-    "google/gemini-2.0-flash-001",
-    "google/gemini-2.5-flash",
-    "google/gemini-1.5-pro",
-    "google/gemini-2.0-pro",
-    "google/gemini-1.5-flash",
-])
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "google/gemini-2.0-flash-001",
+        "google/gemini-2.5-flash",
+        "google/gemini-1.5-pro",
+        "google/gemini-2.0-pro",
+        "google/gemini-1.5-flash",
+    ],
+)
 def test_various_gemini_models_route_correctly(model_id):
     """
     Test that various Google/Gemini model IDs are routed correctly.
@@ -127,8 +129,9 @@ def test_various_gemini_models_route_correctly(model_id):
 
     try:
         provider = detect_provider_from_model_id(model_id)
-        assert provider == "openrouter", \
-            f"Model {model_id} should route to 'openrouter', got '{provider}'"
+        assert (
+            provider == "openrouter"
+        ), f"Model {model_id} should route to 'openrouter', got '{provider}'"
 
     finally:
         # Restore original environment

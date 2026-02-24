@@ -9,7 +9,7 @@ PERF: Includes in-memory caching to reduce database queries by ~95%
 import logging
 import time
 import traceback
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import (
@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 # In-memory cache for trial validation results
 # Structure: {api_key: {"result": dict, "timestamp": datetime}}
 _trial_cache: dict[str, dict[str, Any]] = {}
-_trial_cache_ttl = 60  # 60 seconds TTL - shorter than user cache since trial usage changes frequently
-_trial_cache_ttl_expired = 3600  # 1 hour TTL for expired trials - they won't change, no need to recheck often
+_trial_cache_ttl = (
+    60  # 60 seconds TTL - shorter than user cache since trial usage changes frequently
+)
+_trial_cache_ttl_expired = (
+    3600  # 1 hour TTL for expired trials - they won't change, no need to recheck often
+)
 
 
 def clear_trial_cache(api_key: str | None = None) -> None:
@@ -93,12 +97,13 @@ def _validate_trial_access_uncached(api_key: str, retry_count: int = 0) -> dict[
             if user_id:
                 try:
                     from src.db.plans import is_admin_tier_user
+
                     if is_admin_tier_user(user_id):
                         logger.info("Admin tier user - bypassing trial validation")
                         return {
                             "is_valid": True,
                             "is_trial": False,
-                            "message": "Admin tier - unlimited access"
+                            "message": "Admin tier - unlimited access",
                         }
                 except Exception as e:
                     logger.warning(f"Error checking admin tier status: {e}")
@@ -274,14 +279,15 @@ def validate_trial_access(api_key: str) -> dict[str, Any]:
 
         # Use longer TTL for expired/invalid trials - they won't change
         # This significantly reduces DB load from bot traffic with expired trials
-        is_expired_or_invalid = (
-            not cached_result.get("is_valid", False) or
-            cached_result.get("is_expired", False)
+        is_expired_or_invalid = not cached_result.get("is_valid", False) or cached_result.get(
+            "is_expired", False
         )
         ttl = _trial_cache_ttl_expired if is_expired_or_invalid else _trial_cache_ttl
 
         if datetime.now(UTC) - cache_time < timedelta(seconds=ttl):
-            logger.debug(f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s, ttl: {ttl}s)")
+            logger.debug(
+                f"Trial cache hit for API key {api_key[:10]}... (age: {(datetime.now(UTC) - cache_time).total_seconds():.1f}s, ttl: {ttl}s)"
+            )
             return cached_result
         else:
             # Cache expired, remove it

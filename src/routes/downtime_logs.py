@@ -255,9 +255,7 @@ async def analyze_incident_logs(
         raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-@router.post(
-    "/admin/downtime/incidents/{incident_id}/capture-logs", tags=["admin", "monitoring"]
-)
+@router.post("/admin/downtime/incidents/{incident_id}/capture-logs", tags=["admin", "monitoring"])
 async def trigger_log_capture(
     incident_id: str,
     admin_user: dict = Depends(require_admin),

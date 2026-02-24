@@ -1,7 +1,7 @@
 import logging
 import os
 from collections.abc import Callable
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from threading import Lock
 from typing import TypeVar
 
@@ -12,10 +12,10 @@ try:  # pragma: no cover - defensive import for differing OpenAI SDKs
 except ImportError:  # pragma: no cover
     AuthenticationError = Exception  # type: ignore[assignment]
 
-from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.config import Config
 from src.config.redis_config import get_redis_manager
 from src.services.anthropic_transformer import extract_message_with_tools
+from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -174,7 +174,9 @@ class QuotaExceededError(Exception):
     pass
 
 
-def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]) -> T:  # noqa: UP047
+def _execute_with_region_failover(  # noqa: UP047
+    operation_name: str, fn: Callable[[OpenAI], T]
+) -> T:
     attempts = _region_attempt_order()
     if not attempts:
         raise ValueError(
@@ -225,8 +227,7 @@ def _execute_with_region_failover(operation_name: str, fn: Callable[[OpenAI], T]
             if should_retry:
                 next_region = attempts[idx + 1]
                 logger.warning(
-                    "Alibaba Cloud %s rejected credentials at %s (error: %s). "
-                    "Retrying with %s.",
+                    "Alibaba Cloud %s rejected credentials at %s (error: %s). " "Retrying with %s.",
                     operation_name,
                     _describe_region(region),
                     exc,
@@ -568,8 +569,8 @@ def fetch_models_from_alibaba():
         # Check if it's a 401 authentication error
         if "401" in error_msg or "Incorrect API key" in error_msg or "invalid_api_key" in error_msg:
             # Get the actual region being used
-            region = getattr(Config, 'ALIBABA_CLOUD_REGION', 'international').lower()
-            if region == 'china':
+            region = getattr(Config, "ALIBABA_CLOUD_REGION", "international").lower()
+            if region == "china":
                 current_endpoint = "dashscope.aliyuncs.com (China/Beijing)"
                 suggestion = (
                     "If your key only works for the International endpoint, set "
@@ -589,7 +590,7 @@ def fetch_models_from_alibaba():
                 "Currently using: %s. %s",
                 error_msg,
                 current_endpoint,
-                suggestion
+                suggestion,
             )
         elif (
             Config.ALIBABA_CLOUD_API_KEY

@@ -3,17 +3,18 @@
 Tests for subscription products database module
 """
 
-import pytest
-from postgrest import APIError
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+from postgrest import APIError
+
 from src.db.subscription_products import (
-    get_tier_from_product_id,
+    add_subscription_product,
+    get_all_active_products,
     get_credits_from_tier,
     get_subscription_product,
-    get_all_active_products,
-    add_subscription_product,
+    get_tier_from_product_id,
     update_subscription_product,
 )
 
@@ -52,7 +53,9 @@ class TestSubscriptionProducts:
 
     def test_get_tier_from_product_id_not_found(self, mock_supabase_client):
         """Test getting tier from unknown product ID defaults to basic"""
-        mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = []
+        mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = (
+            []
+        )
 
         tier = get_tier_from_product_id("prod_unknown_123")
 
@@ -117,7 +120,9 @@ class TestSubscriptionProducts:
 
     def test_get_credits_from_tier_not_found(self, mock_supabase_client):
         """Test getting credits from unknown tier defaults to 0"""
-        mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = []
+        mock_supabase_client.table.return_value.select.return_value.eq.return_value.eq.return_value.limit.return_value.execute.return_value.data = (
+            []
+        )
 
         credits = get_credits_from_tier("unknown_tier")
 
@@ -158,7 +163,9 @@ class TestSubscriptionProducts:
             },
         ]
 
-        mock_supabase_client.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = expected_products
+        mock_supabase_client.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = (
+            expected_products
+        )
 
         products = get_all_active_products()
 

@@ -1,20 +1,22 @@
 import importlib
 import json
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import Request, Response, HTTPStatusError, RequestError, TimeoutException
-from unittest.mock import patch, MagicMock, Mock
+from httpx import HTTPStatusError, Request, RequestError, Response, TimeoutException
 
 # ======================================================================
 # >>> CHANGE THIS to the module path where your router + endpoint live:
-MODULE_PATH = "src.routes.chat"   # e.g. "src.api.chat", "src.api.v1.gateway", etc.
+MODULE_PATH = "src.routes.chat"  # e.g. "src.api.chat", "src.api.v1.gateway", etc.
 # ======================================================================
 
 try:
     api = importlib.import_module(MODULE_PATH)
 except ModuleNotFoundError as e:
     pytest.skip(f"Missing optional dependency: {e}", allow_module_level=True)
+
 
 # Build a FastAPI app including the router under test
 @pytest.fixture(scope="function")
@@ -32,10 +34,12 @@ def client():
     app.dependency_overrides[get_api_key] = mock_get_api_key
     return TestClient(app)
 
+
 @pytest.fixture
 def auth_headers():
     """Provide authorization headers for test requests"""
     return {"Authorization": "Bearer test_api_key"}
+
 
 @pytest.fixture
 def payload_basic():
@@ -44,6 +48,7 @@ def payload_basic():
         "model": "openrouter/some-model",
         "messages": [{"role": "user", "content": "Hello"}],
     }
+
 
 # ---------- Helper fake rate limit manager ----------
 class _RLResult:
@@ -56,9 +61,10 @@ class _RLResult:
         # Rate limit header fields (new in latest version)
         self.ratelimit_limit_requests = 250
         self.ratelimit_limit_tokens = 10000
-        self.ratelimit_reset_requests = int(__import__('time').time()) + 60
-        self.ratelimit_reset_tokens = int(__import__('time').time()) + 60
+        self.ratelimit_reset_requests = int(__import__("time").time()) + 60
+        self.ratelimit_reset_tokens = int(__import__("time").time()) + 60
         self.burst_window_description = "100 per 60 seconds"
+
 
 class _RateLimitMgr:
     def __init__(self, allowed_pre=True, allowed_final=True):
@@ -79,20 +85,31 @@ class _RateLimitMgr:
 #                                TESTS
 # ----------------------------------------------------------------------
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_happy_path_openrouter(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test successful chat completion with OpenRouter"""
     # Setup mocks
@@ -108,7 +125,7 @@ def test_happy_path_openrouter(
 
     # Mock rate limit manager
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -121,10 +138,12 @@ def test_happy_path_openrouter(
     assert rate_mgr is not None
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-def test_invalid_api_key(mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+def test_invalid_api_key(
+    mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers
+):
     """Test that invalid API key returns 401"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = None  # Invalid API key
@@ -136,12 +155,21 @@ def test_invalid_api_key(mock_get_user, mock_enforce_limits, mock_trial, client,
     assert "Invalid API key" in r.text
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-def test_plan_limit_exceeded_precheck(mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+def test_plan_limit_exceeded_precheck(
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that plan limit exceeded returns 429"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -153,20 +181,29 @@ def test_plan_limit_exceeded_precheck(mock_make_request, mock_process, mock_get_
     }
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 429
     assert "Plan limit exceeded" in r.text
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch.dict('os.environ', {'DISABLE_RATE_LIMITING': 'false'})
-def test_rate_limit_exceeded_precheck(mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch.dict("os.environ", {"DISABLE_RATE_LIMITING": "false"})
+def test_rate_limit_exceeded_precheck(
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that rate limit exceeded returns 429"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -178,39 +215,48 @@ def test_rate_limit_exceeded_precheck(mock_make_request, mock_process, mock_get_
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=False, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 429
     assert "Rate limit exceeded" in r.text
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-def test_insufficient_credits_non_trial(mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+def test_insufficient_credits_non_trial(
+    mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers
+):
     """Test that insufficient credits returns 402"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 402
     assert "Insufficient credits" in r.text
 
 
-@patch('src.services.trial_validation.track_trial_usage')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
+@patch("src.services.trial_validation.track_trial_usage")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
 def test_trial_valid_usage_tracked(
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_track_trial,
-    client, payload_basic, auth_headers
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_track_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test that trial user usage is tracked correctly"""
     mock_trial.return_value = {"is_valid": True, "is_trial": True, "is_expired": False}
@@ -224,7 +270,7 @@ def test_trial_valid_usage_tracked(
     mock_track_trial.return_value = True
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -235,17 +281,19 @@ def test_trial_valid_usage_tracked(
     assert call_args[0][1] == 10  # total_tokens
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-def test_trial_expired_403(mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+def test_trial_expired_403(
+    mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers
+):
     """Test that expired trial returns 403"""
     mock_trial.return_value = {
         "is_valid": False,
         "is_trial": True,
         "is_expired": True,
         "error": "Trial expired",
-        "trial_end_date": "2025-09-01"
+        "trial_end_date": "2025-09-01",
     }
     mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
@@ -259,15 +307,22 @@ def test_trial_expired_403(mock_get_user, mock_enforce_limits, mock_trial, clien
 
 # ==================== FREE MODEL BYPASS TESTS ====================
 
-@patch('src.services.prometheus_metrics.record_free_model_usage')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
+
+@patch("src.services.prometheus_metrics.record_free_model_usage")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
 def test_expired_trial_can_use_free_model(
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
-    client, auth_headers
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_record_free,
+    client,
+    auth_headers,
 ):
     """Test that expired trial can still access free models (with :free suffix)"""
     mock_trial.return_value = {
@@ -275,7 +330,7 @@ def test_expired_trial_can_use_free_model(
         "is_trial": True,
         "is_expired": True,
         "error": "Trial expired",
-        "trial_end_date": "2025-09-01"
+        "trial_end_date": "2025-09-01",
     }
     mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
@@ -292,7 +347,7 @@ def test_expired_trial_can_use_free_model(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -302,15 +357,21 @@ def test_expired_trial_can_use_free_model(
     mock_record_free.assert_called_once_with("expired_trial", "google/gemini-2.0-flash-exp:free")
 
 
-@patch('src.services.prometheus_metrics.record_free_model_usage')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
+@patch("src.services.prometheus_metrics.record_free_model_usage")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
 def test_trial_limits_exceeded_can_use_free_model(
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
-    client, auth_headers
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_record_free,
+    client,
+    auth_headers,
 ):
     """Test that trial with exceeded limits can still access free models"""
     mock_trial.return_value = {
@@ -320,7 +381,7 @@ def test_trial_limits_exceeded_can_use_free_model(
         "error": "Trial token limit exceeded",
         "remaining_tokens": 0,
         "remaining_requests": 5,
-        "remaining_credits": 1.0
+        "remaining_credits": 1.0,
     }
     mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
@@ -337,7 +398,7 @@ def test_trial_limits_exceeded_can_use_free_model(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -347,17 +408,19 @@ def test_trial_limits_exceeded_can_use_free_model(
     mock_record_free.assert_called_once_with("active_trial", "xiaomi/mimo-v2-flash:free")
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-def test_expired_trial_blocked_for_non_free_model(mock_get_user, mock_enforce_limits, mock_trial, client, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+def test_expired_trial_blocked_for_non_free_model(
+    mock_get_user, mock_enforce_limits, mock_trial, client, auth_headers
+):
     """Test that expired trial is blocked for non-free models"""
     mock_trial.return_value = {
         "is_valid": False,
         "is_trial": True,
         "is_expired": True,
         "error": "Trial expired",
-        "trial_end_date": "2025-09-01"
+        "trial_end_date": "2025-09-01",
     }
     mock_get_user.return_value = {"id": 1, "credits": 0.0, "environment_tag": "live"}
     mock_enforce_limits.return_value = {"allowed": True}
@@ -375,15 +438,21 @@ def test_expired_trial_blocked_for_non_free_model(mock_get_user, mock_enforce_li
     assert r.headers.get("X-Trial-Expired") == "true"
 
 
-@patch('src.services.prometheus_metrics.record_free_model_usage')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
+@patch("src.services.prometheus_metrics.record_free_model_usage")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
 def test_valid_trial_free_model_usage_tracked(
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
-    client, auth_headers
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_record_free,
+    client,
+    auth_headers,
 ):
     """Test that free model usage is tracked for valid trials too"""
     mock_trial.return_value = {"is_valid": True, "is_trial": True, "is_expired": False}
@@ -401,7 +470,7 @@ def test_valid_trial_free_model_usage_tracked(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
 
     assert r.status_code == 200
@@ -409,21 +478,31 @@ def test_valid_trial_free_model_usage_tracked(
     mock_record_free.assert_called_once_with("active_trial", "google/gemini-2.0-flash-exp:free")
 
 
-@patch('src.services.prometheus_metrics.record_free_model_usage')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.prometheus_metrics.record_free_model_usage")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_paid_user_free_model_usage_tracked(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial, mock_record_free,
-    client, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_record_free,
+    client,
+    auth_headers,
 ):
     """Test that free model usage is tracked for paid users"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -442,7 +521,7 @@ def test_paid_user_free_model_usage_tracked(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=free_model_payload, headers=auth_headers)
 
     assert r.status_code == 200
@@ -454,6 +533,7 @@ def test_paid_user_free_model_usage_tracked(
 
 
 # ==================== is_free_model HELPER TESTS ====================
+
 
 def test_is_free_model_with_free_suffix():
     """Test that models with :free suffix are detected as free"""
@@ -494,14 +574,16 @@ def test_is_free_model_edge_cases():
 
 # ==================== validate_trial_with_free_model_bypass TESTS ====================
 
+
 def test_validate_trial_with_free_model_bypass_does_not_mutate_original_dict():
     """Test that validate_trial_with_free_model_bypass does not mutate the original trial dict.
 
     This is critical for security: the trial dict may be cached in _trial_cache, and mutating
     it would corrupt the cache, potentially allowing expired trials to access premium models.
     """
-    from src.routes.chat import validate_trial_with_free_model_bypass
     import logging
+
+    from src.routes.chat import validate_trial_with_free_model_bypass
 
     # Create an expired trial dict (simulating what would be cached)
     original_trial = {
@@ -528,15 +610,18 @@ def test_validate_trial_with_free_model_bypass_does_not_mutate_original_dict():
 
     # The returned dict should have is_valid=True
     assert result["is_valid"] is True, "Returned trial should be marked as valid"
-    assert result.get("free_model_bypass") is True, "Returned trial should have free_model_bypass flag"
+    assert (
+        result.get("free_model_bypass") is True
+    ), "Returned trial should have free_model_bypass flag"
 
     # CRITICAL: The original dict should NOT have been mutated
-    assert original_trial["is_valid"] == original_is_valid, \
-        "Original trial dict was mutated - this is a security vulnerability!"
-    assert "free_model_bypass" not in original_trial, \
-        "Original trial dict was mutated with free_model_bypass flag"
-    assert set(original_trial.keys()) == original_keys, \
-        "Original trial dict keys were modified"
+    assert (
+        original_trial["is_valid"] == original_is_valid
+    ), "Original trial dict was mutated - this is a security vulnerability!"
+    assert (
+        "free_model_bypass" not in original_trial
+    ), "Original trial dict was mutated with free_model_bypass flag"
+    assert set(original_trial.keys()) == original_keys, "Original trial dict keys were modified"
 
 
 def test_validate_trial_with_free_model_bypass_cache_isolation():
@@ -544,10 +629,12 @@ def test_validate_trial_with_free_model_bypass_cache_isolation():
 
     Simulates the scenario where the same cached trial dict is used for multiple requests.
     """
-    from src.routes.chat import validate_trial_with_free_model_bypass
-    from fastapi import HTTPException
     import logging
+
     import pytest
+    from fastapi import HTTPException
+
+    from src.routes.chat import validate_trial_with_free_model_bypass
 
     # Create an expired trial dict (simulating cached value)
     cached_trial = {
@@ -581,18 +668,27 @@ def test_validate_trial_with_free_model_bypass_cache_isolation():
             logger,
         )
 
-    assert exc_info.value.status_code == 403, \
-        "Premium model access should be denied for expired trial"
+    assert (
+        exc_info.value.status_code == 403
+    ), "Premium model access should be denied for expired trial"
 
 
 # ==================== END validate_trial_with_free_model_bypass TESTS ====================
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_429_maps_429(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_openrouter_request_openai")
+def test_upstream_429_maps_429(
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that upstream 429 error is properly mapped to 429"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -603,10 +699,11 @@ def test_upstream_429_maps_429(mock_make_request, mock_get_user, mock_enforce_li
         req = Request("POST", "https://openrouter.example/v1/chat")
         resp = Response(429, request=req, headers={"retry-after": "7"}, text="Too Many Requests")
         raise HTTPStatusError("rate limit", request=req, response=resp)
+
     mock_make_request.side_effect = boom
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 429
@@ -614,11 +711,19 @@ def test_upstream_429_maps_429(mock_make_request, mock_get_user, mock_enforce_li
     assert r.headers.get("retry-after") in ("7", "7.0")
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_401_maps_500_in_your_code(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, client, payload_basic, auth_headers):
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_openrouter_request_openai")
+def test_upstream_401_maps_500_in_your_code(
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that upstream 401 error is mapped to 500"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -628,23 +733,34 @@ def test_upstream_401_maps_500_in_your_code(mock_make_request, mock_get_user, mo
         req = Request("POST", "https://openrouter.example/v1/chat")
         resp = Response(401, request=req, text="Unauthorized")
         raise HTTPStatusError("auth", request=req, response=resp)
+
     mock_make_request.side_effect = boom
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 500
     assert "authentication" in r.text.lower()
 
 
-@patch('src.routes.chat.build_provider_failover_chain')
-@patch('src.routes.chat.should_failover')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
+@patch("src.routes.chat.build_provider_failover_chain")
+@patch("src.routes.chat.should_failover")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_openrouter_request_openai")
+def test_upstream_request_error_maps_503(
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_should_failover,
+    mock_failover_chain,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that upstream request error is mapped to 503"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -653,24 +769,37 @@ def test_upstream_request_error_maps_503(mock_make_request, mock_get_user, mock_
     mock_failover_chain.return_value = ["openrouter"]  # Only try openrouter
 
     def boom(*a, **k):
-        raise RequestError("network is down", request=Request("POST", "https://openrouter.example/v1/chat"))
+        raise RequestError(
+            "network is down", request=Request("POST", "https://openrouter.example/v1/chat")
+        )
+
     mock_make_request.side_effect = boom
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     assert r.status_code == 503
     assert "service unavailable" in r.text.lower() or "network" in r.text.lower()
 
 
-@patch('src.routes.chat.build_provider_failover_chain')
-@patch('src.routes.chat.should_failover')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_openrouter_request_openai')
-def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforce_limits, mock_trial, mock_should_failover, mock_failover_chain, client, payload_basic, auth_headers):
+@patch("src.routes.chat.build_provider_failover_chain")
+@patch("src.routes.chat.should_failover")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_openrouter_request_openai")
+def test_upstream_timeout_maps_504(
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_should_failover,
+    mock_failover_chain,
+    client,
+    payload_basic,
+    auth_headers,
+):
     """Test that upstream timeout is handled properly"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
     mock_get_user.return_value = {"id": 1, "credits": 100.0, "environment_tag": "live"}
@@ -680,32 +809,45 @@ def test_upstream_timeout_maps_504(mock_make_request, mock_get_user, mock_enforc
 
     def boom(*a, **k):
         raise TimeoutException("upstream timeout")
+
     mock_make_request.side_effect = boom
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     # Current code may map timeout to 503 or 500
     assert r.status_code in (503, 500, 504)
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
-@patch('src.db.chat_history.get_chat_session')
-@patch('src.db.chat_history.save_chat_message')
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
+@patch("src.db.chat_history.get_chat_session")
+@patch("src.db.chat_history.save_chat_message")
 def test_saves_chat_history_when_session_id(
-    mock_save_message, mock_get_session, mock_increment, mock_update_rate, mock_record, mock_deduct,
-    mock_calculate_cost, mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_save_message,
+    mock_get_session,
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test that chat history is saved when session_id is provided"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -723,7 +865,7 @@ def test_saves_chat_history_when_session_id(
     payload["messages"] = [{"role": "user", "content": "Save this please"}]
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions?session_id=123", json=payload, headers=auth_headers)
 
     assert r.status_code == 200
@@ -735,19 +877,28 @@ def test_saves_chat_history_when_session_id(
     assert user_call[0][1] == "user"  # role
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_openrouter_request_openai_stream')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_openrouter_request_openai_stream")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_streaming_response(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_stream, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_stream,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test streaming response"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -780,7 +931,7 @@ def test_streaming_response(
         return [
             MockStreamChunk("Hello"),
             MockStreamChunk(" streaming"),
-            MockStreamChunk(" world!", "stop")
+            MockStreamChunk(" world!", "stop"),
         ]
 
     mock_make_stream.return_value = make_stream()
@@ -789,7 +940,7 @@ def test_streaming_response(
     payload["stream"] = True
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert r.status_code == 200
@@ -799,25 +950,39 @@ def test_streaming_response(
     assert "[DONE]" in content
 
 
-@patch('src.services.model_availability.availability_service')
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_featherless_request_openai')
-@patch('src.routes.chat.make_huggingface_request_openai')
-@patch('src.routes.chat.process_huggingface_response')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
-@pytest.mark.xfail(reason="Flaky: Provider failover behavior varies in CI environment", strict=False)
+@patch("src.services.model_availability.availability_service")
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_featherless_request_openai")
+@patch("src.routes.chat.make_huggingface_request_openai")
+@patch("src.routes.chat.process_huggingface_response")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
+@pytest.mark.xfail(
+    reason="Flaky: Provider failover behavior varies in CI environment", strict=False
+)
 def test_provider_failover_to_huggingface(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_process_hf, mock_make_hf, mock_make_featherless,
-    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, mock_availability,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_process_hf,
+    mock_make_hf,
+    mock_make_featherless,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_detect_provider,
+    mock_availability,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test provider failover from featherless to huggingface"""
     # Mock availability service to allow all providers
@@ -837,6 +1002,7 @@ def test_provider_failover_to_huggingface(
         request = Request("POST", "https://featherless.test/v1/chat")
         response = Response(status_code=502, request=request, content=b"")
         raise HTTPStatusError("featherless backend error", request=request, response=response)
+
     mock_make_featherless.side_effect = failing_featherless
 
     # Huggingface succeeds
@@ -851,7 +1017,7 @@ def test_provider_failover_to_huggingface(
     payload["model"] = "featherless/test-model"
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         response = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert response.status_code == 200
@@ -861,25 +1027,39 @@ def test_provider_failover_to_huggingface(
     assert mock_make_hf.call_count == 1
 
 
-@patch('src.services.model_availability.availability_service')
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_featherless_request_openai')
-@patch('src.routes.chat.make_huggingface_request_openai')
-@patch('src.routes.chat.process_huggingface_response')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
-@pytest.mark.xfail(reason="Flaky: Provider failover behavior varies in CI environment", strict=False)
+@patch("src.services.model_availability.availability_service")
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_featherless_request_openai")
+@patch("src.routes.chat.make_huggingface_request_openai")
+@patch("src.routes.chat.process_huggingface_response")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
+@pytest.mark.xfail(
+    reason="Flaky: Provider failover behavior varies in CI environment", strict=False
+)
 def test_provider_failover_on_404_to_huggingface(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_process_hf, mock_make_hf, mock_make_featherless,
-    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, mock_availability,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_process_hf,
+    mock_make_hf,
+    mock_make_featherless,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_detect_provider,
+    mock_availability,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test provider failover on 404 from featherless to huggingface"""
     # Mock availability service to allow all providers
@@ -899,6 +1079,7 @@ def test_provider_failover_on_404_to_huggingface(
         request = Request("POST", "https://featherless.test/v1/chat")
         response = Response(status_code=404, request=request, content=b"missing")
         raise HTTPStatusError("not found", request=request, response=response)
+
     mock_make_featherless.side_effect = missing_featherless
 
     # Huggingface succeeds
@@ -913,7 +1094,7 @@ def test_provider_failover_on_404_to_huggingface(
     payload["model"] = "featherless/ghost-model"
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         response = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert response.status_code == 200
@@ -927,20 +1108,31 @@ def test_provider_failover_on_404_to_huggingface(
 #                    NONE-SAFETY TESTS
 # ----------------------------------------------------------------------
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_response_with_none_choices(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test that responses with None choices are handled safely (no NoneType error)"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -955,7 +1147,7 @@ def test_response_with_none_choices(
     mock_calculate_cost.return_value = 0.001
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     # Should not raise NoneType error - should return the response
@@ -965,20 +1157,30 @@ def test_response_with_none_choices(
     assert "usage" in data
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_response_with_empty_choices(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test that responses with empty choices are handled safely"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -993,27 +1195,37 @@ def test_response_with_empty_choices(
     mock_calculate_cost.return_value = 0.001
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     # Should not raise IndexError - should return the response
     assert r.status_code == 200
 
 
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_openrouter_response')
-@patch('src.routes.chat.make_openrouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_openrouter_response")
+@patch("src.routes.chat.make_openrouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_response_with_none_message(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
-    client, payload_basic, auth_headers
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    client,
+    payload_basic,
+    auth_headers,
 ):
     """Test that responses with None message in choices are handled safely"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -1028,7 +1240,7 @@ def test_response_with_none_message(
     mock_calculate_cost.return_value = 0.001
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload_basic, headers=auth_headers)
 
     # Should not raise NoneType error - should return the response
@@ -1039,22 +1251,32 @@ def test_response_with_none_message(
 #                    ONEROUTER PROVIDER TESTS
 # ----------------------------------------------------------------------
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_onerouter_response')
-@patch('src.routes.chat.make_onerouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_onerouter_response")
+@patch("src.routes.chat.make_onerouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_happy_path_onerouter(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
     mock_detect_provider,
-    client, auth_headers
+    client,
+    auth_headers,
 ):
     """Test successful chat completion with OneRouter provider"""
     # Setup mocks
@@ -1075,7 +1297,7 @@ def test_happy_path_onerouter(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -1085,21 +1307,29 @@ def test_happy_path_onerouter(
     mock_make_request.assert_called_once()
 
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_onerouter_request_openai_stream')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_onerouter_request_openai_stream")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_onerouter_streaming_response(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_stream, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_stream,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
     mock_detect_provider,
-    client, auth_headers
+    client,
+    auth_headers,
 ):
     """Test streaming response with OneRouter provider"""
     mock_detect_provider.return_value = "onerouter"
@@ -1133,7 +1363,7 @@ def test_onerouter_streaming_response(
         return [
             MockStreamChunk("Hello"),
             MockStreamChunk(" from"),
-            MockStreamChunk(" OneRouter!", "stop")
+            MockStreamChunk(" OneRouter!", "stop"),
         ]
 
     mock_make_stream.return_value = make_stream()
@@ -1145,7 +1375,7 @@ def test_onerouter_streaming_response(
     }
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert r.status_code == 200
@@ -1156,15 +1386,19 @@ def test_onerouter_streaming_response(
     mock_make_stream.assert_called_once()
 
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_onerouter_request_openai')
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_onerouter_request_openai")
 def test_onerouter_upstream_error_handling(
-    mock_make_request, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
     mock_detect_provider,
-    client, auth_headers
+    client,
+    auth_headers,
 ):
     """Test that OneRouter upstream errors are properly handled"""
     mock_detect_provider.return_value = "onerouter"
@@ -1177,6 +1411,7 @@ def test_onerouter_upstream_error_handling(
         req = Request("POST", "https://llm.infron.ai/v1/chat/completions")
         resp = Response(429, request=req, headers={"retry-after": "5"}, text="Rate limited")
         raise HTTPStatusError("rate limit", request=req, response=resp)
+
     mock_make_request.side_effect = boom
 
     payload = {
@@ -1185,29 +1420,38 @@ def test_onerouter_upstream_error_handling(
     }
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert r.status_code == 429
     assert r.headers.get("retry-after") in ("5", "5.0")
 
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.process_onerouter_response')
-@patch('src.routes.chat.make_onerouter_request_openai')
-@patch('src.services.pricing.calculate_cost')
-@patch('src.db.users.deduct_credits')
-@patch('src.db.users.record_usage')
-@patch('src.db.rate_limits.update_rate_limit_usage')
-@patch('src.db.api_keys.increment_api_key_usage')
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.process_onerouter_response")
+@patch("src.routes.chat.make_onerouter_request_openai")
+@patch("src.services.pricing.calculate_cost")
+@patch("src.db.users.deduct_credits")
+@patch("src.db.users.record_usage")
+@patch("src.db.rate_limits.update_rate_limit_usage")
+@patch("src.db.api_keys.increment_api_key_usage")
 def test_onerouter_versioned_model_format(
-    mock_increment, mock_update_rate, mock_record, mock_deduct, mock_calculate_cost,
-    mock_make_request, mock_process, mock_get_user, mock_enforce_limits, mock_trial,
+    mock_increment,
+    mock_update_rate,
+    mock_record,
+    mock_deduct,
+    mock_calculate_cost,
+    mock_make_request,
+    mock_process,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
     mock_detect_provider,
-    client, auth_headers
+    client,
+    auth_headers,
 ):
     """Test OneRouter with @ versioned model format (e.g., claude-3-5-sonnet@20240620)"""
     mock_detect_provider.return_value = "onerouter"
@@ -1228,7 +1472,7 @@ def test_onerouter_versioned_model_format(
     }
 
     rate_mgr = _RateLimitMgr(allowed_pre=True, allowed_final=True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     assert r.status_code == 200, r.text
@@ -1237,17 +1481,23 @@ def test_onerouter_versioned_model_format(
     mock_make_request.assert_called_once()
 
 
-@patch('src.routes.chat.build_provider_failover_chain')
-@patch('src.routes.chat.should_failover')
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
-@patch('src.routes.chat.make_onerouter_request_openai')
+@patch("src.routes.chat.build_provider_failover_chain")
+@patch("src.routes.chat.should_failover")
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
+@patch("src.routes.chat.make_onerouter_request_openai")
 def test_onerouter_network_error_handling(
-    mock_make_request, mock_get_user, mock_enforce_limits, mock_trial,
-    mock_detect_provider, mock_should_failover, mock_failover_chain,
-    client, auth_headers
+    mock_make_request,
+    mock_get_user,
+    mock_enforce_limits,
+    mock_trial,
+    mock_detect_provider,
+    mock_should_failover,
+    mock_failover_chain,
+    client,
+    auth_headers,
 ):
     """Test that OneRouter network errors are properly handled"""
     mock_detect_provider.return_value = "onerouter"
@@ -1259,7 +1509,11 @@ def test_onerouter_network_error_handling(
 
     # Simulate network error
     def boom(*a, **k):
-        raise RequestError("Network unreachable", request=Request("POST", "https://llm.infron.ai/v1/chat/completions"))
+        raise RequestError(
+            "Network unreachable",
+            request=Request("POST", "https://llm.infron.ai/v1/chat/completions"),
+        )
+
     mock_make_request.side_effect = boom
 
     payload = {
@@ -1268,20 +1522,19 @@ def test_onerouter_network_error_handling(
     }
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     # Network errors should result in 503 Service Unavailable
     assert r.status_code == 503
 
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
 def test_fal_model_rejected_in_chat_completions(
-    mock_get_user, mock_enforce_limits, mock_trial,
-    mock_detect_provider, client, auth_headers
+    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, client, auth_headers
 ):
     """Test that FAL models (image/video generation only) are rejected with a clear error in chat completions"""
     # FAL models should be rejected immediately when detected
@@ -1296,7 +1549,7 @@ def test_fal_model_rejected_in_chat_completions(
     }
 
     rate_mgr = _RateLimitMgr(True, True)
-    with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+    with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
         r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
     # FAL models should be rejected with 400 Bad Request
@@ -1307,13 +1560,12 @@ def test_fal_model_rejected_in_chat_completions(
     assert "fal-ai/veo3.1" in data["detail"]
 
 
-@patch('src.services.model_transformations.detect_provider_from_model_id')
-@patch('src.services.trial_validation.validate_trial_access')
-@patch('src.db.plans.enforce_plan_limits')
-@patch('src.db.users.get_user')
+@patch("src.services.model_transformations.detect_provider_from_model_id")
+@patch("src.services.trial_validation.validate_trial_access")
+@patch("src.db.plans.enforce_plan_limits")
+@patch("src.db.users.get_user")
 def test_fal_model_rejected_various_models(
-    mock_get_user, mock_enforce_limits, mock_trial,
-    mock_detect_provider, client, auth_headers
+    mock_get_user, mock_enforce_limits, mock_trial, mock_detect_provider, client, auth_headers
 ):
     """Test that various FAL model IDs are rejected with a clear error"""
     mock_trial.return_value = {"is_valid": True, "is_trial": False, "is_expired": False}
@@ -1337,9 +1589,13 @@ def test_fal_model_rejected_various_models(
         }
 
         rate_mgr = _RateLimitMgr(True, True)
-        with patch.object(api, 'get_rate_limit_manager', return_value=rate_mgr):
+        with patch.object(api, "get_rate_limit_manager", return_value=rate_mgr):
             r = client.post("/v1/chat/completions", json=payload, headers=auth_headers)
 
-        assert r.status_code == 400, f"Expected 400 for model {model}, got {r.status_code}: {r.text}"
+        assert (
+            r.status_code == 400
+        ), f"Expected 400 for model {model}, got {r.status_code}: {r.text}"
         data = r.json()
-        assert "FAL image/video generation model" in data["detail"], f"Error message missing for {model}"
+        assert (
+            "FAL image/video generation model" in data["detail"]
+        ), f"Error message missing for {model}"

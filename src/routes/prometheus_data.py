@@ -28,7 +28,7 @@ See src/routes/monitoring.py for the full list of monitoring endpoints.
 import logging
 import os
 import uuid
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
@@ -47,10 +47,12 @@ CACHE_PREFIX = "prometheus:data:"
 # Helper Functions
 # ============================================================================
 
+
 async def _get_redis_client():
     """Get Redis client for caching."""
     try:
         from src.config.redis_config import get_redis_client
+
         return await get_redis_client()
     except Exception as e:
         logger.warning(f"Failed to get Redis client for caching: {e}")
@@ -79,10 +81,11 @@ async def _invalidate_cache(pattern: str = "*") -> int:
 # Cache Management Endpoints
 # ============================================================================
 
+
 @router.delete("/admin/cache/invalidate")
 async def invalidate_cache(
     pattern: str = Query("*", description="Cache key pattern to invalidate (* for all)"),
-    admin_user: dict = Depends(require_admin)
+    admin_user: dict = Depends(require_admin),
 ):
     """
     Invalidate prometheus data cache entries.
@@ -95,7 +98,7 @@ async def invalidate_cache(
         "success": True,
         "invalidated_count": count,
         "pattern": pattern,
-        "timestamp": datetime.now(UTC).isoformat()
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -112,7 +115,7 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
             return {
                 "status": "unavailable",
                 "message": "Redis not connected",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
         # Get all prometheus data cache keys
@@ -121,30 +124,28 @@ async def get_cache_status(admin_user: dict = Depends(require_admin)):
 
         for key in keys:
             ttl = await redis.ttl(key)
-            short_key = key.replace(CACHE_PREFIX, "") if isinstance(key, str) else key.decode().replace(CACHE_PREFIX, "")
-            cache_entries.append({
-                "key": short_key,
-                "ttl_remaining": ttl
-            })
+            short_key = (
+                key.replace(CACHE_PREFIX, "")
+                if isinstance(key, str)
+                else key.decode().replace(CACHE_PREFIX, "")
+            )
+            cache_entries.append({"key": short_key, "ttl_remaining": ttl})
 
         return {
             "status": "connected",
             "cache_prefix": CACHE_PREFIX,
             "cached_entries": cache_entries,
             "entry_count": len(cache_entries),
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"status": "error", "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
 
 # ============================================================================
 # Prometheus Format Metrics Endpoint (for Grafana Alerting)
 # ============================================================================
+
 
 @router.get("/metrics")
 async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_key)):
@@ -164,8 +165,8 @@ async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_
     Returns: text/plain in Prometheus format
     """
     try:
-        from src.services.redis_metrics import get_redis_metrics
         from src.services.model_availability import availability_service
+        from src.services.redis_metrics import get_redis_metrics
 
         lines = []
 
@@ -182,7 +183,9 @@ async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_
         lines.append("# TYPE total_requests gauge")
         lines.append("# HELP avg_latency_ms Average latency in milliseconds")
         lines.append("# TYPE avg_latency_ms gauge")
-        lines.append("# HELP gatewayz_data_scrape_success Whether the prometheus data scrape was successful")
+        lines.append(
+            "# HELP gatewayz_data_scrape_success Whether the prometheus data scrape was successful"
+        )
         lines.append("# TYPE gatewayz_data_scrape_success gauge")
 
         try:
@@ -207,7 +210,9 @@ async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_
 
                 lines.append(f'health_score{{provider="{safe_provider}"}} {score}')
                 lines.append(f'error_rate{{provider="{safe_provider}"}} {error_rate_value:.6f}')
-                lines.append(f'provider_availability{{provider="{safe_provider}"}} {availability:.2f}')
+                lines.append(
+                    f'provider_availability{{provider="{safe_provider}"}} {availability:.2f}'
+                )
                 lines.append(f'total_requests{{provider="{safe_provider}"}} {total_requests}')
                 lines.append(f'avg_latency_ms{{provider="{safe_provider}"}} {avg_latency:.2f}')
 
@@ -236,28 +241,26 @@ async def get_prometheus_metrics(api_key: str | None = Depends(get_optional_api_
             logger.error(f"Error collecting metrics: {e}", exc_info=True)
             # Still return a valid Prometheus response with error indicator
             lines.append("gatewayz_data_scrape_success 0")
-            lines.append(f'# Error: {str(e)}')
+            lines.append(f"# Error: {str(e)}")
 
         # Join with newlines and add trailing newline
         content = "\n".join(lines) + "\n"
 
-        return Response(
-            content=content,
-            media_type="text/plain; version=0.0.4; charset=utf-8"
-        )
+        return Response(content=content, media_type="text/plain; version=0.0.4; charset=utf-8")
 
     except Exception as e:
         logger.error(f"Failed to generate prometheus metrics: {e}", exc_info=True)
         return Response(
             content=f"# Error generating metrics: {str(e)}\ngatewayz_data_scrape_success 0\n",
             media_type="text/plain; version=0.0.4; charset=utf-8",
-            status_code=500
+            status_code=500,
         )
 
 
 # ============================================================================
 # Instrumentation Status Endpoints (NO CACHING - must be live)
 # ============================================================================
+
 
 @router.get("/instrumentation/health")
 async def get_instrumentation_health(api_key: str | None = Depends(get_optional_api_key)):
@@ -269,14 +272,15 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
     NO CACHING - this is a live health check.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
-        from prometheus_client import REGISTRY, generate_latest
         import httpx
+        from prometheus_client import REGISTRY, generate_latest
+
+        from src.config.supabase_config import get_supabase_client
 
         health_status = {
             "timestamp": datetime.now(UTC).isoformat(),
             "status": "healthy",
-            "components": {}
+            "components": {},
         }
 
         # Check Redis
@@ -305,7 +309,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
             metrics = generate_latest(REGISTRY)
             health_status["components"]["prometheus"] = {
                 "status": "healthy",
-                "metrics_count": len(metrics.decode().split("\n"))
+                "metrics_count": len(metrics.decode().split("\n")),
             }
         except Exception as e:
             health_status["components"]["prometheus"] = {"status": "unhealthy", "error": str(e)}
@@ -318,7 +322,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
                     response = await client.get(f"{loki_url}/ready")
                     health_status["components"]["loki"] = {
                         "status": "healthy" if response.status_code == 200 else "degraded",
-                        "url": loki_url
+                        "url": loki_url,
                     }
             except Exception as e:
                 health_status["components"]["loki"] = {"status": "unhealthy", "error": str(e)}
@@ -333,7 +337,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
                     response = await client.get(f"{tempo_url}/ready")
                     health_status["components"]["tempo"] = {
                         "status": "healthy" if response.status_code == 200 else "degraded",
-                        "url": tempo_url
+                        "url": tempo_url,
                     }
             except Exception as e:
                 health_status["components"]["tempo"] = {"status": "unhealthy", "error": str(e)}
@@ -344,11 +348,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
 
     except Exception as e:
         logger.error(f"Failed to get instrumentation health: {e}", exc_info=True)
-        return {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "status": "error",
-            "error": str(e)
-        }
+        return {"timestamp": datetime.now(UTC).isoformat(), "status": "error", "error": str(e)}
 
 
 @router.get("/instrumentation/loki/status")
@@ -360,7 +360,7 @@ async def get_loki_status(api_key: str | None = Depends(get_optional_api_key)):
         return {
             "status": "not_configured",
             "message": "LOKI_URL environment variable not set",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     try:
@@ -372,15 +372,11 @@ async def get_loki_status(api_key: str | None = Depends(get_optional_api_key)):
                 "status": "healthy" if ready_response.status_code == 200 else "unhealthy",
                 "url": loki_url,
                 "ready": ready_response.status_code == 200,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"status": "error", "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
 
 @router.get("/instrumentation/tempo/status")
@@ -392,7 +388,7 @@ async def get_tempo_status(api_key: str | None = Depends(get_optional_api_key)):
         return {
             "status": "not_configured",
             "message": "TEMPO_URL environment variable not set",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
     try:
@@ -404,46 +400,41 @@ async def get_tempo_status(api_key: str | None = Depends(get_optional_api_key)):
                 "status": "healthy" if ready_response.status_code == 200 else "unhealthy",
                 "url": tempo_url,
                 "ready": ready_response.status_code == 200,
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "timestamp": datetime.now(UTC).isoformat()
-        }
+        return {"status": "error", "error": str(e), "timestamp": datetime.now(UTC).isoformat()}
 
 
 @router.post("/instrumentation/test-log")
 async def test_log_ingestion(
     message: str = Query("Test log message", description="Test message to log"),
     level: str = Query("info", description="Log level (debug, info, warn, error)"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """Test log ingestion to Loki (NO CACHING)."""
     trace_id = str(uuid.uuid4())
 
     log_func = getattr(logger, level.lower(), logger.info)
-    log_func(f"[TEST LOG] {message}", extra={
-        "trace_id": trace_id,
-        "test": True,
-        "source": "prometheus_data_test"
-    })
+    log_func(
+        f"[TEST LOG] {message}",
+        extra={"trace_id": trace_id, "test": True, "source": "prometheus_data_test"},
+    )
 
     return {
         "success": True,
         "message": f"Test log sent at level '{level}'",
         "trace_id": trace_id,
         "log_message": message,
-        "timestamp": datetime.now(UTC).isoformat()
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
 @router.post("/instrumentation/test-trace")
 async def test_trace_ingestion(
     operation: str = Query("test_operation", description="Operation name for the trace"),
-    api_key: str | None = Depends(get_optional_api_key)
+    api_key: str | None = Depends(get_optional_api_key),
 ):
     """Test trace ingestion to Tempo (NO CACHING)."""
     trace_id = str(uuid.uuid4())
@@ -458,7 +449,7 @@ async def test_trace_ingestion(
         with tracer.start_as_current_span(
             operation,
             kind=SpanKind.INTERNAL,
-            attributes={"test": True, "source": "prometheus_data_test"}
+            attributes={"test": True, "source": "prometheus_data_test"},
         ) as span:
             span.set_attribute("test.trace_id", trace_id)
 
@@ -469,7 +460,7 @@ async def test_trace_ingestion(
                 "span_id": span_id,
                 "operation": operation,
                 "method": "opentelemetry",
-                "timestamp": datetime.now(UTC).isoformat()
+                "timestamp": datetime.now(UTC).isoformat(),
             }
 
     except ImportError:
@@ -480,5 +471,5 @@ async def test_trace_ingestion(
             "span_id": span_id,
             "operation": operation,
             "method": "simulated",
-            "timestamp": datetime.now(UTC).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }

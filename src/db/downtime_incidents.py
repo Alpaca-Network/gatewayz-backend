@@ -5,7 +5,7 @@ Handles storage and retrieval of application downtime incidents with associated 
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -190,7 +190,9 @@ def get_incident(incident_id: str | UUID) -> dict[str, Any] | None:
     try:
 
         def _get_incident(client):
-            return client.table("downtime_incidents").select("*").eq("id", str(incident_id)).execute()
+            return (
+                client.table("downtime_incidents").select("*").eq("id", str(incident_id)).execute()
+            )
 
         result = execute_with_retry(_get_incident, max_retries=2, retry_delay=0.2)
 
@@ -274,9 +276,7 @@ def get_recent_incidents(
         return []
 
 
-def get_incidents_by_date_range(
-    start_date: datetime, end_date: datetime
-) -> list[dict[str, Any]]:
+def get_incidents_by_date_range(start_date: datetime, end_date: datetime) -> list[dict[str, Any]]:
     """
     Get incidents within a specific date range
 
@@ -346,9 +346,7 @@ def get_incident_statistics(days: int = 30) -> dict[str, Any]:
         cutoff = datetime.now(UTC).timestamp() - (days * 24 * 60 * 60)
         cutoff_dt = datetime.fromtimestamp(cutoff, tz=UTC)
 
-        incidents = get_incidents_by_date_range(
-            cutoff_dt, datetime.now(UTC)
-        )
+        incidents = get_incidents_by_date_range(cutoff_dt, datetime.now(UTC))
 
         if not incidents:
             return {
@@ -376,9 +374,7 @@ def get_incident_statistics(days: int = 30) -> dict[str, Any]:
         return {
             "total_incidents": len(incidents),
             "total_downtime_seconds": total_downtime,
-            "average_duration_seconds": (
-                total_downtime // len(incidents) if incidents else 0
-            ),
+            "average_duration_seconds": (total_downtime // len(incidents) if incidents else 0),
             "by_severity": severity_counts,
             "by_status": status_counts,
         }

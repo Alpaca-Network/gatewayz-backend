@@ -20,7 +20,6 @@ These tests validate:
 import pytest
 from fastapi.testclient import TestClient
 
-
 # Simplismart models available via the API
 SIMPLISMART_MODELS = [
     "meta-llama/Meta-Llama-3.1-8B-Instruct",
@@ -74,9 +73,7 @@ class TestSimplismartModelsE2E:
             assert data["choices"][0]["message"]["content"]
 
     @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
-    def test_simplismart_model_streaming(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_simplismart_model_streaming(self, client: TestClient, auth_headers: dict, model: str):
         """Test streaming chat completion for each Simplismart model."""
         payload = {
             "model": model,
@@ -183,9 +180,7 @@ class TestSimplismartModelsE2E:
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
     @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
-    def test_simplismart_model_with_top_p(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_simplismart_model_with_top_p(self, client: TestClient, auth_headers: dict, model: str):
         """Test Simplismart models with top_p parameter."""
         payload = {
             "model": model,
@@ -230,9 +225,7 @@ class TestSimplismartModelsE2E:
                 assert "prompt_tokens" in data["usage"] or data["usage"] == {}
                 assert "completion_tokens" in data["usage"] or data["usage"] == {}
 
-    def test_simplismart_model_invalid_should_fail(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_simplismart_model_invalid_should_fail(self, client: TestClient, auth_headers: dict):
         """Test that invalid Simplismart model ID returns appropriate error."""
         payload = {
             "model": "simplismart/invalid-model-name",
@@ -280,9 +273,7 @@ class TestSimplismartStreamingE2E:
     """Dedicated streaming tests for Simplismart models."""
 
     @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
-    def test_streaming_with_custom_params(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_streaming_with_custom_params(self, client: TestClient, auth_headers: dict, model: str):
         """Test streaming with custom temperature and max_tokens."""
         payload = {
             "model": model,
@@ -305,9 +296,7 @@ class TestSimplismartStreamingE2E:
             assert "[DONE]" in response.text
 
     @pytest.mark.parametrize("model", SIMPLISMART_MODELS)
-    def test_streaming_response_structure(
-        self, client: TestClient, auth_headers: dict, model: str
-    ):
+    def test_streaming_response_structure(self, client: TestClient, auth_headers: dict, model: str):
         """Test that streaming responses have correct SSE structure."""
         payload = {
             "model": model,
@@ -337,9 +326,7 @@ class TestSimplismartStreamingE2E:
 class TestSimplismartLlamaModelsE2E:
     """Specific tests for Llama models on Simplismart."""
 
-    def test_llama_3_1_8b_instruction_following(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_llama_3_1_8b_instruction_following(self, client: TestClient, auth_headers: dict):
         """Test that Llama 3.1 8B follows instructions."""
         payload = {
             "model": "meta-llama/Meta-Llama-3.1-8B-Instruct",
@@ -367,9 +354,7 @@ class TestSimplismartLlamaModelsE2E:
             content = data["choices"][0]["message"]["content"]
             assert content is not None
 
-    def test_llama_3_3_70b_reasoning_task(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_llama_3_3_70b_reasoning_task(self, client: TestClient, auth_headers: dict):
         """Test Llama 3.3 70B with a reasoning task."""
         payload = {
             "model": "meta-llama/Llama-3.3-70B-Instruct",
@@ -401,9 +386,7 @@ class TestSimplismartLlamaModelsE2E:
 class TestSimplismartGemmaModelsE2E:
     """Specific tests for Gemma models on Simplismart."""
 
-    def test_gemma_3_27b_basic(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_gemma_3_27b_basic(self, client: TestClient, auth_headers: dict):
         """Test Gemma 3 27B basic functionality."""
         payload = {
             "model": "google/gemma-3-27b-it",
@@ -431,9 +414,7 @@ class TestSimplismartGemmaModelsE2E:
 class TestSimplismartQwenModelsE2E:
     """Specific tests for Qwen models on Simplismart."""
 
-    def test_qwen_2_5_32b_basic(
-        self, client: TestClient, auth_headers: dict
-    ):
+    def test_qwen_2_5_32b_basic(self, client: TestClient, auth_headers: dict):
         """Test Qwen 2.5 32B basic functionality."""
         payload = {
             "model": "Qwen/Qwen2.5-32B-Instruct",

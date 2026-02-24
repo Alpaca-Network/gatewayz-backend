@@ -32,7 +32,7 @@ def fetch_models_from_cohere():
                 "supports_streaming": True,
                 "supports_function_calling": True,
                 "pricing": {
-                    "prompt": "0.0000025",    # $2.50 per 1M tokens
+                    "prompt": "0.0000025",  # $2.50 per 1M tokens
                     "completion": "0.00001",  # $10.00 per 1M tokens
                 },
                 "description": "Cohere's most powerful model with enhanced RAG capabilities",
@@ -48,8 +48,8 @@ def fetch_models_from_cohere():
                 "supports_streaming": True,
                 "supports_function_calling": True,
                 "pricing": {
-                    "prompt": "0.0000005",    # $0.50 per 1M tokens
-                    "completion": "0.0000015", # $1.50 per 1M tokens
+                    "prompt": "0.0000005",  # $0.50 per 1M tokens
+                    "completion": "0.0000015",  # $1.50 per 1M tokens
                 },
                 "description": "Optimized for conversational AI and RAG",
             },
@@ -80,8 +80,8 @@ def fetch_models_from_cohere():
                 "supports_streaming": True,
                 "supports_function_calling": False,
                 "pricing": {
-                    "prompt": "0.000001",     # $1.00 per 1M tokens
-                    "completion": "0.000002", # $2.00 per 1M tokens
+                    "prompt": "0.000001",  # $1.00 per 1M tokens
+                    "completion": "0.000002",  # $2.00 per 1M tokens
                 },
                 "description": "Cohere's foundational command model",
             },
@@ -96,8 +96,8 @@ def fetch_models_from_cohere():
                 "supports_streaming": True,
                 "supports_function_calling": False,
                 "pricing": {
-                    "prompt": "0.0000003",    # $0.30 per 1M tokens
-                    "completion": "0.0000006", # $0.60 per 1M tokens
+                    "prompt": "0.0000003",  # $0.30 per 1M tokens
+                    "completion": "0.0000006",  # $0.60 per 1M tokens
                 },
                 "description": "Faster, lighter version of Command",
             },

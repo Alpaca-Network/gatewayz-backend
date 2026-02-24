@@ -3,11 +3,13 @@
 
 import os
 import sys
-from openai import OpenAI
+
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load environment variables
 load_dotenv()
+
 
 def test_near_qwen_api():
     """Test Near AI API with Qwen3-30B model"""
@@ -24,7 +26,7 @@ def test_near_qwen_api():
     client = OpenAI(
         base_url="https://cloud-api.near.ai/v1",
         api_key=api_key,
-        timeout=120.0  # Extended timeout for large models
+        timeout=120.0,  # Extended timeout for large models
     )
 
     # Test with the Qwen3-30B model
@@ -39,11 +41,9 @@ def test_near_qwen_api():
         print("Sending request...")
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "user", "content": "Say hello and tell me what model you are."}
-            ],
+            messages=[{"role": "user", "content": "Say hello and tell me what model you are."}],
             max_tokens=100,
-            temperature=0.7
+            temperature=0.7,
         )
 
         print("\nSUCCESS!")
@@ -59,7 +59,9 @@ def test_near_qwen_api():
         print(f"\nERROR: {type(e).__name__}")
         print(f"Message: {str(e)}")
         import traceback
+
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     test_near_qwen_api()

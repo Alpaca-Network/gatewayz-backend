@@ -6,7 +6,7 @@ These endpoints match the admin dashboard API expectations.
 """
 
 import logging
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -49,9 +49,7 @@ class CreditAdjustRequest(BaseModel):
     """Request to adjust credits (add or remove)"""
 
     user_id: int = Field(..., description="User ID to adjust credits for")
-    amount: float = Field(
-        ..., description="Amount to adjust (positive to add, negative to remove)"
-    )
+    amount: float = Field(..., description="Amount to adjust (positive to add, negative to remove)")
     description: str = Field(
         default="Admin credit adjustment", description="Description for the transaction"
     )
@@ -62,7 +60,9 @@ class CreditAdjustRequest(BaseModel):
 class BulkCreditAddRequest(BaseModel):
     """Request to add credits to multiple users"""
 
-    user_ids: list[int] = Field(..., min_length=1, max_length=100, description="List of user IDs (max 100)")
+    user_ids: list[int] = Field(
+        ..., min_length=1, max_length=100, description="List of user IDs (max 100)"
+    )
     amount: float = Field(..., gt=0, description="Amount of credits to add to each user")
     description: str = Field(
         default="Bulk credit addition", description="Description for the transactions"
@@ -139,7 +139,9 @@ async def add_credits_endpoint(
         client = get_supabase_client()
 
         # Get user
-        user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        user_result = (
+            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
@@ -224,7 +226,9 @@ async def adjust_credits_endpoint(
         client = get_supabase_client()
 
         # Get user
-        user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        user_result = (
+            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
@@ -252,7 +256,9 @@ async def adjust_credits_endpoint(
             raise HTTPException(status_code=500, detail="Failed to update user credits")
 
         # Determine transaction type
-        transaction_type = TransactionType.ADMIN_CREDIT if request.amount > 0 else TransactionType.ADMIN_DEBIT
+        transaction_type = (
+            TransactionType.ADMIN_CREDIT if request.amount > 0 else TransactionType.ADMIN_DEBIT
+        )
 
         # Log the transaction
         transaction = log_credit_transaction(
@@ -339,11 +345,13 @@ async def bulk_add_credits_endpoint(
                 user = users_by_id.get(user_id)
 
                 if not user:
-                    results.append({
-                        "user_id": user_id,
-                        "status": "failed",
-                        "error": "User not found",
-                    })
+                    results.append(
+                        {
+                            "user_id": user_id,
+                            "status": "failed",
+                            "error": "User not found",
+                        }
+                    )
                     failed += 1
                     continue
 
@@ -359,11 +367,13 @@ async def bulk_add_credits_endpoint(
                 )
 
                 if not update_result.data:
-                    results.append({
-                        "user_id": user_id,
-                        "status": "failed",
-                        "error": "Failed to update credits",
-                    })
+                    results.append(
+                        {
+                            "user_id": user_id,
+                            "status": "failed",
+                            "error": "Failed to update credits",
+                        }
+                    )
                     failed += 1
                     continue
 
@@ -384,23 +394,27 @@ async def bulk_add_credits_endpoint(
                     created_by=f"admin:{admin_user.get('id')}",
                 )
 
-                results.append({
-                    "user_id": user_id,
-                    "username": user.get("username"),
-                    "status": "success",
-                    "previous_balance": balance_before,
-                    "new_balance": balance_after,
-                    "transaction_id": transaction.get("id") if transaction else None,
-                })
+                results.append(
+                    {
+                        "user_id": user_id,
+                        "username": user.get("username"),
+                        "status": "success",
+                        "previous_balance": balance_before,
+                        "new_balance": balance_after,
+                        "transaction_id": transaction.get("id") if transaction else None,
+                    }
+                )
                 successful += 1
 
             except Exception as e:
                 logger.error(f"Error adding credits to user {user_id}: {e}")
-                results.append({
-                    "user_id": user_id,
-                    "status": "failed",
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "user_id": user_id,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
                 failed += 1
 
         logger.info(
@@ -453,7 +467,9 @@ async def refund_credits_endpoint(
         client = get_supabase_client()
 
         # Get user
-        user_result = client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        user_result = (
+            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+        )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
@@ -545,7 +561,9 @@ async def get_credits_summary_endpoint(
             summary = get_transaction_summary(user_id, from_date, to_date)
 
             # Get user info
-            user_result = client.table("users").select("id, username, credits").eq("id", user_id).execute()
+            user_result = (
+                client.table("users").select("id, username, credits").eq("id", user_id).execute()
+            )
             user_info = user_result.data[0] if user_result.data else None
 
             return {
@@ -587,8 +605,12 @@ async def get_credits_summary_endpoint(
             transactions = transactions_result.data or []
 
             # Calculate totals
-            total_credits_added = sum(float(t["amount"]) for t in transactions if float(t["amount"]) > 0)
-            total_credits_used = sum(abs(float(t["amount"])) for t in transactions if float(t["amount"]) < 0)
+            total_credits_added = sum(
+                float(t["amount"]) for t in transactions if float(t["amount"]) > 0
+            )
+            total_credits_used = sum(
+                abs(float(t["amount"])) for t in transactions if float(t["amount"]) < 0
+            )
 
             # Breakdown by type
             by_type = {}
@@ -634,8 +656,12 @@ async def get_credits_transactions_endpoint(
     ),
     from_date: str | None = Query(None, description="Start date filter (YYYY-MM-DD or ISO format)"),
     to_date: str | None = Query(None, description="End date filter (YYYY-MM-DD or ISO format)"),
-    min_amount: float | None = Query(None, description="Minimum transaction amount (absolute value)"),
-    max_amount: float | None = Query(None, description="Maximum transaction amount (absolute value)"),
+    min_amount: float | None = Query(
+        None, description="Minimum transaction amount (absolute value)"
+    ),
+    max_amount: float | None = Query(
+        None, description="Maximum transaction amount (absolute value)"
+    ),
     direction: str | None = Query(
         None,
         description="Filter by direction: 'credit' (positive amounts) or 'charge' (negative amounts)",

@@ -1,12 +1,13 @@
 # tests/db/test_rate_limits_store.py
-import types
 import copy
-from datetime import datetime, timedelta, timezone, UTC
-
-import pytest
 
 # Module under test
 import importlib
+import types
+from datetime import UTC, datetime, timedelta, timezone
+
+import pytest
+
 rl_mod = importlib.import_module("src.db.rate_limits")
 
 
@@ -17,12 +18,13 @@ class _Result:
     def __init__(self, data):
         self.data = data
 
+
 class _TableQuery:
     def __init__(self, store, name):
         self._store = store
         self._name = name
-        self._filters = []      # (op, field, value)
-        self._order = None      # (field, desc)
+        self._filters = []  # (op, field, value)
+        self._order = None  # (field, desc)
         self._limit = None
         self._select = None
 
@@ -93,7 +95,7 @@ class _TableQuery:
     # Read
     def execute(self):
         # If this is a mutation result, return that data
-        if hasattr(self, '_result_data'):
+        if hasattr(self, "_result_data"):
             return _Result(self._result_data)
 
         # Otherwise, execute the query
@@ -109,6 +111,7 @@ class _TableQuery:
             rows = rows[: self._limit]
         return _Result(rows)
 
+
 def _match(row, filters):
     for op, field, value in filters:
         v = row.get(field)
@@ -123,12 +126,14 @@ def _match(row, filters):
                 return False
     return True
 
+
 class SupabaseStub:
     def __init__(self):
         self._store = {}
 
     def table(self, name):
         return _TableQuery(self._store, name)
+
 
 # Helpers
 def iso_utc(dt: datetime) -> str:
@@ -143,14 +148,17 @@ def sb():
     """Fresh supabase stub for each test."""
     return SupabaseStub()
 
+
 @pytest.fixture(autouse=True)
 def patch_supabase(monkeypatch, sb):
     monkeypatch.setattr(rl_mod, "get_supabase_client", lambda: sb)
     yield
 
+
 @pytest.fixture()
 def user_api_key():
     return "gw_live_ABC123"
+
 
 @pytest.fixture()
 def user(monkeypatch, user_api_key):
@@ -164,12 +172,16 @@ def user(monkeypatch, user_api_key):
 # ----------------------------
 def test_get_user_rate_limits_new_path(sb, user_api_key, user):
     # api_keys_new + rate_limit_configs path
-    sb.table("api_keys_new").insert({"id": 10, "api_key": user_api_key, "user_id": user["id"]}).execute()
-    sb.table("rate_limit_configs").insert({
-        "api_key_id": 10,
-        "max_requests": 1200,     # per hour
-        "max_tokens": 600000,     # per hour
-    }).execute()
+    sb.table("api_keys_new").insert(
+        {"id": 10, "api_key": user_api_key, "user_id": user["id"]}
+    ).execute()
+    sb.table("rate_limit_configs").insert(
+        {
+            "api_key_id": 10,
+            "max_requests": 1200,  # per hour
+            "max_tokens": 600000,  # per hour
+        }
+    ).execute()
 
     out = rl_mod.get_user_rate_limits(user_api_key)
     assert out["requests_per_minute"] == 1200 // 60
@@ -177,23 +189,28 @@ def test_get_user_rate_limits_new_path(sb, user_api_key, user):
     assert out["requests_per_day"] == 1200 * 24
     assert out["tokens_per_minute"] == 600000 // 60
 
+
 def test_get_user_rate_limits_legacy_fallback(sb, user_api_key):
-    sb.table("rate_limits").insert({
-        "api_key": user_api_key,
-        "requests_per_minute": 5,
-        "requests_per_hour": 100,
-        "requests_per_day": 1000,
-        "tokens_per_minute": 500,
-        "tokens_per_hour": 10000,
-        "tokens_per_day": 20000,
-    }).execute()
+    sb.table("rate_limits").insert(
+        {
+            "api_key": user_api_key,
+            "requests_per_minute": 5,
+            "requests_per_hour": 100,
+            "requests_per_day": 1000,
+            "tokens_per_minute": 500,
+            "tokens_per_hour": 10000,
+            "tokens_per_day": 20000,
+        }
+    ).execute()
 
     out = rl_mod.get_user_rate_limits(user_api_key)
     assert out["requests_per_minute"] == 5
     assert out["tokens_per_day"] == 20000
 
+
 def test_get_user_rate_limits_none_when_no_rows(sb, user_api_key):
     assert rl_mod.get_user_rate_limits(user_api_key) is None
+
 
 def test_set_user_rate_limits_insert_then_update(sb, user_api_key, user):
     data = {
@@ -223,61 +240,109 @@ def test_set_user_rate_limits_insert_then_update(sb, user_api_key, user):
 # ----------------------------
 def test_check_rate_limit_allowed_when_under(sb, user_api_key):
     # provide limits
-    sb.table("rate_limits").insert({
-        "api_key": user_api_key,
-        "requests_per_minute": 2,
-        "requests_per_hour": 5,
-        "requests_per_day": 10,
-        "tokens_per_minute": 200,
-        "tokens_per_hour": 500,
-        "tokens_per_day": 1000,
-    }).execute()
+    sb.table("rate_limits").insert(
+        {
+            "api_key": user_api_key,
+            "requests_per_minute": 2,
+            "requests_per_hour": 5,
+            "requests_per_day": 10,
+            "tokens_per_minute": 200,
+            "tokens_per_hour": 500,
+            "tokens_per_day": 1000,
+        }
+    ).execute()
     # no usage rows yet
     out = rl_mod.check_rate_limit(user_api_key, tokens_used=50)
     assert out["allowed"] is True
 
+
 def test_check_rate_limit_blocks_on_request_minute(sb, user_api_key):
-    sb.table("rate_limits").insert({
-        "api_key": user_api_key,
-        "requests_per_minute": 2,
-        "requests_per_hour": 10,
-        "requests_per_day": 100,
-        "tokens_per_minute": 1000,
-        "tokens_per_hour": 2000,
-        "tokens_per_day": 3000,
-    }).execute()
+    sb.table("rate_limits").insert(
+        {
+            "api_key": user_api_key,
+            "requests_per_minute": 2,
+            "requests_per_hour": 10,
+            "requests_per_day": 100,
+            "tokens_per_minute": 1000,
+            "tokens_per_hour": 2000,
+            "tokens_per_day": 3000,
+        }
+    ).execute()
 
     # Seed 2 requests in current minute window so the next (implicit +1) exceeds
     now = datetime.now(UTC)
     minute_start = now.replace(second=0, microsecond=0).isoformat()
-    sb.table("rate_limit_usage").insert([
-        {"api_key": user_api_key, "window_type": "minute", "window_start": minute_start, "requests_count": 2, "tokens_count": 0},
-        {"api_key": user_api_key, "window_type": "hour",   "window_start": now.replace(minute=0, second=0, microsecond=0).isoformat(), "requests_count": 2, "tokens_count": 0},
-        {"api_key": user_api_key, "window_type": "day",    "window_start": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(), "requests_count": 2, "tokens_count": 0},
-    ]).execute()
+    sb.table("rate_limit_usage").insert(
+        [
+            {
+                "api_key": user_api_key,
+                "window_type": "minute",
+                "window_start": minute_start,
+                "requests_count": 2,
+                "tokens_count": 0,
+            },
+            {
+                "api_key": user_api_key,
+                "window_type": "hour",
+                "window_start": now.replace(minute=0, second=0, microsecond=0).isoformat(),
+                "requests_count": 2,
+                "tokens_count": 0,
+            },
+            {
+                "api_key": user_api_key,
+                "window_type": "day",
+                "window_start": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
+                "requests_count": 2,
+                "tokens_count": 0,
+            },
+        ]
+    ).execute()
 
     out = rl_mod.check_rate_limit(user_api_key, tokens_used=10)
     assert out["allowed"] is False
     assert "per minute" in out["reason"]
 
+
 def test_check_rate_limit_blocks_on_tokens_minute(sb, user_api_key):
-    sb.table("rate_limits").insert({
-        "api_key": user_api_key,
-        "requests_per_minute": 99,
-        "requests_per_hour": 99,
-        "requests_per_day": 999,
-        "tokens_per_minute": 100,
-        "tokens_per_hour": 1000,
-        "tokens_per_day": 10000,
-    }).execute()
+    sb.table("rate_limits").insert(
+        {
+            "api_key": user_api_key,
+            "requests_per_minute": 99,
+            "requests_per_hour": 99,
+            "requests_per_day": 999,
+            "tokens_per_minute": 100,
+            "tokens_per_hour": 1000,
+            "tokens_per_day": 10000,
+        }
+    ).execute()
 
     now = datetime.now(UTC)
     minute_start = now.replace(second=0, microsecond=0).isoformat()
-    sb.table("rate_limit_usage").insert([
-        {"api_key": user_api_key, "window_type": "minute", "window_start": minute_start, "requests_count": 0, "tokens_count": 90},
-        {"api_key": user_api_key, "window_type": "hour",   "window_start": now.replace(minute=0, second=0, microsecond=0).isoformat(), "requests_count": 0, "tokens_count": 90},
-        {"api_key": user_api_key, "window_type": "day",    "window_start": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(), "requests_count": 0, "tokens_count": 90},
-    ]).execute()
+    sb.table("rate_limit_usage").insert(
+        [
+            {
+                "api_key": user_api_key,
+                "window_type": "minute",
+                "window_start": minute_start,
+                "requests_count": 0,
+                "tokens_count": 90,
+            },
+            {
+                "api_key": user_api_key,
+                "window_type": "hour",
+                "window_start": now.replace(minute=0, second=0, microsecond=0).isoformat(),
+                "requests_count": 0,
+                "tokens_count": 90,
+            },
+            {
+                "api_key": user_api_key,
+                "window_type": "day",
+                "window_start": now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat(),
+                "requests_count": 0,
+                "tokens_count": 90,
+            },
+        ]
+    ).execute()
 
     out = rl_mod.check_rate_limit(user_api_key, tokens_used=20)  # 90 + 20 > 100
     assert out["allowed"] is False
@@ -289,7 +354,9 @@ def test_check_rate_limit_blocks_on_tokens_minute(sb, user_api_key):
 # ----------------------------
 def test_update_rate_limit_usage_inserts_then_updates(sb, user_api_key, user):
     # mark as "new key" to trigger last_used_at update
-    sb.table("api_keys_new").insert({"id": 10, "api_key": user_api_key, "user_id": user["id"], "last_used_at": None}).execute()
+    sb.table("api_keys_new").insert(
+        {"id": 10, "api_key": user_api_key, "user_id": user["id"], "last_used_at": None}
+    ).execute()
 
     rl_mod.update_rate_limit_usage(user_api_key, tokens_used=30)
 
@@ -312,11 +379,31 @@ def test_update_rate_limit_usage_inserts_then_updates(sb, user_api_key, user):
 # env usage summary
 # ----------------------------
 def test_get_environment_usage_summary(sb, user):
-    sb.table("api_keys_new").insert([
-        {"user_id": user["id"], "api_key": "gw_live_a", "environment_tag": "live", "requests_used": 5, "max_requests": 100},
-        {"user_id": user["id"], "api_key": "gw_live_b", "environment_tag": "live", "requests_used": 3, "max_requests": None},
-        {"user_id": user["id"], "api_key": "gw_test_a", "environment_tag": "test", "requests_used": 2, "max_requests": 50},
-    ]).execute()
+    sb.table("api_keys_new").insert(
+        [
+            {
+                "user_id": user["id"],
+                "api_key": "gw_live_a",
+                "environment_tag": "live",
+                "requests_used": 5,
+                "max_requests": 100,
+            },
+            {
+                "user_id": user["id"],
+                "api_key": "gw_live_b",
+                "environment_tag": "live",
+                "requests_used": 3,
+                "max_requests": None,
+            },
+            {
+                "user_id": user["id"],
+                "api_key": "gw_test_a",
+                "environment_tag": "test",
+                "requests_used": 2,
+                "max_requests": 50,
+            },
+        ]
+    ).execute()
 
     out = rl_mod.get_environment_usage_summary(user["id"])
     assert out["live"]["total_requests"] == 8
@@ -333,7 +420,9 @@ def test_get_update_rate_limit_config_and_list(sb, user_api_key):
     assert out_default["requests_per_minute"] == 60
 
     # Create an api_keys_new row and update config
-    sb.table("api_keys_new").insert({"api_key": user_api_key, "user_id": 42, "key_name": "k1", "environment_tag": "live"}).execute()
+    sb.table("api_keys_new").insert(
+        {"api_key": user_api_key, "user_id": 42, "key_name": "k1", "environment_tag": "live"}
+    ).execute()
     ok = rl_mod.update_rate_limit_config(user_api_key, {"requests_per_minute": 7})
     assert ok is True
 
@@ -346,11 +435,14 @@ def test_get_update_rate_limit_config_and_list(sb, user_api_key):
     assert len(lst) == 1
     assert lst[0]["key_name"] == "k1"
 
+
 def test_bulk_update_rate_limit_configs(sb):
-    sb.table("api_keys_new").insert([
-        {"api_key": "k1", "user_id": 99, "key_name": "a", "environment_tag": "live"},
-        {"api_key": "k2", "user_id": 99, "key_name": "b", "environment_tag": "test"},
-    ]).execute()
+    sb.table("api_keys_new").insert(
+        [
+            {"api_key": "k1", "user_id": 99, "key_name": "a", "environment_tag": "live"},
+            {"api_key": "k2", "user_id": 99, "key_name": "b", "environment_tag": "test"},
+        ]
+    ).execute()
     count = rl_mod.bulk_update_rate_limit_configs(99, {"requests_per_minute": 11})
     assert count == 2
     rows = sb.table("api_keys_new").select("*").eq("user_id", 99).execute().data
@@ -366,24 +458,51 @@ def test_get_rate_limit_usage_stats_minute(sb, user_api_key):
     end = start + timedelta(minutes=1)
 
     # In-window rows
-    sb.table("usage_records").insert([
-        {"api_key": user_api_key, "tokens_used": 10, "created_at": start.isoformat()},
-        {"api_key": user_api_key, "tokens_used": 15, "created_at": (start + timedelta(seconds=10)).isoformat()},
-    ]).execute()
+    sb.table("usage_records").insert(
+        [
+            {"api_key": user_api_key, "tokens_used": 10, "created_at": start.isoformat()},
+            {
+                "api_key": user_api_key,
+                "tokens_used": 15,
+                "created_at": (start + timedelta(seconds=10)).isoformat(),
+            },
+        ]
+    ).execute()
     # Out of window
-    sb.table("usage_records").insert({"api_key": user_api_key, "tokens_used": 999, "created_at": (end + timedelta(seconds=1)).isoformat()}).execute()
+    sb.table("usage_records").insert(
+        {
+            "api_key": user_api_key,
+            "tokens_used": 999,
+            "created_at": (end + timedelta(seconds=1)).isoformat(),
+        }
+    ).execute()
 
     out = rl_mod.get_rate_limit_usage_stats(user_api_key, "minute")
     assert out["total_requests"] == 2
     assert out["total_tokens"] == 25
 
+
 def test_get_system_rate_limit_stats(sb):
     now = datetime.now(UTC)
-    sb.table("usage_records").insert([
-        {"api_key": "a", "tokens_used": 5, "created_at": (now - timedelta(seconds=10)).isoformat()},
-        {"api_key": "b", "tokens_used": 15, "created_at": (now - timedelta(minutes=10)).isoformat()},
-        {"api_key": "a", "tokens_used": 20, "created_at": (now - timedelta(hours=10)).isoformat()},
-    ]).execute()
+    sb.table("usage_records").insert(
+        [
+            {
+                "api_key": "a",
+                "tokens_used": 5,
+                "created_at": (now - timedelta(seconds=10)).isoformat(),
+            },
+            {
+                "api_key": "b",
+                "tokens_used": 15,
+                "created_at": (now - timedelta(minutes=10)).isoformat(),
+            },
+            {
+                "api_key": "a",
+                "tokens_used": 20,
+                "created_at": (now - timedelta(hours=10)).isoformat(),
+            },
+        ]
+    ).execute()
     out = rl_mod.get_system_rate_limit_stats()
     assert out["minute"]["requests"] >= 1
     assert out["hour"]["requests"] >= 2

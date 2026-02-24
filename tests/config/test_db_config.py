@@ -1,9 +1,11 @@
 """
 Comprehensive tests for src/config/db_config.py
 """
+
 import os
+from unittest.mock import MagicMock, Mock, call, patch
+
 import pytest
-from unittest.mock import Mock, MagicMock, patch, call
 
 
 class TestDatabaseConfig:
@@ -12,8 +14,15 @@ class TestDatabaseConfig:
     def test_default_configuration(self, monkeypatch):
         """Test default database configuration values"""
         # Clear environment variables
-        for key in ["DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
-                    "DB_MIN_CONNECTIONS", "DB_MAX_CONNECTIONS"]:
+        for key in [
+            "DB_HOST",
+            "DB_PORT",
+            "DB_NAME",
+            "DB_USER",
+            "DB_PASSWORD",
+            "DB_MIN_CONNECTIONS",
+            "DB_MAX_CONNECTIONS",
+        ]:
             monkeypatch.delenv(key, raising=False)
 
         from src.config.db_config import DatabaseConfig
@@ -39,7 +48,9 @@ class TestDatabaseConfig:
 
         # Reload module to pick up new env vars
         import importlib
+
         import src.config.db_config as db_config_mod
+
         importlib.reload(db_config_mod)
 
         config = db_config_mod.DatabaseConfig()
@@ -55,6 +66,7 @@ class TestDatabaseConfig:
         """Test configuration when psycopg2 is not installed"""
         # Import after setting up the monkeypatch
         import importlib
+
         import src.config.db_config as db_config_mod
 
         # Force PSYCOPG2_AVAILABLE to False
@@ -93,8 +105,8 @@ class TestDatabaseConfig:
 class TestConnectionPool:
     """Test connection pool management"""
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_pool_success(self, mock_pool):
         """Test successful connection pool creation"""
         from src.config.db_config import DatabaseConfig
@@ -109,8 +121,8 @@ class TestConnectionPool:
         assert config._connection_pool == mock_pool_instance
         mock_pool.ThreadedConnectionPool.assert_called_once()
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_pool_reuses_existing(self, mock_pool):
         """Test connection pool reuse"""
         from src.config.db_config import DatabaseConfig
@@ -126,7 +138,7 @@ class TestConnectionPool:
         # Should only be called once
         assert mock_pool.ThreadedConnectionPool.call_count == 1
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', False)
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", False)
     def test_get_connection_pool_not_available(self):
         """Test connection pool when psycopg2 not available"""
         from src.config.db_config import DatabaseConfig
@@ -136,8 +148,8 @@ class TestConnectionPool:
         with pytest.raises(RuntimeError, match="PostgreSQL support not available"):
             config.get_connection_pool()
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_pool_failure(self, mock_pool):
         """Test connection pool creation failure"""
         from src.config.db_config import DatabaseConfig
@@ -149,8 +161,8 @@ class TestConnectionPool:
         with pytest.raises(RuntimeError, match="Database connection pool creation failed"):
             config.get_connection_pool()
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_close_all_connections(self, mock_pool):
         """Test closing all connections in pool"""
         from src.config.db_config import DatabaseConfig
@@ -165,7 +177,7 @@ class TestConnectionPool:
         mock_pool_instance.closeall.assert_called_once()
         assert config._connection_pool is None
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
     def test_close_all_connections_when_none(self):
         """Test closing connections when pool is None"""
         from src.config.db_config import DatabaseConfig
@@ -174,8 +186,8 @@ class TestConnectionPool:
         config._connection_pool = None
         config.close_all_connections()  # Should not raise
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_close_all_connections_error(self, mock_pool):
         """Test error handling when closing connections"""
         from src.config.db_config import DatabaseConfig
@@ -192,7 +204,7 @@ class TestConnectionPool:
 class TestConnectionContextManager:
     """Test get_connection context manager"""
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', False)
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", False)
     def test_get_connection_not_available(self):
         """Test get_connection when psycopg2 not available"""
         from src.config.db_config import DatabaseConfig
@@ -203,8 +215,8 @@ class TestConnectionContextManager:
             with config.get_connection():
                 pass
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_success(self, mock_pool):
         """Test successful connection retrieval"""
         from src.config.db_config import DatabaseConfig
@@ -223,8 +235,8 @@ class TestConnectionContextManager:
         mock_conn.commit.assert_called_once()
         mock_pool_instance.putconn.assert_called_once_with(mock_conn)
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_getconn_returns_none(self, mock_pool):
         """Test when getconn returns None"""
         from src.config.db_config import DatabaseConfig
@@ -239,8 +251,8 @@ class TestConnectionContextManager:
             with config.get_connection():
                 pass
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_with_exception(self, mock_pool):
         """Test connection rollback on exception"""
         from src.config.db_config import DatabaseConfig
@@ -260,8 +272,8 @@ class TestConnectionContextManager:
         mock_conn.rollback.assert_called_once()
         mock_pool_instance.putconn.assert_called_once_with(mock_conn)
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_rollback_fails(self, mock_pool):
         """Test when rollback itself fails"""
         from src.config.db_config import DatabaseConfig
@@ -279,8 +291,8 @@ class TestConnectionContextManager:
             with config.get_connection() as conn:
                 raise ValueError("Test error")
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_connection_putconn_fails(self, mock_pool):
         """Test when putconn fails"""
         from src.config.db_config import DatabaseConfig
@@ -301,7 +313,7 @@ class TestConnectionContextManager:
 class TestDatabaseOperations:
     """Test database operation methods"""
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', False)
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", False)
     def test_test_connection_not_available(self):
         """Test test_connection when psycopg2 not available"""
         from src.config.db_config import DatabaseConfig
@@ -311,8 +323,8 @@ class TestDatabaseOperations:
 
         assert result is False
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_test_connection_success(self, mock_pool):
         """Test successful connection test"""
         from src.config.db_config import DatabaseConfig
@@ -331,8 +343,8 @@ class TestDatabaseOperations:
 
         assert result is True
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_test_connection_failure(self, mock_pool):
         """Test failed connection test"""
         from src.config.db_config import DatabaseConfig
@@ -346,7 +358,7 @@ class TestDatabaseOperations:
 
         assert result is False
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', False)
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", False)
     def test_get_database_info_not_available(self):
         """Test get_database_info when psycopg2 not available"""
         from src.config.db_config import DatabaseConfig
@@ -357,19 +369,21 @@ class TestDatabaseOperations:
         assert "error" in result
         assert result["error"] == "PostgreSQL support not available"
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_database_info_success(self, mock_pool):
         """Test successful database info retrieval"""
         from src.config.db_config import DatabaseConfig
 
         mock_cursor = Mock()
-        mock_cursor.fetchone = Mock(side_effect=[
-            ("PostgreSQL 14.0",),
-            ("gatewayz_db",),
-            ("gatewayz",),
-            ("10 MB",),
-        ])
+        mock_cursor.fetchone = Mock(
+            side_effect=[
+                ("PostgreSQL 14.0",),
+                ("gatewayz_db",),
+                ("gatewayz",),
+                ("10 MB",),
+            ]
+        )
         mock_conn = Mock()
         mock_conn.cursor = Mock(return_value=mock_cursor)
         mock_pool_instance = Mock()
@@ -385,8 +399,8 @@ class TestDatabaseOperations:
         assert result["user"] == "gatewayz"
         assert result["size"] == "10 MB"
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_execute_query_success(self, mock_pool):
         """Test successful query execution"""
         from src.config.db_config import DatabaseConfig
@@ -405,8 +419,8 @@ class TestDatabaseOperations:
 
         assert result == [(1, "test"), (2, "data")]
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_execute_query_with_params(self, mock_pool):
         """Test query execution with parameters"""
         from src.config.db_config import DatabaseConfig
@@ -426,8 +440,8 @@ class TestDatabaseOperations:
         assert result == [(1, "test")]
         mock_cursor.execute.assert_called_with("SELECT * FROM users WHERE id = %s", (1,))
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_execute_query_fetch_one(self, mock_pool):
         """Test query execution with fetch_one=True"""
         from src.config.db_config import DatabaseConfig
@@ -446,8 +460,8 @@ class TestDatabaseOperations:
 
         assert result == (1, "test")
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_execute_many_success(self, mock_pool):
         """Test batch execution success"""
         from src.config.db_config import DatabaseConfig
@@ -483,8 +497,8 @@ class TestGlobalFunctions:
 
         assert config1 is config2
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_get_db_connection(self, mock_pool):
         """Test get_db_connection helper"""
         from src.config import db_config
@@ -501,8 +515,8 @@ class TestGlobalFunctions:
         with db_config.get_db_connection() as conn:
             assert conn == mock_conn
 
-    @patch('src.config.db_config.PSYCOPG2_AVAILABLE', True)
-    @patch('src.config.db_config.pool')
+    @patch("src.config.db_config.PSYCOPG2_AVAILABLE", True)
+    @patch("src.config.db_config.pool")
     def test_test_db_connection(self, mock_pool):
         """Test test_db_connection helper"""
         from src.config import db_config

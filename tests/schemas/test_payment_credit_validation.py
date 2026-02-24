@@ -18,7 +18,7 @@ def test_credit_value_minimum_100_percent():
         amount=1000,  # $10 in cents
         credit_value=10.00,  # $10 credit
         success_url="https://example.com/success",
-        cancel_url="https://example.com/cancel"
+        cancel_url="https://example.com/cancel",
     )
     assert request.credit_value == 10.00
 
@@ -30,7 +30,7 @@ def test_credit_value_less_than_payment_rejected():
             amount=1000,  # $10 in cents
             credit_value=5.00,  # $5 credit (50% - should be rejected)
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
 
     error = exc_info.value
@@ -40,13 +40,13 @@ def test_credit_value_less_than_payment_rejected():
 def test_credit_value_bonus_packages_allowed():
     """Test that bonus packages (credit > payment) are allowed."""
     test_cases = [
-        (1000, 10.00),   # 100% - exact match
-        (1000, 12.50),   # 125% - small bonus
-        (2000, 25.00),   # 125% - bonus package
-        (5000, 60.00),   # 120% - bonus package
-        (10000, 150.00), # 150% - large bonus package
-        (10000, 200.00), # 200% - double value package
-        (10000, 300.00), # 300% - maximum allowed (3x)
+        (1000, 10.00),  # 100% - exact match
+        (1000, 12.50),  # 125% - small bonus
+        (2000, 25.00),  # 125% - bonus package
+        (5000, 60.00),  # 120% - bonus package
+        (10000, 150.00),  # 150% - large bonus package
+        (10000, 200.00),  # 200% - double value package
+        (10000, 300.00),  # 300% - maximum allowed (3x)
     ]
 
     for amount_cents, credit_value_dollars in test_cases:
@@ -54,7 +54,7 @@ def test_credit_value_bonus_packages_allowed():
             amount=amount_cents,
             credit_value=credit_value_dollars,
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
         assert request.credit_value == credit_value_dollars
 
@@ -66,7 +66,7 @@ def test_credit_value_exceeds_3x_rejected():
             amount=1000,  # $10 in cents
             credit_value=30.01,  # $30.01 credit (just over 3x)
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
 
     error = exc_info.value
@@ -79,7 +79,7 @@ def test_credit_value_exactly_3x_allowed():
         amount=1000,  # $10 in cents
         credit_value=30.00,  # $30 credit (exactly 3x)
         success_url="https://example.com/success",
-        cancel_url="https://example.com/cancel"
+        cancel_url="https://example.com/cancel",
     )
     assert request.credit_value == 30.00
 
@@ -90,7 +90,7 @@ def test_credit_value_none_allowed():
         amount=1000,  # $10 in cents
         credit_value=None,  # Will use payment amount
         success_url="https://example.com/success",
-        cancel_url="https://example.com/cancel"
+        cancel_url="https://example.com/cancel",
     )
     assert request.credit_value is None
 
@@ -114,7 +114,7 @@ def test_various_payment_amounts_with_valid_credits():
             amount=amount_cents,
             credit_value=credit_value_dollars,
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
         assert request.credit_value == credit_value_dollars, f"Failed: {description}"
 
@@ -126,7 +126,7 @@ def test_edge_case_just_below_minimum():
             amount=1000,  # $10 in cents
             credit_value=9.99,  # $9.99 credit (99.9% - just below minimum)
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
 
     error = exc_info.value
@@ -140,7 +140,7 @@ def test_edge_case_just_above_maximum():
             amount=1000,  # $10 in cents
             credit_value=30.01,  # $30.01 credit (just over 3x)
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
 
     error = exc_info.value
@@ -161,7 +161,7 @@ def test_fractional_credit_values():
             amount=amount_cents,
             credit_value=credit_value_dollars,
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
         assert request.credit_value == credit_value_dollars
 
@@ -184,6 +184,6 @@ def test_promotional_packages_realistic_scenarios():
             amount=amount_cents,
             credit_value=credit_value_dollars,
             success_url="https://example.com/success",
-            cancel_url="https://example.com/cancel"
+            cancel_url="https://example.com/cancel",
         )
         assert request.credit_value == credit_value_dollars, f"Failed: {description}"

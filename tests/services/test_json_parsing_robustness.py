@@ -6,9 +6,10 @@ from external APIs without crashing or exposing sensitive information.
 """
 
 import json
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
 import httpx
+import pytest
 
 
 class TestHuggingFaceModelsJSONParsing:

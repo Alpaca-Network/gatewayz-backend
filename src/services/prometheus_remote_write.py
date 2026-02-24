@@ -234,10 +234,7 @@ class PrometheusRemoteWriter:
         self._push_errors += 1
         self._consecutive_failures += 1
 
-        if (
-            not self._circuit_open
-            and self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD
-        ):
+        if not self._circuit_open and self._consecutive_failures >= self.CIRCUIT_BREAKER_THRESHOLD:
             self._circuit_open = True
             self._circuit_open_time = time.time()
             logger.warning(
@@ -322,8 +319,7 @@ class PrometheusRemoteWriter:
             # Only log if circuit is not yet open (avoid spam)
             if not self._circuit_open:
                 logger.error(
-                    f"Error pushing metrics to {self.remote_write_url}: "
-                    f"{type(e).__name__}: {e}"
+                    f"Error pushing metrics to {self.remote_write_url}: " f"{type(e).__name__}: {e}"
                 )
             return False
 

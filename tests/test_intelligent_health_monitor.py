@@ -5,7 +5,7 @@ Tests the tiered monitoring, scheduling, and health check functionality.
 """
 
 import asyncio
-from datetime import datetime, timezone, UTC
+from datetime import UTC, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +22,9 @@ from src.services.intelligent_health_monitor import (
 @pytest.fixture
 def health_monitor():
     """Create a health monitor instance for testing"""
-    return IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
+    return IntelligentHealthMonitor(
+        batch_size=10, max_concurrent_checks=5, redis_coordination=False
+    )
 
 
 @pytest.mark.asyncio
@@ -52,9 +54,18 @@ async def test_tier_configuration(health_monitor):
 @pytest.mark.asyncio
 async def test_get_gateway_endpoint(health_monitor):
     """Test gateway endpoint URL mapping"""
-    assert health_monitor._get_gateway_endpoint("openrouter") == "https://openrouter.ai/api/v1/chat/completions"
-    assert health_monitor._get_gateway_endpoint("featherless") == "https://api.featherless.ai/v1/chat/completions"
-    assert health_monitor._get_gateway_endpoint("groq") == "https://api.groq.com/openai/v1/chat/completions"
+    assert (
+        health_monitor._get_gateway_endpoint("openrouter")
+        == "https://openrouter.ai/api/v1/chat/completions"
+    )
+    assert (
+        health_monitor._get_gateway_endpoint("featherless")
+        == "https://api.featherless.ai/v1/chat/completions"
+    )
+    assert (
+        health_monitor._get_gateway_endpoint("groq")
+        == "https://api.groq.com/openai/v1/chat/completions"
+    )
     assert health_monitor._get_gateway_endpoint("unknown") is None
 
 
@@ -62,11 +73,15 @@ async def test_get_gateway_endpoint(health_monitor):
 async def test_calculate_circuit_breaker_state_closed_to_open(health_monitor):
     """Test circuit breaker transitions from closed to open"""
     # Should stay closed with few failures
-    state = health_monitor._calculate_circuit_breaker_state("closed", consecutive_failures=3, consecutive_successes=0)
+    state = health_monitor._calculate_circuit_breaker_state(
+        "closed", consecutive_failures=3, consecutive_successes=0
+    )
     assert state == CircuitBreakerState.CLOSED
 
     # Should open with 5+ failures
-    state = health_monitor._calculate_circuit_breaker_state("closed", consecutive_failures=5, consecutive_successes=0)
+    state = health_monitor._calculate_circuit_breaker_state(
+        "closed", consecutive_failures=5, consecutive_successes=0
+    )
     assert state == CircuitBreakerState.OPEN
 
 
@@ -74,18 +89,24 @@ async def test_calculate_circuit_breaker_state_closed_to_open(health_monitor):
 async def test_calculate_circuit_breaker_state_half_open_to_closed(health_monitor):
     """Test circuit breaker transitions from half_open to closed"""
     # Should close after 3 successes
-    state = health_monitor._calculate_circuit_breaker_state("half_open", consecutive_failures=0, consecutive_successes=3)
+    state = health_monitor._calculate_circuit_breaker_state(
+        "half_open", consecutive_failures=0, consecutive_successes=3
+    )
     assert state == CircuitBreakerState.CLOSED
 
     # Should stay half_open with fewer successes
-    state = health_monitor._calculate_circuit_breaker_state("half_open", consecutive_failures=0, consecutive_successes=2)
+    state = health_monitor._calculate_circuit_breaker_state(
+        "half_open", consecutive_failures=0, consecutive_successes=2
+    )
     assert state == CircuitBreakerState.HALF_OPEN
 
 
 @pytest.mark.asyncio
 async def test_calculate_circuit_breaker_state_half_open_to_open(health_monitor):
     """Test circuit breaker transitions from half_open back to open on failure"""
-    state = health_monitor._calculate_circuit_breaker_state("half_open", consecutive_failures=1, consecutive_successes=0)
+    state = health_monitor._calculate_circuit_breaker_state(
+        "half_open", consecutive_failures=1, consecutive_successes=0
+    )
     assert state == CircuitBreakerState.OPEN
 
 
@@ -105,8 +126,13 @@ async def test_map_status_to_incident_type(health_monitor):
     """Test mapping health check status to incident type"""
     assert health_monitor._map_status_to_incident_type(HealthCheckStatus.ERROR) == "outage"
     assert health_monitor._map_status_to_incident_type(HealthCheckStatus.TIMEOUT) == "timeout"
-    assert health_monitor._map_status_to_incident_type(HealthCheckStatus.RATE_LIMITED) == "rate_limit"
-    assert health_monitor._map_status_to_incident_type(HealthCheckStatus.UNAUTHORIZED) == "authentication"
+    assert (
+        health_monitor._map_status_to_incident_type(HealthCheckStatus.RATE_LIMITED) == "rate_limit"
+    )
+    assert (
+        health_monitor._map_status_to_incident_type(HealthCheckStatus.UNAUTHORIZED)
+        == "authentication"
+    )
     assert health_monitor._map_status_to_incident_type(HealthCheckStatus.NOT_FOUND) == "unavailable"
 
 
@@ -188,10 +214,13 @@ async def test_check_model_health_timeout(health_monitor):
         try:
             # Simulate timeout in the HTTP request
             import httpx
+
             raise httpx.TimeoutException("Request timeout")
         except httpx.TimeoutException:
-            from src.services.intelligent_health_monitor import HealthCheckResult, HealthCheckStatus
             from datetime import datetime, timezone
+
+            from src.services.intelligent_health_monitor import HealthCheckResult, HealthCheckStatus
+
             return HealthCheckResult(
                 provider=model["provider"],
                 model=model["model"],
@@ -351,7 +380,9 @@ async def test_concurrent_check_limiting(health_monitor):
 @pytest.mark.asyncio
 async def test_tier_update_loop_handles_missing_function():
     """Test that tier update loop gracefully handles PGRST202 errors when function is not found"""
-    monitor = IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
+    monitor = IntelligentHealthMonitor(
+        batch_size=10, max_concurrent_checks=5, redis_coordination=False
+    )
     monitor.monitoring_active = True
 
     # Mock supabase to simulate PGRST202 error
@@ -381,7 +412,9 @@ async def test_tier_update_loop_handles_missing_function():
                     monitor.monitoring_active = False
                 await original_sleep(0)  # Yield to event loop
 
-            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+            with patch(
+                "src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn
+            ) as mock_sleep:
                 monitor.monitoring_active = True
 
                 # Start the tier update loop task
@@ -409,7 +442,9 @@ async def test_tier_update_loop_handles_missing_function():
 @pytest.mark.asyncio
 async def test_tier_update_loop_handles_other_errors():
     """Test that tier update loop properly logs other unexpected errors"""
-    monitor = IntelligentHealthMonitor(batch_size=10, max_concurrent_checks=5, redis_coordination=False)
+    monitor = IntelligentHealthMonitor(
+        batch_size=10, max_concurrent_checks=5, redis_coordination=False
+    )
 
     # Mock supabase to simulate a different error
     with patch("src.services.intelligent_health_monitor.logger") as mock_logger:
@@ -433,7 +468,9 @@ async def test_tier_update_loop_handles_other_errors():
                     monitor.monitoring_active = False
                 await original_sleep(0)  # Yield to event loop
 
-            with patch("src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn) as mock_sleep:
+            with patch(
+                "src.services.intelligent_health_monitor.asyncio.sleep", side_effect=mock_sleep_fn
+            ) as mock_sleep:
                 monitor.monitoring_active = True
 
                 # Start the tier update loop task
@@ -460,7 +497,9 @@ async def test_tier_update_loop_handles_other_errors():
 @pytest.mark.asyncio
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_create_or_update_incident_handles_none_response(mock_supabase, mock_logger, health_monitor):
+async def test_create_or_update_incident_handles_none_response(
+    mock_supabase, mock_logger, health_monitor
+):
     """Test that _create_or_update_incident handles None response from Supabase gracefully"""
     # Create a mock that returns None when execute() is called
     mock_table = MagicMock()
@@ -498,7 +537,9 @@ async def test_create_or_update_incident_handles_none_response(mock_supabase, mo
 @pytest.mark.asyncio
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_process_health_check_result_handles_none_response(mock_supabase, mock_logger, health_monitor):
+async def test_process_health_check_result_handles_none_response(
+    mock_supabase, mock_logger, health_monitor
+):
     """Test that _process_health_check_result handles None response from Supabase gracefully"""
     # Create a mock that returns None when execute() is called
     mock_table = MagicMock()
@@ -535,7 +576,9 @@ async def test_process_health_check_result_handles_none_response(mock_supabase, 
 @patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_process_health_check_result_retries_on_query_failure(mock_supabase, mock_logger, mock_sleep, health_monitor):
+async def test_process_health_check_result_retries_on_query_failure(
+    mock_supabase, mock_logger, mock_sleep, health_monitor
+):
     """Test that _process_health_check_result retries queries on failure before giving up"""
     # Create a mock that raises an exception on first call, succeeds on second
     mock_table = MagicMock()
@@ -545,7 +588,12 @@ async def test_process_health_check_result_retries_on_query_failure(mock_supabas
 
     # First call raises, second call succeeds
     mock_response = MagicMock()
-    mock_response.data = {"provider": "openai", "model": "gpt-4", "call_count": 10, "success_count": 9}
+    mock_response.data = {
+        "provider": "openai",
+        "model": "gpt-4",
+        "call_count": 10,
+        "success_count": 9,
+    }
     call_count = [0]
 
     def execute_side_effect():
@@ -583,7 +631,9 @@ async def test_process_health_check_result_retries_on_query_failure(mock_supabas
 @patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_create_or_update_incident_retries_on_query_failure(mock_supabase, mock_logger, mock_sleep, health_monitor):
+async def test_create_or_update_incident_retries_on_query_failure(
+    mock_supabase, mock_logger, mock_sleep, health_monitor
+):
     """Test that _create_or_update_incident retries queries on failure before giving up"""
     # Create a mock that raises an exception on first call, succeeds on second
     mock_table = MagicMock()
@@ -633,7 +683,9 @@ async def test_create_or_update_incident_retries_on_query_failure(mock_supabase,
 @patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_process_health_check_result_logs_debug_after_max_retries(mock_supabase, mock_logger, mock_sleep, health_monitor):
+async def test_process_health_check_result_logs_debug_after_max_retries(
+    mock_supabase, mock_logger, mock_sleep, health_monitor
+):
     """Test that _process_health_check_result logs at debug level after all retries fail"""
     # Create a mock that always raises an exception
     mock_table = MagicMock()
@@ -672,7 +724,9 @@ async def test_process_health_check_result_logs_debug_after_max_retries(mock_sup
 @pytest.mark.asyncio
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_process_health_check_result_preserves_uptime_percentages(mock_supabase, mock_logger, health_monitor):
+async def test_process_health_check_result_preserves_uptime_percentages(
+    mock_supabase, mock_logger, health_monitor
+):
     """Test that _process_health_check_result preserves existing uptime percentages rather than overwriting them"""
     # Create mock with existing uptime data
     mock_table = MagicMock()
@@ -731,7 +785,9 @@ async def test_process_health_check_result_preserves_uptime_percentages(mock_sup
 @pytest.mark.asyncio
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_process_health_check_result_defaults_uptime_for_new_models(mock_supabase, mock_logger, health_monitor):
+async def test_process_health_check_result_defaults_uptime_for_new_models(
+    mock_supabase, mock_logger, health_monitor
+):
     """Test that _process_health_check_result defaults uptime to 100% for new models without existing data"""
     # Create mock for a new model with no existing uptime data
     mock_table = MagicMock()
@@ -791,7 +847,9 @@ async def test_process_health_check_result_defaults_uptime_for_new_models(mock_s
 @patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_aggregate_hourly_metrics_calculates_uptime_from_history(mock_supabase, mock_logger, mock_sleep, health_monitor):
+async def test_aggregate_hourly_metrics_calculates_uptime_from_history(
+    mock_supabase, mock_logger, mock_sleep, health_monitor
+):
     """Test that _aggregate_hourly_metrics calculates uptime from actual history data"""
     # Mock tracked models
     mock_tracked_response = MagicMock()
@@ -801,9 +859,7 @@ async def test_aggregate_hourly_metrics_calculates_uptime_from_history(mock_supa
 
     # Mock history data - 10 checks, 9 successful
     mock_history_response = MagicMock()
-    mock_history_response.data = [
-        {"status": "success"} for _ in range(9)
-    ] + [{"status": "error"}]
+    mock_history_response.data = [{"status": "success"} for _ in range(9)] + [{"status": "error"}]
 
     # Set up mock table behavior
     call_tracker = {"tracked_calls": 0, "history_calls": 0, "update_calls": 0}
@@ -856,7 +912,9 @@ async def test_aggregate_hourly_metrics_calculates_uptime_from_history(mock_supa
 @patch("src.services.intelligent_health_monitor.asyncio.sleep", new_callable=AsyncMock)
 @patch("src.services.intelligent_health_monitor.logger")
 @patch("src.config.supabase_config.supabase")
-async def test_aggregate_hourly_metrics_defaults_to_100_when_no_history(mock_supabase, mock_logger, mock_sleep, health_monitor):
+async def test_aggregate_hourly_metrics_defaults_to_100_when_no_history(
+    mock_supabase, mock_logger, mock_sleep, health_monitor
+):
     """Test that _aggregate_hourly_metrics defaults to 100% uptime when there's no history data"""
     # Mock tracked models
     mock_tracked_response = MagicMock()

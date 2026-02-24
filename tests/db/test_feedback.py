@@ -8,9 +8,9 @@ Tests cover:
 - Feedback statistics aggregation
 """
 
-import pytest
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import UTC, datetime, timedelta, timezone
 
+import pytest
 
 # =========================
 # In-memory Supabase stub
@@ -392,9 +392,7 @@ def test_update_feedback_type(sb):
     feedback = fb.save_message_feedback(user_id=1, feedback_type="thumbs_up")
     feedback_id = feedback["id"]
 
-    updated = fb.update_feedback(
-        feedback_id=feedback_id, user_id=1, feedback_type="thumbs_down"
-    )
+    updated = fb.update_feedback(feedback_id=feedback_id, user_id=1, feedback_type="thumbs_down")
     assert updated is not None
     assert updated["feedback_type"] == "thumbs_down"
 
@@ -435,9 +433,7 @@ def test_update_feedback_invalid_type_raises_error(sb):
     feedback = fb.save_message_feedback(user_id=1, feedback_type="thumbs_up")
 
     with pytest.raises(ValueError):
-        fb.update_feedback(
-            feedback_id=feedback["id"], user_id=1, feedback_type="invalid"
-        )
+        fb.update_feedback(feedback_id=feedback["id"], user_id=1, feedback_type="invalid")
 
 
 def test_update_feedback_invalid_rating_raises_error(sb):

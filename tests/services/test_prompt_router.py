@@ -73,13 +73,15 @@ class TestCapabilityGating:
 
     def test_extract_capabilities_with_vision(self):
         """Test capability extraction with image content."""
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What's in this image?"},
-                {"type": "image_url", "image_url": {"url": "http://example.com/img.jpg"}},
-            ]
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What's in this image?"},
+                    {"type": "image_url", "image_url": {"url": "http://example.com/img.jpg"}},
+                ],
+            }
+        ]
 
         caps = extract_capabilities(messages)
 
@@ -120,7 +122,9 @@ class TestCapabilityGating:
         models = ["cheap", "expensive"]
         registry = {
             "cheap": ModelCapabilities(model_id="cheap", provider="a", cost_per_1k_input=0.0001),
-            "expensive": ModelCapabilities(model_id="expensive", provider="b", cost_per_1k_input=0.01),
+            "expensive": ModelCapabilities(
+                model_id="expensive", provider="b", cost_per_1k_input=0.01
+            ),
         }
         required = RequiredCapabilities(max_cost_per_1k=0.001)
 
@@ -151,7 +155,9 @@ class TestPromptClassifier:
 
     def test_classify_code_with_block(self):
         """Test classification of message with code block."""
-        messages = [{"role": "user", "content": "Fix this code:\n```python\ndef foo():\n  pass\n```"}]
+        messages = [
+            {"role": "user", "content": "Fix this code:\n```python\ndef foo():\n  pass\n```"}
+        ]
         result = classify_prompt(messages)
 
         assert result.category in (PromptCategory.CODE_GENERATION, PromptCategory.CODE_REVIEW)
@@ -167,7 +173,12 @@ class TestPromptClassifier:
 
     def test_classify_reasoning(self):
         """Test classification of complex reasoning."""
-        messages = [{"role": "user", "content": "Analyze the pros and cons of remote work and explain why it might be beneficial"}]
+        messages = [
+            {
+                "role": "user",
+                "content": "Analyze the pros and cons of remote work and explain why it might be beneficial",
+            }
+        ]
         result = classify_prompt(messages)
 
         assert result.category == PromptCategory.COMPLEX_REASONING
@@ -191,12 +202,14 @@ class TestPromptClassifier:
 
     def test_classify_multimodal_content(self):
         """Test classification handles multimodal content."""
-        messages = [{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "What is 2+2?"},
-            ]
-        }]
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "What is 2+2?"},
+                ],
+            }
+        ]
         result = classify_prompt(messages)
 
         # Should still classify the text
@@ -223,16 +236,25 @@ class TestModelSelector:
     def capabilities_registry(self):
         return {
             "openai/gpt-4o-mini": ModelCapabilities(
-                model_id="openai/gpt-4o-mini", provider="openai",
-                tools=True, json_mode=True, cost_per_1k_input=0.00015,
+                model_id="openai/gpt-4o-mini",
+                provider="openai",
+                tools=True,
+                json_mode=True,
+                cost_per_1k_input=0.00015,
             ),
             "anthropic/claude-3-haiku": ModelCapabilities(
-                model_id="anthropic/claude-3-haiku", provider="anthropic",
-                tools=True, json_mode=True, cost_per_1k_input=0.00025,
+                model_id="anthropic/claude-3-haiku",
+                provider="anthropic",
+                tools=True,
+                json_mode=True,
+                cost_per_1k_input=0.00025,
             ),
             "deepseek/deepseek-chat": ModelCapabilities(
-                model_id="deepseek/deepseek-chat", provider="deepseek",
-                tools=True, json_mode=True, cost_per_1k_input=0.00014,
+                model_id="deepseek/deepseek-chat",
+                provider="deepseek",
+                tools=True,
+                json_mode=True,
+                cost_per_1k_input=0.00014,
             ),
         }
 
@@ -335,20 +357,32 @@ class TestFallbackChain:
     def capabilities_registry(self):
         return {
             "openai/gpt-4o-mini": ModelCapabilities(
-                model_id="openai/gpt-4o-mini", provider="openai",
-                tools=True, json_mode=True, tool_schema_adherence="high",
+                model_id="openai/gpt-4o-mini",
+                provider="openai",
+                tools=True,
+                json_mode=True,
+                tool_schema_adherence="high",
             ),
             "anthropic/claude-3-haiku": ModelCapabilities(
-                model_id="anthropic/claude-3-haiku", provider="anthropic",
-                tools=True, json_mode=True, tool_schema_adherence="high",
+                model_id="anthropic/claude-3-haiku",
+                provider="anthropic",
+                tools=True,
+                json_mode=True,
+                tool_schema_adherence="high",
             ),
             "deepseek/deepseek-chat": ModelCapabilities(
-                model_id="deepseek/deepseek-chat", provider="deepseek",
-                tools=True, json_mode=True, tool_schema_adherence="medium",
+                model_id="deepseek/deepseek-chat",
+                provider="deepseek",
+                tools=True,
+                json_mode=True,
+                tool_schema_adherence="medium",
             ),
             "google/gemini-flash-1.5": ModelCapabilities(
-                model_id="google/gemini-flash-1.5", provider="google",
-                tools=True, json_mode=True, tool_schema_adherence="medium",
+                model_id="google/gemini-flash-1.5",
+                provider="google",
+                tools=True,
+                json_mode=True,
+                tool_schema_adherence="medium",
             ),
         }
 
@@ -448,7 +482,7 @@ class TestPromptRouter:
         messages = [{"role": "user", "content": "Hello"}]
 
         # Force no candidates by patching empty capabilities registry
-        with patch.object(router, '_capabilities_registry', {}):
+        with patch.object(router, "_capabilities_registry", {}):
             decision = router.route(messages=messages)
 
         # Should fail open to default
@@ -558,7 +592,12 @@ class TestPerformanceBenchmarks:
 
     def test_classification_performance(self):
         """Benchmark prompt classification."""
-        messages = [{"role": "user", "content": "Write a Python function to sort a list using quicksort algorithm"}]
+        messages = [
+            {
+                "role": "user",
+                "content": "Write a Python function to sort a list using quicksort algorithm",
+            }
+        ]
 
         start = time.perf_counter()
         iterations = 1000

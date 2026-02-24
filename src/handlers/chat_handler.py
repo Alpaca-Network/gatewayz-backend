@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 from typing import Any, AsyncIterator
+
 from fastapi import Request
 
 from src.db.chat_completion_requests import save_chat_completion_request
@@ -21,20 +22,12 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
-from src.services.pricing import calculate_cost
-from src.services.provider_selector import get_selector
-from src.services.trial_validation import track_trial_usage, validate_trial_access
-from src.services.credit_precheck import estimate_and_check_credits
-
-# Provider client imports
-from src.services.openrouter_client import (
-    make_openrouter_request_openai,
-    make_openrouter_request_openai_stream_async,
-)
 from src.services.cerebras_client import (
     make_cerebras_request_openai,
     make_cerebras_request_openai_stream,
 )
+from src.services.circuit_breaker import CircuitBreakerError
+from src.services.credit_precheck import estimate_and_check_credits
 from src.services.groq_client import (
     make_groq_request_openai,
     make_groq_request_openai_stream,
@@ -42,7 +35,15 @@ from src.services.groq_client import (
 from src.services.onerouter_client import (
     make_onerouter_request_openai_stream,
 )
-from src.services.circuit_breaker import CircuitBreakerError
+
+# Provider client imports
+from src.services.openrouter_client import (
+    make_openrouter_request_openai,
+    make_openrouter_request_openai_stream_async,
+)
+from src.services.pricing import calculate_cost
+from src.services.provider_selector import get_selector
+from src.services.trial_validation import track_trial_usage, validate_trial_access
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +65,7 @@ class ChatInferenceHandler:
     """
 
     def __init__(
-        self,
-        api_key: str,
-        background_tasks: Any | None = None,
-        request: Request | None = None
+        self, api_key: str, background_tasks: Any | None = None, request: Request | None = None
     ):
         """
         Initialize the handler with user context.
@@ -95,6 +93,7 @@ class ChatInferenceHandler:
             HTTPException: With detailed error response if authentication or authorization fails
         """
         from fastapi import HTTPException
+
         from src.utils.error_factory import DetailedErrorFactory
 
         # Get user
@@ -102,12 +101,10 @@ class ChatInferenceHandler:
             self.user = await asyncio.to_thread(get_user, self.api_key)
             if not self.user:
                 # Invalid API key - return detailed error
-                error_response = DetailedErrorFactory.invalid_api_key(
-                    request_id=self.request_id
-                )
+                error_response = DetailedErrorFactory.invalid_api_key(request_id=self.request_id)
                 raise HTTPException(
                     status_code=error_response.error.status,
-                    detail=error_response.dict(exclude_none=True)
+                    detail=error_response.dict(exclude_none=True),
                 )
         except HTTPException:
             # Re-raise HTTP exceptions
@@ -122,7 +119,7 @@ class ChatInferenceHandler:
             )
             raise HTTPException(
                 status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True)
+                detail=error_response.dict(exclude_none=True),
             )
 
         # Validate trial access
@@ -134,9 +131,7 @@ class ChatInferenceHandler:
 
                 # Check if it's a trial expired error
                 if "trial" in trial_error.lower() and "expired" in trial_error.lower():
-                    error_response = DetailedErrorFactory.trial_expired(
-                        request_id=self.request_id
-                    )
+                    error_response = DetailedErrorFactory.trial_expired(request_id=self.request_id)
                 else:
                     # Generic authorization error
                     error_response = DetailedErrorFactory.invalid_api_key(
@@ -146,7 +141,7 @@ class ChatInferenceHandler:
 
                 raise HTTPException(
                     status_code=error_response.error.status,
-                    detail=error_response.dict(exclude_none=True)
+                    detail=error_response.dict(exclude_none=True),
                 )
         except HTTPException:
             # Re-raise HTTP exceptions
@@ -161,7 +156,7 @@ class ChatInferenceHandler:
             )
             raise HTTPException(
                 status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True)
+                detail=error_response.dict(exclude_none=True),
             )
 
         logger.debug(
@@ -262,9 +257,9 @@ class ChatInferenceHandler:
             HTTPException: With detailed error response if provider call fails
         """
         from fastapi import HTTPException
-        from src.utils.error_factory import DetailedErrorFactory
 
         from src.services.pyroscope_config import tag_wrapper
+        from src.utils.error_factory import DetailedErrorFactory
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
@@ -295,6 +290,7 @@ class ChatInferenceHandler:
 
                 # Get circuit breaker state for retry_after calculation
                 from src.services.circuit_breaker import get_circuit_breaker
+
                 breaker = get_circuit_breaker(e.provider)
                 state_info = breaker.get_state()
                 retry_after = state_info.get("seconds_until_retry", 60)
@@ -310,13 +306,13 @@ class ChatInferenceHandler:
 
                 raise HTTPException(
                     status_code=error_response.error.status,
-                    detail=error_response.dict(exclude_none=True)
+                    detail=error_response.dict(exclude_none=True),
                 )
             except Exception as e:
                 # Convert provider exceptions to detailed errors
                 logger.error(
                     f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
-                    exc_info=True
+                    exc_info=True,
                 )
 
                 # Create detailed provider error
@@ -330,7 +326,7 @@ class ChatInferenceHandler:
 
                 raise HTTPException(
                     status_code=error_response.error.status,
-                    detail=error_response.dict(exclude_none=True)
+                    detail=error_response.dict(exclude_none=True),
                 )
 
     async def _call_provider_stream(
@@ -356,9 +352,7 @@ class ChatInferenceHandler:
             ValueError: If provider is not supported
             Exception: Provider-specific errors
         """
-        logger.info(
-            f"[ChatHandler] Calling provider={provider_name} (streaming), model={model_id}"
-        )
+        logger.info(f"[ChatHandler] Calling provider={provider_name} (streaming), model={model_id}")
 
         # Sentinel value to signal iterator exhaustion (PEP 479 compliance)
         _STREAM_EXHAUSTED = object()
@@ -389,8 +383,9 @@ class ChatInferenceHandler:
 
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
-        from src.utils.error_factory import DetailedErrorFactory
+
         from src.services.pyroscope_config import tag_wrapper
+        from src.utils.error_factory import DetailedErrorFactory
 
         try:
             with tag_wrapper({"provider": provider_name, "model": model_id}):
@@ -434,6 +429,7 @@ class ChatInferenceHandler:
 
             # Get circuit breaker state for retry_after calculation
             from src.services.circuit_breaker import get_circuit_breaker
+
             breaker = get_circuit_breaker(e.provider)
             state_info = breaker.get_state()
             retry_after = state_info.get("seconds_until_retry", 60)
@@ -449,7 +445,7 @@ class ChatInferenceHandler:
 
             raise HTTPException(
                 status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True)
+                detail=error_response.dict(exclude_none=True),
             )
 
     async def _charge_user(
@@ -748,7 +744,9 @@ class ChatInferenceHandler:
                 calculate_cost, request.model, prompt_tokens, completion_tokens
             )
             input_cost = await asyncio.to_thread(calculate_cost, request.model, prompt_tokens, 0)
-            output_cost = await asyncio.to_thread(calculate_cost, request.model, 0, completion_tokens)
+            output_cost = await asyncio.to_thread(
+                calculate_cost, request.model, 0, completion_tokens
+            )
 
             logger.debug(
                 f"[ChatHandler] Cost calculation: total=${cost:.6f}, "
@@ -929,7 +927,9 @@ class ChatInferenceHandler:
             async for provider_chunk in stream:
                 # CRITICAL: Check for client disconnect to prevent zombie requests (499)
                 if self.request and await self.request.is_disconnected():
-                    logger.warning(f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})")
+                    logger.warning(
+                        f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})"
+                    )
                     finish_reason = "client_disconnected"
                     break
 

@@ -5,9 +5,10 @@ Tests that the /v1/chat/completions endpoint returns detailed error responses
 for various error scenarios.
 """
 
+from unittest.mock import Mock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, Mock
 
 from src.main import create_app
 
@@ -132,9 +133,7 @@ class TestChatCompletionsErrors:
         data = response.json()
 
         # Should suggest similar models
-        if data["error"].get("context") and data["error"]["context"].get(
-            "suggested_models"
-        ):
+        if data["error"].get("context") and data["error"]["context"].get("suggested_models"):
             suggested = data["error"]["context"]["suggested_models"]
             assert any("gpt-4" in model for model in suggested)
 
@@ -159,9 +158,10 @@ class TestChatCompletionsErrors:
         assert "error" in data
         assert data["error"]["status"] == 400
         # Could be empty_messages_array or bad_request
-        assert "messages" in data["error"]["message"].lower() or data["error"][
-            "type"
-        ] == "empty_messages_array"
+        assert (
+            "messages" in data["error"]["message"].lower()
+            or data["error"]["type"] == "empty_messages_array"
+        )
 
     @patch("src.db.users.get_user")
     def test_missing_messages_field(self, mock_get_user, client, valid_api_key):
@@ -247,9 +247,7 @@ class TestChatCompletionsErrors:
 
     @patch("src.db.users.get_user")
     @patch("src.services.pricing.estimate_request_cost")
-    def test_insufficient_credits(
-        self, mock_estimate_cost, mock_get_user, client, trial_api_key
-    ):
+    def test_insufficient_credits(self, mock_estimate_cost, mock_get_user, client, trial_api_key):
         """Test insufficient credits error."""
         # Mock user with low credits
         mock_get_user.return_value = {
@@ -282,7 +280,10 @@ class TestChatCompletionsErrors:
 
         # Should include credit amounts in context
         if data["error"].get("context"):
-            assert "current_credits" in data["error"]["context"] or "required_credits" in data["error"]["context"]
+            assert (
+                "current_credits" in data["error"]["context"]
+                or "required_credits" in data["error"]["context"]
+            )
 
     def test_request_id_in_all_errors(self, client):
         """Test that all errors include request_id."""
@@ -318,7 +319,10 @@ class TestChatCompletionsErrors:
 
         data = response.json()
         # The custom request ID should be normalized with req_ prefix
-        assert data["error"]["request_id"].endswith(custom_request_id) or custom_request_id in data["error"]["request_id"]
+        assert (
+            data["error"]["request_id"].endswith(custom_request_id)
+            or custom_request_id in data["error"]["request_id"]
+        )
 
     def test_timestamp_in_errors(self, client):
         """Test that all errors include timestamp."""
@@ -368,9 +372,7 @@ class TestChatCompletionsErrors:
 
     @patch("src.db.users.get_user")
     @patch("src.services.provider_failover.call_provider_with_failover")
-    def test_provider_error(
-        self, mock_call_provider, mock_get_user, client, valid_api_key
-    ):
+    def test_provider_error(self, mock_call_provider, mock_get_user, client, valid_api_key):
         """Test provider error returns detailed error."""
         mock_get_user.return_value = {
             "id": "test-user",

@@ -5,9 +5,9 @@ Specifically tests the improved error handling for configuration issues
 like missing or malformed SUPABASE_URL.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
 
@@ -32,9 +32,7 @@ class TestAuthConfigurationErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 import asyncio
 
-                asyncio.get_event_loop().run_until_complete(
-                    privy_auth(request, MagicMock())
-                )
+                asyncio.get_event_loop().run_until_complete(privy_auth(request, MagicMock()))
 
             assert exc_info.value.status_code == 503
             assert "configuration error" in exc_info.value.detail.lower()
@@ -56,9 +54,7 @@ class TestAuthConfigurationErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 import asyncio
 
-                asyncio.get_event_loop().run_until_complete(
-                    privy_auth(request, MagicMock())
-                )
+                asyncio.get_event_loop().run_until_complete(privy_auth(request, MagicMock()))
 
             assert exc_info.value.status_code == 503
             assert "configuration error" in exc_info.value.detail.lower()
@@ -80,9 +76,7 @@ class TestAuthConfigurationErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 import asyncio
 
-                asyncio.get_event_loop().run_until_complete(
-                    privy_auth(request, MagicMock())
-                )
+                asyncio.get_event_loop().run_until_complete(privy_auth(request, MagicMock()))
 
             assert exc_info.value.status_code == 503
             assert "configuration error" in exc_info.value.detail.lower()
@@ -103,9 +97,7 @@ class TestAuthConfigurationErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 import asyncio
 
-                asyncio.get_event_loop().run_until_complete(
-                    privy_auth(request, MagicMock())
-                )
+                asyncio.get_event_loop().run_until_complete(privy_auth(request, MagicMock()))
 
             assert exc_info.value.status_code == 500
             assert "Authentication failed" in exc_info.value.detail
@@ -128,9 +120,7 @@ class TestAuthConfigurationErrorHandling:
             with pytest.raises(HTTPException) as exc_info:
                 import asyncio
 
-                asyncio.get_event_loop().run_until_complete(
-                    privy_auth(request, MagicMock())
-                )
+                asyncio.get_event_loop().run_until_complete(privy_auth(request, MagicMock()))
 
             # Should not contain the actual URL value in user-facing message
             assert "secret-project" not in exc_info.value.detail

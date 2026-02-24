@@ -8,7 +8,7 @@ Supports multiple channels: email, Slack, Discord, PagerDuty, webhooks.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -149,9 +149,7 @@ class HealthAlertingService:
 
         # Clean up old history (keep last 24 hours)
         cutoff = datetime.now(UTC) - timedelta(hours=24)
-        self.alert_history = {
-            k: v for k, v in self.alert_history.items() if v > cutoff
-        }
+        self.alert_history = {k: v for k, v in self.alert_history.items() if v > cutoff}
 
     async def _send_to_channel(self, alert: Alert, channel: AlertChannel):
         """Send alert to a specific channel"""
@@ -178,7 +176,9 @@ class HealthAlertingService:
             from src.config import Config
 
             # Get admin email from config
-            to_email = getattr(Config, "ADMIN_EMAIL", None) or getattr(Config, "SUPPORT_EMAIL", None)
+            to_email = getattr(Config, "ADMIN_EMAIL", None) or getattr(
+                Config, "SUPPORT_EMAIL", None
+            )
             from_email = getattr(Config, "FROM_EMAIL", "noreply@gatewayz.ai")
             resend_api_key = getattr(Config, "RESEND_API_KEY", None)
 
@@ -219,12 +219,14 @@ class HealthAlertingService:
             """
 
             # Send email using Resend
-            resend.Emails.send({
-                "from": from_email,
-                "to": to_email,
-                "subject": subject,
-                "html": html_body,
-            })
+            resend.Emails.send(
+                {
+                    "from": from_email,
+                    "to": to_email,
+                    "subject": subject,
+                    "html": html_body,
+                }
+            )
 
         except Exception as e:
             logger.error(f"Failed to send email alert: {e}")
@@ -250,7 +252,11 @@ class HealthAlertingService:
                         "title": alert.title,
                         "text": alert.message,
                         "fields": [
-                            {"title": "Severity", "value": alert.severity.value.upper(), "short": True},
+                            {
+                                "title": "Severity",
+                                "value": alert.severity.value.upper(),
+                                "short": True,
+                            },
                             {"title": "Type", "value": alert.alert_type.value, "short": True},
                         ],
                         "footer": "Gatewayz Health Monitoring",
@@ -308,9 +314,7 @@ class HealthAlertingService:
                 )
 
             if alert.model:
-                embed["fields"].append(
-                    {"name": "Model", "value": alert.model, "inline": True}
-                )
+                embed["fields"].append({"name": "Model", "value": alert.model, "inline": True})
 
             payload = {"embeds": [embed]}
 

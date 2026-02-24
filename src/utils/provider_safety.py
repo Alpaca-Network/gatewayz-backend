@@ -107,14 +107,12 @@ class CircuitBreaker:
                 self.half_open_calls = 0
             else:
                 time_until_retry = (
-                    self.recovery_timeout
-                    - (time.time() - self.last_failure_time)
+                    self.recovery_timeout - (time.time() - self.last_failure_time)
                     if self.last_failure_time
                     else 0
                 )
                 raise ProviderUnavailableError(
-                    f"Circuit breaker {self.name} is OPEN. "
-                    f"Retry in {time_until_retry:.1f}s"
+                    f"Circuit breaker {self.name} is OPEN. " f"Retry in {time_until_retry:.1f}s"
                 )
 
         # Execute function
@@ -150,9 +148,7 @@ class CircuitBreaker:
         self.last_failure_time = time.time()
 
         if self.state == CircuitState.HALF_OPEN:
-            logger.warning(
-                f"Circuit breaker {self.name}: Recovery failed, reopening circuit"
-            )
+            logger.warning(f"Circuit breaker {self.name}: Recovery failed, reopening circuit")
             self.state = CircuitState.OPEN
         elif self.failure_count >= self.failure_threshold:
             logger.error(
@@ -275,9 +271,7 @@ async def retry_async_with_backoff(  # noqa: UP047
                 await asyncio.sleep(delay)
                 delay = min(delay * exponential_base, max_delay)
             else:
-                logger.error(
-                    f"{func.__name__} failed after {max_retries + 1} attempts: {e}"
-                )
+                logger.error(f"{func.__name__} failed after {max_retries + 1} attempts: {e}")
 
     # All retries exhausted
     if last_exception is not None:
@@ -318,6 +312,7 @@ def safe_provider_call(  # noqa: UP047
         ...     circuit_breaker=cb
         ... )
     """
+
     def execute_with_timeout():
         """Execute function with timeout enforcement."""
         with ThreadPoolExecutor(max_workers=1) as executor:
@@ -424,14 +419,11 @@ def safe_get_choices(
     choices = response.choices
 
     if not isinstance(choices, list):
-        raise ProviderError(
-            f"{provider_name}: choices is not a list (type: {type(choices)})"
-        )
+        raise ProviderError(f"{provider_name}: choices is not a list (type: {type(choices)})")
 
     if len(choices) < min_choices:
         raise ProviderError(
-            f"{provider_name}: Expected at least {min_choices} choice(s), "
-            f"got {len(choices)}"
+            f"{provider_name}: Expected at least {min_choices} choice(s), " f"got {len(choices)}"
         )
 
     return choices

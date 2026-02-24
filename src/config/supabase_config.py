@@ -22,6 +22,7 @@ The three singleton clients and their connection budgets:
   - Read-replica client : 30-100 connections  (catalog SELECT queries, if configured)
   - Sync client         : 20 connections  (bulk model sync, isolated to prevent API downtime)
 """
+
 import logging
 import os
 import threading
@@ -177,7 +178,9 @@ def get_supabase_client() -> Client:
 
         # Inject the configured httpx client into the postgrest client
         # This ensures all database operations use our optimized connection pool
-        if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+        if hasattr(_supabase_client, "postgrest") and hasattr(
+            _supabase_client.postgrest, "session"
+        ):
             _supabase_client.postgrest.session = httpx_client
             logger.info(
                 "Configured Supabase client with optimized connection pool "
@@ -200,19 +203,23 @@ def get_supabase_client() -> Client:
         # Log detailed error information
         logger.error(
             f"❌ Failed to initialize Supabase client: {type(e).__name__}: {e}",
-            exc_info=True  # Include full traceback in logs
+            exc_info=True,  # Include full traceback in logs
         )
 
         # Capture to Sentry with additional context
         try:
             import sentry_sdk
+
             with sentry_sdk.push_scope() as scope:
-                scope.set_context("supabase_config", {
-                    "supabase_url_set": bool(Config.SUPABASE_URL),
-                    "supabase_key_set": bool(Config.SUPABASE_KEY),
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                })
+                scope.set_context(
+                    "supabase_config",
+                    {
+                        "supabase_url_set": bool(Config.SUPABASE_URL),
+                        "supabase_key_set": bool(Config.SUPABASE_KEY),
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                    },
+                )
                 scope.set_tag("component", "supabase_client")
                 scope.set_tag("initialization_phase", "get_supabase_client")
                 scope.level = "error"
@@ -252,12 +259,16 @@ def _test_connection_internal(client: Client) -> bool:
         # Capture to Sentry with context
         try:
             import sentry_sdk
+
             with sentry_sdk.push_scope() as scope:
-                scope.set_context("connection_test", {
-                    "error_type": type(e).__name__,
-                    "error_message": str(e),
-                    "test_table": "users",
-                })
+                scope.set_context(
+                    "connection_test",
+                    {
+                        "error_type": type(e).__name__,
+                        "error_message": str(e),
+                        "test_table": "users",
+                    },
+                )
                 scope.set_tag("component", "supabase_client")
                 scope.set_tag("initialization_phase", "connection_test")
                 scope.level = "error"
@@ -345,9 +356,11 @@ def cleanup_supabase_client():
         # Cleanup primary client
         with _client_lock:
             if _supabase_client is not None:
-                if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                if hasattr(_supabase_client, "postgrest") and hasattr(
+                    _supabase_client.postgrest, "session"
+                ):
                     session = _supabase_client.postgrest.session
-                    if hasattr(session, 'close'):
+                    if hasattr(session, "close"):
                         session.close()
                         logger.info("✅ Primary Supabase client closed successfully")
                 _supabase_client = None
@@ -355,9 +368,11 @@ def cleanup_supabase_client():
         # Cleanup read replica client
         with _replica_lock:
             if _read_replica_client is not None:
-                if hasattr(_read_replica_client, 'postgrest') and hasattr(_read_replica_client.postgrest, 'session'):
+                if hasattr(_read_replica_client, "postgrest") and hasattr(
+                    _read_replica_client.postgrest, "session"
+                ):
                     session = _read_replica_client.postgrest.session
-                    if hasattr(session, 'close'):
+                    if hasattr(session, "close"):
                         session.close()
                         logger.info("✅ Read replica client closed successfully")
                 _read_replica_client = None
@@ -365,9 +380,11 @@ def cleanup_supabase_client():
         # Cleanup sync client
         with _sync_lock:
             if _sync_client is not None:
-                if hasattr(_sync_client, 'postgrest') and hasattr(_sync_client.postgrest, 'session'):
+                if hasattr(_sync_client, "postgrest") and hasattr(
+                    _sync_client.postgrest, "session"
+                ):
                     session = _sync_client.postgrest.session
-                    if hasattr(session, 'close'):
+                    if hasattr(session, "close"):
                         session.close()
                         logger.info("✅ Sync client closed successfully")
                 _sync_client = None
@@ -399,9 +416,11 @@ def refresh_supabase_client() -> Client:
         # Cleanup existing client
         if _supabase_client is not None:
             try:
-                if hasattr(_supabase_client, 'postgrest') and hasattr(_supabase_client.postgrest, 'session'):
+                if hasattr(_supabase_client, "postgrest") and hasattr(
+                    _supabase_client.postgrest, "session"
+                ):
                     session = _supabase_client.postgrest.session
-                    if hasattr(session, 'close'):
+                    if hasattr(session, "close"):
                         session.close()
                         logger.debug("Closed existing httpx session during refresh")
             except Exception as e:
@@ -623,7 +642,9 @@ def get_read_replica_client() -> Client | None:
             )
 
             # Inject HTTP client
-            if hasattr(_read_replica_client, 'postgrest') and hasattr(_read_replica_client.postgrest, 'session'):
+            if hasattr(_read_replica_client, "postgrest") and hasattr(
+                _read_replica_client.postgrest, "session"
+            ):
                 _read_replica_client.postgrest.session = httpx_client
                 logger.info(f"✅ Read replica client initialized: {postgrest_base_url}")
 
@@ -731,7 +752,7 @@ def get_sync_client() -> Client:
             )
 
             # Inject the configured httpx client
-            if hasattr(_sync_client, 'postgrest') and hasattr(_sync_client.postgrest, 'session'):
+            if hasattr(_sync_client, "postgrest") and hasattr(_sync_client.postgrest, "session"):
                 _sync_client.postgrest.session = httpx_client
                 logger.info(
                     "✅ Configured dedicated sync client with isolated connection pool "

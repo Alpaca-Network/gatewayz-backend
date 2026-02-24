@@ -1,37 +1,39 @@
 """Tests for Google Vertex AI client"""
 
 import json
-import pytest
 import sys
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 # Mock Google Cloud dependencies before importing our module
 # This allows tests to run even if google-cloud-aiplatform isn't installed
-sys.modules['google'] = MagicMock()
-sys.modules['google.auth'] = MagicMock()
-sys.modules['google.auth.transport'] = MagicMock()
-sys.modules['google.auth.transport.requests'] = MagicMock()
-sys.modules['google.oauth2'] = MagicMock()
-sys.modules['google.oauth2.service_account'] = MagicMock()
+sys.modules["google"] = MagicMock()
+sys.modules["google.auth"] = MagicMock()
+sys.modules["google.auth.transport"] = MagicMock()
+sys.modules["google.auth.transport.requests"] = MagicMock()
+sys.modules["google.oauth2"] = MagicMock()
+sys.modules["google.oauth2.service_account"] = MagicMock()
 
 # Mock vertexai before importing our module (needed for lazy imports)
-sys.modules['vertexai'] = MagicMock()
-sys.modules['vertexai.generative_models'] = MagicMock()
-sys.modules['google.protobuf'] = MagicMock()
-sys.modules['google.protobuf.json_format'] = MagicMock()
+sys.modules["vertexai"] = MagicMock()
+sys.modules["vertexai.generative_models"] = MagicMock()
+sys.modules["google.protobuf"] = MagicMock()
+sys.modules["google.protobuf.json_format"] = MagicMock()
 
 # Now import our module (which will use the mocked dependencies)
 try:
     from src.services.google_vertex_client import (
+        _build_vertex_content,
+        _ensure_protobuf_imports,
+        _ensure_vertex_imports,
+        _get_model_location,
+        _process_google_vertex_rest_response,
         make_google_vertex_request_openai,
         make_google_vertex_request_openai_stream,
         transform_google_vertex_model_id,
-        _build_vertex_content,
-        _process_google_vertex_rest_response,
-        _ensure_vertex_imports,
-        _ensure_protobuf_imports,
-        _get_model_location,
     )
+
     GOOGLE_VERTEX_AVAILABLE = True
 except ImportError:
     GOOGLE_VERTEX_AVAILABLE = False
@@ -64,7 +66,9 @@ class TestTransformGoogleVertexModelId:
 
     def test_transform_full_resource_name(self):
         """Test that full resource names are extracted to simple model name"""
-        model_id = "projects/my-project/locations/us-central1/publishers/google/models/gemini-2.0-flash"
+        model_id = (
+            "projects/my-project/locations/us-central1/publishers/google/models/gemini-2.0-flash"
+        )
         result = transform_google_vertex_model_id(model_id)
         assert result == "gemini-2.0-flash"
 
@@ -121,10 +125,7 @@ class TestBuildVertexContent:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What's in this image?"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": "https://example.com/image.jpg"}
-                    },
+                    {"type": "image_url", "image_url": {"url": "https://example.com/image.jpg"}},
                 ],
             }
         ]
@@ -154,10 +155,7 @@ class TestBuildVertexContent:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What's in this image?"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": data_url}
-                    },
+                    {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }
         ]
@@ -185,10 +183,7 @@ class TestBuildVertexContent:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Describe this image"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": data_url}
-                    },
+                    {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }
         ]
@@ -208,10 +203,7 @@ class TestBuildVertexContent:
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "What is this?"},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": data_url}
-                    },
+                    {"type": "image_url", "image_url": {"url": data_url}},
                 ],
             }
         ]
@@ -245,18 +237,14 @@ class TestProcessGoogleVertexResponse:
         response_data = {
             "candidates": [
                 {
-                    "content": {
-                        "parts": [
-                            {"text": "This is a response"}
-                        ]
-                    },
+                    "content": {"parts": [{"text": "This is a response"}]},
                     "finishReason": "STOP",
                 }
             ],
             "usageMetadata": {
                 "promptTokenCount": 10,
                 "candidatesTokenCount": 5,
-            }
+            },
         }
 
         result = _process_google_vertex_rest_response(response_data, "gemini-2.0-flash")
@@ -274,19 +262,14 @@ class TestProcessGoogleVertexResponse:
         response_data = {
             "candidates": [
                 {
-                    "content": {
-                        "parts": [
-                            {"text": "Part 1 "},
-                            {"text": "Part 2"}
-                        ]
-                    },
+                    "content": {"parts": [{"text": "Part 1 "}, {"text": "Part 2"}]},
                     "finishReason": "STOP",
                 }
             ],
             "usageMetadata": {
                 "promptTokenCount": 10,
                 "candidatesTokenCount": 5,
-            }
+            },
         }
 
         result = _process_google_vertex_rest_response(response_data, "gemini-1.5-pro")
@@ -298,21 +281,19 @@ class TestProcessGoogleVertexResponse:
         response_data = {
             "candidates": [
                 {
-                    "content": {
-                        "parts": [
-                            {"text": "Flash Lite response"}
-                        ]
-                    },
+                    "content": {"parts": [{"text": "Flash Lite response"}]},
                     "finishReason": "STOP",
                 }
             ],
             "usageMetadata": {
                 "promptTokenCount": 5,
                 "candidatesTokenCount": 3,
-            }
+            },
         }
 
-        result = _process_google_vertex_rest_response(response_data, "gemini-2.5-flash-lite-preview-09-2025")
+        result = _process_google_vertex_rest_response(
+            response_data, "gemini-2.5-flash-lite-preview-09-2025"
+        )
 
         assert result["model"] == "gemini-2.5-flash-lite-preview-09-2025"
         assert result["choices"][0]["message"]["content"] == "Flash Lite response"
@@ -345,16 +326,10 @@ class TestMakeGoogleVertexRequest:
         # Mock _ensure_vertex_imports to return our mocked GenerativeModel class
         mock_ensure_imports.return_value = (Mock(), mock_generative_model_class)
 
-        messages = [
-            {"role": "user", "content": "Hello"}
-        ]
+        messages = [{"role": "user", "content": "Hello"}]
 
         result = make_google_vertex_request_openai(
-            messages=messages,
-            model="gemini-2.0-flash",
-            max_tokens=100,
-            temperature=0.7,
-            top_p=0.9
+            messages=messages, model="gemini-2.0-flash", max_tokens=100, temperature=0.7, top_p=0.9
         )
 
         assert "choices" in result
@@ -387,15 +362,11 @@ class TestMakeGoogleVertexRequest:
         # Mock _ensure_vertex_imports to return our mocked GenerativeModel class
         mock_ensure_imports.return_value = (Mock(), mock_generative_model_class)
 
-        messages = [
-            {"role": "user", "content": "Hello"}
-        ]
+        messages = [{"role": "user", "content": "Hello"}]
 
         # Get the generator
         gen = make_google_vertex_request_openai_stream(
-            messages=messages,
-            model="gemini-1.5-flash",
-            max_tokens=100
+            messages=messages, model="gemini-1.5-flash", max_tokens=100
         )
 
         # Collect all chunks
@@ -440,13 +411,10 @@ class TestMakeGoogleVertexRequest:
         # Mock _ensure_vertex_imports to return our mocked GenerativeModel class
         mock_ensure_imports.return_value = (Mock(), mock_generative_model_class)
 
-        messages = [
-            {"role": "user", "content": "Test"}
-        ]
+        messages = [{"role": "user", "content": "Test"}]
 
         result = make_google_vertex_request_openai(
-            messages=messages,
-            model="gemini-2.5-flash-lite-preview-09-2025"
+            messages=messages, model="gemini-2.5-flash-lite-preview-09-2025"
         )
 
         assert result["model"] == "gemini-2.5-flash-lite-preview-09-2025"
@@ -547,7 +515,7 @@ class TestGoogleVertexRestTransport:
 class TestGoogleVertexModelIntegration:
     """Integration tests for model detection and transformation"""
 
-    @patch.dict('os.environ', {'GOOGLE_VERTEX_CREDENTIALS_JSON': '{"type":"service_account"}'})
+    @patch.dict("os.environ", {"GOOGLE_VERTEX_CREDENTIALS_JSON": '{"type":"service_account"}'})
     def test_gemini_model_detection(self):
         """Test that gemini models are properly detected when credentials are available"""
         from src.services.model_transformations import detect_provider_from_model_id
@@ -562,7 +530,9 @@ class TestGoogleVertexModelIntegration:
 
         for model in models:
             provider = detect_provider_from_model_id(model)
-            assert provider == "google-vertex", f"Model {model} should detect as google-vertex, got {provider}"
+            assert (
+                provider == "google-vertex"
+            ), f"Model {model} should detect as google-vertex, got {provider}"
 
     def test_model_id_transformation_consistency(self):
         """Test that model IDs are transformed consistently"""
@@ -638,8 +608,12 @@ class TestFetchModelsFromGoogleVertex:
 
         # Check that slug and canonical_slug have google-vertex/ prefix
         # This ensures Google Vertex models don't get deduplicated with other gateways
-        assert model["slug"].startswith("google-vertex/"), f"Expected slug to start with 'google-vertex/', got: {model['slug']}"
-        assert model["canonical_slug"].startswith("google-vertex/"), f"Expected canonical_slug to start with 'google-vertex/', got: {model['canonical_slug']}"
+        assert model["slug"].startswith(
+            "google-vertex/"
+        ), f"Expected slug to start with 'google-vertex/', got: {model['slug']}"
+        assert model["canonical_slug"].startswith(
+            "google-vertex/"
+        ), f"Expected canonical_slug to start with 'google-vertex/', got: {model['canonical_slug']}"
         assert model["slug"] == f"google-vertex/{model['id']}"
         assert model["canonical_slug"] == f"google-vertex/{model['id']}"
 
@@ -673,18 +647,22 @@ class TestFetchModelsFromGoogleVertex:
         # Check that all models have provider_model_id
         for model in models:
             assert "provider_model_id" in model, f"Model {model['id']} missing provider_model_id"
-            assert model["provider_model_id"] is not None, f"Model {model['id']} has None provider_model_id"
+            assert (
+                model["provider_model_id"] is not None
+            ), f"Model {model['id']} has None provider_model_id"
 
         # Specifically check Gemini 3 models which have different provider model IDs
         gemini_3_flash = next((m for m in models if m["id"] == "gemini-3-flash"), None)
         assert gemini_3_flash is not None, "gemini-3-flash model not found"
-        assert gemini_3_flash["provider_model_id"] == "gemini-3-flash-preview", \
-            f"Expected gemini-3-flash to have provider_model_id 'gemini-3-flash-preview', got '{gemini_3_flash['provider_model_id']}'"
+        assert (
+            gemini_3_flash["provider_model_id"] == "gemini-3-flash-preview"
+        ), f"Expected gemini-3-flash to have provider_model_id 'gemini-3-flash-preview', got '{gemini_3_flash['provider_model_id']}'"
 
         gemini_3_pro = next((m for m in models if m["id"] == "gemini-3-pro"), None)
         assert gemini_3_pro is not None, "gemini-3-pro model not found"
-        assert gemini_3_pro["provider_model_id"] == "gemini-3-pro-preview", \
-            f"Expected gemini-3-pro to have provider_model_id 'gemini-3-pro-preview', got '{gemini_3_pro['provider_model_id']}'"
+        assert (
+            gemini_3_pro["provider_model_id"] == "gemini-3-pro-preview"
+        ), f"Expected gemini-3-pro to have provider_model_id 'gemini-3-pro-preview', got '{gemini_3_pro['provider_model_id']}'"
 
     def test_fetch_models_raw_google_vertex_includes_provider_model_id(self):
         """Test that raw_google_vertex metadata includes provider_model_id."""
@@ -696,8 +674,9 @@ class TestFetchModelsFromGoogleVertex:
         gemini_3_flash = next((m for m in models if m["id"] == "gemini-3-flash"), None)
         assert gemini_3_flash is not None, "gemini-3-flash model not found"
         assert "raw_google_vertex" in gemini_3_flash, "Missing raw_google_vertex metadata"
-        assert gemini_3_flash["raw_google_vertex"]["provider_model_id"] == "gemini-3-flash-preview", \
-            "raw_google_vertex should include the provider_model_id for database sync"
+        assert (
+            gemini_3_flash["raw_google_vertex"]["provider_model_id"] == "gemini-3-flash-preview"
+        ), "raw_google_vertex should include the provider_model_id for database sync"
 
 
 @pytest.mark.skipif(not GOOGLE_VERTEX_AVAILABLE, reason="Google Vertex AI SDK not available")
@@ -718,7 +697,9 @@ class TestModelLocationRouting:
 
         for model_name in gemini_3_models:
             location = _get_model_location(model_name)
-            assert location == "global", f"Model {model_name} should use 'global' endpoint, got '{location}'"
+            assert (
+                location == "global"
+            ), f"Model {model_name} should use 'global' endpoint, got '{location}'"
 
     def test_gemini_2_uses_regional_endpoint(self, monkeypatch):
         """Test that Gemini 2.x models use the configured regional endpoint"""
@@ -735,7 +716,9 @@ class TestModelLocationRouting:
 
         for model_name in gemini_2_models:
             location = _get_model_location(model_name)
-            assert location == "us-central1", f"Model {model_name} should use 'us-central1' endpoint, got '{location}'"
+            assert (
+                location == "us-central1"
+            ), f"Model {model_name} should use 'us-central1' endpoint, got '{location}'"
 
     def test_gemini_1_uses_regional_endpoint(self, monkeypatch):
         """Test that Gemini 1.x models use the configured regional endpoint"""
@@ -750,7 +733,9 @@ class TestModelLocationRouting:
 
         for model_name in gemini_1_models:
             location = _get_model_location(model_name)
-            assert location == "europe-west4", f"Model {model_name} should use 'europe-west4' endpoint, got '{location}'"
+            assert (
+                location == "europe-west4"
+            ), f"Model {model_name} should use 'europe-west4' endpoint, got '{location}'"
 
     def test_gemma_models_use_regional_endpoint(self, monkeypatch):
         """Test that Gemma models use the configured regional endpoint"""
@@ -763,7 +748,9 @@ class TestModelLocationRouting:
 
         for model_name in gemma_models:
             location = _get_model_location(model_name)
-            assert location == "us-west1", f"Model {model_name} should use 'us-west1' endpoint, got '{location}'"
+            assert (
+                location == "us-west1"
+            ), f"Model {model_name} should use 'us-west1' endpoint, got '{location}'"
 
     @pytest.mark.usefixtures("force_rest_transport")
     def test_rest_request_uses_global_for_gemini_3(self, monkeypatch):
@@ -789,8 +776,7 @@ class TestModelLocationRouting:
         monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
 
         result = make_google_vertex_request_openai(
-            messages=[{"role": "user", "content": "test"}],
-            model="gemini-3-flash-preview"
+            messages=[{"role": "user", "content": "test"}], model="gemini-3-flash-preview"
         )
 
         # Verify the request was successful
@@ -800,7 +786,9 @@ class TestModelLocationRouting:
         # Global endpoint uses https://aiplatform.googleapis.com (no region prefix)
         assert client_factory.calls == 1
         request_url = client_factory.payloads[0]["url"]
-        assert "https://aiplatform.googleapis.com/v1/" in request_url, f"URL should use global endpoint (no region prefix): {request_url}"
+        assert (
+            "https://aiplatform.googleapis.com/v1/" in request_url
+        ), f"URL should use global endpoint (no region prefix): {request_url}"
         assert "locations/global/" in request_url, f"URL should use global location: {request_url}"
 
     @pytest.mark.usefixtures("force_rest_transport")
@@ -827,8 +815,7 @@ class TestModelLocationRouting:
         monkeypatch.setattr("src.services.google_vertex_client.httpx.Client", client_factory)
 
         result = make_google_vertex_request_openai(
-            messages=[{"role": "user", "content": "test"}],
-            model="gemini-2.5-flash"
+            messages=[{"role": "user", "content": "test"}], model="gemini-2.5-flash"
         )
 
         # Verify the request was successful
@@ -837,8 +824,12 @@ class TestModelLocationRouting:
         # Verify the URL used the regional endpoint
         assert client_factory.calls == 1
         request_url = client_factory.payloads[0]["url"]
-        assert "us-central1-aiplatform.googleapis.com" in request_url, f"URL should use regional endpoint: {request_url}"
-        assert "locations/us-central1/" in request_url, f"URL should use regional location: {request_url}"
+        assert (
+            "us-central1-aiplatform.googleapis.com" in request_url
+        ), f"URL should use regional endpoint: {request_url}"
+        assert (
+            "locations/us-central1/" in request_url
+        ), f"URL should use regional location: {request_url}"
 
     @pytest.mark.usefixtures("force_rest_transport")
     def test_rest_request_strips_google_prefix_from_model_id(self, monkeypatch):
@@ -870,8 +861,7 @@ class TestModelLocationRouting:
 
         # Use model ID with google/ prefix (as it comes from the routing layer)
         result = make_google_vertex_request_openai(
-            messages=[{"role": "user", "content": "test"}],
-            model="google/gemini-3-pro-preview"
+            messages=[{"role": "user", "content": "test"}], model="google/gemini-3-pro-preview"
         )
 
         # Verify the request was successful
@@ -883,12 +873,18 @@ class TestModelLocationRouting:
 
         # The URL should have publishers/google/models/gemini-3-pro-preview
         # NOT publishers/google/models/google/gemini-3-pro-preview
-        assert "models/gemini-3-pro-preview" in request_url, f"URL should have stripped model name: {request_url}"
-        assert "models/google/gemini-3-pro-preview" not in request_url, f"URL should NOT have duplicated google/ prefix: {request_url}"
+        assert (
+            "models/gemini-3-pro-preview" in request_url
+        ), f"URL should have stripped model name: {request_url}"
+        assert (
+            "models/google/gemini-3-pro-preview" not in request_url
+        ), f"URL should NOT have duplicated google/ prefix: {request_url}"
 
     @patch("src.services.google_vertex_client.initialize_vertex_ai")
     @patch("src.services.google_vertex_client._ensure_vertex_imports")
-    def test_sdk_request_uses_global_for_gemini_3(self, mock_ensure_imports, mock_init_vertex, monkeypatch):
+    def test_sdk_request_uses_global_for_gemini_3(
+        self, mock_ensure_imports, mock_init_vertex, monkeypatch
+    ):
         """Ensure SDK transport initializes with global location for Gemini 3"""
         monkeypatch.setattr(Config, "GOOGLE_VERTEX_LOCATION", "us-central1")
         monkeypatch.setattr(Config, "GOOGLE_VERTEX_TRANSPORT", "sdk")
@@ -909,8 +905,7 @@ class TestModelLocationRouting:
         mock_ensure_imports.return_value = (Mock(), mock_generative_model_class)
 
         result = make_google_vertex_request_openai(
-            messages=[{"role": "user", "content": "test"}],
-            model="gemini-3-flash-preview"
+            messages=[{"role": "user", "content": "test"}], model="gemini-3-flash-preview"
         )
 
         # Verify the request was successful
@@ -1071,8 +1066,12 @@ class TestNoCandidatesErrorHandling:
             "promptFeedback": {
                 "blockReason": "SAFETY",
                 "safetyRatings": [
-                    {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "probability": "HIGH", "blocked": True}
-                ]
+                    {
+                        "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                        "probability": "HIGH",
+                        "blocked": True,
+                    }
+                ],
             },
             "usageMetadata": {"promptTokenCount": 100},
         }
@@ -1089,8 +1088,12 @@ class TestNoCandidatesErrorHandling:
         response_data = {
             "promptFeedback": {
                 "safetyRatings": [
-                    {"category": "HARM_CATEGORY_HATE_SPEECH", "probability": "HIGH", "blocked": True},
-                    {"category": "HARM_CATEGORY_VIOLENCE", "probability": "LOW", "blocked": False}
+                    {
+                        "category": "HARM_CATEGORY_HATE_SPEECH",
+                        "probability": "HIGH",
+                        "blocked": True,
+                    },
+                    {"category": "HARM_CATEGORY_VIOLENCE", "probability": "LOW", "blocked": False},
                 ]
             },
             "usageMetadata": {"promptTokenCount": 50},

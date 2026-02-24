@@ -96,7 +96,9 @@ class StatsigService:
                 self.statsig.initialize().wait(timeout=5)
             except Exception as timeout_e:
                 logger.warning(f"⚠️  Statsig initialization timed out after 5s: {timeout_e}")
-                logger.warning("   Continuing with Statsig in degraded mode - will retry on first use")
+                logger.warning(
+                    "   Continuing with Statsig in degraded mode - will retry on first use"
+                )
                 # Mark as initialized but not enabled to prevent retries during startup
                 self._initialized = True
                 return
@@ -294,7 +296,7 @@ class StatsigService:
                 # Statsig Python Core SDK uses shutdown() with wait() to flush
                 # For explicit flush without shutdown, we trigger a flush by
                 # calling flush() if available, otherwise log a warning
-                if hasattr(self.statsig, 'flush'):
+                if hasattr(self.statsig, "flush"):
                     self.statsig.flush().wait(timeout=5)
                     logger.debug("📤 Statsig events flushed successfully")
                     return True

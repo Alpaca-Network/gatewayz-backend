@@ -9,21 +9,22 @@ Tests cover:
 - Maintenance mode management
 """
 
-import pytest
-from datetime import datetime, timedelta, UTC
 import os
 import time
+from datetime import UTC, datetime, timedelta
 
-os.environ['APP_ENV'] = 'testing'
-os.environ['TESTING'] = 'true'
+import pytest
+
+os.environ["APP_ENV"] = "testing"
+os.environ["TESTING"] = "true"
 
 from src.services.model_availability import (
+    AvailabilityConfig,
+    AvailabilityStatus,
     CircuitBreaker,
     CircuitBreakerState,
-    AvailabilityStatus,
     ModelAvailability,
     ModelAvailabilityService,
-    AvailabilityConfig,
     availability_service,
 )
 
@@ -151,11 +152,7 @@ class TestAvailabilityConfig:
 
     def test_custom_config_values(self):
         """Test custom configuration values"""
-        config = AvailabilityConfig(
-            check_interval=30,
-            failure_threshold=10,
-            recovery_timeout=600
-        )
+        config = AvailabilityConfig(check_interval=30, failure_threshold=10, recovery_timeout=600)
 
         assert config.check_interval == 30
         assert config.failure_threshold == 10
@@ -179,7 +176,7 @@ class TestModelAvailabilityDataclass:
             response_time_ms=150.0,
             error_count=2,
             circuit_breaker_state=CircuitBreakerState.CLOSED,
-            fallback_models=["gpt-3.5-turbo"]
+            fallback_models=["gpt-3.5-turbo"],
         )
 
         assert availability.model_id == "gpt-4"
@@ -250,7 +247,7 @@ class TestModelAvailabilityService:
             response_time_ms=150.0,
             error_count=0,
             circuit_breaker_state=CircuitBreakerState.CLOSED,
-            fallback_models=[]
+            fallback_models=[],
         )
         service.availability_cache["openrouter:gpt-4"] = availability
 
@@ -279,22 +276,40 @@ class TestModelAvailabilityService:
         # Add models to cache
         models = [
             ModelAvailability(
-                model_id="gpt-4", provider="openai", gateway="openrouter",
-                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-                success_rate=0.95, response_time_ms=150.0, error_count=0,
-                circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+                model_id="gpt-4",
+                provider="openai",
+                gateway="openrouter",
+                status=AvailabilityStatus.AVAILABLE,
+                last_checked=datetime.now(UTC),
+                success_rate=0.95,
+                response_time_ms=150.0,
+                error_count=0,
+                circuit_breaker_state=CircuitBreakerState.CLOSED,
+                fallback_models=[],
             ),
             ModelAvailability(
-                model_id="claude-3", provider="anthropic", gateway="openrouter",
-                status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-                success_rate=0.90, response_time_ms=200.0, error_count=0,
-                circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+                model_id="claude-3",
+                provider="anthropic",
+                gateway="openrouter",
+                status=AvailabilityStatus.AVAILABLE,
+                last_checked=datetime.now(UTC),
+                success_rate=0.90,
+                response_time_ms=200.0,
+                error_count=0,
+                circuit_breaker_state=CircuitBreakerState.CLOSED,
+                fallback_models=[],
             ),
             ModelAvailability(
-                model_id="llama-3", provider="meta", gateway="huggingface",
-                status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
-                success_rate=0.50, response_time_ms=None, error_count=5,
-                circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
+                model_id="llama-3",
+                provider="meta",
+                gateway="huggingface",
+                status=AvailabilityStatus.UNAVAILABLE,
+                last_checked=datetime.now(UTC),
+                success_rate=0.50,
+                response_time_ms=None,
+                error_count=5,
+                circuit_breaker_state=CircuitBreakerState.OPEN,
+                fallback_models=[],
             ),
         ]
 
@@ -322,10 +337,16 @@ class TestModelAvailabilityService:
 
         # Add available model
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
         )
 
         assert service.is_model_available("gpt-4", "openrouter") is True
@@ -341,10 +362,16 @@ class TestModelAvailabilityService:
 
         # Add model with OPEN circuit
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.OPEN,
+            fallback_models=[],
         )
 
         # Should return False because circuit is OPEN
@@ -358,11 +385,17 @@ class TestModelAvailabilityService:
 
         # Add model in maintenance
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[],
-            maintenance_until=datetime.now(UTC) + timedelta(hours=1)
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
+            maintenance_until=datetime.now(UTC) + timedelta(hours=1),
         )
 
         # Should return False because of maintenance
@@ -375,10 +408,16 @@ class TestModelAvailabilityService:
         service = ModelAvailabilityService()
 
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
         )
 
         result = service.get_best_available_model("gpt-4", "openrouter")
@@ -392,26 +431,44 @@ class TestModelAvailabilityService:
 
         # gpt-4 unavailable
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.50, response_time_ms=None, error_count=10,
-            circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.UNAVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.50,
+            response_time_ms=None,
+            error_count=10,
+            circuit_breaker_state=CircuitBreakerState.OPEN,
+            fallback_models=[],
         )
 
         # gpt-4-turbo also unavailable (first fallback)
         service.availability_cache["openrouter:gpt-4-turbo"] = ModelAvailability(
-            model_id="gpt-4-turbo", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.50, response_time_ms=None, error_count=10,
-            circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
+            model_id="gpt-4-turbo",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.UNAVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.50,
+            response_time_ms=None,
+            error_count=10,
+            circuit_breaker_state=CircuitBreakerState.OPEN,
+            fallback_models=[],
         )
 
         # gpt-3.5-turbo available (second fallback)
         service.availability_cache["openrouter:gpt-3.5-turbo"] = ModelAvailability(
-            model_id="gpt-3.5-turbo", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=100.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+            model_id="gpt-3.5-turbo",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=100.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
         )
 
         result = service.get_best_available_model("gpt-4", "openrouter")
@@ -435,22 +492,40 @@ class TestModelAvailabilityService:
 
         # Add models
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
         )
         service.availability_cache["openrouter:gpt-3.5"] = ModelAvailability(
-            model_id="gpt-3.5", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.UNAVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.50, response_time_ms=None, error_count=5,
-            circuit_breaker_state=CircuitBreakerState.OPEN, fallback_models=[]
+            model_id="gpt-3.5",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.UNAVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.50,
+            response_time_ms=None,
+            error_count=5,
+            circuit_breaker_state=CircuitBreakerState.OPEN,
+            fallback_models=[],
         )
         service.availability_cache["huggingface:llama"] = ModelAvailability(
-            model_id="llama", provider="meta", gateway="huggingface",
-            status=AvailabilityStatus.DEGRADED, last_checked=datetime.now(UTC),
-            success_rate=0.75, response_time_ms=500.0, error_count=2,
-            circuit_breaker_state=CircuitBreakerState.HALF_OPEN, fallback_models=[]
+            model_id="llama",
+            provider="meta",
+            gateway="huggingface",
+            status=AvailabilityStatus.DEGRADED,
+            last_checked=datetime.now(UTC),
+            success_rate=0.75,
+            response_time_ms=500.0,
+            error_count=2,
+            circuit_breaker_state=CircuitBreakerState.HALF_OPEN,
+            fallback_models=[],
         )
 
         summary = service.get_availability_summary()
@@ -471,10 +546,16 @@ class TestModelAvailabilityService:
 
         # Add model
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.AVAILABLE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[]
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.AVAILABLE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
         )
 
         # Set maintenance
@@ -493,11 +574,17 @@ class TestModelAvailabilityService:
 
         # Add model in maintenance
         service.availability_cache["openrouter:gpt-4"] = ModelAvailability(
-            model_id="gpt-4", provider="openai", gateway="openrouter",
-            status=AvailabilityStatus.MAINTENANCE, last_checked=datetime.now(UTC),
-            success_rate=0.95, response_time_ms=150.0, error_count=0,
-            circuit_breaker_state=CircuitBreakerState.CLOSED, fallback_models=[],
-            maintenance_until=datetime.now(UTC) + timedelta(hours=2)
+            model_id="gpt-4",
+            provider="openai",
+            gateway="openrouter",
+            status=AvailabilityStatus.MAINTENANCE,
+            last_checked=datetime.now(UTC),
+            success_rate=0.95,
+            response_time_ms=150.0,
+            error_count=0,
+            circuit_breaker_state=CircuitBreakerState.CLOSED,
+            fallback_models=[],
+            maintenance_until=datetime.now(UTC) + timedelta(hours=2),
         )
 
         # Clear maintenance

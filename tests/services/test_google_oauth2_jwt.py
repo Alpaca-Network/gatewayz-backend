@@ -13,12 +13,11 @@ import pytest
 from src.services.google_oauth2_jwt import (
     GOOGLE_OAUTH2_TOKEN_ENDPOINT,
     JWT_GRANT_TYPE,
+    _base64url_encode,
     build_jwt_assertion,
     exchange_jwt_for_access_token,
     get_access_token_from_service_account,
-    _base64url_encode,
 )
-
 
 # ==================== Test Fixtures ====================
 
@@ -26,40 +25,42 @@ from src.services.google_oauth2_jwt import (
 @pytest.fixture
 def mock_service_account_json():
     """Fixture providing a mock service account JSON"""
-    return json.dumps({
-        "type": "service_account",
-        "project_id": "test-project-123",
-        "private_key_id": "key-id-123",
-        "private_key": (
-            "-----BEGIN RSA PRIVATE KEY-----\n"
-            "MIIEowIBAAKCAQEA2a2rwplBCXH/2yKzqnEICRa1RBVmYb3I01hDTdaVmX6p5IBm\n"
-            "l6cPR95TK8a7aPOPVWvlDrg+CYq8P5BppqUEhZx2Y0CQ+uO0A3N9OBEaPGBQNjYA\n"
-            "6qSGVVr8RkQWLDuFQPTy+5UD0LXXsM6xL3I39xwg7LLZ2XfkNqEtLqYRKmKGZWJC\n"
-            "p6vXZXq6K7m9K5JJd7XGZQqCCTGqIZGv3kbWKJy+WKWL2yqUlDpMJa0zVkL5VvHV\n"
-            "N2E0LSJLLXzQVKLYJZQfTN7F5XWjNqCCvFwM+qsVVzHz7bK5P5VLk7JK4vqVGYkE\n"
-            "XzVmZKqMq9Nd5QDvXKvLGQoYg2j1FGOvpM7CsQIDAQABAoIBAQCqiKM0hZhDlvAL\n"
-            "6wP8KZK2KWLFfLNKbYIr5nLCzKZJ8P7KvCZBuGZz5L3B2uEFQgJn0lX1t8B5bR9a\n"
-            "TxP0L2Xc5zKnZvKLZJCZGQzVnGVGK7cM8Z0xB3YC8xZ2J9L5Q3K8R7Z5K9Q6Z8M7\n"
-            "M0W6N2P1R1Q5S2O2S4T3P3U3T2V4U4W5V6X7Y8Z9A0B1C2D3E4F5G6H7I8J9K0L1\n"
-            "M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0P1Q2R3\n"
-            "S4T5U6V7W8X9Y0Z1A2AoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5\n"
-            "Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8\n"
-            "D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0v\n"
-            "Z0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6R7S8T9U0V1W2\n"
-            "X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhWVZDzKxLQRZ2q\n"
-            "LZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6\n"
-            "R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhW\n"
-            "VZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0\n"
-            "L1M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0r\n"
-            "AoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F\n"
-            "-----END RSA PRIVATE KEY-----\n"
-        ),
-        "client_email": "test-sa@test-project.iam.gserviceaccount.com",
-        "client_id": "123456789",
-        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-        "token_uri": "https://oauth2.googleapis.com/token",
-        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-    })
+    return json.dumps(
+        {
+            "type": "service_account",
+            "project_id": "test-project-123",
+            "private_key_id": "key-id-123",
+            "private_key": (
+                "-----BEGIN RSA PRIVATE KEY-----\n"
+                "MIIEowIBAAKCAQEA2a2rwplBCXH/2yKzqnEICRa1RBVmYb3I01hDTdaVmX6p5IBm\n"
+                "l6cPR95TK8a7aPOPVWvlDrg+CYq8P5BppqUEhZx2Y0CQ+uO0A3N9OBEaPGBQNjYA\n"
+                "6qSGVVr8RkQWLDuFQPTy+5UD0LXXsM6xL3I39xwg7LLZ2XfkNqEtLqYRKmKGZWJC\n"
+                "p6vXZXq6K7m9K5JJd7XGZQqCCTGqIZGv3kbWKJy+WKWL2yqUlDpMJa0zVkL5VvHV\n"
+                "N2E0LSJLLXzQVKLYJZQfTN7F5XWjNqCCvFwM+qsVVzHz7bK5P5VLk7JK4vqVGYkE\n"
+                "XzVmZKqMq9Nd5QDvXKvLGQoYg2j1FGOvpM7CsQIDAQABAoIBAQCqiKM0hZhDlvAL\n"
+                "6wP8KZK2KWLFfLNKbYIr5nLCzKZJ8P7KvCZBuGZz5L3B2uEFQgJn0lX1t8B5bR9a\n"
+                "TxP0L2Xc5zKnZvKLZJCZGQzVnGVGK7cM8Z0xB3YC8xZ2J9L5Q3K8R7Z5K9Q6Z8M7\n"
+                "M0W6N2P1R1Q5S2O2S4T3P3U3T2V4U4W5V6X7Y8Z9A0B1C2D3E4F5G6H7I8J9K0L1\n"
+                "M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0P1Q2R3\n"
+                "S4T5U6V7W8X9Y0Z1A2AoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5\n"
+                "Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8\n"
+                "D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0v\n"
+                "Z0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6R7S8T9U0V1W2\n"
+                "X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhWVZDzKxLQRZ2q\n"
+                "LZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5Q6\n"
+                "R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0rAoGBAPrJIKhW\n"
+                "VZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F5G6H7I8J9K0\n"
+                "L1M2N3O4P5Q6R7S8T9U0V1W2X3Y4Z5A6B7C8D9E0F1G2H3I4J5K6L7M8N9O0PrZq0r\n"
+                "AoGBAPrJIKhWVZDzKxLQRZ2qLZKqZb8Q5Z0vZ0Z1Z2Z3Z4Z5Z6Z7Z8Z9A0B1C2D3E4F\n"
+                "-----END RSA PRIVATE KEY-----\n"
+            ),
+            "client_email": "test-sa@test-project.iam.gserviceaccount.com",
+            "client_id": "123456789",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+        }
+    )
 
 
 @pytest.fixture
@@ -94,8 +95,9 @@ def test_base64url_encode_simple():
 
     # Should be valid base64url (no padding, uses - and _ instead of + and /)
     assert "=" not in encoded
-    assert all(c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-               for c in encoded)
+    assert all(
+        c in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for c in encoded
+    )
 
 
 def test_base64url_encode_json():
@@ -175,7 +177,9 @@ def test_build_jwt_assertion_structure(mock_sign, valid_service_account_email, v
 
 
 @patch("src.services.google_oauth2_jwt._sign_with_rsa_sha256")
-def test_build_jwt_assertion_with_custom_subject(mock_sign, valid_service_account_email, valid_scope):
+def test_build_jwt_assertion_with_custom_subject(
+    mock_sign, valid_service_account_email, valid_scope
+):
     """Test JWT assertion with custom subject claim"""
     mock_sign.return_value = b"mock_signature"
 
@@ -346,7 +350,9 @@ def test_get_access_token_from_service_account_success(
     # Verify JWT was built
     mock_build_jwt.assert_called_once()
     call_args = mock_build_jwt.call_args
-    assert call_args.kwargs["service_account_email"] == "test-sa@test-project.iam.gserviceaccount.com"
+    assert (
+        call_args.kwargs["service_account_email"] == "test-sa@test-project.iam.gserviceaccount.com"
+    )
     assert call_args.kwargs["scope"] == "https://www.googleapis.com/auth/cloud-platform"
 
     # Verify JWT was exchanged
@@ -366,11 +372,13 @@ def test_get_access_token_from_service_account_invalid_json():
 
 def test_get_access_token_from_service_account_missing_email():
     """Test with service account JSON missing client_email"""
-    invalid_json = json.dumps({
-        "type": "service_account",
-        # Missing "client_email"
-        "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMOCK\n-----END RSA PRIVATE KEY-----",
-    })
+    invalid_json = json.dumps(
+        {
+            "type": "service_account",
+            # Missing "client_email"
+            "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMOCK\n-----END RSA PRIVATE KEY-----",
+        }
+    )
 
     with pytest.raises(ValueError, match="client_email"):
         get_access_token_from_service_account(invalid_json)
@@ -378,11 +386,13 @@ def test_get_access_token_from_service_account_missing_email():
 
 def test_get_access_token_from_service_account_missing_key():
     """Test with service account JSON missing private_key"""
-    invalid_json = json.dumps({
-        "type": "service_account",
-        "client_email": "test@example.com",
-        # Missing "private_key"
-    })
+    invalid_json = json.dumps(
+        {
+            "type": "service_account",
+            "client_email": "test@example.com",
+            # Missing "private_key"
+        }
+    )
 
     with pytest.raises(ValueError, match="private_key"):
         get_access_token_from_service_account(invalid_json)

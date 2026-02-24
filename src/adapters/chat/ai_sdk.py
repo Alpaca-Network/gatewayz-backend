@@ -9,6 +9,7 @@ Reference: https://sdk.vercel.ai/docs
 import json
 import logging
 from typing import Any, AsyncIterator
+
 from src.adapters.chat.base import BaseChatAdapter
 from src.schemas.internal.chat import (
     InternalChatRequest,

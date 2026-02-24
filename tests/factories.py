@@ -11,8 +11,8 @@ Provides factory functions to create realistic test data for:
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone, UTC
-from typing import Dict, Any, Optional, List
+from datetime import UTC, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 
 class UserFactory:
@@ -27,7 +27,7 @@ class UserFactory:
         role: str = "user",
         is_admin: bool = False,
         subscription_status: str = "active",
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a test user
@@ -72,11 +72,7 @@ class UserFactory:
     @staticmethod
     def create_with_trial(**kwargs) -> dict[str, Any]:
         """Create a user with trial subscription"""
-        return UserFactory.create(
-            subscription_status="trial",
-            credits=50.0,
-            **kwargs
-        )
+        return UserFactory.create(subscription_status="trial", credits=50.0, **kwargs)
 
     @staticmethod
     def create_low_balance(**kwargs) -> dict[str, Any]:
@@ -100,7 +96,7 @@ class ApiKeyFactory:
         max_requests: int | None = None,
         ip_allowlist: list[str] | None = None,
         domain_referrers: list[str] | None = None,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a test API key
@@ -163,10 +159,7 @@ class ApiKeyFactory:
     @staticmethod
     def create_with_ip_restrictions(**kwargs) -> dict[str, Any]:
         """Create API key with IP restrictions"""
-        return ApiKeyFactory.create(
-            ip_allowlist=["192.168.1.1", "10.0.0.1"],
-            **kwargs
-        )
+        return ApiKeyFactory.create(ip_allowlist=["192.168.1.1", "10.0.0.1"], **kwargs)
 
 
 class ChatCompletionFactory:
@@ -179,7 +172,7 @@ class ChatCompletionFactory:
         stream: bool = False,
         max_tokens: int = 1000,
         temperature: float = 1.0,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a chat completion request
@@ -214,7 +207,7 @@ class ChatCompletionFactory:
         model: str = "anthropic/claude-3-opus",
         content: str = "Hello! How can I help you?",
         finish_reason: str = "stop",
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a chat completion response
@@ -255,9 +248,7 @@ class ChatCompletionFactory:
 
     @staticmethod
     def create_streaming_chunk(
-        content: str = "Hello",
-        finish_reason: str | None = None,
-        **kwargs
+        content: str = "Hello", finish_reason: str | None = None, **kwargs
     ) -> dict[str, Any]:
         """Create a streaming response chunk"""
         chunk = {
@@ -290,7 +281,7 @@ class ModelFactory:
         input_cost: float = 15.0,
         output_cost: float = 75.0,
         is_available: bool = True,
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a test model
@@ -334,7 +325,7 @@ class ModelFactory:
             context_length=128000,
             input_cost=10.0,
             output_cost=30.0,
-            **kwargs
+            **kwargs,
         )
 
     @staticmethod
@@ -353,7 +344,7 @@ class PaymentFactory:
         currency: str = "usd",
         status: str = "succeeded",
         payment_method: str = "card",
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a payment transaction
@@ -398,7 +389,7 @@ class ReferralFactory:
         referral_code: str | None = None,
         reward_amount: float = 5.0,
         status: str = "pending",
-        **kwargs
+        **kwargs,
     ) -> dict[str, Any]:
         """
         Create a referral

@@ -10,6 +10,7 @@ https://github.com/prometheus/prometheus/blob/main/prompb/remote.proto
 The wire format matches exactly what Prometheus expects for remote_write.
 """
 
+
 class Label:
     """
     Prometheus Label message.

@@ -10,7 +10,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.security.deps import require_admin
-
 from src.services.connection_pool import get_pool_stats
 from src.services.request_prioritization import get_priority_stats
 from src.services.response_cache import get_cache_stats

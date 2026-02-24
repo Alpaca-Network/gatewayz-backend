@@ -10,19 +10,19 @@ These tests verify that the credit deduction logic works correctly, including:
 """
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from src.services.credit_handler import (
     CREDIT_DEDUCTION_MAX_RETRIES,
     CREDIT_DEDUCTION_RETRY_DELAYS,
-    handle_credits_and_usage,
-    handle_credits_and_usage_with_fallback,
+    _record_background_task_failure,
     _record_credit_metrics,
     _record_missed_deduction,
-    _record_background_task_failure,
     _send_critical_billing_alert,
+    handle_credits_and_usage,
+    handle_credits_and_usage_with_fallback,
 )
 
 

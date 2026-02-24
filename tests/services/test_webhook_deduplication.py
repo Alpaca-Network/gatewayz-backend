@@ -3,16 +3,17 @@
 Tests for Stripe webhook event deduplication
 """
 
-import pytest
-from datetime import datetime, timezone, timezone, UTC
-from unittest.mock import Mock, patch, MagicMock
+from datetime import UTC, datetime, timezone
+from unittest.mock import MagicMock, Mock, patch
 
-from src.services.payments import StripeService
+import pytest
+
 from src.db.webhook_events import (
+    get_processed_event,
     is_event_processed,
     record_processed_event,
-    get_processed_event,
 )
+from src.services.payments import StripeService
 
 
 class TestWebhookDeduplication:
@@ -41,7 +42,9 @@ class TestWebhookDeduplication:
     def test_event_not_processed_initially(self, mock_supabase_client):
         """Test that new event is not marked as processed"""
         # Mock empty result (event not found)
-        mock_supabase_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+        mock_supabase_client.table.return_value.select.return_value.eq.return_value.execute.return_value.data = (
+            []
+        )
 
         result = is_event_processed("evt_test_123")
 
@@ -71,10 +74,7 @@ class TestWebhookDeduplication:
         ]
 
         result = record_processed_event(
-            event_id="evt_test_123",
-            event_type="invoice.paid",
-            user_id=1,
-            metadata={"test": "data"}
+            event_id="evt_test_123", event_type="invoice.paid", user_id=1, metadata={"test": "data"}
         )
 
         assert result is True
@@ -88,11 +88,9 @@ class TestWebhookDeduplication:
             "type": "invoice.paid",
             "data": {
                 "object": Mock(
-                    subscription="sub_123",
-                    id="in_123",
-                    metadata={"user_id": "1", "tier": "pro"}
+                    subscription="sub_123", id="in_123", metadata={"user_id": "1", "tier": "pro"}
                 )
-            }
+            },
         }
 
         with patch("src.services.payments.stripe.Webhook.construct_event") as mock_construct:
@@ -128,16 +126,13 @@ class TestWebhookDeduplication:
             {"event_id": "evt_test_123"}
         ]
 
-        metadata = {
-            "stripe_account": "acct_123",
-            "environment": "test"
-        }
+        metadata = {"stripe_account": "acct_123", "environment": "test"}
 
         result = record_processed_event(
             event_id="evt_test_123",
             event_type="customer.subscription.created",
             user_id=42,
-            metadata=metadata
+            metadata=metadata,
         )
 
         assert result is True

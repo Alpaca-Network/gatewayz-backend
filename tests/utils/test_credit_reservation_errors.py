@@ -8,8 +8,8 @@ provide detailed, actionable information to users.
 import pytest
 from fastapi import HTTPException
 
-from src.utils.exceptions import APIExceptions
 from src.utils.error_factory import DetailedErrorFactory
+from src.utils.exceptions import APIExceptions
 
 
 class TestInsufficientCreditsForReservation:
@@ -103,7 +103,8 @@ class TestInsufficientCreditsForReservation:
         # Should calculate recommended max_tokens (roughly 25% of 4000 = 1000)
         # Look for a numeric suggestion
         has_calculated_suggestion = any(
-            s for s in suggestions
+            s
+            for s in suggestions
             if "max_tokens to" in s.lower() and any(char.isdigit() for char in s)
         )
         assert has_calculated_suggestion
@@ -337,8 +338,8 @@ class TestErrorMessageClarity:
         # Each suggestion should be actionable
         for suggestion in suggestions:
             # Should either mention a specific action or have a specific number
-            is_actionable = (
-                any(action in suggestion.lower() for action in ["add", "reduce", "visit", "use", "try", "set"])
-                or any(char.isdigit() for char in suggestion)
-            )
+            is_actionable = any(
+                action in suggestion.lower()
+                for action in ["add", "reduce", "visit", "use", "try", "set"]
+            ) or any(char.isdigit() for char in suggestion)
             assert is_actionable, f"Suggestion not actionable: {suggestion}"

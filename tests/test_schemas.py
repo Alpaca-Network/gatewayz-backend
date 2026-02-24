@@ -13,13 +13,15 @@ Tests cover:
 - Edge cases and constraints
 """
 
+from datetime import UTC, datetime, timezone
+
 import pytest
-from datetime import datetime, timezone, timezone, UTC
 from pydantic import ValidationError
 
 # ==================================================
 # COMMON SCHEMAS TESTS
 # ==================================================
+
 
 class TestCommonEnums:
     """Test common enumeration types"""
@@ -76,6 +78,7 @@ class TestCommonEnums:
 # AUTH SCHEMAS TESTS
 # ==================================================
 
+
 class TestPrivyLinkedAccount:
     """Test PrivyLinkedAccount model"""
 
@@ -83,11 +86,7 @@ class TestPrivyLinkedAccount:
         """Test creating email linked account"""
         from src.schemas.auth import PrivyLinkedAccount
 
-        account = PrivyLinkedAccount(
-            type="email",
-            email="test@example.com",
-            verified_at=1234567890
-        )
+        account = PrivyLinkedAccount(type="email", email="test@example.com", verified_at=1234567890)
 
         assert account.type == "email"
         assert account.email == "test@example.com"
@@ -99,10 +98,7 @@ class TestPrivyLinkedAccount:
         from src.schemas.auth import PrivyLinkedAccount
 
         account = PrivyLinkedAccount(
-            type="google_oauth",
-            email="user@gmail.com",
-            name="Test User",
-            verified_at=1234567890
+            type="google_oauth", email="user@gmail.com", name="Test User", verified_at=1234567890
         )
 
         assert account.type == "google_oauth"
@@ -142,10 +138,7 @@ class TestPrivyUserData:
         """Test creating PrivyUserData with minimal required fields"""
         from src.schemas.auth import PrivyUserData
 
-        user = PrivyUserData(
-            id="privy_123",
-            created_at=1234567890
-        )
+        user = PrivyUserData(id="privy_123", created_at=1234567890)
 
         assert user.id == "privy_123"
         assert user.created_at == 1234567890
@@ -156,16 +149,16 @@ class TestPrivyUserData:
 
     def test_create_with_linked_accounts(self):
         """Test creating PrivyUserData with linked accounts"""
-        from src.schemas.auth import PrivyUserData, PrivyLinkedAccount
+        from src.schemas.auth import PrivyLinkedAccount, PrivyUserData
 
         user = PrivyUserData(
             id="privy_456",
             created_at=1234567890,
             linked_accounts=[
                 PrivyLinkedAccount(type="email", email="test@example.com"),
-                PrivyLinkedAccount(type="google_oauth", email="user@gmail.com")
+                PrivyLinkedAccount(type="google_oauth", email="user@gmail.com"),
             ],
-            has_accepted_terms=True
+            has_accepted_terms=True,
         )
 
         assert len(user.linked_accounts) == 2
@@ -180,7 +173,7 @@ class TestPrivyUserData:
             PrivyUserData(created_at=1234567890)
 
         errors = exc_info.value.errors()
-        assert any(e['loc'] == ('id',) for e in errors)
+        assert any(e["loc"] == ("id",) for e in errors)
 
     def test_missing_required_created_at(self):
         """Test that created_at field is required"""
@@ -190,7 +183,7 @@ class TestPrivyUserData:
             PrivyUserData(id="privy_789")
 
         errors = exc_info.value.errors()
-        assert any(e['loc'] == ('created_at',) for e in errors)
+        assert any(e["loc"] == ("created_at",) for e in errors)
 
 
 class TestPrivyAuthRequest:
@@ -201,10 +194,7 @@ class TestPrivyAuthRequest:
         from src.schemas.auth import PrivyAuthRequest, PrivyUserData
 
         user_data = PrivyUserData(id="privy_123", created_at=1234567890)
-        request = PrivyAuthRequest(
-            user=user_data,
-            token="access_token_123"
-        )
+        request = PrivyAuthRequest(user=user_data, token="access_token_123")
 
         assert request.user.id == "privy_123"
         assert request.token == "access_token_123"
@@ -225,7 +215,7 @@ class TestPrivyAuthRequest:
             refresh_token="refresh_123",
             session_update_action="login",
             is_new_user=True,
-            referral_code="FRIEND10"
+            referral_code="FRIEND10",
         )
 
         assert request.email == "user@example.com"
@@ -239,7 +229,7 @@ class TestPrivyAuthResponse:
 
     def test_create_success_response(self):
         """Test creating successful auth response"""
-        from src.schemas.auth import PrivyAuthResponse, AuthMethod
+        from src.schemas.auth import AuthMethod, PrivyAuthResponse
 
         response = PrivyAuthResponse(
             success=True,
@@ -251,7 +241,7 @@ class TestPrivyAuthResponse:
             is_new_user=False,
             email="test@example.com",
             credits=100.0,
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         assert response.success is True
@@ -265,10 +255,7 @@ class TestPrivyAuthResponse:
         """Test creating response with only required fields"""
         from src.schemas.auth import PrivyAuthResponse
 
-        response = PrivyAuthResponse(
-            success=False,
-            message="Authentication failed"
-        )
+        response = PrivyAuthResponse(success=False, message="Authentication failed")
 
         assert response.success is False
         assert response.message == "Authentication failed"
@@ -280,6 +267,7 @@ class TestPrivyAuthResponse:
 # USER SCHEMAS TESTS
 # ==================================================
 
+
 class TestUserRegistrationRequest:
     """Test UserRegistrationRequest model"""
 
@@ -287,10 +275,7 @@ class TestUserRegistrationRequest:
         """Test creating registration request with default values"""
         from src.schemas.users import UserRegistrationRequest
 
-        request = UserRegistrationRequest(
-            username="testuser",
-            email="test@example.com"
-        )
+        request = UserRegistrationRequest(username="testuser", email="test@example.com")
 
         assert request.username == "testuser"
         assert request.email == "test@example.com"
@@ -301,7 +286,7 @@ class TestUserRegistrationRequest:
 
     def test_create_with_all_fields(self):
         """Test creating registration request with all fields"""
-        from src.schemas.users import UserRegistrationRequest, AuthMethod
+        from src.schemas.users import AuthMethod, UserRegistrationRequest
 
         request = UserRegistrationRequest(
             username="googleuser",
@@ -309,7 +294,7 @@ class TestUserRegistrationRequest:
             auth_method=AuthMethod.GOOGLE,
             environment_tag="test",
             key_name="Test Key",
-            referral_code="REFER123"
+            referral_code="REFER123",
         )
 
         assert request.auth_method == AuthMethod.GOOGLE
@@ -322,13 +307,10 @@ class TestUserRegistrationRequest:
         from src.schemas.users import UserRegistrationRequest
 
         with pytest.raises(ValidationError) as exc_info:
-            UserRegistrationRequest(
-                username="testuser",
-                email="not-an-email"
-            )
+            UserRegistrationRequest(username="testuser", email="not-an-email")
 
         errors = exc_info.value.errors()
-        assert any('email' in str(e) for e in errors)
+        assert any("email" in str(e) for e in errors)
 
     def test_missing_required_username(self):
         """Test that username is required"""
@@ -338,7 +320,7 @@ class TestUserRegistrationRequest:
             UserRegistrationRequest(email="test@example.com")
 
         errors = exc_info.value.errors()
-        assert any(e['loc'] == ('username',) for e in errors)
+        assert any(e["loc"] == ("username",) for e in errors)
 
 
 class TestUserRegistrationResponse:
@@ -346,7 +328,7 @@ class TestUserRegistrationResponse:
 
     def test_create_complete_response(self):
         """Test creating complete registration response"""
-        from src.schemas.users import UserRegistrationResponse, AuthMethod, SubscriptionStatus
+        from src.schemas.users import AuthMethod, SubscriptionStatus, UserRegistrationResponse
 
         response = UserRegistrationResponse(
             user_id=1,
@@ -359,7 +341,7 @@ class TestUserRegistrationResponse:
             auth_method=AuthMethod.EMAIL,
             subscription_status=SubscriptionStatus.TRIAL,
             message="Account created successfully",
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         assert response.user_id == 1
@@ -389,10 +371,7 @@ class TestUserProfileUpdate:
         """Test creating update with only some fields"""
         from src.schemas.users import UserProfileUpdate
 
-        update = UserProfileUpdate(
-            name="Updated Name",
-            preferences={"theme": "dark"}
-        )
+        update = UserProfileUpdate(name="Updated Name", preferences={"theme": "dark"})
 
         assert update.name == "Updated Name"
         assert update.preferences == {"theme": "dark"}
@@ -407,7 +386,7 @@ class TestUserProfileUpdate:
             name="Full Name",
             email="new@example.com",
             preferences={"theme": "dark", "language": "en"},
-            settings={"notifications": True}
+            settings={"notifications": True},
         )
 
         assert update.name == "Full Name"
@@ -435,7 +414,7 @@ class TestUserProfileResponse:
             is_active=None,  # Optional
             registration_date=None,  # Optional
             created_at=None,  # Optional
-            updated_at=None  # Optional
+            updated_at=None,  # Optional
         )
 
         assert response.user_id == 1
@@ -463,7 +442,7 @@ class TestUserProfileResponse:
             is_active=True,
             registration_date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
-            updated_at="2024-10-24T12:00:00Z"
+            updated_at="2024-10-24T12:00:00Z",
         )
 
         assert response.username == "testuser"
@@ -498,7 +477,7 @@ class TestUserProfileResponse:
             is_active=True,
             registration_date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
-            updated_at="2024-01-15T12:00:00Z"
+            updated_at="2024-01-15T12:00:00Z",
         )
 
         assert response.tier == "pro"
@@ -529,7 +508,7 @@ class TestUserProfileResponse:
             is_active=True,
             registration_date="2024-01-01",
             created_at="2024-01-01T00:00:00Z",
-            updated_at="2024-01-15T12:00:00Z"
+            updated_at="2024-01-15T12:00:00Z",
         )
 
         assert response.tier == "max"
@@ -558,7 +537,7 @@ class TestDeleteAccountRequest:
             DeleteAccountRequest()
 
         errors = exc_info.value.errors()
-        assert any(e['loc'] == ('confirmation',) for e in errors)
+        assert any(e["loc"] == ("confirmation",) for e in errors)
 
 
 class TestDeleteAccountResponse:
@@ -572,7 +551,7 @@ class TestDeleteAccountResponse:
             status="success",
             message="Account deleted successfully",
             user_id=123,
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         assert response.status == "success"
@@ -585,6 +564,7 @@ class TestDeleteAccountResponse:
 # MODEL SERIALIZATION TESTS
 # ==================================================
 
+
 class TestModelSerialization:
     """Test Pydantic model serialization and deserialization"""
 
@@ -593,17 +573,13 @@ class TestModelSerialization:
         from src.schemas.auth import PrivyAuthRequest, PrivyUserData
 
         user_data = PrivyUserData(id="privy_123", created_at=1234567890)
-        request = PrivyAuthRequest(
-            user=user_data,
-            token="token_123",
-            email="test@example.com"
-        )
+        request = PrivyAuthRequest(user=user_data, token="token_123", email="test@example.com")
 
         data = request.model_dump()
 
-        assert data['user']['id'] == "privy_123"
-        assert data['token'] == "token_123"
-        assert data['email'] == "test@example.com"
+        assert data["user"]["id"] == "privy_123"
+        assert data["token"] == "token_123"
+        assert data["email"] == "test@example.com"
 
     def test_privy_auth_request_from_dict(self):
         """Test deserializing PrivyAuthRequest from dict"""
@@ -616,9 +592,9 @@ class TestModelSerialization:
                 "linked_accounts": [],
                 "mfa_methods": [],
                 "has_accepted_terms": True,
-                "is_guest": False
+                "is_guest": False,
             },
-            "token": "token_456"
+            "token": "token_456",
         }
 
         request = PrivyAuthRequest(**data)
@@ -629,12 +605,10 @@ class TestModelSerialization:
 
     def test_user_registration_request_to_json(self):
         """Test serializing UserRegistrationRequest to JSON"""
-        from src.schemas.users import UserRegistrationRequest, AuthMethod
+        from src.schemas.users import AuthMethod, UserRegistrationRequest
 
         request = UserRegistrationRequest(
-            username="jsonuser",
-            email="json@example.com",
-            auth_method=AuthMethod.GOOGLE
+            username="jsonuser", email="json@example.com", auth_method=AuthMethod.GOOGLE
         )
 
         json_str = request.model_dump_json()
@@ -645,8 +619,9 @@ class TestModelSerialization:
 
     def test_user_registration_response_from_json(self):
         """Test deserializing UserRegistrationResponse from JSON"""
-        from src.schemas.users import UserRegistrationResponse
         import json
+
+        from src.schemas.users import UserRegistrationResponse
 
         json_data = {
             "user_id": 1,
@@ -659,7 +634,7 @@ class TestModelSerialization:
             "auth_method": "email",
             "subscription_status": "trial",
             "message": "Success",
-            "timestamp": "2024-10-24T12:00:00Z"
+            "timestamp": "2024-10-24T12:00:00Z",
         }
 
         response = UserRegistrationResponse(**json_data)
@@ -673,6 +648,7 @@ class TestModelSerialization:
 # EDGE CASES AND VALIDATION TESTS
 # ==================================================
 
+
 class TestEdgeCasesAndValidation:
     """Test edge cases and validation scenarios"""
 
@@ -682,10 +658,7 @@ class TestEdgeCasesAndValidation:
 
         # Pydantic allows empty strings by default unless constrained
         # This test documents current behavior
-        request = UserRegistrationRequest(
-            username="",
-            email="test@example.com"
-        )
+        request = UserRegistrationRequest(username="", email="test@example.com")
 
         assert request.username == ""
 
@@ -694,10 +667,7 @@ class TestEdgeCasesAndValidation:
         from src.schemas.users import UserRegistrationRequest
 
         long_username = "a" * 1000
-        request = UserRegistrationRequest(
-            username=long_username,
-            email="test@example.com"
-        )
+        request = UserRegistrationRequest(username=long_username, email="test@example.com")
 
         assert len(request.username) == 1000
 
@@ -706,16 +676,13 @@ class TestEdgeCasesAndValidation:
         from src.schemas.users import UserRegistrationRequest
 
         # Valid email with special characters
-        request = UserRegistrationRequest(
-            username="testuser",
-            email="user+tag@example.co.uk"
-        )
+        request = UserRegistrationRequest(username="testuser", email="user+tag@example.co.uk")
 
         assert request.email == "user+tag@example.co.uk"
 
     def test_negative_credits(self):
         """Test that negative credits are accepted (if no constraint)"""
-        from src.schemas.users import UserRegistrationResponse, AuthMethod, SubscriptionStatus
+        from src.schemas.users import AuthMethod, SubscriptionStatus, UserRegistrationResponse
 
         # Pydantic accepts negative values unless constrained
         response = UserRegistrationResponse(
@@ -729,7 +696,7 @@ class TestEdgeCasesAndValidation:
             auth_method=AuthMethod.EMAIL,
             subscription_status=SubscriptionStatus.ACTIVE,
             message="Test",
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         assert response.credits == -100
@@ -750,7 +717,7 @@ class TestEdgeCasesAndValidation:
             is_active=None,
             registration_date=None,
             created_at=None,
-            updated_at=None
+            updated_at=None,
         )
 
         assert response.user_id == 0
@@ -760,8 +727,7 @@ class TestEdgeCasesAndValidation:
         from src.schemas.users import UserRegistrationRequest
 
         request = UserRegistrationRequest(
-            username="用户名",  # Chinese characters
-            email="test@example.com"
+            username="用户名", email="test@example.com"  # Chinese characters
         )
 
         assert request.username == "用户名"
@@ -782,6 +748,7 @@ class TestEdgeCasesAndValidation:
 # ENUM STRING COERCION TESTS
 # ==================================================
 
+
 class TestEnumCoercion:
     """Test that enums can be created from strings"""
 
@@ -793,14 +760,14 @@ class TestEnumCoercion:
         request = UserRegistrationRequest(
             username="user",
             email="test@example.com",
-            auth_method="google"  # String instead of enum
+            auth_method="google",  # String instead of enum
         )
 
         assert request.auth_method.value == "google"
 
     def test_subscription_status_from_string_in_model(self):
         """Test SubscriptionStatus enum coercion in model"""
-        from src.schemas.users import UserRegistrationResponse, AuthMethod
+        from src.schemas.users import AuthMethod, UserRegistrationResponse
 
         response = UserRegistrationResponse(
             user_id=1,
@@ -813,7 +780,7 @@ class TestEnumCoercion:
             auth_method=AuthMethod.EMAIL,
             subscription_status="trial",  # String instead of enum
             message="Test",
-            timestamp=datetime.now(UTC)
+            timestamp=datetime.now(UTC),
         )
 
         assert response.subscription_status.value == "trial"
@@ -826,16 +793,17 @@ class TestEnumCoercion:
             UserRegistrationRequest(
                 username="user",
                 email="test@example.com",
-                auth_method="invalid_method"  # Invalid enum value
+                auth_method="invalid_method",  # Invalid enum value
             )
 
         errors = exc_info.value.errors()
-        assert any('auth_method' in str(e) for e in errors)
+        assert any("auth_method" in str(e) for e in errors)
 
 
 # ==================================================
 # CHAT SCHEMAS TESTS
 # ==================================================
+
 
 class TestChatSchemas:
     """Test chat-related schemas"""
@@ -844,11 +812,7 @@ class TestChatSchemas:
         """Test creating a ChatMessage"""
         from src.schemas.chat import ChatMessage
 
-        message = ChatMessage(
-            session_id=1,
-            role="user",
-            content="Hello, world!"
-        )
+        message = ChatMessage(session_id=1, role="user", content="Hello, world!")
 
         assert message.session_id == 1
         assert message.role == "user"
@@ -860,11 +824,7 @@ class TestChatSchemas:
         """Test creating a ChatSession"""
         from src.schemas.chat import ChatSession
 
-        session = ChatSession(
-            user_id=123,
-            title="Test Chat",
-            model="gpt-4"
-        )
+        session = ChatSession(user_id=123, title="Test Chat", model="gpt-4")
 
         assert session.user_id == 123
         assert session.title == "Test Chat"
@@ -874,19 +834,14 @@ class TestChatSchemas:
 
     def test_chat_session_with_messages(self):
         """Test creating ChatSession with messages"""
-        from src.schemas.chat import ChatSession, ChatMessage
+        from src.schemas.chat import ChatMessage, ChatSession
 
         messages = [
             ChatMessage(session_id=1, role="user", content="Hi"),
-            ChatMessage(session_id=1, role="assistant", content="Hello!")
+            ChatMessage(session_id=1, role="assistant", content="Hello!"),
         ]
 
-        session = ChatSession(
-            user_id=123,
-            title="Conversation",
-            model="gpt-4",
-            messages=messages
-        )
+        session = ChatSession(user_id=123, title="Conversation", model="gpt-4", messages=messages)
 
         assert len(session.messages) == 2
         assert session.messages[0].role == "user"
@@ -895,10 +850,7 @@ class TestChatSchemas:
         """Test CreateChatSessionRequest"""
         from src.schemas.chat import CreateChatSessionRequest
 
-        request = CreateChatSessionRequest(
-            title="New Chat",
-            model="gpt-3.5-turbo"
-        )
+        request = CreateChatSessionRequest(title="New Chat", model="gpt-3.5-turbo")
 
         assert request.title == "New Chat"
         assert request.model == "gpt-3.5-turbo"
@@ -914,19 +866,11 @@ class TestChatSchemas:
 
     def test_chat_session_response(self):
         """Test ChatSessionResponse"""
-        from src.schemas.chat import ChatSessionResponse, ChatSession
+        from src.schemas.chat import ChatSession, ChatSessionResponse
 
-        session = ChatSession(
-            user_id=1,
-            title="Test",
-            model="gpt-4"
-        )
+        session = ChatSession(user_id=1, title="Test", model="gpt-4")
 
-        response = ChatSessionResponse(
-            success=True,
-            data=session,
-            message="Session created"
-        )
+        response = ChatSessionResponse(success=True, data=session, message="Session created")
 
         assert response.success is True
         assert response.data.title == "Test"
@@ -934,18 +878,14 @@ class TestChatSchemas:
 
     def test_chat_sessions_list_response(self):
         """Test ChatSessionsListResponse"""
-        from src.schemas.chat import ChatSessionsListResponse, ChatSession
+        from src.schemas.chat import ChatSession, ChatSessionsListResponse
 
         sessions = [
             ChatSession(user_id=1, title="Chat 1", model="gpt-4"),
-            ChatSession(user_id=1, title="Chat 2", model="gpt-3.5")
+            ChatSession(user_id=1, title="Chat 2", model="gpt-3.5"),
         ]
 
-        response = ChatSessionsListResponse(
-            success=True,
-            data=sessions,
-            count=2
-        )
+        response = ChatSessionsListResponse(success=True, data=sessions, count=2)
 
         assert response.success is True
         assert response.count == 2
@@ -955,10 +895,7 @@ class TestChatSchemas:
         """Test SearchChatSessionsRequest"""
         from src.schemas.chat import SearchChatSessionsRequest
 
-        request = SearchChatSessionsRequest(
-            query="python",
-            limit=10
-        )
+        request = SearchChatSessionsRequest(query="python", limit=10)
 
         assert request.query == "python"
         assert request.limit == 10
@@ -968,10 +905,7 @@ class TestChatSchemas:
         from src.schemas.chat import SaveChatMessageRequest
 
         request = SaveChatMessageRequest(
-            role="user",
-            content="Test message",
-            model="gpt-4",
-            tokens=50
+            role="user", content="Test message", model="gpt-4", tokens=50
         )
 
         assert request.role == "user"
@@ -982,6 +916,7 @@ class TestChatSchemas:
 # ==================================================
 # COUPON SCHEMAS TESTS
 # ==================================================
+
 
 class TestCouponSchemas:
     """Test coupon-related schemas"""
@@ -1011,8 +946,9 @@ class TestCouponSchemas:
 
     def test_create_global_coupon_request(self):
         """Test creating a global coupon request"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope, CouponType
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CouponType, CreateCouponRequest
 
         request = CreateCouponRequest(
             code="SAVE20",
@@ -1020,7 +956,7 @@ class TestCouponSchemas:
             coupon_scope=CouponScope.GLOBAL,
             max_uses=100,
             valid_until=datetime.now() + timedelta(days=30),
-            coupon_type=CouponType.PROMOTIONAL
+            coupon_type=CouponType.PROMOTIONAL,
         )
 
         assert request.code == "SAVE20"  # Should be uppercased
@@ -1030,8 +966,9 @@ class TestCouponSchemas:
 
     def test_create_user_specific_coupon_request(self):
         """Test creating a user-specific coupon request"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         request = CreateCouponRequest(
             code="WELCOME10",
@@ -1039,7 +976,7 @@ class TestCouponSchemas:
             coupon_scope=CouponScope.USER_SPECIFIC,
             max_uses=1,
             valid_until=datetime.now() + timedelta(days=7),
-            assigned_to_user_id=123
+            assigned_to_user_id=123,
         )
 
         assert request.code == "WELCOME10"
@@ -1048,38 +985,41 @@ class TestCouponSchemas:
 
     def test_coupon_code_validation_uppercase(self):
         """Test that coupon codes are converted to uppercase"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         request = CreateCouponRequest(
             code="lowercase",
             value_usd=15.0,
             coupon_scope=CouponScope.GLOBAL,
             max_uses=50,
-            valid_until=datetime.now() + timedelta(days=30)
+            valid_until=datetime.now() + timedelta(days=30),
         )
 
         assert request.code == "LOWERCASE"
 
     def test_coupon_code_with_special_chars(self):
         """Test coupon codes with hyphens and underscores"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         request = CreateCouponRequest(
             code="SAVE_20-OFF",
             value_usd=20.0,
             coupon_scope=CouponScope.GLOBAL,
             max_uses=100,
-            valid_until=datetime.now() + timedelta(days=30)
+            valid_until=datetime.now() + timedelta(days=30),
         )
 
         assert request.code == "SAVE_20-OFF"
 
     def test_invalid_coupon_code(self):
         """Test that invalid coupon code raises error"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         with pytest.raises(ValidationError):
             CreateCouponRequest(
@@ -1087,13 +1027,14 @@ class TestCouponSchemas:
                 value_usd=20.0,
                 coupon_scope=CouponScope.GLOBAL,
                 max_uses=100,
-                valid_until=datetime.now() + timedelta(days=30)
+                valid_until=datetime.now() + timedelta(days=30),
             )
 
     def test_user_specific_coupon_without_user_id(self):
         """Test that user-specific coupon requires user_id"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         with pytest.raises(ValidationError) as exc_info:
             CreateCouponRequest(
@@ -1101,17 +1042,18 @@ class TestCouponSchemas:
                 value_usd=10.0,
                 coupon_scope=CouponScope.USER_SPECIFIC,
                 max_uses=1,
-                valid_until=datetime.now() + timedelta(days=7)
+                valid_until=datetime.now() + timedelta(days=7),
                 # Missing assigned_to_user_id
             )
 
         errors = exc_info.value.errors()
-        assert any('assigned_to_user_id' in str(e) or 'user_assignment' in str(e) for e in errors)
+        assert any("assigned_to_user_id" in str(e) or "user_assignment" in str(e) for e in errors)
 
     def test_global_coupon_with_user_id(self):
         """Test that global coupon cannot have user_id"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         with pytest.raises(ValidationError) as exc_info:
             CreateCouponRequest(
@@ -1120,16 +1062,17 @@ class TestCouponSchemas:
                 coupon_scope=CouponScope.GLOBAL,
                 max_uses=100,
                 valid_until=datetime.now() + timedelta(days=7),
-                assigned_to_user_id=123  # Should not be allowed
+                assigned_to_user_id=123,  # Should not be allowed
             )
 
         errors = exc_info.value.errors()
-        assert any('assigned_to_user_id' in str(e) or 'user_assignment' in str(e) for e in errors)
+        assert any("assigned_to_user_id" in str(e) or "user_assignment" in str(e) for e in errors)
 
     def test_user_specific_coupon_max_uses_validation(self):
         """Test that user-specific coupons must have max_uses=1"""
-        from src.schemas.coupons import CreateCouponRequest, CouponScope
         from datetime import datetime, timedelta
+
+        from src.schemas.coupons import CouponScope, CreateCouponRequest
 
         with pytest.raises(ValidationError) as exc_info:
             CreateCouponRequest(
@@ -1138,11 +1081,11 @@ class TestCouponSchemas:
                 coupon_scope=CouponScope.USER_SPECIFIC,
                 max_uses=5,  # Should be 1 for user-specific
                 valid_until=datetime.now() + timedelta(days=7),
-                assigned_to_user_id=123
+                assigned_to_user_id=123,
             )
 
         errors = exc_info.value.errors()
-        assert any('max_uses' in str(e) for e in errors)
+        assert any("max_uses" in str(e) for e in errors)
 
     def test_redeem_coupon_request(self):
         """Test RedeemCouponRequest"""

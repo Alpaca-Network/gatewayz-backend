@@ -10,23 +10,24 @@ Tests cover:
 - Error handling
 """
 
-import pytest
 from unittest.mock import Mock, patch
+
+import pytest
 from fastapi import HTTPException
 
+from src.db.roles import UserRole
 from src.services.roles import (
-    require_role,
+    create_permission_checker,
     require_admin,
     require_developer,
     require_permission,
-    create_permission_checker
+    require_role,
 )
-from src.db.roles import UserRole
-
 
 # ============================================================
 # TEST: Require Role
 # ============================================================
+
 
 class TestRequireRole:
     """Test role requirement function"""
@@ -34,7 +35,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_admin_success(self):
         """Test admin accessing admin resource"""
-        user = {'id': 1, 'role': UserRole.ADMIN}
+        user = {"id": 1, "role": UserRole.ADMIN}
 
         result = await require_role(UserRole.ADMIN, user)
         assert result == user
@@ -42,7 +43,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_developer_success(self):
         """Test developer accessing developer resource"""
-        user = {'id': 1, 'role': UserRole.DEVELOPER}
+        user = {"id": 1, "role": UserRole.DEVELOPER}
 
         result = await require_role(UserRole.DEVELOPER, user)
         assert result == user
@@ -50,7 +51,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_user_success(self):
         """Test user accessing user resource"""
-        user = {'id': 1, 'role': UserRole.USER}
+        user = {"id": 1, "role": UserRole.USER}
 
         result = await require_role(UserRole.USER, user)
         assert result == user
@@ -58,7 +59,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_hierarchy_admin_to_dev(self):
         """Test admin can access developer resources"""
-        user = {'id': 1, 'role': UserRole.ADMIN}
+        user = {"id": 1, "role": UserRole.ADMIN}
 
         result = await require_role(UserRole.DEVELOPER, user)
         assert result == user
@@ -66,7 +67,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_hierarchy_admin_to_user(self):
         """Test admin can access user resources"""
-        user = {'id': 1, 'role': UserRole.ADMIN}
+        user = {"id": 1, "role": UserRole.ADMIN}
 
         result = await require_role(UserRole.USER, user)
         assert result == user
@@ -74,7 +75,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_hierarchy_dev_to_user(self):
         """Test developer can access user resources"""
-        user = {'id': 1, 'role': UserRole.DEVELOPER}
+        user = {"id": 1, "role": UserRole.DEVELOPER}
 
         result = await require_role(UserRole.USER, user)
         assert result == user
@@ -82,7 +83,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_user_cannot_access_dev(self):
         """Test user cannot access developer resources"""
-        user = {'id': 1, 'role': UserRole.USER}
+        user = {"id": 1, "role": UserRole.USER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_role(UserRole.DEVELOPER, user)
@@ -93,7 +94,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_user_cannot_access_admin(self):
         """Test user cannot access admin resources"""
-        user = {'id': 1, 'role': UserRole.USER}
+        user = {"id": 1, "role": UserRole.USER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_role(UserRole.ADMIN, user)
@@ -104,7 +105,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_dev_cannot_access_admin(self):
         """Test developer cannot access admin resources"""
-        user = {'id': 1, 'role': UserRole.DEVELOPER}
+        user = {"id": 1, "role": UserRole.DEVELOPER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_role(UserRole.ADMIN, user)
@@ -114,7 +115,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_default_to_user(self):
         """Test missing role defaults to user level"""
-        user = {'id': 1}  # No role specified
+        user = {"id": 1}  # No role specified
 
         result = await require_role(UserRole.USER, user)
         assert result == user
@@ -122,7 +123,7 @@ class TestRequireRole:
     @pytest.mark.asyncio
     async def test_require_role_unknown_role(self):
         """Test unknown role is rejected"""
-        user = {'id': 1, 'role': 'unknown_role'}
+        user = {"id": 1, "role": "unknown_role"}
 
         with pytest.raises(HTTPException):
             await require_role(UserRole.ADMIN, user)
@@ -132,13 +133,14 @@ class TestRequireRole:
 # TEST: Require Admin
 # ============================================================
 
+
 class TestRequireAdmin:
     """Test admin requirement shortcut"""
 
     @pytest.mark.asyncio
     async def test_require_admin_success(self):
         """Test admin can access admin-only resource"""
-        user = {'id': 1, 'role': UserRole.ADMIN}
+        user = {"id": 1, "role": UserRole.ADMIN}
 
         result = await require_admin(user)
         assert result == user
@@ -146,7 +148,7 @@ class TestRequireAdmin:
     @pytest.mark.asyncio
     async def test_require_admin_developer_rejected(self):
         """Test developer cannot access admin-only resource"""
-        user = {'id': 1, 'role': UserRole.DEVELOPER}
+        user = {"id": 1, "role": UserRole.DEVELOPER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_admin(user)
@@ -156,7 +158,7 @@ class TestRequireAdmin:
     @pytest.mark.asyncio
     async def test_require_admin_user_rejected(self):
         """Test user cannot access admin-only resource"""
-        user = {'id': 1, 'role': UserRole.USER}
+        user = {"id": 1, "role": UserRole.USER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_admin(user)
@@ -168,13 +170,14 @@ class TestRequireAdmin:
 # TEST: Require Developer
 # ============================================================
 
+
 class TestRequireDeveloper:
     """Test developer requirement shortcut"""
 
     @pytest.mark.asyncio
     async def test_require_developer_success(self):
         """Test developer can access developer resource"""
-        user = {'id': 1, 'role': UserRole.DEVELOPER}
+        user = {"id": 1, "role": UserRole.DEVELOPER}
 
         result = await require_developer(user)
         assert result == user
@@ -182,7 +185,7 @@ class TestRequireDeveloper:
     @pytest.mark.asyncio
     async def test_require_developer_admin_success(self):
         """Test admin can access developer resource"""
-        user = {'id': 1, 'role': UserRole.ADMIN}
+        user = {"id": 1, "role": UserRole.ADMIN}
 
         result = await require_developer(user)
         assert result == user
@@ -190,7 +193,7 @@ class TestRequireDeveloper:
     @pytest.mark.asyncio
     async def test_require_developer_user_rejected(self):
         """Test user cannot access developer resource"""
-        user = {'id': 1, 'role': UserRole.USER}
+        user = {"id": 1, "role": UserRole.USER}
 
         with pytest.raises(HTTPException) as exc_info:
             await require_developer(user)
@@ -202,30 +205,31 @@ class TestRequireDeveloper:
 # TEST: Require Permission
 # ============================================================
 
+
 class TestRequirePermission:
     """Test permission requirement"""
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_require_permission_granted(self, mock_check):
         """Test permission granted"""
         mock_check.return_value = True
-        user = {'id': 1}
+        user = {"id": 1}
 
-        result = await require_permission('coupons', 'create', user)
+        result = await require_permission("coupons", "create", user)
         assert result == user
 
-        mock_check.assert_called_once_with(1, 'coupons', 'create')
+        mock_check.assert_called_once_with(1, "coupons", "create")
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_require_permission_denied(self, mock_check):
         """Test permission denied"""
         mock_check.return_value = False
-        user = {'id': 1}
+        user = {"id": 1}
 
         with pytest.raises(HTTPException) as exc_info:
-            await require_permission('coupons', 'create', user)
+            await require_permission("coupons", "create", user)
 
         assert exc_info.value.status_code == 403
         assert "permission denied" in exc_info.value.detail.lower()
@@ -233,15 +237,15 @@ class TestRequirePermission:
         assert "coupons" in exc_info.value.detail.lower()
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_require_permission_different_resources(self, mock_check):
         """Test permission checking for different resources"""
         mock_check.return_value = True
-        user = {'id': 1}
+        user = {"id": 1}
 
         # Test different resource/action combinations
-        resources = ['users', 'api_keys', 'billing']
-        actions = ['read', 'write', 'delete']
+        resources = ["users", "api_keys", "billing"]
+        actions = ["read", "write", "delete"]
 
         for resource in resources:
             for action in actions:
@@ -253,31 +257,32 @@ class TestRequirePermission:
 # TEST: Create Permission Checker
 # ============================================================
 
+
 class TestCreatePermissionChecker:
     """Test permission checker factory"""
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_create_permission_checker_success(self, mock_check):
         """Test permission checker factory"""
         mock_check.return_value = True
 
-        checker = create_permission_checker('coupons', 'create')
-        user = {'id': 1}
+        checker = create_permission_checker("coupons", "create")
+        user = {"id": 1}
 
         result = await checker(user)
         assert result == user
 
-        mock_check.assert_called_once_with(1, 'coupons', 'create')
+        mock_check.assert_called_once_with(1, "coupons", "create")
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_create_permission_checker_denied(self, mock_check):
         """Test permission checker factory with denied permission"""
         mock_check.return_value = False
 
-        checker = create_permission_checker('coupons', 'delete')
-        user = {'id': 1}
+        checker = create_permission_checker("coupons", "delete")
+        user = {"id": 1}
 
         with pytest.raises(HTTPException) as exc_info:
             await checker(user)
@@ -285,17 +290,17 @@ class TestCreatePermissionChecker:
         assert exc_info.value.status_code == 403
 
     @pytest.mark.asyncio
-    @patch('src.services.roles.check_user_permission')
+    @patch("src.services.roles.check_user_permission")
     async def test_create_permission_checker_multiple_resources(self, mock_check):
         """Test creating multiple permission checkers"""
         mock_check.return_value = True
 
         # Create different checkers
-        coupon_creator = create_permission_checker('coupons', 'create')
-        user_reader = create_permission_checker('users', 'read')
-        billing_writer = create_permission_checker('billing', 'write')
+        coupon_creator = create_permission_checker("coupons", "create")
+        user_reader = create_permission_checker("users", "read")
+        billing_writer = create_permission_checker("billing", "write")
 
-        user = {'id': 1}
+        user = {"id": 1}
 
         # All should work
         await coupon_creator(user)

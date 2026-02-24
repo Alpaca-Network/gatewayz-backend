@@ -8,8 +8,10 @@ This test file uses proper mocking strategies for FastAPI route testing:
 - Tests all auth endpoints with proper fixtures
 """
 
+from datetime import UTC, datetime, timezone
+
 import pytest
-from datetime import datetime, timezone, timezone, UTC
+
 # Note: Do NOT import 'from src.main import app' here!
 # The app must be imported AFTER mocking in the fixture to ensure mocks are applied
 
@@ -17,6 +19,7 @@ from datetime import datetime, timezone, timezone, UTC
 # ==================================================
 # IN-MEMORY SUPABASE STUB (Reusing from db tests)
 # ==================================================
+
 
 class _Result:
     def __init__(self, data=None, count=None):
@@ -70,7 +73,7 @@ class _BaseQuery:
                 matched.sort(key=lambda x: x.get(field, 0), reverse=desc)
 
         if self._limit:
-            matched = matched[:self._limit]
+            matched = matched[: self._limit]
 
         return _Result(matched, len(matched))
 
@@ -94,9 +97,9 @@ class _InsertQuery:
 
         # Auto-assign IDs if not present (as strings to match Supabase/PostgreSQL)
         for record in self.data:
-            if 'id' not in record:
-                existing_ids = [int(r.get('id', 0)) for r in self.store.tables[self.table]]
-                record['id'] = str(max(existing_ids, default=0) + 1)
+            if "id" not in record:
+                existing_ids = [int(r.get("id", 0)) for r in self.store.tables[self.table]]
+                record["id"] = str(max(existing_ids, default=0) + 1)
 
         self.store.tables[self.table].extend(self.data)
         return _Result(self.data)
@@ -159,6 +162,7 @@ class SupabaseStub:
 # FIXTURES
 # ==================================================
 
+
 @pytest.fixture
 def sb():
     """Provide in-memory Supabase stub with cleanup"""
@@ -176,61 +180,64 @@ def client(sb, monkeypatch):
 
     # Mock get_supabase_client to return our stub
     import src.config.supabase_config
+
     monkeypatch.setattr(src.config.supabase_config, "get_supabase_client", lambda: sb)
 
     # Mock the db functions that auth uses
-    import src.db.users as users_module
-    import src.db.api_keys as api_keys_module
     import src.db.activity as activity_module
+    import src.db.api_keys as api_keys_module
+    import src.db.users as users_module
 
     # Replace with stub-aware versions
     def mock_get_user_by_privy_id(privy_id):
-        result = sb.table('users').select('*').eq('privy_user_id', privy_id).execute()
+        result = sb.table("users").select("*").eq("privy_user_id", privy_id).execute()
         return result.data[0] if result.data else None
 
     def mock_get_user_by_username(username):
-        result = sb.table('users').select('*').eq('username', username).execute()
+        result = sb.table("users").select("*").eq("username", username).execute()
         return result.data[0] if result.data else None
 
-    def mock_create_enhanced_user(username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"):
+    def mock_create_enhanced_user(
+        username, email, auth_method, privy_user_id=None, credits=5, subscription_status="trial"
+    ):
         # Create user (let stub auto-assign ID)
         trial_expires_at = datetime.now(UTC).isoformat()
         user_data = {
-            'username': username,
-            'email': email,
-            'credits': credits,
-            'privy_user_id': privy_user_id,
-            'auth_method': auth_method.value if hasattr(auth_method, 'value') else str(auth_method),
-            'created_at': datetime.now(UTC).isoformat(),
-            'subscription_status': subscription_status,
-            'trial_expires_at': trial_expires_at,
-            'tier': 'basic',
+            "username": username,
+            "email": email,
+            "credits": credits,
+            "privy_user_id": privy_user_id,
+            "auth_method": auth_method.value if hasattr(auth_method, "value") else str(auth_method),
+            "created_at": datetime.now(UTC).isoformat(),
+            "subscription_status": subscription_status,
+            "trial_expires_at": trial_expires_at,
+            "tier": "basic",
         }
-        result = sb.table('users').insert(user_data).execute()
+        result = sb.table("users").insert(user_data).execute()
         created_user = result.data[0]  # Get the user with auto-assigned ID
 
         # Create API key
         api_key = f"gw_live_{username}_test"
         api_key_data = {
-            'user_id': created_user['id'],
-            'api_key': api_key,
-            'key_name': 'Primary API Key',
-            'is_primary': True,
-            'is_active': True,
-            'environment_tag': 'production',
+            "user_id": created_user["id"],
+            "api_key": api_key,
+            "key_name": "Primary API Key",
+            "is_primary": True,
+            "is_active": True,
+            "environment_tag": "production",
         }
-        sb.table('api_keys_new').insert(api_key_data).execute()
+        sb.table("api_keys_new").insert(api_key_data).execute()
 
         return {
-            'user_id': created_user['id'],
-            'username': username,
-            'email': email,
-            'credits': credits,
-            'primary_api_key': api_key,
-            'api_key': api_key,
-            'subscription_status': subscription_status,
-            'trial_expires_at': trial_expires_at,
-            'tier': 'basic',
+            "user_id": created_user["id"],
+            "username": username,
+            "email": email,
+            "credits": credits,
+            "primary_api_key": api_key,
+            "api_key": api_key,
+            "subscription_status": subscription_status,
+            "trial_expires_at": trial_expires_at,
+            "tier": "basic",
         }
 
     def mock_log_activity(*args, **kwargs):
@@ -246,14 +253,21 @@ def client(sb, monkeypatch):
     # IMPORTANT: Also patch the auth route module's imported references
     # If src.routes.auth has already been imported, we need to patch its module-level imports
     import sys
-    if 'src.routes.auth' in sys.modules:
-        auth_module = sys.modules['src.routes.auth']
+
+    if "src.routes.auth" in sys.modules:
+        auth_module = sys.modules["src.routes.auth"]
         # Auth module uses: import src.db.users as users_module
         # So we need to patch users_module.get_user_by_privy_id, not auth_module.get_user_by_privy_id
         if hasattr(auth_module, "users_module"):
-            monkeypatch.setattr(auth_module.users_module, "get_user_by_privy_id", mock_get_user_by_privy_id)
-            monkeypatch.setattr(auth_module.users_module, "create_enhanced_user", mock_create_enhanced_user)
-            monkeypatch.setattr(auth_module.users_module, "get_user_by_username", mock_get_user_by_username)
+            monkeypatch.setattr(
+                auth_module.users_module, "get_user_by_privy_id", mock_get_user_by_privy_id
+            )
+            monkeypatch.setattr(
+                auth_module.users_module, "create_enhanced_user", mock_create_enhanced_user
+            )
+            monkeypatch.setattr(
+                auth_module.users_module, "get_user_by_username", mock_get_user_by_username
+            )
         # Auth module uses: from src.db.activity import log_activity
         monkeypatch.setattr(auth_module, "log_activity", mock_log_activity)
         # Auth module uses: import src.config.supabase_config as supabase_config
@@ -267,16 +281,19 @@ def client(sb, monkeypatch):
     class MockNotificationService:
         def send_welcome_email(self, *args, **kwargs):
             return True
+
         def send_welcome_email_if_needed(self, *args, **kwargs):
             return True
+
         def send_password_reset_email(self, *args, **kwargs):
             return "reset_token_123"
 
     monkeypatch.setattr(notif_module, "enhanced_notification_service", MockNotificationService())
 
     # Now import and create the app
-    from src.main import app
     from fastapi.testclient import TestClient
+
+    from src.main import app
 
     return TestClient(app)
 
@@ -285,80 +302,83 @@ def client(sb, monkeypatch):
 # TESTS: Privy Auth - Existing Users
 # ==================================================
 
+
 def test_privy_auth_existing_user_success(client, sb):
     """Test successful authentication for existing user"""
     # Create existing user
-    sb.table('users').insert({
-        'id': '100',
-        'username': 'testuser',
-        'email': 'test@example.com',
-        'credits': 50.0,
-        'privy_user_id': 'privy_user_123',
-        'api_key': 'gw_legacy_key',
-        'welcome_email_sent': True,
-        'subscription_status': 'active',
-        'tier': 'pro',
-        'trial_expires_at': '2024-01-01T00:00:00+00:00',
-        'subscription_end_date': 1704067200,
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "100",
+            "username": "testuser",
+            "email": "test@example.com",
+            "credits": 50.0,
+            "privy_user_id": "privy_user_123",
+            "api_key": "gw_legacy_key",
+            "welcome_email_sent": True,
+            "subscription_status": "active",
+            "tier": "pro",
+            "trial_expires_at": "2024-01-01T00:00:00+00:00",
+            "subscription_end_date": 1704067200,
+        }
+    ).execute()
 
     # Create API key (realistic length: gw_live_ + 43 chars from token_urlsafe(32))
-    sb.table('api_keys_new').insert({
-        'id': '1',
-        'user_id': '100',
-        'api_key': 'gw_live_test_primary_key_1234567890abcdefghijkl',  # 51 chars total
-        'is_primary': True,
-        'is_active': True,
-    }).execute()
+    sb.table("api_keys_new").insert(
+        {
+            "id": "1",
+            "user_id": "100",
+            "api_key": "gw_live_test_primary_key_1234567890abcdefghijkl",  # 51 chars total
+            "is_primary": True,
+            "is_active": True,
+        }
+    ).execute()
 
     request_data = {
         "user": {
             "id": "privy_user_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": "test@example.com",
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": "test@example.com", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_123",
         "email": "test@example.com",
-        "is_new_user": False
+        "is_new_user": False,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['message'] == 'Login successful'
-    assert data['user_id'] == 100  # Pydantic converts to int in response
-    assert data['api_key'] == 'gw_live_test_primary_key_1234567890abcdefghijkl'
-    assert data['is_new_user'] is False
-    assert data['email'] == 'test@example.com'
-    assert data['credits'] == 50.0
-    assert data['subscription_status'] == 'active'
-    assert data['tier'] == 'pro'
-    assert data['tier_display_name'] == 'Pro'
-    assert data['trial_expires_at'] == '2024-01-01T00:00:00+00:00'
-    assert data['subscription_end_date'] == 1704067200
+    assert data["success"] is True
+    assert data["message"] == "Login successful"
+    assert data["user_id"] == 100  # Pydantic converts to int in response
+    assert data["api_key"] == "gw_live_test_primary_key_1234567890abcdefghijkl"
+    assert data["is_new_user"] is False
+    assert data["email"] == "test@example.com"
+    assert data["credits"] == 50.0
+    assert data["subscription_status"] == "active"
+    assert data["tier"] == "pro"
+    assert data["tier_display_name"] == "Pro"
+    assert data["trial_expires_at"] == "2024-01-01T00:00:00+00:00"
+    assert data["subscription_end_date"] == 1704067200
 
 
 def test_privy_auth_existing_user_no_api_keys_uses_legacy(client, sb):
     """Test existing user with no API keys falls back to legacy key"""
-    sb.table('users').insert({
-        'id': '200',
-        'username': 'legacy_user',
-        'email': 'legacy@example.com',
-        'credits': 100.0,
-        'privy_user_id': 'privy_user_456',
-        'api_key': 'gw_legacy_fallback',
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "200",
+            "username": "legacy_user",
+            "email": "legacy@example.com",
+            "credits": 100.0,
+            "privy_user_id": "privy_user_456",
+            "api_key": "gw_legacy_fallback",
+        }
+    ).execute()
 
     # No API keys in api_keys_new table
 
@@ -369,37 +389,41 @@ def test_privy_auth_existing_user_no_api_keys_uses_legacy(client, sb):
             "linked_accounts": [{"type": "email", "email": "legacy@example.com"}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_456"
+        "token": "privy_token_456",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['api_key'] == 'gw_legacy_fallback'
+    assert data["success"] is True
+    assert data["api_key"] == "gw_legacy_fallback"
 
 
 def test_privy_auth_fallback_to_username_lookup(client, sb):
     """Test fallback to username lookup if Privy ID not found"""
     # User exists but doesn't have privy_user_id set yet
-    sb.table('users').insert({
-        'id': '300',
-        'username': 'test',
-        'email': 'test@example.com',
-        'credits': 75.0,
-        'api_key': 'gw_legacy_username',
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "300",
+            "username": "test",
+            "email": "test@example.com",
+            "credits": 75.0,
+            "api_key": "gw_legacy_username",
+        }
+    ).execute()
 
-    sb.table('api_keys_new').insert({
-        'id': '2',
-        'user_id': '300',
-        'api_key': 'gw_live_username_key',
-        'is_primary': True,
-        'is_active': True,
-    }).execute()
+    sb.table("api_keys_new").insert(
+        {
+            "id": "2",
+            "user_id": "300",
+            "api_key": "gw_live_username_key",
+            "is_primary": True,
+            "is_active": True,
+        }
+    ).execute()
 
     request_data = {
         "user": {
@@ -408,25 +432,26 @@ def test_privy_auth_fallback_to_username_lookup(client, sb):
             "linked_accounts": [{"type": "email", "email": "test@example.com"}],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_999",
-        "email": "test@example.com"
+        "email": "test@example.com",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Should have updated the user with privy_user_id
-    updated_user = sb.table('users').select('*').eq('id', '300').execute()
-    assert updated_user.data[0]['privy_user_id'] == 'privy_user_999'
+    updated_user = sb.table("users").select("*").eq("id", "300").execute()
+    assert updated_user.data[0]["privy_user_id"] == "privy_user_999"
 
 
 # ==================================================
 # TESTS: Privy Auth - New Users
 # ==================================================
+
 
 def test_privy_auth_new_user_creation(client, sb):
     """Test creating new user via Privy auth"""
@@ -435,38 +460,34 @@ def test_privy_auth_new_user_creation(client, sb):
             "id": "privy_new_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": "newuser@example.com",
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": "newuser@example.com", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_new",
         "email": "newuser@example.com",
-        "is_new_user": True
+        "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['message'] == 'Account created successfully'
-    assert data['is_new_user'] is True
-    assert isinstance(data['user_id'], int)  # Pydantic converts to int in response
-    assert data['user_id'] > 0  # Valid ID
-    assert data['credits'] == 5.0
-    assert 'api_key' in data
+    assert data["success"] is True
+    assert data["message"] == "Account created successfully"
+    assert data["is_new_user"] is True
+    assert isinstance(data["user_id"], int)  # Pydantic converts to int in response
+    assert data["user_id"] > 0  # Valid ID
+    assert data["credits"] == 5.0
+    assert "api_key" in data
 
     # Verify user was created in database
-    users = sb.table('users').select('*').eq('username', 'newuser').execute()
+    users = sb.table("users").select("*").eq("username", "newuser").execute()
     assert len(users.data) == 1
-    assert users.data[0]['email'] == 'newuser@example.com'
-    assert users.data[0]['privy_user_id'] == 'privy_new_123'
+    assert users.data[0]["email"] == "newuser@example.com"
+    assert users.data[0]["privy_user_id"] == "privy_new_123"
 
 
 def test_privy_auth_email_address_field_extraction(client, sb):
@@ -490,14 +511,14 @@ def test_privy_auth_email_address_field_extraction(client, sb):
         "is_new_user": True,
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['email'] == 'address_only@example.com'
-    assert data['auth_method'] == 'email'
-    assert '@privy.user' not in data['email']
+    assert data["success"] is True
+    assert data["email"] == "address_only@example.com"
+    assert data["auth_method"] == "email"
+    assert "@privy.user" not in data["email"]
 
 
 def test_privy_auth_google_oauth(client, sb):
@@ -511,23 +532,23 @@ def test_privy_auth_google_oauth(client, sb):
                     "type": "google_oauth",
                     "email": "google@gmail.com",
                     "name": "Google User",
-                    "verified_at": 1705123456
+                    "verified_at": 1705123456,
                 }
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_google"
+        "token": "privy_token_google",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['auth_method'] == 'google'
-    assert data['email'] == 'google@gmail.com'
+    assert data["success"] is True
+    assert data["auth_method"] == "google"
+    assert data["email"] == "google@gmail.com"
 
 
 def test_privy_auth_github(client, sb):
@@ -537,28 +558,24 @@ def test_privy_auth_github(client, sb):
             "id": "privy_github_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "github",
-                    "name": "githubuser",
-                    "verified_at": 1705123456
-                }
+                {"type": "github", "name": "githubuser", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
         "token": "privy_token_github",
-        "email": "github@example.com"  # Email provided at top level, so auth_method will be EMAIL
+        "email": "github@example.com",  # Email provided at top level, so auth_method will be EMAIL
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Since email is provided at top level, auth_method is set to EMAIL
     # The GitHub account type detection only works when there's no top-level email
-    assert data['auth_method'] == 'email'
+    assert data["auth_method"] == "email"
 
 
 def test_privy_auth_email_fallback(client, sb):
@@ -570,23 +587,24 @@ def test_privy_auth_email_fallback(client, sb):
             "linked_accounts": [],  # No linked accounts
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_fallback"
+        "token": "privy_token_fallback",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Should use fallback email format
-    assert '@privy.user' in data['email']
+    assert "@privy.user" in data["email"]
 
 
 # ==================================================
 # TESTS: Phone Authentication
 # ==================================================
+
 
 def test_privy_auth_phone_new_user(client, sb):
     """Test authentication with phone number for new user"""
@@ -595,80 +613,76 @@ def test_privy_auth_phone_new_user(client, sb):
             "id": "privy_phone_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "phone",
-                    "phone_number": "+15551234567",
-                    "verified_at": 1705123456
-                }
+                {"type": "phone", "phone_number": "+15551234567", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_phone"
+        "token": "privy_token_phone",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['auth_method'] == 'phone'
-    assert data['phone_number'] == '+15551234567'
-    assert data['is_new_user'] is True
+    assert data["success"] is True
+    assert data["auth_method"] == "phone"
+    assert data["phone_number"] == "+15551234567"
+    assert data["is_new_user"] is True
     # Username should be generated from last 4 digits of phone
-    assert 'user_' in data['display_name']
+    assert "user_" in data["display_name"]
 
 
 def test_privy_auth_phone_existing_user(client, sb):
     """Test authentication with phone number for existing user"""
     # Create existing user with phone
-    sb.table('users').insert({
-        'id': '500',
-        'username': 'user_4567',
-        'email': 'noemail+phone_user@privy.placeholder',
-        'phone_number': '+15551234567',
-        'credits': 25.0,
-        'privy_user_id': 'privy_phone_existing',
-        'api_key': 'gw_live_phone_user_key',
-        'subscription_status': 'active',
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "500",
+            "username": "user_4567",
+            "email": "noemail+phone_user@privy.placeholder",
+            "phone_number": "+15551234567",
+            "credits": 25.0,
+            "privy_user_id": "privy_phone_existing",
+            "api_key": "gw_live_phone_user_key",
+            "subscription_status": "active",
+        }
+    ).execute()
 
-    sb.table('api_keys_new').insert({
-        'id': '10',
-        'user_id': '500',
-        'api_key': 'gw_live_phone_user_primary',
-        'is_primary': True,
-        'is_active': True,
-    }).execute()
+    sb.table("api_keys_new").insert(
+        {
+            "id": "10",
+            "user_id": "500",
+            "api_key": "gw_live_phone_user_primary",
+            "is_primary": True,
+            "is_active": True,
+        }
+    ).execute()
 
     request_data = {
         "user": {
             "id": "privy_phone_existing",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "phone",
-                    "phone_number": "+15551234567",
-                    "verified_at": 1705123456
-                }
+                {"type": "phone", "phone_number": "+15551234567", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_phone_existing"
+        "token": "privy_token_phone_existing",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['message'] == 'Login successful'
-    assert data['is_new_user'] is False
-    assert data['phone_number'] == '+15551234567'
-    assert data['user_id'] == 500
+    assert data["success"] is True
+    assert data["message"] == "Login successful"
+    assert data["is_new_user"] is False
+    assert data["phone_number"] == "+15551234567"
+    assert data["user_id"] == 500
 
 
 def test_privy_auth_phone_with_email(client, sb):
@@ -678,35 +692,27 @@ def test_privy_auth_phone_with_email(client, sb):
             "id": "privy_multi_123",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": "multiuser@example.com",
-                    "verified_at": 1705123456
-                },
-                {
-                    "type": "phone",
-                    "phone_number": "+15559876543",
-                    "verified_at": 1705123456
-                }
+                {"type": "email", "email": "multiuser@example.com", "verified_at": 1705123456},
+                {"type": "phone", "phone_number": "+15559876543", "verified_at": 1705123456},
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_multi"
+        "token": "privy_token_multi",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Email should be the primary identifier (comes first)
-    assert data['email'] == 'multiuser@example.com'
+    assert data["email"] == "multiuser@example.com"
     # Phone should also be extracted
-    assert data['phone_number'] == '+15559876543'
+    assert data["phone_number"] == "+15559876543"
     # Auth method should be email since email was found
-    assert data['auth_method'] == 'email'
+    assert data["auth_method"] == "email"
 
 
 def test_privy_auth_phone_camelcase_field(client, sb):
@@ -720,23 +726,23 @@ def test_privy_auth_phone_camelcase_field(client, sb):
                 {
                     "type": "phone",
                     "phoneNumber": "+15557778888",  # camelCase as sent by Privy
-                    "verified_at": 1705123456
+                    "verified_at": 1705123456,
                 }
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_camel"
+        "token": "privy_token_camel",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['auth_method'] == 'phone'
-    assert data['phone_number'] == '+15557778888'
+    assert data["success"] is True
+    assert data["auth_method"] == "phone"
+    assert data["phone_number"] == "+15557778888"
 
 
 def test_privy_auth_phone_international_format(client, sb):
@@ -750,25 +756,25 @@ def test_privy_auth_phone_international_format(client, sb):
                 {
                     "type": "phone",
                     "phone_number": "+447911123456",  # UK format
-                    "verified_at": 1705123456
+                    "verified_at": 1705123456,
                 }
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_uk"
+        "token": "privy_token_uk",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['auth_method'] == 'phone'
-    assert data['phone_number'] == '+447911123456'
+    assert data["success"] is True
+    assert data["auth_method"] == "phone"
+    assert data["phone_number"] == "+447911123456"
     # Username should use last 4 digits: 3456
-    assert '3456' in data['display_name']
+    assert "3456" in data["display_name"]
 
 
 def test_privy_auth_phone_short_number(client, sb):
@@ -781,24 +787,24 @@ def test_privy_auth_phone_short_number(client, sb):
                 {
                     "type": "phone",
                     "phone_number": "+123",  # Very short number
-                    "verified_at": 1705123456
+                    "verified_at": 1705123456,
                 }
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_short"
+        "token": "privy_token_short",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['phone_number'] == '+123'
+    assert data["success"] is True
+    assert data["phone_number"] == "+123"
     # Short numbers should fall back to privy ID for username
-    assert 'user_' in data['display_name']
+    assert "user_" in data["display_name"]
 
 
 def test_privy_auth_phone_first_then_email_added(client, sb):
@@ -808,35 +814,31 @@ def test_privy_auth_phone_first_then_email_added(client, sb):
             "id": "privy_phone_then_email",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "phone",
-                    "phone_number": "+15551112222",
-                    "verified_at": 1705123456
-                },
+                {"type": "phone", "phone_number": "+15551112222", "verified_at": 1705123456},
                 {
                     "type": "email",
                     "email": "added_later@example.com",
-                    "verified_at": 1705200000  # Added later
-                }
+                    "verified_at": 1705200000,  # Added later
+                },
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_phone_then_email"
+        "token": "privy_token_phone_then_email",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Phone comes first in linked_accounts, so phone is extracted
-    assert data['phone_number'] == '+15551112222'
+    assert data["phone_number"] == "+15551112222"
     # But email is also extracted
-    assert data['email'] == 'added_later@example.com'
+    assert data["email"] == "added_later@example.com"
     # Auth method should be email since email was found (takes priority)
-    assert data['auth_method'] == 'email'
+    assert data["auth_method"] == "email"
 
 
 def test_privy_auth_phone_with_google_oauth(client, sb):
@@ -846,60 +848,60 @@ def test_privy_auth_phone_with_google_oauth(client, sb):
             "id": "privy_phone_google",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "phone",
-                    "phone_number": "+15553334444",
-                    "verified_at": 1705123456
-                },
+                {"type": "phone", "phone_number": "+15553334444", "verified_at": 1705123456},
                 {
                     "type": "google_oauth",
                     "email": "googleuser@gmail.com",
                     "name": "Google User",
-                    "verified_at": 1705123456
-                }
+                    "verified_at": 1705123456,
+                },
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_phone_google"
+        "token": "privy_token_phone_google",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
+    assert data["success"] is True
     # Phone extracted
-    assert data['phone_number'] == '+15553334444'
+    assert data["phone_number"] == "+15553334444"
     # Google email extracted
-    assert data['email'] == 'googleuser@gmail.com'
+    assert data["email"] == "googleuser@gmail.com"
     # Auth method should be Google since Google OAuth provides email
-    assert data['auth_method'] == 'google'
+    assert data["auth_method"] == "google"
     # Display name from Google
-    assert data['display_name'] == 'Google User'
+    assert data["display_name"] == "Google User"
 
 
 def test_privy_auth_phone_returning_user_updates_phone(client, sb):
     """Test returning user who adds phone number to their account"""
     # Create existing user without phone
-    sb.table('users').insert({
-        'id': '600',
-        'username': 'existing_no_phone',
-        'email': 'existinguser@example.com',
-        'credits': 100.0,
-        'privy_user_id': 'privy_add_phone',
-        'api_key': 'gw_live_existing_key',
-        'subscription_status': 'active',
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "600",
+            "username": "existing_no_phone",
+            "email": "existinguser@example.com",
+            "credits": 100.0,
+            "privy_user_id": "privy_add_phone",
+            "api_key": "gw_live_existing_key",
+            "subscription_status": "active",
+        }
+    ).execute()
 
-    sb.table('api_keys_new').insert({
-        'id': '20',
-        'user_id': '600',
-        'api_key': 'gw_live_existing_primary',
-        'is_primary': True,
-        'is_active': True,
-    }).execute()
+    sb.table("api_keys_new").insert(
+        {
+            "id": "20",
+            "user_id": "600",
+            "api_key": "gw_live_existing_primary",
+            "is_primary": True,
+            "is_active": True,
+        }
+    ).execute()
 
     # User returns with phone number added to their account
     request_data = {
@@ -907,35 +909,27 @@ def test_privy_auth_phone_returning_user_updates_phone(client, sb):
             "id": "privy_add_phone",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "email",
-                    "email": "existinguser@example.com",
-                    "verified_at": 1705123456
-                },
-                {
-                    "type": "phone",
-                    "phone_number": "+15559998888",
-                    "verified_at": 1705200000
-                }
+                {"type": "email", "email": "existinguser@example.com", "verified_at": 1705123456},
+                {"type": "phone", "phone_number": "+15559998888", "verified_at": 1705200000},
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_add_phone"
+        "token": "privy_token_add_phone",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['message'] == 'Login successful'
-    assert data['is_new_user'] is False
+    assert data["success"] is True
+    assert data["message"] == "Login successful"
+    assert data["is_new_user"] is False
     # Both email and phone should be present in response
-    assert data['email'] == 'existinguser@example.com'
-    assert data['phone_number'] == '+15559998888'
-    assert data['user_id'] == 600
+    assert data["email"] == "existinguser@example.com"
+    assert data["phone_number"] == "+15559998888"
+    assert data["user_id"] == 600
 
 
 def test_privy_auth_phone_only_no_email_placeholder(client, sb):
@@ -945,31 +939,27 @@ def test_privy_auth_phone_only_no_email_placeholder(client, sb):
             "id": "privy_phone_only_placeholder",
             "created_at": 1705123456,
             "linked_accounts": [
-                {
-                    "type": "phone",
-                    "phone_number": "+15550001111",
-                    "verified_at": 1705123456
-                }
+                {"type": "phone", "phone_number": "+15550001111", "verified_at": 1705123456}
             ],
             "mfa_methods": [],
             "has_accepted_terms": True,
-            "is_guest": False
+            "is_guest": False,
         },
-        "token": "privy_token_placeholder"
+        "token": "privy_token_placeholder",
     }
 
-    response = client.post('/auth', json=request_data)
+    response = client.post("/auth", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert data['success'] is True
-    assert data['auth_method'] == 'phone'
-    assert data['phone_number'] == '+15550001111'
+    assert data["success"] is True
+    assert data["auth_method"] == "phone"
+    assert data["phone_number"] == "+15550001111"
     # Email should be None or a placeholder format (not a real email)
     # The response email might be None for phone-only users
-    if data['email']:
+    if data["email"]:
         # If there's an email, it should be a placeholder format
-        assert '@privy.placeholder' in data['email'] or data['email'] is None
+        assert "@privy.placeholder" in data["email"] or data["email"] is None
 
 
 def test_privy_auth_phone_username_generation_various_lengths(client, sb):
@@ -987,183 +977,187 @@ def test_privy_auth_phone_username_generation_various_lengths(client, sb):
                 "id": f"privy_phone_len_{i}",
                 "created_at": 1705123456,
                 "linked_accounts": [
-                    {
-                        "type": "phone",
-                        "phone_number": phone,
-                        "verified_at": 1705123456
-                    }
+                    {"type": "phone", "phone_number": phone, "verified_at": 1705123456}
                 ],
                 "mfa_methods": [],
                 "has_accepted_terms": True,
-                "is_guest": False
+                "is_guest": False,
             },
-            "token": f"privy_token_len_{i}"
+            "token": f"privy_token_len_{i}",
         }
 
-        response = client.post('/auth', json=request_data)
+        response = client.post("/auth", json=request_data)
 
         assert response.status_code == 200, f"Failed for phone: {phone}"
         data = response.json()
-        assert data['success'] is True, f"Failed for phone: {phone}"
-        assert data['phone_number'] == phone
+        assert data["success"] is True, f"Failed for phone: {phone}"
+        assert data["phone_number"] == phone
         # Check username contains expected suffix
-        assert expected_suffix in data['display_name'], f"Expected {expected_suffix} in {data['display_name']} for {phone}"
+        assert (
+            expected_suffix in data["display_name"]
+        ), f"Expected {expected_suffix} in {data['display_name']} for {phone}"
 
 
 # ==================================================
 # TESTS: User Registration
 # ==================================================
 
+
 def test_register_user_success(client, sb):
     """Test successful user registration"""
-    request_data = {
-        "username": "newreg",
-        "email": "newreg@example.com",
-        "auth_method": "email"
-    }
+    request_data = {"username": "newreg", "email": "newreg@example.com", "auth_method": "email"}
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 200
     data = response.json()
-    assert isinstance(data['user_id'], int)  # Pydantic converts to int in response
-    assert data['user_id'] > 0  # Valid ID
-    assert data['username'] == 'newreg'
-    assert data['email'] == 'newreg@example.com'
-    assert data['credits'] == 5.0
-    assert data['subscription_status'] == 'trial'
-    assert 'api_key' in data
+    assert isinstance(data["user_id"], int)  # Pydantic converts to int in response
+    assert data["user_id"] > 0  # Valid ID
+    assert data["username"] == "newreg"
+    assert data["email"] == "newreg@example.com"
+    assert data["credits"] == 5.0
+    assert data["subscription_status"] == "trial"
+    assert "api_key" in data
 
 
 def test_register_user_duplicate_email(client, sb):
     """Test registration with existing email"""
     # Create existing user with different username
-    sb.table('users').insert({
-        'id': '999',
-        'username': 'existing_different',  # Different from request
-        'email': 'existing@example.com',
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "999",
+            "username": "existing_different",  # Different from request
+            "email": "existing@example.com",
+        }
+    ).execute()
 
     request_data = {
         "username": "totally_new_username",  # Different from existing
         "email": "existing@example.com",  # Same email - should fail
-        "auth_method": "email"
+        "auth_method": "email",
     }
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 400
-    assert 'email already exists' in response.json()['detail'].lower()
+    assert "email already exists" in response.json()["detail"].lower()
 
 
 def test_register_user_duplicate_username(client, sb):
     """Test registration with existing username"""
     # Create existing user with different email
-    sb.table('users').insert({
-        'id': '888',
-        'username': 'existinguser',
-        'email': 'totally_different@example.com',  # Different from request
-    }).execute()
+    sb.table("users").insert(
+        {
+            "id": "888",
+            "username": "existinguser",
+            "email": "totally_different@example.com",  # Different from request
+        }
+    ).execute()
 
     request_data = {
         "username": "existinguser",  # Same username - should fail
         "email": "brand_new_email@example.com",  # Different email
-        "auth_method": "email"
+        "auth_method": "email",
     }
 
-    response = client.post('/auth/register', json=request_data)
+    response = client.post("/auth/register", json=request_data)
 
     assert response.status_code == 400
-    assert 'username already taken' in response.json()['detail'].lower()
+    assert "username already taken" in response.json()["detail"].lower()
 
 
 # ==================================================
 # TESTS: Password Reset
 # ==================================================
 
+
 def test_request_password_reset_success(client, sb):
     """Test successful password reset request"""
-    sb.table('users').insert({
-        'id': '1',
-        'username': 'testuser',
-        'email': 'test@example.com'
-    }).execute()
+    sb.table("users").insert(
+        {"id": "1", "username": "testuser", "email": "test@example.com"}
+    ).execute()
 
-    response = client.post('/auth/password-reset?email=test@example.com')
+    response = client.post("/auth/password-reset?email=test@example.com")
 
     assert response.status_code == 200
-    assert 'password reset email sent' in response.json()['message'].lower()
+    assert "password reset email sent" in response.json()["message"].lower()
 
 
 def test_request_password_reset_user_not_found(client, sb):
     """Test password reset for non-existent email (security - don't reveal)"""
-    response = client.post('/auth/password-reset?email=nonexistent@example.com')
+    response = client.post("/auth/password-reset?email=nonexistent@example.com")
 
     assert response.status_code == 200
     # Should return generic message for security
-    assert 'if an account with that email exists' in response.json()['message'].lower()
+    assert "if an account with that email exists" in response.json()["message"].lower()
 
 
 def test_reset_password_with_valid_token(client, sb):
     """Test resetting password with valid token"""
     # Create valid token
     expires_at = datetime.now(UTC).replace(hour=23, minute=59)
-    sb.table('password_reset_tokens').insert({
-        'id': '1',
-        'token': 'valid_token_123',
-        'user_id': '1',
-        'used': False,
-        'expires_at': expires_at.isoformat()
-    }).execute()
+    sb.table("password_reset_tokens").insert(
+        {
+            "id": "1",
+            "token": "valid_token_123",
+            "user_id": "1",
+            "used": False,
+            "expires_at": expires_at.isoformat(),
+        }
+    ).execute()
 
-    response = client.post('/auth/reset-password?token=valid_token_123')
+    response = client.post("/auth/reset-password?token=valid_token_123")
 
     assert response.status_code == 200
-    assert 'password reset successfully' in response.json()['message'].lower()
+    assert "password reset successfully" in response.json()["message"].lower()
 
     # Verify token was marked as used
-    token_data = sb.table('password_reset_tokens').select('*').eq('id', '1').execute()
-    assert token_data.data[0]['used'] is True
+    token_data = sb.table("password_reset_tokens").select("*").eq("id", "1").execute()
+    assert token_data.data[0]["used"] is True
 
 
 def test_reset_password_with_invalid_token(client, sb):
     """Test resetting password with invalid token"""
-    response = client.post('/auth/reset-password?token=invalid_token')
+    response = client.post("/auth/reset-password?token=invalid_token")
 
     assert response.status_code == 400
-    assert 'invalid or expired' in response.json()['detail'].lower()
+    assert "invalid or expired" in response.json()["detail"].lower()
 
 
 def test_reset_password_with_expired_token(client, sb):
     """Test resetting password with expired token"""
     # Create expired token
     expires_at = datetime.now(UTC).replace(year=2020)
-    sb.table('password_reset_tokens').insert({
-        'id': '1',
-        'token': 'expired_token_123',
-        'user_id': '1',
-        'used': False,
-        'expires_at': expires_at.isoformat()
-    }).execute()
+    sb.table("password_reset_tokens").insert(
+        {
+            "id": "1",
+            "token": "expired_token_123",
+            "user_id": "1",
+            "used": False,
+            "expires_at": expires_at.isoformat(),
+        }
+    ).execute()
 
-    response = client.post('/auth/reset-password?token=expired_token_123')
+    response = client.post("/auth/reset-password?token=expired_token_123")
 
     assert response.status_code == 400
-    assert 'expired' in response.json()['detail'].lower()
+    assert "expired" in response.json()["detail"].lower()
 
 
 def test_reset_password_with_used_token(client, sb):
     """Test resetting password with already used token"""
     expires_at = datetime.now(UTC).replace(hour=23, minute=59)
-    sb.table('password_reset_tokens').insert({
-        'id': '1',
-        'token': 'used_token_123',
-        'user_id': '1',
-        'used': True,  # Already used
-        'expires_at': expires_at.isoformat()
-    }).execute()
+    sb.table("password_reset_tokens").insert(
+        {
+            "id": "1",
+            "token": "used_token_123",
+            "user_id": "1",
+            "used": True,  # Already used
+            "expires_at": expires_at.isoformat(),
+        }
+    ).execute()
 
-    response = client.post('/auth/reset-password?token=used_token_123')
+    response = client.post("/auth/reset-password?token=used_token_123")
 
     assert response.status_code == 400
-    assert 'invalid or expired' in response.json()['detail'].lower()
+    assert "invalid or expired" in response.json()["detail"].lower()
