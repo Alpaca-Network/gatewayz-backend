@@ -870,7 +870,11 @@ def deduct_credits(
                     rpc_error = result_data.get("error", "unknown_rpc_error")
                     if rpc_error == "insufficient_credits":
                         rpc_balance = result_data.get("new_balance")
-                        balance_rounded = round(float(rpc_balance), 2) if rpc_balance is not None else round(balance_before, 2)
+                        balance_rounded = (
+                            round(float(rpc_balance), 2)
+                            if rpc_balance is not None
+                            else round(balance_before, 2)
+                        )
                         required_rounded = round(tokens, 2)
                         raise ValueError(
                             f"Insufficient credits. Current balance: ~${balance_rounded:.2f}, "
