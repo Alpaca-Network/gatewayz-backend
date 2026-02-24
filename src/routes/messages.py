@@ -304,7 +304,10 @@ async def anthropic_messages(
                 )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
-            raise HTTPException(status_code=402, detail="Insufficient credits")
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient credits. Please add credits to continue.",
+            )
 
         # Pre-check plan limits before processing (fail fast)
         pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)
@@ -872,8 +875,12 @@ async def anthropic_messages(
                 endpoint="/v1/messages",
             )
         except ValueError as e:
-            # Insufficient credits
-            raise HTTPException(status_code=402, detail=str(e))
+            # Insufficient credits - log details server-side, sanitize response
+            logger.warning("Credit deduction failed for /v1/messages: %s", e)
+            raise HTTPException(
+                status_code=402,
+                detail="Insufficient credits. Please add credits to continue.",
+            )
 
         await _to_thread(increment_api_key_usage, api_key)
 

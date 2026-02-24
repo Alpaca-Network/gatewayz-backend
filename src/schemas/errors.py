@@ -210,8 +210,8 @@ class ErrorResponse(BaseModel):
             "example": {
                 "error": {
                     "type": "insufficient_credits",
-                    "message": "Insufficient credits. Required: $2.00, Current: $0.50",
-                    "detail": "You need $1.50 more credits to complete this request. Please add credits to your account.",
+                    "message": "Insufficient credits. Please add credits to continue.",
+                    "detail": "Please add credits to your account to complete this request.",
                     "code": "INSUFFICIENT_CREDITS",
                     "status": 402,
                     "request_id": "req_xyz789",
@@ -220,11 +220,7 @@ class ErrorResponse(BaseModel):
                         "Add credits at https://gatewayz.ai/billing",
                         "Consider upgrading to a subscription plan for better rates",
                     ],
-                    "context": {
-                        "current_credits": 0.50,
-                        "required_credits": 2.00,
-                        "credit_deficit": 1.50,
-                    },
+                    "context": {},
                     "docs_url": "https://docs.gatewayz.ai/errors/insufficient-credits",
                     "support_url": "https://gatewayz.ai/support",
                 }

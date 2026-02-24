@@ -54,8 +54,8 @@ ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.ACCESS_DENIED: "Access denied",
     ErrorCode.FEATURE_NOT_AVAILABLE: "This feature is not available on your current plan",
     # Payment & credit errors
-    ErrorCode.INSUFFICIENT_CREDITS: "Insufficient credits. Required: ${required_credits:.4f}, Current: ${current_credits:.4f}",
-    ErrorCode.CREDIT_BELOW_MINIMUM: "Credit balance (${current_credits:.4f}) is below the minimum required amount (${minimum:.4f})",
+    ErrorCode.INSUFFICIENT_CREDITS: "Insufficient credits. Please add credits to continue.",
+    ErrorCode.CREDIT_BELOW_MINIMUM: "Credit balance is below the minimum required amount. Please add credits to continue.",
     ErrorCode.PAYMENT_METHOD_REQUIRED: "Payment method required. Please add a payment method to your account",
     ErrorCode.PAYMENT_FAILED: "Payment processing failed: {reason}",
     ErrorCode.INVOICE_OVERDUE: "Your account has overdue invoices. Please settle your balance to continue",
