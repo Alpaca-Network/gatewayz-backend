@@ -572,6 +572,7 @@ async def _handle_openrouter_stream(
     Raises:
         HTTPException: If OpenRouter API key is not configured (503)
     """
+    request_id = str(uuid.uuid4())
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
@@ -776,6 +777,7 @@ async def _handle_ai_sdk_stream(
     Returns:
         StreamingResponse with server-sent events
     """
+    request_id = str(uuid.uuid4())
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
