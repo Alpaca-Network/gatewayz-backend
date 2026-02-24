@@ -49,6 +49,14 @@ def _track_default_pricing_usage(model_id: str, error: str | None = None) -> Non
         # Keep only last 10 errors
         tracker["errors"] = tracker["errors"][-10:]
 
+    # Update Prometheus gauge for number of unique models using default pricing
+    try:
+        from src.services.prometheus_metrics import models_using_default_pricing
+
+        models_using_default_pricing.set(len(_default_pricing_tracker))
+    except (ImportError, AttributeError):
+        pass  # Prometheus metrics not available
+
     # Alert for high-value model families that should have pricing
     high_value_prefixes = (
         "openai/",
