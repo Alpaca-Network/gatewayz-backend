@@ -161,7 +161,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
 
     # 2a. Fireworks: "accounts/fireworks/models/X" -> X
     if normalized.lower().startswith("accounts/fireworks/models/"):
-        stripped = normalized[len("accounts/fireworks/models/"):]
+        stripped = normalized[len("accounts/fireworks/models/") :]
         logger.debug(
             "[PRICING_NORMALIZE] Stripped Fireworks prefix: '%s' -> '%s'",
             original,
@@ -171,7 +171,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
 
     # 2b. Cloudflare Workers AI: "@cf/org/model" -> "org/model"
     elif normalized.lower().startswith("@cf/"):
-        stripped = normalized[len("@cf/"):]
+        stripped = normalized[len("@cf/") :]
         logger.debug(
             "[PRICING_NORMALIZE] Stripped Cloudflare @cf/ prefix: '%s' -> '%s'",
             original,
@@ -181,7 +181,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
 
     # 2c. Google Vertex: "@google/models/X" -> "google/X"
     elif normalized.lower().startswith("@google/models/"):
-        stripped = "google/" + normalized[len("@google/models/"):]
+        stripped = "google/" + normalized[len("@google/models/") :]
         logger.debug(
             "[PRICING_NORMALIZE] Converted Google Vertex path: '%s' -> '%s'",
             original,
@@ -202,7 +202,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
                 break
         if models_idx is not None:
             org = parts[0]
-            model_name = "/".join(parts[models_idx + 1:])
+            model_name = "/".join(parts[models_idx + 1 :])
             stripped = f"{org}/{model_name}"
             logger.debug(
                 "[PRICING_NORMALIZE] Stripped Clarifai path: '%s' -> '%s'",
@@ -229,7 +229,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
     # to avoid incorrectly stripping "@" from model names like "user@model".
     if "@" in normalized:
         at_idx = normalized.rfind("@")
-        version_part = normalized[at_idx + 1:]
+        version_part = normalized[at_idx + 1 :]
         if version_part and _VERSION_SUFFIX_RE.match(version_part):
             normalized = normalized[:at_idx]
             logger.debug(
@@ -266,6 +266,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
         )
 
     return normalized
+
 
 # Track models that fall back to default pricing for monitoring/alerting
 # Structure: {model_id: {"count": int, "first_seen": float, "last_seen": float, "errors": list}}
@@ -389,9 +390,7 @@ def clear_pricing_cache(model_id: str | None = None) -> None:
                     del _pricing_cache[key]
                     cleared = True
             if cleared:
-                logger.debug(
-                    f"Cleared pricing cache for model {model_id} (cache_key={cache_key})"
-                )
+                logger.debug(f"Cleared pricing cache for model {model_id} (cache_key={cache_key})")
         else:
             _pricing_cache.clear()
             logger.info("Cleared entire pricing cache")
