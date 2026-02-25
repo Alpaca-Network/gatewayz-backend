@@ -13,7 +13,7 @@ What you see in Grafana
 -----------------------
 1.  Inference Profiling dashboard — continuous flamegraph broken down by all
     tags applied at sampling time:
-        service_name – always "gatewayz-backend"          (init_pyroscope)
+        service_name – always "gatewayz-backend"          (application_name → implicit)
         environment  – Railway environment                 (init_pyroscope)
         endpoint     – normalised URL path                 (observability_middleware)
         method       – HTTP verb  (GET, POST, …)           (observability_middleware)
@@ -99,12 +99,14 @@ def init_pyroscope() -> bool:
         environment = os.getenv("RAILWAY_ENVIRONMENT", "local")
 
         configure_kwargs: dict = {
+            # application_name becomes the `service_name` label in Pyroscope 1.x push API.
+            # Do NOT also set service_name in tags — that creates a duplicate label
+            # which causes Pyroscope to return 400 on every push.
             "application_name": "gatewayz-backend",
             "server_address": server_address,
-            # Tags applied to every sample this process emits.
-            # These appear as filter labels in the Grafana Pyroscope UI.
+            # Extra tags applied to every sample (environment only — service_name
+            # is already set implicitly by application_name above).
             "tags": {
-                "service_name": "gatewayz-backend",
                 "environment": environment,
             },
             # 100 Hz = one sample every 10 ms.  This is the pyroscope default
