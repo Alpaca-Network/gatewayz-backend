@@ -403,6 +403,7 @@ async def ai_sdk_chat_completion(
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "cost_usd": cost,
+                        "request_id": request_id,
                     },
                 )
                 await asyncio.to_thread(
@@ -571,6 +572,7 @@ async def _handle_openrouter_stream(
     Raises:
         HTTPException: If OpenRouter API key is not configured (503)
     """
+    request_id = str(uuid.uuid4())
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
@@ -690,6 +692,7 @@ async def _handle_openrouter_stream(
                             "prompt_tokens": total_prompt_tokens,
                             "completion_tokens": total_completion_tokens,
                             "cost_usd": cost,
+                            "request_id": request_id,
                         },
                     )
                     await asyncio.to_thread(
@@ -774,6 +777,7 @@ async def _handle_ai_sdk_stream(
     Returns:
         StreamingResponse with server-sent events
     """
+    request_id = str(uuid.uuid4())
     # Track tokens for credit deduction
     total_prompt_tokens = 0
     total_completion_tokens = 0
@@ -887,6 +891,7 @@ async def _handle_ai_sdk_stream(
                             "prompt_tokens": total_prompt_tokens,
                             "completion_tokens": total_completion_tokens,
                             "cost_usd": cost,
+                            "request_id": request_id,
                         },
                     )
                     await asyncio.to_thread(

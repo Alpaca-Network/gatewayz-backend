@@ -15,26 +15,91 @@ def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
     try:
         client = get_supabase_client()
 
-        # Get API key ID
-        key_result = client.table("api_keys_new").select("id").eq("api_key", api_key).execute()
+        # Get API key ID and user_id
+        key_result = (
+            client.table("api_keys_new").select("id, user_id").eq("api_key", api_key).execute()
+        )
 
         try:
             key_data = safe_get_first(
                 key_result, error_message="API key not found", validate_keys=["id"]
             )
             api_key_id = key_data["id"]
+            user_id = key_data.get("user_id")
         except (DatabaseResultError, KeyError) as e:
             logger.warning(f"Failed to get API key ID: {e}")
             return {"success": False, "error": "API key not found"}
 
-        # Call database function
-        result = client.rpc(
-            "start_trial", {"api_key_id": api_key_id, "trial_days": trial_days}
-        ).execute()
+        # Atomically record the trial grant at the database level.
+        # The UNIQUE(user_id) constraint on trial_grants prevents
+        # concurrent requests from granting duplicate trials.
+        if user_id is not None:
+            grant_result = client.rpc(
+                "record_trial_grant",
+                {
+                    "p_user_id": user_id,
+                    "p_api_key_id": api_key_id,
+                    "p_grant_type": "standard",
+                    "p_trial_credits": float(trial_days * 5),
+                    "p_trial_duration_days": trial_days,
+                },
+            ).execute()
+
+            if grant_result.data and not grant_result.data.get("success", True):
+                logger.warning(f"Duplicate trial grant blocked by DB constraint for user {user_id}")
+                return {
+                    "success": False,
+                    "error": "Trial already started or subscription active",
+                }
+
+        # Call database function.
+        # If start_trial fails after record_trial_grant succeeded, clean up
+        # the grant so the user can retry.
+        try:
+            result = client.rpc(
+                "start_trial", {"api_key_id": api_key_id, "trial_days": trial_days}
+            ).execute()
+        except Exception as start_err:
+            if user_id is not None:
+                try:
+                    client.table("trial_grants").delete().eq("user_id", user_id).execute()
+                    logger.info(
+                        f"Cleaned up trial_grants for user {user_id} after start_trial failure"
+                    )
+                except Exception as cleanup_err:
+                    logger.error(
+                        f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}"
+                    )
+            raise start_err
+
+        if result.data and not result.data.get("success", True):
+            # start_trial returned a logical failure — clean up the grant
+            if user_id is not None:
+                try:
+                    client.table("trial_grants").delete().eq("user_id", user_id).execute()
+                    logger.info(
+                        f"Cleaned up trial_grants for user {user_id} after start_trial logical failure"
+                    )
+                except Exception as cleanup_err:
+                    logger.error(
+                        f"Failed to clean up trial_grants for user {user_id}: {cleanup_err}"
+                    )
 
         return result.data if result.data else {"success": False, "error": "Database error"}
 
     except Exception as e:
+        error_str = str(e)
+        # Handle unique violation from the trial_grants constraint
+        if (
+            "unique" in error_str.lower()
+            or "23505" in error_str
+            or "trial_already_granted" in error_str
+        ):
+            logger.warning(f"Duplicate trial grant blocked by DB constraint: {e}")
+            return {
+                "success": False,
+                "error": "Trial already started or subscription active",
+            }
         logger.error(f"Error starting trial: {e}")
         return {"success": False, "error": str(e)}
 

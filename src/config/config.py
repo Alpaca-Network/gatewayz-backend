@@ -306,6 +306,12 @@ class Config:
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
+    # Admin Credit Grant Safety Controls
+    # Maximum single credit grant amount in dollars (default $1000)
+    ADMIN_MAX_CREDIT_GRANT: float = float(os.environ.get("ADMIN_MAX_CREDIT_GRANT", "1000"))
+    # Maximum total credits an admin can grant in a 24-hour rolling window (default $5000)
+    ADMIN_DAILY_GRANT_LIMIT: float = float(os.environ.get("ADMIN_DAILY_GRANT_LIMIT", "5000"))
+
     # GZip Compression Configuration
     # Minimum response size (bytes) before GZip compression is applied.
     # 1 KB (1024 bytes) is a reasonable floor: below this the gzip header overhead
