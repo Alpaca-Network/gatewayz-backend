@@ -1736,13 +1736,17 @@ def fetch_models_from_google_vertex():
 
                 model_id = normalized["id"]
 
-                # If we have static config for this model, use its pricing
+                # If we have static config for this model, merge its metadata
                 if model_id in static_by_id:
                     static = static_by_id[model_id]
                     normalized["pricing"] = static["pricing"]
                     normalized["tags"] = static["tags"]
                     normalized["name"] = static["name"]
                     normalized["description"] = static["description"]
+                    # Copy provider_model_id - critical for Gemini 3 models where canonical
+                    # ID differs from provider model ID (e.g., gemini-3-flash-preview)
+                    if static.get("provider_model_id"):
+                        normalized["provider_model_id"] = static["provider_model_id"]
 
                 normalized_models.append(normalized)
                 seen_ids.add(model_id)
