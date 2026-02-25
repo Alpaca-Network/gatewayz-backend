@@ -1781,26 +1781,59 @@ class StripeService:
                 logger.info(f"User {user_id} trial status cleared on subscription update to active")
 
                 # Update subscription allowance when tier changes (for upgrades/downgrades)
-                # Check if tier has changed by comparing with previous product_id
-                from src.db.subscription_products import get_allowance_from_tier
-                from src.db.users import reset_subscription_allowance
+                # IMPORTANT: Check if allowance was already handled by the upgrade/downgrade
+                # endpoint to prevent double-resetting. The endpoint sets 'allowance_handled_at'
+                # in the subscription metadata when it resets the allowance.
+                allowance_handled_at = metadata.get("allowance_handled_at") if metadata else None
+                allowance_handled_by = metadata.get("allowance_handled_by") if metadata else None
+                should_skip_allowance_reset = False
 
-                new_allowance = get_allowance_from_tier(tier)
-                if new_allowance > 0:
-                    # Reset allowance to new tier's amount on tier change
-                    reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
-                    if not reset_result:
-                        logger.error(
-                            f"Failed to reset allowance for user {user_id} during subscription update webhook. "
-                            f"Tier: {tier}, allowance: ${new_allowance}. "
-                            f"Raising exception to trigger Stripe retry."
+                if allowance_handled_at:
+                    try:
+                        handled_time = datetime.fromisoformat(allowance_handled_at)
+                        seconds_since_handled = (datetime.now(UTC) - handled_time).total_seconds()
+                        # If allowance was handled within the last 120 seconds by the upgrade/downgrade
+                        # endpoint, skip re-resetting to avoid double-crediting
+                        if seconds_since_handled < 120:
+                            should_skip_allowance_reset = True
+                            logger.info(
+                                f"Skipping allowance reset in subscription.updated webhook for user {user_id}: "
+                                f"allowance was already handled {seconds_since_handled:.1f}s ago "
+                                f"by {allowance_handled_by or 'unknown'}. "
+                                f"This prevents double-crediting on upgrade/downgrade."
+                            )
+                        else:
+                            logger.info(
+                                f"allowance_handled_at is stale ({seconds_since_handled:.1f}s ago) "
+                                f"for user {user_id}. Proceeding with allowance reset in webhook."
+                            )
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Could not parse allowance_handled_at '{allowance_handled_at}' "
+                            f"for user {user_id}: {e}. Proceeding with allowance reset."
                         )
-                        raise Exception(
-                            f"Failed to update subscription allowance for user {user_id}"
+
+                if not should_skip_allowance_reset:
+                    from src.db.subscription_products import get_allowance_from_tier
+                    from src.db.users import reset_subscription_allowance
+
+                    new_allowance = get_allowance_from_tier(tier)
+                    if new_allowance > 0:
+                        # Reset allowance to new tier's amount on tier change
+                        reset_result = reset_subscription_allowance(user_id, new_allowance, tier)
+                        if not reset_result:
+                            logger.error(
+                                f"Failed to reset allowance for user {user_id} during subscription update webhook. "
+                                f"Tier: {tier}, allowance: ${new_allowance}. "
+                                f"Raising exception to trigger Stripe retry."
+                            )
+                            raise Exception(
+                                f"Failed to update subscription allowance for user {user_id}"
+                            )
+                        logger.info(
+                            f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) "
+                            f"on subscription update webhook"
                         )
-                    logger.info(
-                        f"Updated allowance to ${new_allowance} for user {user_id} ({tier} tier) on subscription update"
-                    )
 
             # CRITICAL: Invalidate user cache so profile API returns fresh data
             # This ensures the credits page and header show updated tier immediately
@@ -1937,11 +1970,40 @@ class StripeService:
             raise
 
     def _handle_invoice_paid(self, invoice):
-        """Handle invoice paid event - add credits for subscription renewal"""
+        """
+        Handle invoice paid event - add credits for subscription renewal.
+
+        IMPORTANT: This handler distinguishes between:
+        1. Renewal invoices (billing_reason='subscription_cycle') - These reset allowance
+        2. Proration invoices (billing_reason='subscription_update') - These do NOT reset
+           allowance because the upgrade/downgrade endpoint already handled it
+        3. Initial subscription invoices (billing_reason='subscription_create') - These reset allowance
+
+        This distinction prevents double-crediting on upgrades/downgrades.
+        """
         try:
             # Get subscription from invoice
             if not invoice.subscription:
                 logger.info(f"Invoice {invoice.id} is not for a subscription, skipping")
+                return
+
+            # Check billing_reason to determine if this is a proration invoice
+            billing_reason = getattr(invoice, "billing_reason", None)
+            logger.info(
+                f"Processing invoice.paid: invoice_id={invoice.id}, "
+                f"billing_reason={billing_reason}, subscription={invoice.subscription}"
+            )
+
+            # Skip allowance reset for proration invoices from upgrades/downgrades.
+            # When a user upgrades/downgrades, Stripe fires an invoice.paid event for the
+            # proration charge/credit. The upgrade/downgrade endpoint already reset the
+            # allowance, so we must NOT reset it again here.
+            if billing_reason == "subscription_update":
+                logger.info(
+                    f"Invoice {invoice.id} is a proration invoice (billing_reason=subscription_update). "
+                    f"Skipping allowance reset - it was already handled by the upgrade/downgrade endpoint. "
+                    f"This prevents double-crediting."
+                )
                 return
 
             subscription = stripe.Subscription.retrieve(invoice.subscription)
@@ -1967,8 +2029,34 @@ class StripeService:
             )
             metadata_tier = metadata.get("tier") if metadata else None
 
+            # Additional safeguard: check if allowance was recently handled by upgrade/downgrade
+            # This catches edge cases where billing_reason might not be set correctly
+            allowance_handled_at = metadata.get("allowance_handled_at") if metadata else None
+            if allowance_handled_at:
+                try:
+                    handled_time = datetime.fromisoformat(allowance_handled_at)
+                    seconds_since_handled = (datetime.now(UTC) - handled_time).total_seconds()
+                    if seconds_since_handled < 120:
+                        allowance_handled_by = metadata.get("allowance_handled_by", "unknown")
+                        logger.info(
+                            f"Invoice {invoice.id} for user {user_id}: allowance was handled "
+                            f"{seconds_since_handled:.1f}s ago by {allowance_handled_by}. "
+                            f"Skipping allowance reset to prevent double-crediting."
+                        )
+                        return
+                except (ValueError, TypeError) as e:
+                    logger.warning(
+                        f"Could not parse allowance_handled_at '{allowance_handled_at}' "
+                        f"for invoice {invoice.id}: {e}. Proceeding with allowance reset."
+                    )
+
             # Resolve tier from metadata or subscription items
             tier, _ = self._resolve_tier_from_subscription(subscription, metadata_tier)
+
+            logger.info(
+                f"Processing allowance reset for invoice {invoice.id}, user {user_id}, "
+                f"tier={tier}, billing_reason={billing_reason}"
+            )
 
             # Reset subscription allowance (old allowance is forfeited, no carry-over)
             from src.db.subscription_products import get_allowance_from_tier
@@ -1985,7 +2073,8 @@ class StripeService:
                         f"on invoice payment. Webhook will be retried by Stripe."
                     )
                 logger.info(
-                    f"Reset allowance to ${allowance} for user {user_id} ({tier} tier) on invoice payment"
+                    f"Reset allowance to ${allowance} for user {user_id} ({tier} tier) "
+                    f"on invoice payment (billing_reason={billing_reason})"
                 )
             else:
                 logger.warning(f"No allowance configured for tier: {tier}")
@@ -2139,12 +2228,71 @@ class StripeService:
             logger.error(f"Error getting subscription for user {user_id}: {e}")
             raise
 
+    def _get_stripe_proration_amount(
+        self, subscription_id: str, new_price_id: str, subscription_item_id: str
+    ) -> float | None:
+        """
+        Fetch the proration amount from Stripe's upcoming invoice preview.
+
+        This queries Stripe for what the proration charge would be, allowing us
+        to verify our internal calculations and log the actual Stripe-side amount.
+
+        Args:
+            subscription_id: Stripe subscription ID
+            new_price_id: The new price ID being switched to
+            subscription_item_id: The subscription item being modified
+
+        Returns:
+            Proration amount in dollars, or None if unavailable
+        """
+        try:
+            upcoming = stripe.Invoice.upcoming(
+                subscription=subscription_id,
+                subscription_items=[
+                    {
+                        "id": subscription_item_id,
+                        "price": new_price_id,
+                    }
+                ],
+                subscription_proration_behavior="create_prorations",
+            )
+
+            # Sum proration line items (they have type='invoiceitem' and proration=True)
+            proration_total = 0
+            for line in upcoming.lines.data:
+                if getattr(line, "proration", False):
+                    proration_total += line.amount
+
+            # Convert from cents to dollars
+            return round(proration_total / 100.0, 2) if proration_total else 0.0
+
+        except stripe.StripeError as e:
+            logger.warning(
+                f"Could not fetch proration preview for subscription {subscription_id}: {e}. "
+                f"Proceeding without Stripe proration verification."
+            )
+            return None
+        except Exception as e:
+            logger.warning(
+                f"Unexpected error fetching proration preview for subscription {subscription_id}: {e}"
+            )
+            return None
+
     def upgrade_subscription(
         self, user_id: int, request: UpgradeSubscriptionRequest
     ) -> SubscriptionManagementResponse:
         """
         Upgrade a user's subscription to a higher tier (e.g., Pro -> Max).
         Uses Stripe's subscription update with proration to charge the difference immediately.
+
+        PRORATION LOGIC:
+        - On upgrade, subscription_allowance is SET to the new tier's allowance (not incremented).
+        - The user's remaining unused allowance from the old tier is forfeited (replaced).
+        - Purchased credits are never touched by tier changes.
+        - A metadata flag 'allowance_handled_at' is set on the Stripe subscription to prevent
+          webhook handlers from double-resetting the allowance.
+        - Stripe handles the monetary proration (charging the price difference); we handle
+          the credit allowance separately.
 
         Args:
             user_id: User ID
@@ -2195,6 +2343,24 @@ class StripeService:
                 f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
             )
 
+            # Fetch Stripe proration preview BEFORE modifying subscription
+            # This gives us Stripe's calculated proration for audit/verification
+            stripe_proration_amount = self._get_stripe_proration_amount(
+                subscription_id=stripe_subscription_id,
+                new_price_id=request.new_price_id,
+                subscription_item_id=subscription_item_id,
+            )
+
+            if stripe_proration_amount is not None:
+                logger.info(
+                    f"Stripe proration preview for user {user_id} upgrade "
+                    f"{current_tier} -> {new_tier}: ${stripe_proration_amount}"
+                )
+
+            # Generate a timestamp to mark when this endpoint handled the allowance.
+            # Webhook handlers will check this to avoid double-resetting.
+            allowance_handled_at = datetime.now(UTC).isoformat()
+
             # Update the subscription with the new price
             # proration_behavior='create_prorations' will charge the difference immediately
             updated_subscription = stripe.Subscription.modify(
@@ -2210,12 +2376,13 @@ class StripeService:
                     "user_id": str(user_id),
                     "product_id": request.new_product_id,
                     "tier": new_tier,
+                    # Signal to webhook handlers that allowance was already reset by this endpoint.
+                    # The webhook handler checks this timestamp and skips allowance reset if it
+                    # was set within the last 120 seconds.
+                    "allowance_handled_at": allowance_handled_at,
+                    "allowance_handled_by": "upgrade_subscription",
                 },
             )
-
-            # Calculate proration amount (if any)
-            # Note: The actual proration will be handled by Stripe and reflected in the next invoice
-            proration_amount = None
 
             # Update user's tier in database
             from src.config.supabase_config import get_supabase_client
@@ -2265,48 +2432,92 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # Update subscription allowance to new tier's allowance
-            # Business decision: On upgrade, user gets full new tier allowance immediately.
-            # This is intentionally generous to reward upgrading mid-cycle. The user pays
-            # prorated amount for the higher tier and receives the full higher allowance.
-            # Alternative approaches considered:
-            # - Preserve remaining allowance + add difference (more complex tracking)
-            # - Wait for next billing cycle (less immediate value for user)
+            # =====================================================================
+            # PRORATION FIX: SET allowance to new tier level, do NOT add difference
+            # =====================================================================
+            # On upgrade, subscription_allowance is REPLACED with the new tier's
+            # allowance. The user's remaining old allowance is forfeited because:
+            #   1. Stripe charges the prorated price difference for the upgrade
+            #   2. The new tier's full allowance replaces the old one
+            #   3. purchased_credits remain untouched
+            # This prevents double-crediting where users would get old remaining + new full.
             from src.db.credit_transactions import TransactionType, log_credit_transaction
             from src.db.subscription_products import get_allowance_from_tier
             from src.db.users import get_user_by_id as get_user_fresh
             from src.db.users import reset_subscription_allowance
 
             new_allowance = get_allowance_from_tier(new_tier)
-            if new_allowance > 0:
-                # Get current balance for audit logging
-                user_fresh = get_user_fresh(user_id)
-                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+            old_tier_allowance = get_allowance_from_tier(current_tier)
 
-                # Reset allowance to new tier's full amount (immediate benefit for upgrade)
+            if new_allowance > 0:
+                # Get current balance for audit logging (this is what the user has remaining)
+                user_fresh = get_user_fresh(user_id)
+                old_remaining_allowance = (
+                    float(user_fresh.get("subscription_allowance", 0)) if user_fresh else 0.0
+                )
+                purchased_credits = (
+                    float(user_fresh.get("purchased_credits", 0)) if user_fresh else 0.0
+                )
+
+                # Calculate how much of the old allowance was used
+                old_used = max(0.0, old_tier_allowance - old_remaining_allowance)
+
+                # Calculate what is being forfeited (unused old allowance that won't carry over)
+                forfeited_allowance = old_remaining_allowance
+
+                logger.info(
+                    f"Proration calculation for user {user_id} upgrade {current_tier} -> {new_tier}: "
+                    f"old_tier_allowance=${old_tier_allowance}, "
+                    f"old_remaining=${old_remaining_allowance}, "
+                    f"old_used=${old_used}, "
+                    f"forfeited=${forfeited_allowance}, "
+                    f"new_allowance=${new_allowance}, "
+                    f"purchased_credits=${purchased_credits} (unchanged), "
+                    f"stripe_proration=${stripe_proration_amount}"
+                )
+
+                # Reset allowance to new tier's full amount
+                # This REPLACES the old allowance (does not add to it)
                 reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
                 if not reset_result:
                     logger.error(f"Failed to reset allowance for user {user_id} during upgrade")
                     raise Exception("Failed to update subscription allowance")
 
                 logger.info(
-                    f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)"
+                    f"Allowance SET to ${new_allowance} for user {user_id} ({new_tier} tier). "
+                    f"Previous remaining ${old_remaining_allowance} was replaced (not added)."
                 )
 
-                # Log audit trail for subscription upgrade
+                # Log detailed audit trail for subscription upgrade
+                # NOTE: reset_subscription_allowance() already logs a SUBSCRIPTION_RENEWAL
+                # transaction internally. This additional SUBSCRIPTION_UPGRADE transaction
+                # captures the upgrade-specific context (tier change, proration details).
                 log_credit_transaction(
                     user_id=user_id,
-                    amount=new_allowance - old_allowance,
+                    amount=new_allowance - old_remaining_allowance,
                     transaction_type=TransactionType.SUBSCRIPTION_UPGRADE,
-                    description=f"Subscription upgraded from {current_tier} to {new_tier}",
-                    balance_before=old_allowance,
-                    balance_after=new_allowance,
+                    description=(
+                        f"Subscription upgraded from {current_tier} to {new_tier}. "
+                        f"Allowance SET to ${new_allowance} (not incremented). "
+                        f"Forfeited ${forfeited_allowance} unused from old tier."
+                    ),
+                    balance_before=old_remaining_allowance + purchased_credits,
+                    balance_after=new_allowance + purchased_credits,
                     metadata={
                         "from_tier": current_tier,
                         "to_tier": new_tier,
+                        "old_tier_allowance": old_tier_allowance,
+                        "old_remaining_allowance": old_remaining_allowance,
+                        "old_used_allowance": old_used,
+                        "forfeited_allowance": forfeited_allowance,
+                        "new_allowance": new_allowance,
+                        "purchased_credits_unchanged": purchased_credits,
+                        "proration_method": "set_not_increment",
+                        "stripe_proration_amount": stripe_proration_amount,
                         "subscription_id": updated_subscription.id,
                         "product_id": request.new_product_id,
                         "price_id": request.new_price_id,
+                        "allowance_handled_at": allowance_handled_at,
                     },
                     created_by="system:subscription_upgrade",
                 )
@@ -2316,8 +2527,12 @@ class StripeService:
 
             invalidate_user_cache_by_id(user_id)
 
+            # Use Stripe proration amount if available, otherwise None
+            proration_amount = stripe_proration_amount
+
             logger.info(
-                f"Successfully upgraded subscription {stripe_subscription_id} to {new_tier} for user {user_id}"
+                f"Successfully upgraded subscription {stripe_subscription_id} to {new_tier} "
+                f"for user {user_id}. Proration: ${proration_amount}"
             )
 
             return SubscriptionManagementResponse(
@@ -2349,6 +2564,15 @@ class StripeService:
         """
         Downgrade a user's subscription to a lower tier (e.g., Max -> Pro).
         Uses Stripe's subscription update with proration to credit the unused time.
+
+        PRORATION LOGIC:
+        - On downgrade, subscription_allowance is SET to the new (lower) tier's allowance.
+        - The user's remaining unused allowance from the old tier is forfeited (replaced).
+        - Purchased credits are never touched by tier changes.
+        - A metadata flag 'allowance_handled_at' is set on the Stripe subscription to prevent
+          webhook handlers from double-resetting the allowance.
+        - Stripe handles the monetary proration (crediting the price difference); we handle
+          the credit allowance separately.
 
         Args:
             user_id: User ID
@@ -2401,6 +2625,10 @@ class StripeService:
                 f"from {current_tier} to tier {new_tier} (price_id: {request.new_price_id})"
             )
 
+            # Generate a timestamp to mark when this endpoint handled the allowance.
+            # Webhook handlers will check this to avoid double-resetting.
+            allowance_handled_at = datetime.now(UTC).isoformat()
+
             # Update the subscription with the new price
             # proration_behavior='create_prorations' will credit the unused time
             updated_subscription = stripe.Subscription.modify(
@@ -2416,6 +2644,9 @@ class StripeService:
                     "user_id": str(user_id),
                     "product_id": request.new_product_id,
                     "tier": new_tier,
+                    # Signal to webhook handlers that allowance was already reset by this endpoint.
+                    "allowance_handled_at": allowance_handled_at,
+                    "allowance_handled_by": "downgrade_subscription",
                 },
             )
 
@@ -2467,20 +2698,49 @@ class StripeService:
                 }
             ).eq("user_id", user_id).execute()
 
-            # Update subscription allowance to new tier's allowance
-            # Business decision: On downgrade, user's allowance is reset to the lower tier amount.
-            # The user receives prorated credit via Stripe for unused subscription time.
-            # This ensures allowance matches the tier being paid for going forward.
+            # =====================================================================
+            # PRORATION FIX: SET allowance to new tier level, do NOT add difference
+            # =====================================================================
+            # On downgrade, subscription_allowance is REPLACED with the new tier's
+            # (lower) allowance. Stripe credits the monetary difference; we reset
+            # the credit allowance to match the new tier.
             from src.db.credit_transactions import TransactionType, log_credit_transaction
             from src.db.subscription_products import get_allowance_from_tier
             from src.db.users import get_user_by_id as get_user_fresh
             from src.db.users import reset_subscription_allowance
 
             new_allowance = get_allowance_from_tier(new_tier)
+            old_tier_allowance = get_allowance_from_tier(current_tier)
+
             if new_allowance > 0:
-                # Get current balance for audit logging
+                # Get current balance for audit logging (this is what the user has remaining)
                 user_fresh = get_user_fresh(user_id)
-                old_allowance = user_fresh.get("subscription_allowance", 0) if user_fresh else 0
+                old_remaining_allowance = (
+                    float(user_fresh.get("subscription_allowance", 0)) if user_fresh else 0.0
+                )
+                purchased_credits = (
+                    float(user_fresh.get("purchased_credits", 0)) if user_fresh else 0.0
+                )
+
+                # Calculate how much of the old allowance was used
+                old_used = max(0.0, old_tier_allowance - old_remaining_allowance)
+
+                # Calculate what is being forfeited (unused old allowance exceeding new tier).
+                # Design decision: on downgrade, we only forfeit the excess above the new
+                # tier's allowance. The user keeps the new tier's full capacity as their
+                # starting balance, so they are never worse off than a fresh subscriber on
+                # the lower tier. Purchased credits are never touched by this calculation.
+                forfeited_allowance = max(0.0, old_remaining_allowance - new_allowance)
+
+                logger.info(
+                    f"Proration calculation for user {user_id} downgrade {current_tier} -> {new_tier}: "
+                    f"old_tier_allowance=${old_tier_allowance}, "
+                    f"old_remaining=${old_remaining_allowance}, "
+                    f"old_used=${old_used}, "
+                    f"forfeited=${forfeited_allowance}, "
+                    f"new_allowance=${new_allowance}, "
+                    f"purchased_credits=${purchased_credits} (unchanged)"
+                )
 
                 # Reset allowance to new tier's amount (matches what user is now paying for)
                 reset_result = reset_subscription_allowance(user_id, new_allowance, new_tier)
@@ -2489,23 +2749,36 @@ class StripeService:
                     raise Exception("Failed to update subscription allowance")
 
                 logger.info(
-                    f"Updated allowance to ${new_allowance} for user {user_id} ({new_tier} tier)"
+                    f"Allowance SET to ${new_allowance} for user {user_id} ({new_tier} tier). "
+                    f"Previous remaining ${old_remaining_allowance} was replaced (not carried over)."
                 )
 
-                # Log audit trail for subscription downgrade
+                # Log detailed audit trail for subscription downgrade
                 log_credit_transaction(
                     user_id=user_id,
-                    amount=new_allowance - old_allowance,
+                    amount=new_allowance - old_remaining_allowance,
                     transaction_type=TransactionType.SUBSCRIPTION_DOWNGRADE,
-                    description=f"Subscription downgraded from {current_tier} to {new_tier}",
-                    balance_before=old_allowance,
-                    balance_after=new_allowance,
+                    description=(
+                        f"Subscription downgraded from {current_tier} to {new_tier}. "
+                        f"Allowance SET to ${new_allowance} (not incremented). "
+                        f"Forfeited ${forfeited_allowance} unused from old tier."
+                    ),
+                    balance_before=old_remaining_allowance + purchased_credits,
+                    balance_after=new_allowance + purchased_credits,
                     metadata={
                         "from_tier": current_tier,
                         "to_tier": new_tier,
+                        "old_tier_allowance": old_tier_allowance,
+                        "old_remaining_allowance": old_remaining_allowance,
+                        "old_used_allowance": old_used,
+                        "forfeited_allowance": forfeited_allowance,
+                        "new_allowance": new_allowance,
+                        "purchased_credits_unchanged": purchased_credits,
+                        "proration_method": "set_not_increment",
                         "subscription_id": updated_subscription.id,
                         "product_id": request.new_product_id,
                         "price_id": request.new_price_id,
+                        "allowance_handled_at": allowance_handled_at,
                     },
                     created_by="system:subscription_downgrade",
                 )
