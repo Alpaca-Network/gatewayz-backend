@@ -14,12 +14,25 @@ from src.schemas import (
     UserProfileUpdate,
 )
 from src.security.deps import get_api_key
+from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Per-endpoint rate limits
+_balance_rate_limit = create_endpoint_rate_limit(
+    endpoint_name="user_balance",
+    max_requests=60,
+    window_seconds=60,
+)
+_credit_transactions_rate_limit = create_endpoint_rate_limit(
+    endpoint_name="user_credit_transactions",
+    max_requests=30,
+    window_seconds=60,
+)
 
 
 # Backwards compatibility wrappers for tests to patch
@@ -64,7 +77,10 @@ def get_transaction_summary(*args, **kwargs):
 
 
 @router.get("/user/balance", tags=["authentication"])
-async def get_user_balance(api_key: str = Depends(get_api_key)):
+async def get_user_balance(
+    api_key: str = Depends(get_api_key),
+    _rl: None = Depends(_balance_rate_limit),
+):
     try:
         user = get_user(api_key)
         if not user:
@@ -439,6 +455,7 @@ async def get_credit_transactions_endpoint(
     offset: int = 0,
     transaction_type: str = None,
     api_key: str = Depends(get_api_key),
+    _rl: None = Depends(_credit_transactions_rate_limit),
 ):
     """
     Get credit transaction history for the authenticated user
