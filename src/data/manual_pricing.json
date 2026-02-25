@@ -1715,6 +1715,30 @@
       "pricing_model": "per_minute"
     }
   },
+  "image_pricing": {
+    "deepinfra": {
+      "stable-diffusion-3.5-large": {"per_image": 0.035},
+      "stable-diffusion-3.5-medium": {"per_image": 0.02},
+      "stabilityai/sd3.5": {"per_image": 0.035},
+      "stabilityai/sd3.5-large": {"per_image": 0.035},
+      "stabilityai/sd3.5-medium": {"per_image": 0.02},
+      "default": {"per_image": 0.025}
+    },
+    "fal": {
+      "flux/schnell": {"per_image": 0.003},
+      "flux/dev": {"per_image": 0.025},
+      "flux-pro": {"per_image": 0.05},
+      "fal-ai/flux/schnell": {"per_image": 0.003},
+      "fal-ai/flux/dev": {"per_image": 0.025},
+      "fal-ai/flux-pro": {"per_image": 0.05},
+      "default": {"per_image": 0.025}
+    },
+    "google-vertex": {
+      "imagegeneration@006": {"per_image": 0.02},
+      "imagen-3.0-generate-001": {"per_image": 0.04},
+      "default": {"per_image": 0.03}
+    }
+  },
   "_metadata": {
     "last_updated": "2026-01-26",
     "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",

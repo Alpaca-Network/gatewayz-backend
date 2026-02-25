@@ -5,7 +5,7 @@ Tracks all credit additions and deductions with full audit trail
 """
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import (
@@ -667,3 +667,56 @@ def get_transaction_summary(
             "transaction_count_by_direction": {"credits": 0, "charges": 0},
             "error": str(e),
         }
+
+
+def get_admin_daily_grant_total(admin_user_id: int | str) -> float:
+    """
+    Get the total amount of ADMIN_CREDIT grants issued by a specific admin
+    in the last 24 hours.
+
+    This is used to enforce a daily rolling window limit on admin credit grants.
+
+    Args:
+        admin_user_id: The admin's user ID (matched against metadata->admin_user_id
+                       or created_by field).
+
+    Returns:
+        Total amount granted in the last 24 hours (positive float).
+    """
+    try:
+        client = get_supabase_client()
+
+        cutoff = (datetime.now(UTC) - timedelta(hours=24)).isoformat()
+
+        # Query ADMIN_CREDIT transactions from the last 24 hours
+        # Filter by created_by which stores "admin:{admin_id}"
+        created_by_value = f"admin:{admin_user_id}"
+
+        result = (
+            client.table("credit_transactions")
+            .select("amount")
+            .eq("transaction_type", TransactionType.ADMIN_CREDIT)
+            .eq("created_by", created_by_value)
+            .gte("created_at", cutoff)
+            .gt("amount", 0)
+            .execute()
+        )
+
+        transactions = result.data or []
+        total = sum(float(t.get("amount", 0)) for t in transactions)
+
+        logger.debug(
+            f"Admin {admin_user_id} has granted {total} credits in the last 24 hours "
+            f"({len(transactions)} transactions)"
+        )
+
+        return total
+
+    except Exception as e:
+        logger.error(
+            f"Error querying admin daily grant total for admin {admin_user_id}: {e}",
+            exc_info=True,
+        )
+        # Fail closed: return infinity so the daily-limit check will reject the grant.
+        # This prevents unlimited grants if the audit query is broken.
+        return float("inf")

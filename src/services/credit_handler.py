@@ -315,6 +315,7 @@ async def handle_credits_and_usage(
                     "cost_usd": 0.0,
                     "is_trial": True,
                     "endpoint": endpoint,
+                    "request_id": request_id,
                 },
                 True,
             )
@@ -355,6 +356,7 @@ async def handle_credits_and_usage(
                         "endpoint": endpoint,
                         "is_streaming": is_streaming,
                         "attempt_number": attempt,
+                        "request_id": request_id,
                     },
                     request_id,
                 )

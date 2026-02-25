@@ -14,12 +14,25 @@ from src.schemas import (
     UserProfileUpdate,
 )
 from src.security.deps import get_api_key
+from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Per-endpoint rate limits
+_balance_rate_limit = create_endpoint_rate_limit(
+    endpoint_name="user_balance",
+    max_requests=60,
+    window_seconds=60,
+)
+_credit_transactions_rate_limit = create_endpoint_rate_limit(
+    endpoint_name="user_credit_transactions",
+    max_requests=30,
+    window_seconds=60,
+)
 
 
 # Backwards compatibility wrappers for tests to patch
@@ -64,7 +77,10 @@ def get_transaction_summary(*args, **kwargs):
 
 
 @router.get("/user/balance", tags=["authentication"])
-async def get_user_balance(api_key: str = Depends(get_api_key)):
+async def get_user_balance(
+    api_key: str = Depends(get_api_key),
+    _rl: None = Depends(_balance_rate_limit),
+):
     try:
         user = get_user(api_key)
         if not user:
@@ -439,6 +455,7 @@ async def get_credit_transactions_endpoint(
     offset: int = 0,
     transaction_type: str = None,
     api_key: str = Depends(get_api_key),
+    _rl: None = Depends(_credit_transactions_rate_limit),
 ):
     """
     Get credit transaction history for the authenticated user
@@ -458,7 +475,7 @@ async def get_credit_transactions_endpoint(
         api_key: Authenticated user's API key
 
     Returns:
-        List of credit transactions with running balance
+        List of credit transactions (sanitized for user consumption)
     """
     try:
         user = get_user(api_key)
@@ -475,6 +492,9 @@ async def get_credit_transactions_endpoint(
         # Get summary
         summary = get_transaction_summary(user_id)
 
+        # Sanitize metadata: only expose safe, user-relevant fields
+        safe_metadata_keys = {"model", "endpoint"}
+
         return {
             "transactions": [
                 {
@@ -482,11 +502,12 @@ async def get_credit_transactions_endpoint(
                     "amount": float(txn["amount"]),
                     "transaction_type": txn["transaction_type"],
                     "description": txn.get("description", ""),
-                    "balance_before": float(txn["balance_before"]),
-                    "balance_after": float(txn["balance_after"]),
                     "created_at": txn["created_at"],
-                    "payment_id": txn.get("payment_id"),
-                    "metadata": txn.get("metadata", {}),
+                    "metadata": {
+                        k: v
+                        for k, v in (txn.get("metadata") or {}).items()
+                        if k in safe_metadata_keys
+                    },
                 }
                 for txn in transactions
             ],
