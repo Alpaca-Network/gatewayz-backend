@@ -509,6 +509,7 @@ def add_credits_to_user(
     description: str = "Credits added",
     payment_id: int | None = None,
     metadata: dict | None = None,
+    created_by: str | None = None,
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction.
@@ -522,6 +523,7 @@ def add_credits_to_user(
         description: Description of the transaction
         payment_id: Optional payment ID if this is from a payment
         metadata: Optional metadata dictionary
+        created_by: Optional identifier of who created the transaction (e.g. "admin:123")
     """
     if credits <= 0:
         raise ValueError("Credits must be positive")
@@ -598,6 +600,7 @@ def add_credits_to_user(
                 "purchased_before": purchased_before,
                 "purchased_after": purchased_after,
             },
+            created_by=created_by,
         )
 
         logger.info(

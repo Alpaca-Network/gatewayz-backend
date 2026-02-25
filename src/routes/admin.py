@@ -4,8 +4,13 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from src.config.config import Config
 from src.db.chat_completion_requests import get_chat_completion_requests_by_api_key
-from src.db.credit_transactions import get_all_transactions, get_transaction_summary
+from src.db.credit_transactions import (
+    get_admin_daily_grant_total,
+    get_all_transactions,
+    get_transaction_summary,
+)
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
 from src.db.trials import get_trial_analytics
 from src.db.users import (
@@ -100,12 +105,40 @@ async def create_api_key(request: UserRegistrationRequest):
 @router.post("/admin/add_credits", tags=["admin"])
 async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(require_admin)):
     try:
+        # --- Safety controls: per-transaction cap and daily rolling limit ---
+        max_single_grant = Config.ADMIN_MAX_CREDIT_GRANT
+        daily_limit = Config.ADMIN_DAILY_GRANT_LIMIT
+        admin_id = admin_user.get("id")
+
+        if req.credits > max_single_grant:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Credit grant amount ${req.credits:.2f} exceeds the maximum single grant "
+                    f"limit of ${max_single_grant:.2f}. Contact a super-admin to increase "
+                    f"the ADMIN_MAX_CREDIT_GRANT limit."
+                ),
+            )
+
+        daily_total = await asyncio.to_thread(get_admin_daily_grant_total, admin_id)
+        remaining = daily_limit - daily_total
+        if daily_total + req.credits > daily_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"This grant of ${req.credits:.2f} would exceed your 24-hour admin grant "
+                    f"limit of ${daily_limit:.2f}. You have already granted ${daily_total:.2f} "
+                    f"in the last 24 hours (${remaining:.2f} remaining). Contact a super-admin "
+                    f"to increase the ADMIN_DAILY_GRANT_LIMIT."
+                ),
+            )
+
         user = await asyncio.to_thread(get_user, req.api_key)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # Build description with reason if provided
-        description = req.reason if req.reason else "Admin credit adjustment"
+        # reason is now required (min 10 chars, enforced by Pydantic schema)
+        description = req.reason
 
         # Add credits to a user account with description
         await asyncio.to_thread(
@@ -114,9 +147,20 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
             credits=req.credits,
             transaction_type="admin_credit",
             description=description,
+            metadata={
+                "reason": req.reason,
+                "admin_user_id": admin_id,
+                "admin_username": admin_user.get("username"),
+            },
+            created_by=f"admin:{admin_id}",
         )
 
         updated_user = await asyncio.to_thread(get_user, req.api_key)
+
+        logger.info(
+            f"Admin {admin_user.get('username')} added {req.credits} credits to user "
+            f"{user.get('username', user['id'])}. Reason: {req.reason}"
+        )
 
         return {
             "status": "success",
