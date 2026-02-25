@@ -799,116 +799,267 @@ def deduct_credits(
         purchased_before = float(user_lookup.data[0].get("purchased_credits") or 0)
         balance_before = allowance_before + purchased_before
 
-        # Check sufficiency
+        # Soft pre-check: log if balance appears insufficient.
+        # The atomic stored procedure re-checks under a FOR UPDATE lock, so this
+        # Python-side read is subject to TOCTOU and is only informational.
+        # The legacy fallback path performs its own hard check below.
         if balance_before < tokens:
-            # SECURITY: Log exact amounts server-side for debugging, but do NOT
-            # expose them in the ValueError message (which may reach the HTTP response).
-            logger.warning(
-                "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+            logger.debug(
+                "Pre-check: balance appears insufficient for user %s: "
+                "balance=%.6f, required=%.6f (will be re-verified atomically)",
                 user_id,
                 balance_before,
                 tokens,
             )
-            raise ValueError("Insufficient credits. Please add credits to continue.")
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
         from_allowance = min(allowance_before, tokens)
         from_purchased = tokens - from_allowance
 
-        allowance_after = allowance_before - from_allowance
-        purchased_after = purchased_before - from_purchased
-        balance_after = allowance_after + purchased_after
+        # Extract request_id from metadata if present (for idempotency / tracing)
+        request_id = (metadata or {}).get("request_id")
 
-        # Use optimistic locking on both fields: update only if neither has changed
-        # This prevents race conditions where multiple requests deduct simultaneously
-        with track_database_query(table="users", operation="update"):
-            result = (
-                client.table("users")
-                .update(
-                    {
-                        "subscription_allowance": allowance_after,
-                        "purchased_credits": purchased_after,
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    }
-                )
-                .eq("id", user_id)
-                .eq("subscription_allowance", allowance_before)  # Optimistic lock
-                .eq("purchased_credits", purchased_before)  # Optimistic lock
-                .execute()
+        # ===================================================================
+        # ATOMIC PATH: Try stored procedure first (single-transaction guarantee)
+        # The atomic_deduct_credits RPC updates the user balance AND inserts the
+        # credit_transactions record in a single PostgreSQL transaction. If either
+        # fails, both are rolled back -- no more "vanishing money" bug.
+        # ===================================================================
+        used_atomic_path = False
+        try:
+            rpc_params = {
+                "p_user_id": user_id,
+                "p_tokens_amount": float(tokens),
+                "p_from_allowance": float(from_allowance),
+                "p_from_purchased": float(from_purchased),
+                "p_transaction_type": TransactionType.API_USAGE,
+                "p_description": description,
+                "p_metadata": metadata or {},
+            }
+            if request_id:
+                rpc_params["p_request_id"] = str(request_id)
+
+            with track_database_query(table="users", operation="rpc_atomic_deduct"):
+                rpc_result = client.rpc("atomic_deduct_credits", rpc_params).execute()
+
+            if rpc_result.data is not None:
+                # RPC returned a result -- parse the JSONB response
+                result_data = rpc_result.data
+                # Supabase may return the JSONB directly as a dict or as a single-element list
+                if isinstance(result_data, list) and len(result_data) > 0:
+                    result_data = result_data[0]
+
+                if isinstance(result_data, dict) and result_data.get("success") is True:
+                    used_atomic_path = True
+                    transaction_id = result_data.get("transaction_id", "unknown")
+                    new_allowance = float(result_data.get("new_allowance", 0))
+                    new_purchased = float(result_data.get("new_purchased", 0))
+                    new_balance = float(result_data.get("new_balance", 0))
+
+                    logger.info(
+                        "ATOMIC deducted $%s from user %s. Balance: $%s → $%s "
+                        "(allowance: $%s → $%s, purchased: $%s → $%s). Transaction: %s",
+                        sanitize_for_logging(f"{tokens:.6f}"),
+                        sanitize_for_logging(str(user_id)),
+                        sanitize_for_logging(f"{balance_before:.6f}"),
+                        sanitize_for_logging(f"{new_balance:.6f}"),
+                        sanitize_for_logging(f"{allowance_before:.6f}"),
+                        sanitize_for_logging(f"{new_allowance:.6f}"),
+                        sanitize_for_logging(f"{purchased_before:.6f}"),
+                        sanitize_for_logging(f"{new_purchased:.6f}"),
+                        transaction_id,
+                    )
+                elif isinstance(result_data, dict):
+                    # RPC returned an error result (e.g. insufficient_credits, concurrent mod)
+                    rpc_error = result_data.get("error", "unknown_rpc_error")
+                    if rpc_error == "insufficient_credits":
+                        rpc_balance = result_data.get("new_balance")
+                        balance_rounded = (
+                            round(float(rpc_balance), 2)
+                            if rpc_balance is not None
+                            else round(balance_before, 2)
+                        )
+                        required_rounded = round(tokens, 2)
+                        raise ValueError(
+                            f"Insufficient credits. Current balance: ~${balance_rounded:.2f}, "
+                            f"Required: ~${required_rounded:.2f}. Please add credits to continue."
+                        )
+                    elif rpc_error == "user_not_found":
+                        raise ValueError("User with API key not found")
+                    elif rpc_error in (
+                        "insufficient_allowance",
+                        "insufficient_purchased_credits",
+                    ):
+                        # Component-level balance check failed -- the RPC has
+                        # precise knowledge of allowance vs purchased breakdown,
+                        # so we must honour its verdict rather than falling back
+                        # to the legacy path which could compute a different split.
+                        rpc_balance = result_data.get("new_balance")
+                        balance_rounded = (
+                            round(float(rpc_balance), 2)
+                            if rpc_balance is not None
+                            else round(balance_before, 2)
+                        )
+                        required_rounded = round(tokens, 2)
+                        logger.warning(
+                            "Atomic deduct RPC component check failed ('%s') for user %s. "
+                            "Balance: $%.2f, Required: $%.2f",
+                            rpc_error,
+                            sanitize_for_logging(str(user_id)),
+                            balance_rounded,
+                            required_rounded,
+                        )
+                        raise ValueError(
+                            f"Insufficient credits ({rpc_error.replace('_', ' ')}). "
+                            f"Current balance: ~${balance_rounded:.2f}, "
+                            f"Required: ~${required_rounded:.2f}. Please add credits to continue."
+                        )
+                    else:
+                        # Other RPC-level errors (e.g. unexpected DB constraint
+                        # violations) -- fall through to legacy path
+                        logger.warning(
+                            "Atomic deduct RPC returned error '%s' for user %s, "
+                            "falling back to legacy two-call path.",
+                            rpc_error,
+                            sanitize_for_logging(str(user_id)),
+                        )
+                else:
+                    # Unexpected response format -- fall through to legacy path
+                    logger.warning(
+                        "Atomic deduct RPC returned unexpected format for user %s: %s, "
+                        "falling back to legacy two-call path.",
+                        sanitize_for_logging(str(user_id)),
+                        type(result_data).__name__,
+                    )
+
+        except ValueError:
+            # Re-raise ValueError (insufficient credits, user not found) -- these are business errors
+            raise
+        except Exception as rpc_exc:
+            # RPC not available (function doesn't exist, network error, etc.)
+            # This is expected before the migration is deployed.
+            logger.info(
+                "Atomic deduct RPC unavailable for user %s (%s: %s), "
+                "using legacy two-call path.",
+                sanitize_for_logging(str(user_id)),
+                type(rpc_exc).__name__,
+                sanitize_for_logging(str(rpc_exc)[:200]),
             )
 
-        if not result.data:
-            # Balance changed between our read and update (concurrent modification)
-            # Fetch current balance and fail with accurate error
-            with track_database_query(table="users", operation="select"):
-                current = (
+        # ===================================================================
+        # LEGACY PATH: Two separate calls (backwards compatibility / fallback)
+        # Used when atomic_deduct_credits RPC is not yet deployed or fails.
+        # ===================================================================
+        if not used_atomic_path:
+            # Hard check for the legacy path: no atomic lock protects us here,
+            # so we must reject early if the balance is insufficient.
+            if balance_before < tokens:
+                logger.warning(
+                    "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+                    user_id,
+                    balance_before,
+                    tokens,
+                )
+                raise ValueError("Insufficient credits. Please add credits to continue.")
+
+            allowance_after = allowance_before - from_allowance
+            purchased_after = purchased_before - from_purchased
+            balance_after = allowance_after + purchased_after
+
+            # Use optimistic locking on both fields: update only if neither has changed
+            # This prevents race conditions where multiple requests deduct simultaneously
+            with track_database_query(table="users", operation="update"):
+                result = (
                     client.table("users")
-                    .select("subscription_allowance, purchased_credits")
+                    .update(
+                        {
+                            "subscription_allowance": allowance_after,
+                            "purchased_credits": purchased_after,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
                     .eq("id", user_id)
+                    .eq("subscription_allowance", allowance_before)  # Optimistic lock
+                    .eq("purchased_credits", purchased_before)  # Optimistic lock
                     .execute()
                 )
 
-            if current.data and len(current.data) > 0:
-                current_allowance = float(current.data[0].get("subscription_allowance") or 0)
-                current_purchased = float(current.data[0].get("purchased_credits") or 0)
-                current_balance = current_allowance + current_purchased
+            if not result.data:
+                # Balance changed between our read and update (concurrent modification)
+                # Fetch current balance and fail with accurate error
+                with track_database_query(table="users", operation="select"):
+                    current = (
+                        client.table("users")
+                        .select("subscription_allowance, purchased_credits")
+                        .eq("id", user_id)
+                        .execute()
+                    )
+
+                if current.data and len(current.data) > 0:
+                    current_allowance = float(current.data[0].get("subscription_allowance") or 0)
+                    current_purchased = float(current.data[0].get("purchased_credits") or 0)
+                    current_balance = current_allowance + current_purchased
+                else:
+                    current_balance = "unknown"
+
+                # SECURITY: Log details server-side, keep ValueError generic
+                logger.warning(
+                    "Failed to update balance due to concurrent modification for user %s: "
+                    "current_balance=%s, required=%.6f",
+                    user_id,
+                    (
+                        round(current_balance, 2)
+                        if isinstance(current_balance, (int, float))
+                        else current_balance
+                    ),
+                    tokens,
+                )
+                raise ValueError(
+                    "Failed to update balance due to concurrent modification. Please retry."
+                )
+
+            # Log the transaction with breakdown (negative amount for deduction)
+            transaction_metadata = {
+                **(metadata or {}),
+                "from_allowance": from_allowance,
+                "from_purchased": from_purchased,
+                "allowance_before": allowance_before,
+                "allowance_after": allowance_after,
+                "purchased_before": purchased_before,
+                "purchased_after": purchased_after,
+            }
+
+            transaction_result = log_credit_transaction(
+                user_id=user_id,
+                amount=-tokens,  # Negative for deduction
+                transaction_type=TransactionType.API_USAGE,
+                description=description,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                metadata=transaction_metadata,
+            )
+
+            if not transaction_result:
+                logger.error(
+                    f"LEGACY: Failed to log credit transaction for user {user_id}. "
+                    f"Credits were deducted but transaction not logged. "
+                    f"Amount: -${tokens:.6f}, Balance: ${balance_before:.6f} → ${balance_after:.6f}"
+                )
+                # Don't raise here - credits were already deducted, just log the error
             else:
-                current_balance = "unknown"
-
-            # SECURITY: Log details server-side, keep ValueError generic
-            logger.warning(
-                "Failed to update balance due to concurrent modification for user %s: "
-                "current_balance=%s, required=%.6f",
-                user_id,
-                current_balance,
-                tokens,
-            )
-            raise ValueError(
-                "Failed to update balance due to concurrent modification. Please retry."
-            )
-
-        # Log the transaction with breakdown (negative amount for deduction)
-        transaction_metadata = {
-            **(metadata or {}),
-            "from_allowance": from_allowance,
-            "from_purchased": from_purchased,
-            "allowance_before": allowance_before,
-            "allowance_after": allowance_after,
-            "purchased_before": purchased_before,
-            "purchased_after": purchased_after,
-        }
-
-        transaction_result = log_credit_transaction(
-            user_id=user_id,
-            amount=-tokens,  # Negative for deduction
-            transaction_type=TransactionType.API_USAGE,
-            description=description,
-            balance_before=balance_before,
-            balance_after=balance_after,
-            metadata=transaction_metadata,
-        )
-
-        if not transaction_result:
-            logger.error(
-                f"Failed to log credit transaction for user {user_id}. "
-                f"Credits were deducted but transaction not logged. "
-                f"Amount: -${tokens:.6f}, Balance: ${balance_before:.6f} → ${balance_after:.6f}"
-            )
-            # Don't raise here - credits were already deducted, just log the error
-        else:
-            logger.info(
-                "Deducted $%s from user %s. Balance: $%s → $%s "
-                "(allowance: $%s → $%s, purchased: $%s → $%s). Transaction logged: %s",
-                sanitize_for_logging(f"{tokens:.6f}"),
-                sanitize_for_logging(str(user_id)),
-                sanitize_for_logging(f"{balance_before:.6f}"),
-                sanitize_for_logging(f"{balance_after:.6f}"),
-                sanitize_for_logging(f"{allowance_before:.6f}"),
-                sanitize_for_logging(f"{allowance_after:.6f}"),
-                sanitize_for_logging(f"{purchased_before:.6f}"),
-                sanitize_for_logging(f"{purchased_after:.6f}"),
-                transaction_result.get("id", "unknown"),
-            )
+                logger.info(
+                    "LEGACY deducted $%s from user %s. Balance: $%s → $%s "
+                    "(allowance: $%s → $%s, purchased: $%s → $%s). Transaction logged: %s",
+                    sanitize_for_logging(f"{tokens:.6f}"),
+                    sanitize_for_logging(str(user_id)),
+                    sanitize_for_logging(f"{balance_before:.6f}"),
+                    sanitize_for_logging(f"{balance_after:.6f}"),
+                    sanitize_for_logging(f"{allowance_before:.6f}"),
+                    sanitize_for_logging(f"{allowance_after:.6f}"),
+                    sanitize_for_logging(f"{purchased_before:.6f}"),
+                    sanitize_for_logging(f"{purchased_after:.6f}"),
+                    transaction_result.get("id", "unknown"),
+                )
 
         # Invalidate cache to ensure fresh credit balance on next get_user call
         invalidate_user_cache(api_key)
