@@ -6,53 +6,50 @@ What this does
 Pyroscope runs a background thread inside the FastAPI process that wakes up
 every 10 ms, captures a snapshot of every active Python call stack, and
 accumulates those snapshots into a flamegraph.  Every 15 seconds (by default)
-the accumulated flamegraph is flushed and pushed over HTTP to the Grafana Cloud
-hosted Pyroscope endpoint.
-
-No extra Railway service is required.  The only network traffic is the
-periodic HTTP push from the backend container to Grafana Cloud.
+the accumulated flamegraph is flushed and pushed over HTTP to the self-hosted
+Pyroscope service running in the railway-grafana-stack project.
 
 What you see in Grafana
 -----------------------
-1.  In the Pyroscope datasource:  a continuous flamegraph of the whole process,
-    broken down by the tags applied at the time of sampling.  Tags are:
-        endpoint    – normalised URL path  (e.g. /v1/chat/completions)
-        method      – HTTP verb            (GET, POST, …)
-        service_name – always "gatewayz-backend"
-        environment  – Railway environment (production / staging / local)
+1.  Inference Profiling dashboard — continuous flamegraph broken down by all
+    tags applied at sampling time:
+        service_name – always "gatewayz-backend"          (init_pyroscope)
+        environment  – Railway environment                 (init_pyroscope)
+        endpoint     – normalised URL path                 (observability_middleware)
+        method       – HTTP verb  (GET, POST, …)           (observability_middleware)
+        provider     – upstream provider name              (chat_handler tag_wrapper)
+        model        – model identifier                    (chat_handler tag_wrapper)
 
-2.  In Tempo's trace viewer:  every slow span has a "View Profile" button
-    (enabled via tracesToProfiles in tempo.yml).  Clicking it opens Pyroscope
-    filtered to service_name=gatewayz-backend and the exact time window of that
-    span, showing which Python functions were actually running during that
-    specific request.
+2.  Tempo trace viewer — every slow span has a "View Profile" button
+    (enabled via tracesToProfiles in grafana/provisioning/datasources/tempo.yml).
+    Clicking it opens Pyroscope filtered to service_name=gatewayz-backend
+    and the exact time window of that span, showing which Python functions
+    were running during that specific request.
 
-Why endpoint tags matter
-------------------------
-The raw flamegraph for the whole process is useful, but it mixes every route
-together.  The endpoint tag lets you ask:
-  "Which functions account for the most CPU time specifically in
-   /v1/chat/completions?"
+Why tags matter
+---------------
+Without tags the flamegraph is a single flat view of the whole process.
+With tags you can ask:
+  "Which functions burned the most CPU specifically during openrouter calls
+   to claude-3-5-sonnet?"
 vs
-  "Which functions are slow in /admin/trial/analytics?"
-...without rebuilding the service or adding manual instrumentation to routes.
+  "Is /admin/trial/analytics slow because of the DB query or Redis?"
 
 Sampling vs Sentry profiling
 -----------------------------
-Sentry already has profiles_sample_rate=0.05 (5 % of transactions).
-That profile only fires when Sentry samples a transaction, which means the rare
-P99 slow request is very unlikely to be captured.
-Pyroscope samples EVERY 10 ms regardless — it always catches outliers.
+Sentry has profiles_sample_rate=0.05 (5 % of transactions).  That profile
+only fires when Sentry samples a transaction — the rare P99 slow request is
+very unlikely to be captured.  Pyroscope samples EVERY 10 ms regardless.
 
-Environment variables
----------------------
-PYROSCOPE_ENABLED           Set to "true" to activate.  Defaults to "false"
-                             so local/test environments are never affected.
-PYROSCOPE_SERVER_ADDRESS    Full push URL from Grafana Cloud → Connections →
-                             Pyroscope.  Example:
-                             https://profiles-prod-006.grafana.net
-PYROSCOPE_AUTH_USER         Grafana Cloud numeric instance ID.
-PYROSCOPE_AUTH_PASSWORD     Grafana Cloud API token (profiles:write scope).
+Environment variables (set on the backend Railway service)
+----------------------------------------------------------
+PYROSCOPE_ENABLED           Set to "true" to activate.  Defaults to "false".
+PYROSCOPE_SERVER_ADDRESS    Public Railway domain of the Pyroscope service.
+                             Railway dashboard → Pyroscope service → Generate Domain.
+                             Example: https://pyroscope-production-xxxx.up.railway.app
+PYROSCOPE_AUTH_USER         Optional. Not needed for self-hosted Pyroscope
+                             (only required if using Grafana Cloud hosted profiling).
+PYROSCOPE_AUTH_PASSWORD     Optional. Same as above.
 """
 
 import logging
