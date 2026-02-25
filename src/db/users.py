@@ -799,17 +799,18 @@ def deduct_credits(
         purchased_before = float(user_lookup.data[0].get("purchased_credits") or 0)
         balance_before = allowance_before + purchased_before
 
-        # Check sufficiency
+        # Soft pre-check: log if balance appears insufficient.
+        # The atomic stored procedure re-checks under a FOR UPDATE lock, so this
+        # Python-side read is subject to TOCTOU and is only informational.
+        # The legacy fallback path performs its own hard check below.
         if balance_before < tokens:
-            # SECURITY: Log exact amounts server-side for debugging, but do NOT
-            # expose them in the ValueError message (which may reach the HTTP response).
-            logger.warning(
-                "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+            logger.debug(
+                "Pre-check: balance appears insufficient for user %s: "
+                "balance=%.6f, required=%.6f (will be re-verified atomically)",
                 user_id,
                 balance_before,
                 tokens,
             )
-            raise ValueError("Insufficient credits. Please add credits to continue.")
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
         from_allowance = min(allowance_before, tokens)
@@ -950,6 +951,17 @@ def deduct_credits(
         # Used when atomic_deduct_credits RPC is not yet deployed or fails.
         # ===================================================================
         if not used_atomic_path:
+            # Hard check for the legacy path: no atomic lock protects us here,
+            # so we must reject early if the balance is insufficient.
+            if balance_before < tokens:
+                logger.warning(
+                    "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+                    user_id,
+                    balance_before,
+                    tokens,
+                )
+                raise ValueError("Insufficient credits. Please add credits to continue.")
+
             allowance_after = allowance_before - from_allowance
             purchased_after = purchased_before - from_purchased
             balance_after = allowance_after + purchased_after
@@ -995,7 +1007,11 @@ def deduct_credits(
                     "Failed to update balance due to concurrent modification for user %s: "
                     "current_balance=%s, required=%.6f",
                     user_id,
-                    round(current_balance, 2) if isinstance(current_balance, (int, float)) else current_balance,
+                    (
+                        round(current_balance, 2)
+                        if isinstance(current_balance, (int, float))
+                        else current_balance
+                    ),
                     tokens,
                 )
                 raise ValueError(
