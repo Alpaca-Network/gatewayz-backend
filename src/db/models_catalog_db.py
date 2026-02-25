@@ -32,7 +32,7 @@ import logging
 import time
 from collections import defaultdict
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from src.config.supabase_config import get_client_for_query, get_supabase_client
@@ -807,15 +807,15 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
             continue
 
         try:
-            input_price = float(prompt) if prompt is not None else 0
-            output_price = float(completion) if completion is not None else 0
-        except (ValueError, TypeError):
+            input_price = Decimal(str(prompt)) if prompt is not None else Decimal("0")
+            output_price = Decimal(str(completion)) if completion is not None else Decimal("0")
+        except (ValueError, TypeError, InvalidOperation):
             continue
 
         row = {
             "model_id": model_id,
-            "price_per_input_token": input_price,
-            "price_per_output_token": output_price,
+            "price_per_input_token": str(input_price),
+            "price_per_output_token": str(output_price),
             "pricing_source": "provider",
         }
 
@@ -823,15 +823,15 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
         image = pricing_raw.get("image")
         if image is not None:
             try:
-                row["price_per_image_token"] = float(image)
-            except (ValueError, TypeError):
+                row["price_per_image_token"] = str(Decimal(str(image)))
+            except (ValueError, TypeError, InvalidOperation):
                 pass
 
         request_price = pricing_raw.get("request")
         if request_price is not None:
             try:
-                row["price_per_request"] = float(request_price)
-            except (ValueError, TypeError):
+                row["price_per_request"] = str(Decimal(str(request_price)))
+            except (ValueError, TypeError, InvalidOperation):
                 pass
 
         # Classify pricing type
