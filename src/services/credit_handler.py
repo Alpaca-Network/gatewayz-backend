@@ -224,7 +224,7 @@ async def handle_credits_and_usage(
         elapsed_ms: Request processing time in milliseconds
         endpoint: API endpoint for logging (default: /v1/chat/completions)
         is_streaming: Whether this is a streaming request (affects retry behavior)
-        request_id: Optional request correlation ID for tracing billing to specific API requests
+        request_id: Optional UUID idempotency key to prevent duplicate deductions on retries
 
     Returns:
         float: Calculated cost in USD
@@ -384,6 +384,7 @@ async def handle_credits_and_usage(
                         "attempt_number": attempt,
                         "request_id": request_id,
                     },
+                    request_id,
                 )
 
                 # CRITICAL: Once deduct_credits succeeds, mark as successful immediately

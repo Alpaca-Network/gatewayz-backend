@@ -904,7 +904,7 @@ async def _handle_credits_and_usage(
 
     Args:
         is_streaming: Whether this is a streaming request (affects retry behavior)
-        request_id: Optional request correlation ID for tracing billing to specific API requests
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
 
     Returns: cost (float)
     """
@@ -946,7 +946,7 @@ async def _handle_credits_and_usage_with_fallback(
     3. Never raises - failures are tracked for manual reconciliation
 
     Args:
-        request_id: Optional request correlation ID for tracing billing to specific API requests
+        request_id: Optional UUID idempotency key to prevent duplicate deductions
 
     Returns: tuple[float, bool] - (cost, success)
     """
