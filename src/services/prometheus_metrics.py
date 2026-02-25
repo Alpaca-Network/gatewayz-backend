@@ -476,7 +476,6 @@ def record_token_estimation_accuracy(
         pass  # Never break the main flow
 
 
-
 # ==================== Database Metrics ====================
 database_query_count = get_or_create_metric(
     Counter,
