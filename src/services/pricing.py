@@ -5,6 +5,7 @@ Handles model pricing calculations and credit cost computation
 
 import asyncio
 import logging
+import re
 import threading
 import time
 from typing import Any
@@ -18,6 +19,254 @@ logger = logging.getLogger(__name__)
 _pricing_cache: dict[str, dict[str, Any]] = {}
 _pricing_cache_ttl = 900  # 15 minutes TTL for live pricing
 _pricing_cache_lock = threading.RLock()  # Reentrant lock to prevent race conditions
+
+
+# ---------------------------------------------------------------------------
+# Reverse-transform lookup: maps provider-specific (transformed) model IDs
+# back to their canonical/base form so pricing lookups succeed.
+#
+# Built lazily from model_transformations._MODEL_ID_MAPPINGS on first call.
+# Key = transformed (native) model ID (lowercased)
+# Value = canonical model ID that the user originally supplied (the mapping *key*
+#         with an org/ prefix, i.e. the one most likely stored in the pricing DB).
+# ---------------------------------------------------------------------------
+_reverse_transform_cache: dict[str, str] | None = None
+_reverse_transform_cache_lock = threading.Lock()
+
+# Regex for recognised version suffixes after "@" (e.g. "@latest", "@20240620", "@1").
+# Only these patterns are stripped; arbitrary text like "user@model" is left intact.
+_VERSION_SUFFIX_RE = re.compile(
+    r"^(?:latest|\d{8}|\d{1,10})$"  # "latest", 8-digit date (YYYYMMDD), or digit-only versions
+)
+
+
+def _build_reverse_transform_lookup() -> dict[str, str]:
+    """
+    Build a reverse lookup from provider-native model IDs back to canonical IDs.
+
+    Uses _MODEL_ID_MAPPINGS from model_transformations.py.  For each provider
+    mapping (canonical -> native), we store native -> canonical so that when a
+    pricing lookup receives a transformed ID we can recover the original.
+
+    Priority rules when multiple canonical IDs map to the same native ID:
+      - Prefer entries that contain an org/ prefix (e.g. "deepseek-ai/deepseek-v3")
+        over bare model names (e.g. "deepseek-v3"), because the org-prefixed form
+        is what the pricing database stores.
+      - Among entries with the same prefix status, the first one wins (stable).
+    """
+    try:
+        from src.services.model_transformations import _MODEL_ID_MAPPINGS
+    except ImportError:
+        logger.warning("Could not import _MODEL_ID_MAPPINGS for reverse transform lookup")
+        return {}
+
+    reverse: dict[str, str] = {}
+
+    for _provider, mapping in _MODEL_ID_MAPPINGS.items():
+        for canonical, native in mapping.items():
+            native_lower = native.lower()
+            # Skip identity mappings (canonical == native) -- they don't help
+            if canonical.lower() == native_lower:
+                continue
+
+            existing = reverse.get(native_lower)
+            if existing is None:
+                reverse[native_lower] = canonical
+            else:
+                # Prefer the entry with an org/ prefix for better DB matching
+                existing_has_org = "/" in existing
+                candidate_has_org = "/" in canonical
+                if candidate_has_org and not existing_has_org:
+                    reverse[native_lower] = canonical
+
+    logger.info(
+        "[PRICING] Built reverse-transform lookup with %d entries from %d providers",
+        len(reverse),
+        len(_MODEL_ID_MAPPINGS),
+    )
+    return reverse
+
+
+def _get_reverse_transform_lookup() -> dict[str, str]:
+    """Return the cached reverse-transform lookup, building it on first access.
+
+    Uses double-checked locking to ensure thread-safe lazy initialization
+    without acquiring the lock on every call after the cache is built.
+    """
+    global _reverse_transform_cache
+    if _reverse_transform_cache is None:
+        with _reverse_transform_cache_lock:
+            # Double-check after acquiring the lock to avoid redundant builds
+            if _reverse_transform_cache is None:
+                _reverse_transform_cache = _build_reverse_transform_lookup()
+    return _reverse_transform_cache
+
+
+def normalize_model_id_for_pricing(model_id: str) -> str:
+    """
+    Normalize a potentially provider-transformed model ID back to its canonical
+    form for pricing lookup.
+
+    This solves the critical billing bug where transformed IDs (e.g.
+    "accounts/fireworks/models/deepseek-v3p1") cannot be found in the pricing
+    database, causing fallback to the default $0.00002/token rate.
+
+    Normalization strategy (applied in order):
+      1. Exact reverse-lookup from the _MODEL_ID_MAPPINGS table.
+      2. Pattern-based stripping of known provider prefixes/suffixes:
+         - Fireworks:  "accounts/fireworks/models/X" -> extract X
+         - Cloudflare: "@cf/org/model" -> "org/model"
+         - Google:     "@google/models/X" -> "google/X"
+         - HuggingFace suffixes: ":hf-inference", ":openai", ":anthropic"
+         - Onerouter version suffixes: "@latest", "@20240620", etc.
+      3. Model alias resolution via apply_model_alias().
+
+    The returned ID is suitable for cache keys and database queries.
+
+    Args:
+        model_id: The model ID that may have been transformed for a provider.
+
+    Returns:
+        The canonical/base model ID for pricing lookup.
+    """
+    if not model_id:
+        return model_id
+
+    original = model_id
+    model_id_lower = model_id.lower()
+
+    # ------------------------------------------------------------------
+    # Step 1: Exact reverse-lookup from the transformation table.
+    # This is the most reliable method -- it uses the same mappings that
+    # transform_model_id() applied in the first place.
+    # ------------------------------------------------------------------
+    reverse_lookup = _get_reverse_transform_lookup()
+    reverse_match = reverse_lookup.get(model_id_lower)
+    if reverse_match:
+        logger.info(
+            "[PRICING_NORMALIZE] Reverse-lookup: '%s' -> '%s'",
+            original,
+            reverse_match,
+        )
+        # Apply alias resolution on the result to catch any further
+        # normalization (e.g. bare model names -> org/model).
+        final = apply_model_alias(reverse_match) or reverse_match
+        return final
+
+    # ------------------------------------------------------------------
+    # Step 2: Pattern-based stripping of known provider prefixes/suffixes.
+    # These catch cases not covered by the static mapping table.
+    # ------------------------------------------------------------------
+    normalized = model_id
+
+    # 2a. Fireworks: "accounts/fireworks/models/X" -> X
+    if normalized.lower().startswith("accounts/fireworks/models/"):
+        stripped = normalized[len("accounts/fireworks/models/") :]
+        logger.debug(
+            "[PRICING_NORMALIZE] Stripped Fireworks prefix: '%s' -> '%s'",
+            original,
+            stripped,
+        )
+        normalized = stripped
+
+    # 2b. Cloudflare Workers AI: "@cf/org/model" -> "org/model"
+    elif normalized.lower().startswith("@cf/"):
+        stripped = normalized[len("@cf/") :]
+        logger.debug(
+            "[PRICING_NORMALIZE] Stripped Cloudflare @cf/ prefix: '%s' -> '%s'",
+            original,
+            stripped,
+        )
+        normalized = stripped
+
+    # 2c. Google Vertex: "@google/models/X" -> "google/X"
+    elif normalized.lower().startswith("@google/models/"):
+        stripped = "google/" + normalized[len("@google/models/") :]
+        logger.debug(
+            "[PRICING_NORMALIZE] Converted Google Vertex path: '%s' -> '%s'",
+            original,
+            stripped,
+        )
+        normalized = stripped
+
+    # 2d. Clarifai: "org/app/models/model" (4-segment path) -> "org/model"
+    # Clarifai model IDs look like "openai/chat-completion/models/gpt-4o"
+    # or "anthropic/completion/models/claude-3-opus"
+    elif "/models/" in normalized and normalized.count("/") >= 3:
+        parts = normalized.split("/")
+        # Pattern: org/app/models/model-name -> org/model-name
+        models_idx = None
+        for i, part in enumerate(parts):
+            if part == "models" and i > 0 and i < len(parts) - 1:
+                models_idx = i
+                break
+        if models_idx is not None:
+            org = parts[0]
+            model_name = "/".join(parts[models_idx + 1 :])
+            stripped = f"{org}/{model_name}"
+            logger.debug(
+                "[PRICING_NORMALIZE] Stripped Clarifai path: '%s' -> '%s'",
+                original,
+                stripped,
+            )
+            normalized = stripped
+
+    # 2e. HuggingFace / provider suffixes: ":hf-inference", ":openai", ":anthropic"
+    provider_suffixes = [":hf-inference", ":openai", ":anthropic"]
+    for suffix in provider_suffixes:
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)]
+            logger.debug(
+                "[PRICING_NORMALIZE] Stripped provider suffix '%s': '%s' -> '%s'",
+                suffix,
+                original,
+                normalized,
+            )
+            break
+
+    # 2f. Onerouter / version suffixes: "@latest", "@20240620", etc.
+    # IMPORTANT: Only strip if the part after @ matches known version patterns
+    # to avoid incorrectly stripping "@" from model names like "user@model".
+    if "@" in normalized:
+        at_idx = normalized.rfind("@")
+        version_part = normalized[at_idx + 1 :]
+        if version_part and _VERSION_SUFFIX_RE.match(version_part):
+            normalized = normalized[:at_idx]
+            logger.debug(
+                "[PRICING_NORMALIZE] Stripped version suffix '@%s': '%s' -> '%s'",
+                version_part,
+                original,
+                normalized,
+            )
+
+    # 2g. OpenRouter ":free" suffix (pricing-relevant -- free models handled separately
+    # in calculate_cost, but if somehow we get here, strip it for lookup)
+    if normalized.endswith(":free"):
+        normalized = normalized[:-5]
+
+    # ------------------------------------------------------------------
+    # Step 3: Apply model alias resolution as a final pass.
+    # This catches bare model names (e.g. "deepseek-r1" -> "deepseek/deepseek-r1")
+    # and common typos/variants.
+    # ------------------------------------------------------------------
+    aliased = apply_model_alias(normalized)
+    if aliased and aliased != normalized:
+        logger.debug(
+            "[PRICING_NORMALIZE] Applied alias: '%s' -> '%s'",
+            normalized,
+            aliased,
+        )
+        normalized = aliased
+
+    if normalized != original:
+        logger.info(
+            "[PRICING_NORMALIZE] Final normalization: '%s' -> '%s'",
+            original,
+            normalized,
+        )
+
+    return normalized
+
 
 # Track models that fall back to default pricing for monitoring/alerting
 # Structure: {model_id: {"count": int, "first_seen": float, "last_seen": float, "errors": list}}
@@ -122,13 +371,34 @@ def get_default_pricing_stats() -> dict[str, Any]:
 
 
 def clear_pricing_cache(model_id: str | None = None) -> None:
-    """Clear pricing cache (for testing or explicit invalidation)"""
+    """Clear pricing cache (for testing or explicit invalidation).
+
+    When a specific model_id is provided, it is normalized first so that
+    both transformed and canonical IDs clear the same cache entry.
+    """
     global _pricing_cache
     with _pricing_cache_lock:
         if model_id:
-            if model_id in _pricing_cache:
-                del _pricing_cache[model_id]
-                logger.debug(f"Cleared pricing cache for model {model_id}")
+            # Normalize the model ID to match the cache key strategy (FIX A2)
+            # Wrap in try/except so a normalization error never prevents cache clearing.
+            try:
+                cache_key = normalize_model_id_for_pricing(model_id)
+            except Exception:
+                logger.warning(
+                    "Failed to normalize model ID '%s' during cache clear, "
+                    "falling back to raw key",
+                    model_id,
+                    exc_info=True,
+                )
+                cache_key = model_id
+            cleared = False
+            # Clear both the normalized key and the raw key (belt-and-suspenders)
+            for key in {cache_key, model_id}:
+                if key in _pricing_cache:
+                    del _pricing_cache[key]
+                    cleared = True
+            if cleared:
+                logger.debug(f"Cleared pricing cache for model {model_id} (cache_key={cache_key})")
         else:
             _pricing_cache.clear()
             logger.info("Cleared entire pricing cache")
@@ -361,14 +631,21 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
     Get pricing information for a specific model.
 
     Pricing lookup priority (UPDATED - PHASE 0):
-    1. In-memory cache (15min TTL)
-    2. Live API fetch from provider (OpenRouter, Featherless, Near AI, etc.)
+    1. In-memory cache (15min TTL) -- keyed by NORMALIZED model ID
+    2. Live API fetch from provider (DEPRECATED)
     3. Database (model_pricing table) - PHASE 0 FIX
     4. Provider API cache / JSON fallback (manual_pricing.json)
     5. Default pricing ($0.00002 per token)
 
+    IMPORTANT: Before any lookup, the model ID is normalized via
+    normalize_model_id_for_pricing() to reverse provider-specific transformations
+    (e.g. "accounts/fireworks/models/deepseek-v3p1" -> "deepseek-ai/deepseek-v3").
+    This ensures the pricing DB/cache lookup matches the canonical model ID even
+    when the caller passes a transformed (provider-native) model ID.
+
     Args:
-        model_id: The model ID (e.g., "openai/gpt-4", "anthropic/claude-3-opus")
+        model_id: The model ID (e.g., "openai/gpt-4", "anthropic/claude-3-opus",
+                  or a transformed ID like "accounts/fireworks/models/deepseek-v3p1")
 
     Returns:
         Dictionary with pricing info:
@@ -388,25 +665,18 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
             logger.debug(f"Returning default pricing for {model_id} (catalog building in progress)")
             return {"prompt": 0.00002, "completion": 0.00002, "found": False, "source": "default"}
 
+        # ---------------------------------------------------------------
+        # FIX A1: Normalize the model ID BEFORE any cache/DB lookup.
+        # This reverses provider-specific transformations so that e.g.
+        # "accounts/fireworks/models/deepseek-v3p1" is looked up as
+        # "deepseek-ai/deepseek-v3", which is what the pricing DB stores.
+        # ---------------------------------------------------------------
+        normalized_model_id = normalize_model_id_for_pricing(model_id)
+
         # Build candidate IDs for lookup (original + normalized variations)
-        candidate_ids = {model_id}
+        candidate_ids = {model_id, normalized_model_id}
 
-        # Strip provider-specific suffixes for matching
-        # HuggingFace adds :hf-inference, other providers may add similar suffixes
-        normalized_model_id = model_id
-        provider_suffixes = [":hf-inference", ":openai", ":anthropic"]
-        for suffix in provider_suffixes:
-            if normalized_model_id.endswith(suffix):
-                normalized_model_id = normalized_model_id[: -len(suffix)]
-                logger.debug(
-                    f"Normalized model ID from '{model_id}' to '{normalized_model_id}' for pricing lookup"
-                )
-                break
-
-        if normalized_model_id != model_id:
-            candidate_ids.add(normalized_model_id)
-
-        # Apply model aliases
+        # Also add the alias-resolved form if different
         aliased_model_id = apply_model_alias(normalized_model_id)
         if aliased_model_id and aliased_model_id != normalized_model_id:
             logger.info(
@@ -414,19 +684,37 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                 normalized_model_id,
                 aliased_model_id,
             )
-            normalized_model_id = aliased_model_id
-            candidate_ids.add(normalized_model_id)
+            candidate_ids.add(aliased_model_id)
+
+        # Strip provider-specific suffixes as additional candidates
+        # (kept for backward compat, though normalize_model_id_for_pricing
+        #  already handles these)
+        for suffix in [":hf-inference", ":openai", ":anthropic"]:
+            if model_id.endswith(suffix):
+                candidate_ids.add(model_id[: -len(suffix)])
+                break
 
         # Remove any empty candidates that might have been added
         candidate_ids = {cid for cid in candidate_ids if cid}
 
+        # ---------------------------------------------------------------
+        # FIX A2: Use the NORMALIZED model ID as cache key.
+        # This ensures that both "accounts/fireworks/models/deepseek-v3p1"
+        # and "deepseek-ai/deepseek-v3" hit the same cache entry, preventing
+        # redundant lookups and ensuring consistent pricing.
+        # ---------------------------------------------------------------
+        cache_key = normalized_model_id
+
         # Step 1: Check in-memory cache (fastest) - with thread safety
         with _pricing_cache_lock:
-            cache_entry = _pricing_cache.get(model_id)
+            cache_entry = _pricing_cache.get(cache_key)
             if cache_entry:
                 age = time.time() - cache_entry["timestamp"]
                 if age < _pricing_cache_ttl:
-                    logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    logger.debug(
+                        f"[CACHE HIT] Pricing for {model_id} "
+                        f"(cache_key={cache_key}, age: {age:.1f}s)"
+                    )
                     try:
                         from src.services.prometheus_metrics import pricing_cache_hits
 
@@ -436,8 +724,11 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
-                    del _pricing_cache[model_id]
-                    logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+                    del _pricing_cache[cache_key]
+                    logger.debug(
+                        f"[CACHE EXPIRED] Pricing for {model_id} "
+                        f"(cache_key={cache_key}, age: {age:.1f}s)"
+                    )
 
         # Cache miss: entry not found or expired
         try:
@@ -461,10 +752,13 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         try:
             db_pricing = _get_pricing_from_database(model_id, candidate_ids)
             if db_pricing:
-                # Cache the database result - with thread safety
+                # Cache the database result using NORMALIZED key - with thread safety
                 with _pricing_cache_lock:
-                    _pricing_cache[model_id] = {"data": db_pricing, "timestamp": time.time()}
-                logger.info(f"[DB FALLBACK] Using database pricing for {model_id}")
+                    _pricing_cache[cache_key] = {"data": db_pricing, "timestamp": time.time()}
+                logger.info(
+                    f"[DB FALLBACK] Using database pricing for {model_id} "
+                    f"(cache_key={cache_key})"
+                )
                 return db_pricing
         except Exception as e:
             logger.warning(f"Database pricing lookup failed for {model_id}: {e}")
@@ -473,9 +767,9 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         try:
             cache_pricing = _get_pricing_from_cache_fallback(model_id, candidate_ids)
             if cache_pricing:
-                # Cache the fallback result - with thread safety
+                # Cache the fallback result using NORMALIZED key - with thread safety
                 with _pricing_cache_lock:
-                    _pricing_cache[model_id] = {"data": cache_pricing, "timestamp": time.time()}
+                    _pricing_cache[cache_key] = {"data": cache_pricing, "timestamp": time.time()}
                 return cache_pricing
         except Exception as e:
             logger.warning(f"Cache fallback pricing lookup failed for {model_id}: {e}")
@@ -485,6 +779,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
         # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
         # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
+        # NOTE: Check against BOTH original and normalized IDs to catch transformed variants
         HIGH_VALUE_MODEL_PATTERNS = [
             "gpt-4",
             "gpt-5",
@@ -501,12 +796,19 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
             "mixtral-8x22b",  # Mistral high-end
         ]
 
+        # Check both original and normalized IDs against high-value patterns
+        # (the normalized ID may reveal the true model identity from a transformed ID)
         model_id_lower = model_id.lower()
-        is_high_value = any(pattern in model_id_lower for pattern in HIGH_VALUE_MODEL_PATTERNS)
+        normalized_lower = normalized_model_id.lower()
+        is_high_value = any(
+            pattern in model_id_lower or pattern in normalized_lower
+            for pattern in HIGH_VALUE_MODEL_PATTERNS
+        )
 
         if is_high_value:
             error_msg = (
                 f"HIGH_VALUE_MODEL_PRICING_MISSING: Cannot use default pricing for {model_id}. "
+                f"Normalized as: {normalized_model_id}. "
                 f"This model requires accurate pricing data to prevent significant under-billing. "
                 f"Please contact support to add pricing for this model."
             )
@@ -521,6 +823,7 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
                     level="error",
                     extras={
                         "model_id": model_id,
+                        "normalized_model_id": normalized_model_id,
                         "candidate_ids": list(candidate_ids),
                         "default_pricing_would_be": 0.00002,
                     },
@@ -537,7 +840,8 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
 
         # For non-high-value models, allow default pricing but track usage
         logger.warning(
-            f"[DEFAULT_PRICING_ALERT] Model {model_id} not found in database or cache, "
+            f"[DEFAULT_PRICING_ALERT] Model {model_id} (normalized: {normalized_model_id}) "
+            f"not found in database or cache, "
             f"using default pricing ($0.00002/token). This may under-bill for expensive models."
         )
         _track_default_pricing_usage(model_id)
@@ -563,14 +867,18 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
     Uses the same caching strategy as get_model_pricing but handles async operations natively.
 
     Pricing lookup priority (UPDATED - PHASE 0):
-    1. In-memory cache (15min TTL)
-    2. Live API fetch from provider (OpenRouter, Featherless, Near AI, etc.)
+    1. In-memory cache (15min TTL) -- keyed by NORMALIZED model ID
+    2. Live API fetch from provider (DEPRECATED)
     3. Database (model_pricing table) - PHASE 0 FIX
     4. Provider API cache / JSON fallback (manual_pricing.json)
     5. Default pricing ($0.00002 per token)
 
+    IMPORTANT: Before any lookup, the model ID is normalized via
+    normalize_model_id_for_pricing() to reverse provider-specific transformations.
+
     Args:
-        model_id: The model ID (e.g., "openai/gpt-4", "anthropic/claude-3-opus")
+        model_id: The model ID (e.g., "openai/gpt-4", "anthropic/claude-3-opus",
+                  or a transformed ID like "accounts/fireworks/models/deepseek-v3p1")
 
     Returns:
         Dictionary with pricing info
@@ -584,24 +892,18 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             logger.debug(f"Returning default pricing for {model_id} (catalog building in progress)")
             return {"prompt": 0.00002, "completion": 0.00002, "found": False, "source": "default"}
 
-        # Build candidate IDs for lookup
-        candidate_ids = {model_id}
+        # ---------------------------------------------------------------
+        # FIX A1: Normalize the model ID BEFORE any cache/DB lookup.
+        # This reverses provider-specific transformations so that e.g.
+        # "accounts/fireworks/models/deepseek-v3p1" is looked up as
+        # "deepseek-ai/deepseek-v3", which is what the pricing DB stores.
+        # ---------------------------------------------------------------
+        normalized_model_id = normalize_model_id_for_pricing(model_id)
 
-        # Strip provider-specific suffixes for matching
-        normalized_model_id = model_id
-        provider_suffixes = [":hf-inference", ":openai", ":anthropic"]
-        for suffix in provider_suffixes:
-            if normalized_model_id.endswith(suffix):
-                normalized_model_id = normalized_model_id[: -len(suffix)]
-                logger.debug(
-                    f"Normalized model ID from '{model_id}' to '{normalized_model_id}' for pricing lookup"
-                )
-                break
+        # Build candidate IDs for lookup (original + normalized variations)
+        candidate_ids = {model_id, normalized_model_id}
 
-        if normalized_model_id != model_id:
-            candidate_ids.add(normalized_model_id)
-
-        # Apply model aliases
+        # Also add the alias-resolved form if different
         aliased_model_id = apply_model_alias(normalized_model_id)
         if aliased_model_id and aliased_model_id != normalized_model_id:
             logger.info(
@@ -609,19 +911,34 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                 normalized_model_id,
                 aliased_model_id,
             )
-            normalized_model_id = aliased_model_id
-            candidate_ids.add(normalized_model_id)
+            candidate_ids.add(aliased_model_id)
+
+        # Strip provider-specific suffixes as additional candidates
+        for suffix in [":hf-inference", ":openai", ":anthropic"]:
+            if model_id.endswith(suffix):
+                candidate_ids.add(model_id[: -len(suffix)])
+                break
 
         # Remove any empty candidates
         candidate_ids = {cid for cid in candidate_ids if cid}
 
+        # ---------------------------------------------------------------
+        # FIX A2: Use the NORMALIZED model ID as cache key.
+        # This ensures that both "accounts/fireworks/models/deepseek-v3p1"
+        # and "deepseek-ai/deepseek-v3" hit the same cache entry.
+        # ---------------------------------------------------------------
+        cache_key = normalized_model_id
+
         # Step 1: Check in-memory cache (fastest) - with thread safety
         with _pricing_cache_lock:
-            cache_entry = _pricing_cache.get(model_id)
+            cache_entry = _pricing_cache.get(cache_key)
             if cache_entry:
                 age = time.time() - cache_entry["timestamp"]
                 if age < _pricing_cache_ttl:
-                    logger.debug(f"[CACHE HIT] Pricing for {model_id} (age: {age:.1f}s)")
+                    logger.debug(
+                        f"[CACHE HIT] Pricing for {model_id} "
+                        f"(cache_key={cache_key}, age: {age:.1f}s)"
+                    )
                     try:
                         from src.services.prometheus_metrics import pricing_cache_hits
 
@@ -631,8 +948,11 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                     return cache_entry["data"]
                 else:
                     # Cache expired, remove it
-                    del _pricing_cache[model_id]
-                    logger.debug(f"[CACHE EXPIRED] Pricing for {model_id} (age: {age:.1f}s)")
+                    del _pricing_cache[cache_key]
+                    logger.debug(
+                        f"[CACHE EXPIRED] Pricing for {model_id} "
+                        f"(cache_key={cache_key}, age: {age:.1f}s)"
+                    )
 
         # Cache miss: entry not found or expired
         try:
@@ -658,10 +978,13 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                 _get_pricing_from_database, model_id, candidate_ids
             )
             if db_pricing:
-                # Cache the database result - with thread safety
+                # Cache the database result using NORMALIZED key - with thread safety
                 with _pricing_cache_lock:
-                    _pricing_cache[model_id] = {"data": db_pricing, "timestamp": time.time()}
-                logger.info(f"[DB FALLBACK] Using database pricing for {model_id}")
+                    _pricing_cache[cache_key] = {"data": db_pricing, "timestamp": time.time()}
+                logger.info(
+                    f"[DB FALLBACK] Using database pricing for {model_id} "
+                    f"(cache_key={cache_key})"
+                )
                 return db_pricing
         except Exception as e:
             logger.warning(f"Database pricing lookup failed for {model_id}: {e}")
@@ -672,8 +995,9 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                 _get_pricing_from_cache_fallback, model_id, candidate_ids
             )
             if cache_pricing:
-                # Cache the fallback result
-                _pricing_cache[model_id] = {"data": cache_pricing, "timestamp": time.time()}
+                # Cache the fallback result using NORMALIZED key
+                with _pricing_cache_lock:
+                    _pricing_cache[cache_key] = {"data": cache_pricing, "timestamp": time.time()}
                 return cache_pricing
         except Exception as e:
             logger.warning(f"Cache fallback pricing lookup failed for {model_id}: {e}")
@@ -683,6 +1007,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
         # HIGH-VALUE MODEL CHECK: Block requests for expensive models with unknown pricing
         # This prevents massive revenue loss from using default pricing on GPT-4, Claude, etc.
+        # NOTE: Check against BOTH original and normalized IDs to catch transformed variants
         HIGH_VALUE_MODEL_PATTERNS = [
             "gpt-4",
             "gpt-5",
@@ -699,12 +1024,18 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             "mixtral-8x22b",  # Mistral high-end
         ]
 
+        # Check both original and normalized IDs against high-value patterns
         model_id_lower = model_id.lower()
-        is_high_value = any(pattern in model_id_lower for pattern in HIGH_VALUE_MODEL_PATTERNS)
+        normalized_lower = normalized_model_id.lower()
+        is_high_value = any(
+            pattern in model_id_lower or pattern in normalized_lower
+            for pattern in HIGH_VALUE_MODEL_PATTERNS
+        )
 
         if is_high_value:
             error_msg = (
                 f"HIGH_VALUE_MODEL_PRICING_MISSING: Cannot use default pricing for {model_id}. "
+                f"Normalized as: {normalized_model_id}. "
                 f"This model requires accurate pricing data to prevent significant under-billing. "
                 f"Please contact support to add pricing for this model."
             )
@@ -719,6 +1050,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
                     level="error",
                     extras={
                         "model_id": model_id,
+                        "normalized_model_id": normalized_model_id,
                         "candidate_ids": list(candidate_ids),
                         "default_pricing_would_be": 0.00002,
                     },
@@ -735,7 +1067,8 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
 
         # For non-high-value models, allow default pricing but track usage
         logger.warning(
-            f"[DEFAULT_PRICING_ALERT] Model {model_id} not found via live API, database, or cache, "
+            f"[DEFAULT_PRICING_ALERT] Model {model_id} (normalized: {normalized_model_id}) "
+            f"not found via live API, database, or cache, "
             f"using default pricing ($0.00002/token). This may under-bill for expensive models."
         )
         _track_default_pricing_usage(model_id)

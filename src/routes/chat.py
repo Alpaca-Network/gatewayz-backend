@@ -1193,6 +1193,8 @@ async def _process_stream_completion_background(
                     f"User: {user.get('id')}, Model: {model}, Cost: ${cost:.6f}. "
                     f"Logged for reconciliation."
                 )
+                # NOTE: Credit deduction failed, so no credits were taken.
+                # No refund needed here - the reconciliation log handles this case.
 
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
@@ -1383,6 +1385,8 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
+    chunk_count = 0  # Initialized before try so it's available in except for refund metadata
+    credit_deduction_success = False  # Track whether credits were actually deducted
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
@@ -1392,8 +1396,6 @@ async def stream_generator(
         if tracker:
             streaming_ctx = tracker.streaming()
             streaming_ctx.__enter__()
-
-        chunk_count = 0
 
         # PERF: Use async iteration for async streams to avoid blocking the event loop
         # This is critical for reducing perceived TTFC as it allows the server to handle
@@ -1521,48 +1523,90 @@ async def stream_generator(
                 f"[EMPTY CONTENT] Provider {provider} returned {chunk_count} chunks but no content for model {model}."
             )
 
-        # If no usage was provided, estimate based on content
-        # WARNING: This estimation may result in inaccurate billing!
+        # If no usage was provided, estimate based on content using improved tokenizer.
+        # Some providers return prompt_tokens/completion_tokens but omit total_tokens;
+        # in that case we should derive total_tokens rather than overwriting the
+        # provider-supplied counts with estimates.
         if total_tokens == 0:
-            # Rough estimate: 1 token ≈ 4 characters
-            completion_tokens = max(1, len(accumulated_content) // 4)
-
-            # Calculate prompt tokens, handling both string and multimodal content
-            prompt_chars = 0
-            for m in messages:
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    prompt_chars += len(content)
-                elif isinstance(content, list):
-                    # For multimodal content, extract text parts
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            prompt_chars += len(item.get("text", ""))
-            prompt_tokens = max(1, prompt_chars // 4)
-            total_tokens = prompt_tokens + completion_tokens
-
-            # Log warning about token estimation (potential billing inaccuracy)
-            logger.warning(
-                f"[TOKEN_ESTIMATION] Provider {provider} did not return usage data for model {model}. "
-                f"Using character-based estimation: prompt_tokens={prompt_tokens}, "
-                f"completion_tokens={completion_tokens}, total_tokens={total_tokens}. "
-                f"Content length: {len(accumulated_content)} chars. "
-                f"This may result in inaccurate billing."
-            )
-
-            # Track metric for monitoring
-            try:
-                from src.services.prometheus_metrics import Counter, get_or_create_metric
-
-                token_estimation_counter = get_or_create_metric(
-                    Counter,
-                    "gatewayz_token_estimation_total",
-                    "Count of requests where token usage was estimated (not provided by provider)",
-                    ["provider", "model"],
+            if prompt_tokens > 0 or completion_tokens > 0:
+                # Provider gave partial usage -- just fill in the total
+                total_tokens = prompt_tokens + completion_tokens
+                estimation_source = "provider_partial"
+                logger.info(
+                    f"[TOKEN_ESTIMATION] Provider '{provider}' returned partial "
+                    f"usage for model '{model}' (prompt={prompt_tokens}, "
+                    f"completion={completion_tokens}). "
+                    f"Derived total_tokens={total_tokens}."
                 )
-                token_estimation_counter.labels(provider=provider, model=model).inc()
+            else:
+                from src.utils.token_estimator import (
+                    count_completion_tokens,
+                    count_tokens_messages,
+                    get_estimation_method,
+                )
+
+                estimation_source = get_estimation_method()
+                completion_tokens = count_completion_tokens(accumulated_content)
+                prompt_tokens = count_tokens_messages(messages)
+                total_tokens = prompt_tokens + completion_tokens
+
+                # Log warning with provider/model for identifying which
+                # providers lack usage data
+                logger.warning(
+                    f"[TOKEN_ESTIMATION] Provider '{provider}' did not return "
+                    f"usage data for model '{model}'. "
+                    f"Estimated via {estimation_source}: "
+                    f"prompt_tokens={prompt_tokens}, "
+                    f"completion_tokens={completion_tokens}, "
+                    f"total_tokens={total_tokens}. "
+                    f"Accumulated content: {len(accumulated_content)} chars, "
+                    f"{len(accumulated_content.split())} words. "
+                    f"Billing is approximate until this provider reports usage."
+                )
+
+            # Track metrics for monitoring
+            try:
+                from src.services.prometheus_metrics import record_token_count_source
+
+                record_token_count_source(
+                    provider=provider,
+                    model=model,
+                    source=estimation_source,
+                )
             except Exception:
-                pass  # Metrics not available
+                pass  # Never let metrics break the main flow
+        else:
+            # Provider returned usage data - record that fact and optionally
+            # compute an estimate for calibration purposes.
+            try:
+                from src.services.prometheus_metrics import record_token_count_source
+
+                record_token_count_source(provider=provider, model=model, source="provider")
+
+                # When we have actual counts, also compute estimates so we can
+                # measure estimation accuracy for future calibration.
+                from src.utils.token_estimator import (
+                    count_completion_tokens,
+                    count_tokens_messages,
+                    get_estimation_method,
+                )
+
+                estimation_method = get_estimation_method()
+                est_prompt = count_tokens_messages(messages)
+                est_completion = count_completion_tokens(accumulated_content)
+
+                from src.services.prometheus_metrics import record_token_estimation_accuracy
+
+                record_token_estimation_accuracy(
+                    provider=provider,
+                    estimation_method=estimation_method,
+                    estimated_prompt=est_prompt,
+                    estimated_completion=est_completion,
+                    actual_prompt=prompt_tokens,
+                    actual_completion=completion_tokens,
+                )
+            except Exception:
+                pass  # Never let calibration metrics break the main flow
 
         elapsed = max(0.001, time.monotonic() - start_time)
 
@@ -1645,6 +1689,57 @@ async def stream_generator(
             # Include the actual error message but truncate it for safety
             sanitized_msg = str(e)[:300].replace("\n", " ").replace("\r", " ")
             error_message = f"Streaming error: {sanitized_msg}"
+
+        # Auto-refund for clear provider failures if credits were already deducted.
+        # In the current streaming architecture, credits are deducted in the background
+        # task AFTER the stream completes, so this is primarily a defensive measure for
+        # edge cases and future code paths. Only refund for obvious provider-side failures
+        # (5xx, timeout), NEVER for user errors (4xx, auth, rate limit).
+        # Guard: only attempt refund if credits were actually deducted successfully.
+        if (
+            credit_deduction_success
+            and not is_anonymous
+            and user
+            and error_type in ("provider_error", "timeout_error")
+            and total_tokens > 0
+        ):
+            try:
+                from src.services.credit_handler import refund_credits
+                from src.services.pricing import calculate_cost_async
+
+                estimated_cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+                if estimated_cost > 0:
+                    refund_success = await refund_credits(
+                        user_id=user["id"],
+                        api_key=api_key,
+                        amount=estimated_cost,
+                        reason=error_type,
+                        original_request_id=request_id,
+                        metadata={
+                            "model": model,
+                            "provider": provider,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "error_type": error_type,
+                            "error_message": str(e)[:200],
+                            "stream_chunks_received": chunk_count,
+                        },
+                    )
+                    if refund_success:
+                        logger.info(
+                            f"Auto-refunded ${estimated_cost:.6f} to user {user.get('id')} "
+                            f"for failed streaming request (reason: {error_type})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Auto-refund of ${estimated_cost:.6f} failed for user {user.get('id')} "
+                            f"(reason: {error_type}). Manual review needed."
+                        )
+            except Exception as refund_err:
+                logger.error(
+                    f"Error during auto-refund attempt for user {user.get('id')}: {refund_err}",
+                    exc_info=True,
+                )
 
         # Save failed request to database
         if request_id:
