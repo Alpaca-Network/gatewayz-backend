@@ -88,6 +88,32 @@ def _record_missed_deduction(cost: float, reason: str) -> None:
         logger.debug(f"Failed to record missed deduction metric: {e}")
 
 
+def _record_refund_metrics(reason: str, amount: float) -> None:
+    """Record Prometheus metrics for credit refund operations."""
+    try:
+        from src.services.prometheus_metrics import (
+            credit_refunds_amount_usd,
+            credit_refunds_total,
+        )
+
+        credit_refunds_total.labels(reason=reason).inc()
+        if amount > 0:
+            credit_refunds_amount_usd.labels(reason=reason).inc(amount)
+    except Exception as e:
+        logger.debug(f"Failed to record refund metrics: {e}")
+
+
+# Refund error types that qualify for automatic refund (conservative list)
+# Only clear provider-side failures qualify; user errors (4xx) do not.
+REFUNDABLE_ERROR_TYPES = frozenset(
+    {
+        "provider_error",  # 502, 503, upstream errors
+        "timeout_error",  # Request timed out
+        "empty_stream",  # Provider returned empty stream
+    }
+)
+
+
 def _record_background_task_failure(failure_type: str, endpoint: str) -> None:
     """Record metrics for streaming background task failures."""
     try:
@@ -660,3 +686,126 @@ async def _log_failed_deduction_for_reconciliation(
     except Exception as e:
         # Log at warning level so failures to record reconciliation data are visible
         logger.warning(f"Could not log to reconciliation table: {e}")
+
+
+async def refund_credits(
+    user_id: int,
+    api_key: str,
+    amount: float,
+    reason: str,
+    original_request_id: str = None,
+    metadata: dict = None,
+) -> bool:
+    """
+    Refund credits to a user's purchased_credits balance after a provider failure.
+
+    This function is used for automatic credit refunds when a provider call fails
+    after credits have already been deducted. It is intentionally conservative:
+    only clear provider-side failures (5xx, timeout, empty stream) should trigger
+    a refund. User errors (4xx) should NOT be refunded.
+
+    The refund is added to purchased_credits (not subscription_allowance) to
+    avoid inflating subscription quotas.
+
+    Args:
+        user_id: The user's database ID.
+        api_key: The user's API key (used for lookup if needed).
+        amount: The credit amount to refund (must be positive).
+        reason: Short reason code for the refund (e.g., "provider_error", "timeout").
+        original_request_id: Correlation ID linking to the original failed request.
+        metadata: Additional context about the refund (model, tokens, error details).
+
+    Returns:
+        True if the refund was applied successfully, False otherwise.
+    """
+    if amount <= 0:
+        logger.warning(f"Skipping refund for non-positive amount: ${amount:.6f}, user={user_id}")
+        return False
+
+    # Conservative guard: only allow known refundable reasons
+    if reason not in REFUNDABLE_ERROR_TYPES:
+        logger.warning(
+            f"Skipping refund for non-refundable reason '{reason}', "
+            f"user={user_id}, amount=${amount:.6f}"
+        )
+        return False
+
+    try:
+        from src.db.credit_transactions import TransactionType
+        from src.db.users import add_credits_to_user
+
+        # Build refund metadata with correlation info
+        refund_metadata = {
+            "refund_reason": reason,
+            "auto_refund": True,
+        }
+        if original_request_id:
+            refund_metadata["original_request_id"] = original_request_id
+        if metadata:
+            refund_metadata.update(metadata)
+
+        # Add credits back to purchased_credits via the existing add_credits_to_user function
+        # This function handles balance lookup, update, and transaction logging atomically.
+        await asyncio.to_thread(
+            add_credits_to_user,
+            user_id=user_id,
+            credits=amount,
+            transaction_type=TransactionType.REFUND,
+            description=f"Auto-refund: {reason} (request: {original_request_id or 'unknown'})",
+            metadata=refund_metadata,
+        )
+
+        # Record Prometheus metrics
+        _record_refund_metrics(reason, amount)
+
+        logger.info(
+            f"CREDIT_REFUND: Refunded ${amount:.6f} to user {user_id}. "
+            f"Reason: {reason}, request_id: {original_request_id}"
+        )
+
+        # Send Sentry breadcrumb for audit trail
+        try:
+            import sentry_sdk
+
+            sentry_sdk.add_breadcrumb(
+                category="billing",
+                message=f"Auto-refund issued for user {user_id}",
+                level="info",
+                data={
+                    "user_id": user_id,
+                    "amount": amount,
+                    "reason": reason,
+                    "original_request_id": original_request_id,
+                },
+            )
+        except Exception:
+            pass  # Sentry breadcrumb should never break billing flow
+
+        return True
+
+    except Exception as e:
+        logger.error(
+            f"CREDIT_REFUND_FAILED: Could not refund ${amount:.6f} to user {user_id}. "
+            f"Reason: {reason}, request_id: {original_request_id}, error: {e}",
+            exc_info=True,
+        )
+
+        # Alert via Sentry for failed refunds (these need manual intervention)
+        try:
+            import sentry_sdk
+
+            sentry_sdk.capture_message(
+                f"Credit refund failed for user {user_id}: ${amount:.6f}",
+                level="error",
+                extras={
+                    "user_id": user_id,
+                    "amount": amount,
+                    "reason": reason,
+                    "original_request_id": original_request_id,
+                    "error": str(e),
+                },
+            )
+        except Exception:
+            pass  # Sentry alert should never mask the original refund failure
+
+        return False

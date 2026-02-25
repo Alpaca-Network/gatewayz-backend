@@ -1193,6 +1193,8 @@ async def _process_stream_completion_background(
                     f"User: {user.get('id')}, Model: {model}, Cost: ${cost:.6f}. "
                     f"Logged for reconciliation."
                 )
+                # NOTE: Credit deduction failed, so no credits were taken.
+                # No refund needed here - the reconciliation log handles this case.
 
             # Increment API key usage counter
             await _to_thread(increment_api_key_usage, api_key)
@@ -1383,6 +1385,8 @@ async def stream_generator(
     streaming_ctx = None
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
+    chunk_count = 0  # Initialized before try so it's available in except for refund metadata
+    credit_deduction_success = False  # Track whether credits were actually deducted
 
     # Initialize normalizer
     normalizer = StreamNormalizer(provider=provider, model=model)
@@ -1392,8 +1396,6 @@ async def stream_generator(
         if tracker:
             streaming_ctx = tracker.streaming()
             streaming_ctx.__enter__()
-
-        chunk_count = 0
 
         # PERF: Use async iteration for async streams to avoid blocking the event loop
         # This is critical for reducing perceived TTFC as it allows the server to handle
@@ -1687,6 +1689,57 @@ async def stream_generator(
             # Include the actual error message but truncate it for safety
             sanitized_msg = str(e)[:300].replace("\n", " ").replace("\r", " ")
             error_message = f"Streaming error: {sanitized_msg}"
+
+        # Auto-refund for clear provider failures if credits were already deducted.
+        # In the current streaming architecture, credits are deducted in the background
+        # task AFTER the stream completes, so this is primarily a defensive measure for
+        # edge cases and future code paths. Only refund for obvious provider-side failures
+        # (5xx, timeout), NEVER for user errors (4xx, auth, rate limit).
+        # Guard: only attempt refund if credits were actually deducted successfully.
+        if (
+            credit_deduction_success
+            and not is_anonymous
+            and user
+            and error_type in ("provider_error", "timeout_error")
+            and total_tokens > 0
+        ):
+            try:
+                from src.services.credit_handler import refund_credits
+                from src.services.pricing import calculate_cost_async
+
+                estimated_cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
+                if estimated_cost > 0:
+                    refund_success = await refund_credits(
+                        user_id=user["id"],
+                        api_key=api_key,
+                        amount=estimated_cost,
+                        reason=error_type,
+                        original_request_id=request_id,
+                        metadata={
+                            "model": model,
+                            "provider": provider,
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "error_type": error_type,
+                            "error_message": str(e)[:200],
+                            "stream_chunks_received": chunk_count,
+                        },
+                    )
+                    if refund_success:
+                        logger.info(
+                            f"Auto-refunded ${estimated_cost:.6f} to user {user.get('id')} "
+                            f"for failed streaming request (reason: {error_type})"
+                        )
+                    else:
+                        logger.warning(
+                            f"Auto-refund of ${estimated_cost:.6f} failed for user {user.get('id')} "
+                            f"(reason: {error_type}). Manual review needed."
+                        )
+            except Exception as refund_err:
+                logger.error(
+                    f"Error during auto-refund attempt for user {user.get('id')}: {refund_err}",
+                    exc_info=True,
+                )
 
         # Save failed request to database
         if request_id:

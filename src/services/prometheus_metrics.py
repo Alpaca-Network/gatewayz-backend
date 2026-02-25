@@ -375,6 +375,22 @@ missed_credit_deductions_usd = get_or_create_metric(
     ["reason"],  # reason: background_task_failure, retry_exhausted, etc.
 )
 
+# ==================== Credit Refund Metrics ====================
+# Track automatic credit refunds issued for failed provider calls
+credit_refunds_total = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_refunds_total",
+    "Total credit refunds issued for failed provider calls",
+    ["reason"],  # reason: provider_error, timeout, empty_stream, etc.
+)
+
+credit_refunds_amount_usd = get_or_create_metric(
+    Counter,
+    "gatewayz_credit_refunds_amount_usd_total",
+    "Total USD amount of credit refunds issued",
+    ["reason"],
+)
+
 # ==================== Payment Amount Verification Metrics ====================
 # Track payment amount mismatches between Stripe and expected plan pricing
 payment_amount_mismatch = get_or_create_metric(
