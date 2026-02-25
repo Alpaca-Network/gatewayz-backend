@@ -7,7 +7,7 @@
 --   2. provider_id + is_active + model_name ORDER BY  → get_models_by_provider_slug(),
 --                                                        get_models_by_gateway_for_catalog(),
 --                                                        get_models_for_catalog_with_filters()
---   3. model_health_history(model_id, checked_at DESC)  → get_model_health_history()
+--   3. model_health_history(provider, model, checked_at DESC)  → get_model_health_history()
 
 -- ============================================================================
 -- Index 1: Active status + model_name (supports filtered full-catalog scans)
@@ -44,17 +44,18 @@ COMMENT ON INDEX idx_models_provider_active_name IS
 'Optimizes provider-filtered catalog queries with ORDER BY model_name (DB-M7)';
 
 -- ============================================================================
--- Index 3: model_health_history (model_id, checked_at DESC) composite
+-- Index 3: model_health_history (provider, model, checked_at DESC) composite
 -- ============================================================================
 -- Supports queries like:
 --   SELECT * FROM model_health_history
---   WHERE model_id = X ORDER BY checked_at DESC LIMIT 100
+--   WHERE provider = X AND model = Y ORDER BY checked_at DESC LIMIT 100
 --
 -- Used by: get_model_health_history()
--- The existing idx_model_health_history_model_id covers model_id alone; adding
--- checked_at DESC lets the planner serve the ORDER BY directly from the index.
+-- The existing idx_history_provider_model_time covers (provider, model, checked_at)
+-- but adding a DESC sort on checked_at lets the planner serve ORDER BY DESC
+-- directly from the index without a reverse scan.
 CREATE INDEX IF NOT EXISTS idx_model_health_history_model_checked
-ON model_health_history (model_id, checked_at DESC);
+ON model_health_history (provider, model, checked_at DESC);
 
 COMMENT ON INDEX idx_model_health_history_model_checked IS
 'Optimizes paginated health-history lookups ordered by most recent check (DB-M7)';
@@ -76,5 +77,5 @@ BEGIN
     RAISE NOTICE 'Added 3 indexes for common catalog filter patterns (DB-M7):';
     RAISE NOTICE '  - idx_models_active_model_name (is_active + model_name ORDER BY)';
     RAISE NOTICE '  - idx_models_provider_active_name (provider_id + is_active + model_name ORDER BY)';
-    RAISE NOTICE '  - idx_model_health_history_model_checked (model_id + checked_at DESC)';
+    RAISE NOTICE '  - idx_model_health_history_model_checked (provider + model + checked_at DESC)';
 END $$;

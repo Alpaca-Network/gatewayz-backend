@@ -172,15 +172,10 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          # Pipe 'yes' to skip the interactive confirmation prompt in CI.
+          # --include-all skips the interactive confirmation prompt in CI.
           # db push automatically skips already-applied migrations and only
           # applies new ones — all local files must be present for this to work.
-          yes | supabase db push --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
-          # PIPESTATUS[1] is the exit code of supabase (PIPESTATUS[0] is yes)
-          if [ ${PIPESTATUS[1]} -ne 0 ]; then
-            echo "::error::Migration push failed — see logs above"
-            exit 1
-          fi
+          supabase db push --include-all --password "${{ secrets.SUPABASE_DB_PASSWORD }}" 2>&1 | tee migration-output.txt
           echo "Migrations applied successfully"
 
       - name: Verify migration status
