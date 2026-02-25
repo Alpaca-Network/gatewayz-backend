@@ -5,6 +5,7 @@ Provides endpoints for credit operations including add, adjust, bulk-add, refund
 These endpoints match the admin dashboard API expectations.
 """
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from typing import Any
@@ -12,9 +13,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from src.config.config import Config
 from src.config.supabase_config import get_supabase_client
 from src.db.credit_transactions import (
     TransactionType,
+    get_admin_daily_grant_total,
     get_all_transactions,
     get_transaction_summary,
     log_credit_transaction,
@@ -39,6 +42,11 @@ class CreditAddRequest(BaseModel):
 
     user_id: int = Field(..., description="User ID to add credits to")
     amount: float = Field(..., gt=0, description="Amount of credits to add (must be positive)")
+    reason: str = Field(
+        ...,
+        min_length=10,
+        description="Required reason for the credit grant (min 10 characters)",
+    )
     description: str = Field(
         default="Admin credit addition", description="Description for the transaction"
     )
@@ -53,7 +61,11 @@ class CreditAdjustRequest(BaseModel):
     description: str = Field(
         default="Admin credit adjustment", description="Description for the transaction"
     )
-    reason: str | None = Field(default=None, description="Reason for adjustment")
+    reason: str = Field(
+        ...,
+        min_length=10,
+        description="Required reason for the adjustment (min 10 characters)",
+    )
     metadata: dict[str, Any] | None = Field(default=None, description="Optional metadata")
 
 
@@ -64,6 +76,11 @@ class BulkCreditAddRequest(BaseModel):
         ..., min_length=1, max_length=100, description="List of user IDs (max 100)"
     )
     amount: float = Field(..., gt=0, description="Amount of credits to add to each user")
+    reason: str = Field(
+        ...,
+        min_length=10,
+        description="Required reason for the bulk credit grant (min 10 characters)",
+    )
     description: str = Field(
         default="Bulk credit addition", description="Description for the transactions"
     )
@@ -110,6 +127,61 @@ class BulkCreditResponse(BaseModel):
 
 
 # =============================================================================
+# ADMIN GRANT SAFETY CONTROLS
+# =============================================================================
+
+
+async def _validate_admin_credit_grant(
+    amount: float,
+    admin_user: dict,
+    *,
+    is_bulk: bool = False,
+    bulk_user_count: int = 1,
+) -> None:
+    """
+    Validate admin credit grant against safety controls:
+    1. Per-transaction cap (ADMIN_MAX_CREDIT_GRANT)
+    2. 24-hour rolling window limit per admin (ADMIN_DAILY_GRANT_LIMIT)
+
+    For bulk operations, the total grant (amount * user_count) is checked
+    against the daily limit.
+
+    Raises:
+        HTTPException(400) if any limit is exceeded.
+    """
+    max_single_grant = Config.ADMIN_MAX_CREDIT_GRANT
+    daily_limit = Config.ADMIN_DAILY_GRANT_LIMIT
+    admin_id = admin_user.get("id")
+
+    # 1. Per-transaction cap
+    if amount > max_single_grant:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Credit grant amount ${amount:.2f} exceeds the maximum single grant "
+                f"limit of ${max_single_grant:.2f}. Contact a super-admin to increase "
+                f"the ADMIN_MAX_CREDIT_GRANT limit."
+            ),
+        )
+
+    # 2. Daily rolling window limit
+    total_grant_amount = amount * bulk_user_count if is_bulk else amount
+    daily_total = await asyncio.to_thread(get_admin_daily_grant_total, admin_id)
+    remaining = daily_limit - daily_total
+
+    if daily_total + total_grant_amount > daily_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This grant of ${total_grant_amount:.2f} would exceed your 24-hour "
+                f"admin grant limit of ${daily_limit:.2f}. You have already granted "
+                f"${daily_total:.2f} in the last 24 hours (${remaining:.2f} remaining). "
+                f"Contact a super-admin to increase the ADMIN_DAILY_GRANT_LIMIT."
+            ),
+        )
+
+
+# =============================================================================
 # CREDIT ENDPOINTS
 # =============================================================================
 
@@ -136,6 +208,9 @@ async def add_credits_endpoint(
     - Transaction details
     """
     try:
+        # Enforce admin credit grant safety controls
+        await _validate_admin_credit_grant(request.amount, admin_user)
+
         client = get_supabase_client()
 
         # Get user
@@ -161,7 +236,7 @@ async def add_credits_endpoint(
         if not update_result.data:
             raise HTTPException(status_code=500, detail="Failed to update user credits")
 
-        # Log the transaction
+        # Log the transaction with reason in metadata for full audit trail
         transaction = log_credit_transaction(
             user_id=request.user_id,
             amount=request.amount,
@@ -171,6 +246,7 @@ async def add_credits_endpoint(
             balance_after=balance_after,
             metadata={
                 **(request.metadata or {}),
+                "reason": request.reason,
                 "admin_user_id": admin_user.get("id"),
                 "admin_username": admin_user.get("username"),
             },
@@ -178,7 +254,8 @@ async def add_credits_endpoint(
         )
 
         logger.info(
-            f"Admin {admin_user.get('username')} added {request.amount} credits to user {request.user_id}"
+            f"Admin {admin_user.get('username')} added {request.amount} credits to user "
+            f"{request.user_id}. Reason: {request.reason}"
         )
 
         return CreditResponse(
@@ -215,7 +292,7 @@ async def adjust_credits_endpoint(
     - `user_id`: Target user ID
     - `amount`: Amount to adjust (positive to add, negative to remove)
     - `description`: Optional description for the transaction
-    - `reason`: Optional reason for the adjustment
+    - `reason`: Required reason for the adjustment (min 10 characters)
     - `metadata`: Optional additional metadata
 
     **Response:**
@@ -223,6 +300,10 @@ async def adjust_credits_endpoint(
     - Transaction details
     """
     try:
+        # Enforce admin credit grant safety controls for positive adjustments (grants)
+        if request.amount > 0:
+            await _validate_admin_credit_grant(request.amount, admin_user)
+
         client = get_supabase_client()
 
         # Get user
@@ -279,7 +360,8 @@ async def adjust_credits_endpoint(
 
         action = "added" if request.amount > 0 else "removed"
         logger.info(
-            f"Admin {admin_user.get('username')} {action} {abs(request.amount)} credits for user {request.user_id}"
+            f"Admin {admin_user.get('username')} {action} {abs(request.amount)} credits for user "
+            f"{request.user_id}. Reason: {request.reason}"
         )
 
         return CreditResponse(
@@ -314,6 +396,7 @@ async def bulk_add_credits_endpoint(
     **Request:**
     - `user_ids`: List of user IDs to add credits to (max 100)
     - `amount`: Amount of credits to add to each user
+    - `reason`: Required reason for the bulk credit grant (min 10 characters)
     - `description`: Optional description for the transactions
     - `metadata`: Optional additional metadata
 
@@ -322,13 +405,21 @@ async def bulk_add_credits_endpoint(
     - Details for each user
     """
     try:
+        # Deduplicate user IDs early so we know the real count for limit checks
+        unique_user_ids = list(dict.fromkeys(request.user_ids))
+
+        # Enforce admin credit grant safety controls (per-amount cap + daily total)
+        await _validate_admin_credit_grant(
+            request.amount,
+            admin_user,
+            is_bulk=True,
+            bulk_user_count=len(unique_user_ids),
+        )
+
         client = get_supabase_client()
         results = []
         successful = 0
         failed = 0
-
-        # Deduplicate user IDs to prevent duplicate transactions and incorrect balance tracking
-        unique_user_ids = list(dict.fromkeys(request.user_ids))
 
         # Batch fetch: Get all users at once to reduce N+1 queries
         users_result = (
@@ -377,7 +468,7 @@ async def bulk_add_credits_endpoint(
                     failed += 1
                     continue
 
-                # Log the transaction
+                # Log the transaction with reason for audit trail
                 transaction = log_credit_transaction(
                     user_id=user_id,
                     amount=request.amount,
@@ -387,6 +478,7 @@ async def bulk_add_credits_endpoint(
                     balance_after=balance_after,
                     metadata={
                         **(request.metadata or {}),
+                        "reason": request.reason,
                         "bulk_operation": True,
                         "admin_user_id": admin_user.get("id"),
                         "admin_username": admin_user.get("username"),
@@ -418,7 +510,8 @@ async def bulk_add_credits_endpoint(
                 failed += 1
 
         logger.info(
-            f"Admin {admin_user.get('username')} bulk added {request.amount} credits to {successful}/{len(unique_user_ids)} users"
+            f"Admin {admin_user.get('username')} bulk added {request.amount} credits to "
+            f"{successful}/{len(unique_user_ids)} users. Reason: {request.reason}"
         )
 
         return BulkCreditResponse(

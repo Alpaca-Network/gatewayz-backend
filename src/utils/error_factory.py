@@ -454,28 +454,23 @@ class DetailedErrorFactory:
         """
         Create an insufficient credits error.
 
+        SECURITY: Does not expose exact credit amounts in the response.
+        Amounts are kept for internal logging only.
+
         Args:
-            current_credits: User's current credit balance
-            required_credits: Credits required for the request
+            current_credits: User's current credit balance (logged server-side only)
+            required_credits: Credits required for the request (logged server-side only)
             request_id: Optional request ID
 
         Returns:
-            ErrorResponse with insufficient credits error
+            ErrorResponse with sanitized insufficient credits error
         """
         code = ErrorCode.INSUFFICIENT_CREDITS
-        deficit = required_credits - current_credits
-        message = get_error_message(
-            code,
-            required_credits=required_credits,
-            current_credits=current_credits,
-        )
-        detail = f"You need ${deficit:.4f} more credits to complete this request. Please add credits to your account."
+        message = get_error_message(code)
+        detail = "Please add credits to your account to complete this request."
 
-        context = ErrorContext(
-            current_credits=current_credits,
-            required_credits=required_credits,
-            credit_deficit=deficit,
-        )
+        # SECURITY: Do not include exact credit amounts in the response context
+        context = ErrorContext()
 
         error = ErrorDetail(
             type=get_error_type(code),
@@ -520,53 +515,31 @@ class DetailedErrorFactory:
             ErrorResponse with detailed insufficient credits error for reservation
         """
         code = ErrorCode.INSUFFICIENT_CREDITS
-        shortfall = max_cost - current_credits
 
-        # Create user-friendly message
-        message = (
-            f"Insufficient credits for this request. "
-            f"Maximum possible cost: ${max_cost:.4f}. "
-            f"Available balance: ${current_credits:.4f}. "
-            f"Shortfall: ${shortfall:.4f}."
-        )
+        # SECURITY: Sanitize user-facing message - no dollar amounts or credit values
+        message = "Insufficient credits for this request. Please add credits to continue."
 
-        # Create detailed explanation
         detail = (
-            f"Your request to {model_id} requires up to ${max_cost:.4f} in credits "
-            f"(based on max_tokens={max_tokens}), but you only have ${current_credits:.4f} available. "
-            f"You need ${shortfall:.4f} more credits to proceed."
+            "Your account does not have enough credits for this request. "
+            "Consider reducing max_tokens or using a less expensive model."
         )
 
-        # Build actionable suggestions
+        # SECURITY: Sanitized suggestions without dollar amounts
         suggestions = [
-            f"Add ${shortfall:.4f} or more in credits to your account",
-            f"Reduce max_tokens from {max_tokens} to lower the maximum possible cost",
+            "Add more credits to your account",
+            "Reduce max_tokens to lower the maximum possible cost",
             "Use a less expensive model",
             "Visit https://gatewayz.ai/pricing to add credits",
         ]
 
-        # Add suggestion to reduce max_tokens with calculation
-        if max_tokens > 100:
-            suggested_max_tokens = (
-                int(max_tokens * (current_credits / max_cost)) if max_cost > 0 else 100
-            )
-            if suggested_max_tokens > 0:
-                suggestions.insert(
-                    1,
-                    f"Try setting max_tokens to {suggested_max_tokens} or less to fit your available balance",
-                )
-
+        # SECURITY: Do not include exact credit amounts in the response context
         context = ErrorContext(
-            current_credits=current_credits,
-            required_credits=max_cost,
-            credit_deficit=shortfall,
             requested_model=model_id,
             requested_max_tokens=max_tokens,
             input_tokens=input_tokens,
             additional_info={
                 "reason": "pre_flight_check",
                 "check_type": "credit_reservation",
-                "max_possible_cost": max_cost,
                 "note": "This is a conservative estimate. Actual cost may be lower based on actual token usage.",
             },
         )

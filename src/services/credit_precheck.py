@@ -196,7 +196,7 @@ def estimate_and_check_credits(
         ...     max_tokens=1000
         ... )
         >>> if not result["allowed"]:
-        ...     raise HTTPException(402, detail=result["reason"])
+        ...     raise HTTPException(402, detail="Insufficient credits. Please add credits to continue.")
     """
     # Calculate maximum cost
     max_cost, input_tokens, max_output_tokens = calculate_maximum_cost(

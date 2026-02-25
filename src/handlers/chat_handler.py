@@ -514,6 +514,7 @@ class ChatInferenceHandler:
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
                         "cost_usd": cost,
+                        "request_id": self.request_id,
                     },
                 )
 

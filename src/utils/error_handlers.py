@@ -124,21 +124,13 @@ def _map_http_exception_to_detailed_error(
 
     elif status_code == 402:
         # Payment required - insufficient credits
-        # Try to extract credit amounts from detail
-        current, required = _extract_credit_amounts(detail)
-        if current is not None and required is not None:
-            return DetailedErrorFactory.insufficient_credits(
-                current_credits=current,
-                required_credits=required,
-                request_id=request_id,
-            )
-        else:
-            # Generic payment error
-            return DetailedErrorFactory.insufficient_credits(
-                current_credits=0.0,
-                required_credits=0.0,
-                request_id=request_id,
-            )
+        # SECURITY: Do not extract or expose credit amounts in the response.
+        # The factory now produces sanitized messages without dollar amounts.
+        return DetailedErrorFactory.insufficient_credits(
+            current_credits=0.0,
+            required_credits=0.0,
+            request_id=request_id,
+        )
 
     elif status_code == 403:
         # Forbidden - check detail for specific error type
