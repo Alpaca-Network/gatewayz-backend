@@ -5,6 +5,7 @@ from typing import Any
 
 from src.config.redis_config import get_redis_config
 from src.config.supabase_config import get_supabase_client
+from src.services.pyroscope_config import tag_wrapper
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 
 logger = logging.getLogger(__name__)
@@ -200,7 +201,8 @@ def get_trial_analytics() -> dict[str, Any]:
     try:
         # Try to get from cache first
         redis_config = get_redis_config()
-        cached_data = redis_config.get_cache(CACHE_KEY)
+        with tag_wrapper({"cache_layer": "trial_analytics", "cache_op": "read"}):
+            cached_data = redis_config.get_cache(CACHE_KEY)
 
         if cached_data:
             try:
@@ -324,7 +326,8 @@ def get_trial_analytics() -> dict[str, Any]:
 
         # Cache the result
         try:
-            redis_config.set_cache(CACHE_KEY, json.dumps(analytics_data), CACHE_TTL)
+            with tag_wrapper({"cache_layer": "trial_analytics", "cache_op": "write"}):
+                redis_config.set_cache(CACHE_KEY, json.dumps(analytics_data), CACHE_TTL)
             logger.info("Trial analytics cached successfully")
         except Exception as cache_error:
             logger.warning(f"Failed to cache trial analytics: {cache_error}")
@@ -343,8 +346,9 @@ def invalidate_trial_analytics_cache() -> bool:
     """
     try:
         redis_config = get_redis_config()
-        redis_config.delete_cache("trial:analytics:summary")
-        redis_config.delete_cache("trial:domain:analysis")
+        with tag_wrapper({"cache_layer": "trial_analytics", "cache_op": "delete"}):
+            redis_config.delete_cache("trial:analytics:summary")
+            redis_config.delete_cache("trial:domain:analysis")
         logger.info("Trial analytics caches invalidated")
         return True
     except Exception as e:
