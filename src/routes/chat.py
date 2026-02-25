@@ -1521,48 +1521,90 @@ async def stream_generator(
                 f"[EMPTY CONTENT] Provider {provider} returned {chunk_count} chunks but no content for model {model}."
             )
 
-        # If no usage was provided, estimate based on content
-        # WARNING: This estimation may result in inaccurate billing!
+        # If no usage was provided, estimate based on content using improved tokenizer.
+        # Some providers return prompt_tokens/completion_tokens but omit total_tokens;
+        # in that case we should derive total_tokens rather than overwriting the
+        # provider-supplied counts with estimates.
         if total_tokens == 0:
-            # Rough estimate: 1 token ≈ 4 characters
-            completion_tokens = max(1, len(accumulated_content) // 4)
-
-            # Calculate prompt tokens, handling both string and multimodal content
-            prompt_chars = 0
-            for m in messages:
-                content = m.get("content", "")
-                if isinstance(content, str):
-                    prompt_chars += len(content)
-                elif isinstance(content, list):
-                    # For multimodal content, extract text parts
-                    for item in content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            prompt_chars += len(item.get("text", ""))
-            prompt_tokens = max(1, prompt_chars // 4)
-            total_tokens = prompt_tokens + completion_tokens
-
-            # Log warning about token estimation (potential billing inaccuracy)
-            logger.warning(
-                f"[TOKEN_ESTIMATION] Provider {provider} did not return usage data for model {model}. "
-                f"Using character-based estimation: prompt_tokens={prompt_tokens}, "
-                f"completion_tokens={completion_tokens}, total_tokens={total_tokens}. "
-                f"Content length: {len(accumulated_content)} chars. "
-                f"This may result in inaccurate billing."
-            )
-
-            # Track metric for monitoring
-            try:
-                from src.services.prometheus_metrics import Counter, get_or_create_metric
-
-                token_estimation_counter = get_or_create_metric(
-                    Counter,
-                    "gatewayz_token_estimation_total",
-                    "Count of requests where token usage was estimated (not provided by provider)",
-                    ["provider", "model"],
+            if prompt_tokens > 0 or completion_tokens > 0:
+                # Provider gave partial usage -- just fill in the total
+                total_tokens = prompt_tokens + completion_tokens
+                estimation_source = "provider_partial"
+                logger.info(
+                    f"[TOKEN_ESTIMATION] Provider '{provider}' returned partial "
+                    f"usage for model '{model}' (prompt={prompt_tokens}, "
+                    f"completion={completion_tokens}). "
+                    f"Derived total_tokens={total_tokens}."
                 )
-                token_estimation_counter.labels(provider=provider, model=model).inc()
+            else:
+                from src.utils.token_estimator import (
+                    count_completion_tokens,
+                    count_tokens_messages,
+                    get_estimation_method,
+                )
+
+                estimation_source = get_estimation_method()
+                completion_tokens = count_completion_tokens(accumulated_content)
+                prompt_tokens = count_tokens_messages(messages)
+                total_tokens = prompt_tokens + completion_tokens
+
+                # Log warning with provider/model for identifying which
+                # providers lack usage data
+                logger.warning(
+                    f"[TOKEN_ESTIMATION] Provider '{provider}' did not return "
+                    f"usage data for model '{model}'. "
+                    f"Estimated via {estimation_source}: "
+                    f"prompt_tokens={prompt_tokens}, "
+                    f"completion_tokens={completion_tokens}, "
+                    f"total_tokens={total_tokens}. "
+                    f"Accumulated content: {len(accumulated_content)} chars, "
+                    f"{len(accumulated_content.split())} words. "
+                    f"Billing is approximate until this provider reports usage."
+                )
+
+            # Track metrics for monitoring
+            try:
+                from src.services.prometheus_metrics import record_token_count_source
+
+                record_token_count_source(
+                    provider=provider,
+                    model=model,
+                    source=estimation_source,
+                )
             except Exception:
-                pass  # Metrics not available
+                pass  # Never let metrics break the main flow
+        else:
+            # Provider returned usage data - record that fact and optionally
+            # compute an estimate for calibration purposes.
+            try:
+                from src.services.prometheus_metrics import record_token_count_source
+
+                record_token_count_source(provider=provider, model=model, source="provider")
+
+                # When we have actual counts, also compute estimates so we can
+                # measure estimation accuracy for future calibration.
+                from src.utils.token_estimator import (
+                    count_completion_tokens,
+                    count_tokens_messages,
+                    get_estimation_method,
+                )
+
+                estimation_method = get_estimation_method()
+                est_prompt = count_tokens_messages(messages)
+                est_completion = count_completion_tokens(accumulated_content)
+
+                from src.services.prometheus_metrics import record_token_estimation_accuracy
+
+                record_token_estimation_accuracy(
+                    provider=provider,
+                    estimation_method=estimation_method,
+                    estimated_prompt=est_prompt,
+                    estimated_completion=est_completion,
+                    actual_prompt=prompt_tokens,
+                    actual_completion=completion_tokens,
+                )
+            except Exception:
+                pass  # Never let calibration metrics break the main flow
 
         elapsed = max(0.001, time.monotonic() - start_time)
 

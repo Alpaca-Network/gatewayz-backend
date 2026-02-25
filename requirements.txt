@@ -28,6 +28,10 @@ clarifai==11.1.0
 huggingface-hub==0.23.0
 novita-client==0.5.0
 
+# tiktoken - Accurate BPE token counting for billing (recommended, graceful fallback if absent)
+# Significantly improves streaming token estimation accuracy when providers don't return usage data.
+tiktoken>=0.7.0
+
 # NotDiamond AI Router (optional - code gracefully falls back when not installed)
 # Excluded from main requirements due to dependency conflicts with cryptography and python-dotenv.
 # To enable NotDiamond routing, install separately: pip install notdiamond
