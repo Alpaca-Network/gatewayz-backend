@@ -847,6 +847,29 @@ class StripeService:
 
             amount_dollars = float(Decimal(credits_cents) / 100)  # Convert cents to dollars
 
+            # Verify payment amount against known plan pricing
+            # This does NOT block payments -- it only logs and monitors mismatches
+            verification_result = self._verify_payment_amount(
+                amount_cents=credits_cents,
+                session_id=session_id,
+                user_id=user_id,
+                metadata=metadata,
+            )
+
+            # Build transaction metadata including verification audit trail
+            transaction_metadata = {
+                "stripe_session_id": session_id,
+                "stripe_payment_intent_id": payment_intent_id,
+                "amount_verification": {
+                    "verified": verification_result.get("verified", False),
+                    "severity": verification_result.get("severity", "unknown"),
+                    "matched_package": verification_result.get("matched_package"),
+                    "expected_cents": verification_result.get("expected_cents"),
+                    "difference_cents": verification_result.get("difference_cents", 0),
+                    "difference_percent": verification_result.get("difference_percent", 0.0),
+                },
+            }
+
             # Add credits and log transaction
             add_credits_to_user(
                 user_id=user_id,
@@ -854,10 +877,7 @@ class StripeService:
                 transaction_type="purchase",
                 description=f"Stripe checkout - ${amount_dollars}",
                 payment_id=payment_id,
-                metadata={
-                    "stripe_session_id": session_id,
-                    "stripe_payment_intent_id": payment_intent_id,
-                },
+                metadata=transaction_metadata,
             )
 
             # Update payment
@@ -992,6 +1012,259 @@ class StripeService:
         except Exception as e:
             logger.error(f"Error handling checkout completed: {e}")
             raise
+
+    # ==================== Payment Amount Verification ====================
+
+    # Known credit package prices (amount_cents -> package_name)
+    # Mirrors the packages defined in get_credit_packages()
+    KNOWN_CREDIT_PACKAGES: dict[int, str] = {
+        1000: "starter",  # $10.00 - Starter Pack
+        4500: "professional",  # $45.00 - Professional Pack (10% discount on $50 credits)
+    }
+
+    # Tolerance thresholds for amount verification
+    AMOUNT_TOLERANCE_CENTS = 50  # $0.50 absolute tolerance
+    AMOUNT_TOLERANCE_PERCENT = 0.01  # 1% relative tolerance
+    AMOUNT_OVER_THRESHOLD_PERCENT = 0.10  # 10% over triggers error-level alert
+
+    def _verify_payment_amount(
+        self,
+        amount_cents: int,
+        session_id: str | None = None,
+        user_id: int | None = None,
+        metadata: dict | None = None,
+    ) -> dict:
+        """
+        Verify a payment amount against known credit package pricing.
+
+        Compares the actual Stripe charge amount to expected prices for known
+        credit packages. Does NOT block payments -- only logs and records
+        mismatches for monitoring and audit.
+
+        Args:
+            amount_cents: The amount in cents from the Stripe session.
+            session_id: Stripe checkout session ID for logging.
+            user_id: User ID for logging.
+            metadata: Checkout session metadata (may contain package hints).
+
+        Returns:
+            Dict with verification result:
+                - verified: bool (True if amount matches a known package)
+                - severity: str (matched, within_tolerance, under, over, unknown_plan)
+                - expected_cents: int | None (expected amount if matched)
+                - matched_package: str | None (package name if matched)
+                - difference_cents: int (signed difference: actual - expected)
+                - difference_percent: float (percentage difference)
+                - message: str (human-readable description)
+        """
+        try:
+            from src.services.prometheus_metrics import payment_amount_mismatch
+        except ImportError:
+            payment_amount_mismatch = None
+
+        result: dict = {
+            "verified": False,
+            "severity": "unknown_plan",
+            "expected_cents": None,
+            "matched_package": None,
+            "difference_cents": 0,
+            "difference_percent": 0.0,
+            "message": "",
+        }
+
+        # Step 1: Try to match against known credit packages
+        # Check for exact match first
+        if amount_cents in self.KNOWN_CREDIT_PACKAGES:
+            package_name = self.KNOWN_CREDIT_PACKAGES[amount_cents]
+            result.update(
+                {
+                    "verified": True,
+                    "severity": "matched",
+                    "expected_cents": amount_cents,
+                    "matched_package": package_name,
+                    "difference_cents": 0,
+                    "difference_percent": 0.0,
+                    "message": f"Exact match for '{package_name}' package (${amount_cents / 100:.2f})",
+                }
+            )
+            logger.info(
+                "Payment amount verified: exact match for '%s' package "
+                "(amount=$%.2f, session=%s, user=%s)",
+                package_name,
+                amount_cents / 100,
+                session_id,
+                user_id,
+            )
+            if payment_amount_mismatch:
+                payment_amount_mismatch.labels(severity="matched").inc()
+            return result
+
+        # Step 2: Try fuzzy matching against known packages (handles rounding/currency)
+        best_match_package = None
+        best_match_expected = None
+        smallest_diff = float("inf")
+
+        for expected_cents, package_name in self.KNOWN_CREDIT_PACKAGES.items():
+            diff_cents = abs(amount_cents - expected_cents)
+            if diff_cents < smallest_diff:
+                smallest_diff = diff_cents
+                best_match_package = package_name
+                best_match_expected = expected_cents
+
+        # Step 3: Also check subscription products from the database
+        # This handles Pro/Max subscription one-time purchases or promotions
+        try:
+            from src.db.subscription_products import get_all_active_products
+
+            active_products = get_all_active_products()
+            for product in active_products:
+                # subscription_products may store price in different formats
+                product_price = product.get("price_cents") or product.get("price_per_month")
+                if product_price is not None:
+                    try:
+                        # price_per_month is typically in dollars, convert to cents
+                        if product.get("price_cents"):
+                            expected = int(product["price_cents"])
+                        else:
+                            expected = int(float(product_price) * 100)
+                        diff_cents = abs(amount_cents - expected)
+                        if diff_cents < smallest_diff:
+                            smallest_diff = diff_cents
+                            tier = product.get("tier", "unknown")
+                            best_match_package = f"subscription:{tier}"
+                            best_match_expected = expected
+                    except (TypeError, ValueError):
+                        continue
+        except Exception as e:
+            logger.debug("Could not check subscription products for amount verification: %s", e)
+
+        # Step 4: Evaluate the best match
+        if best_match_expected is not None:
+            diff_cents_signed = amount_cents - best_match_expected
+            diff_percent = (
+                abs(diff_cents_signed) / best_match_expected if best_match_expected > 0 else 0.0
+            )
+            tolerance_cents = max(
+                self.AMOUNT_TOLERANCE_CENTS,
+                int(best_match_expected * self.AMOUNT_TOLERANCE_PERCENT),
+            )
+
+            result["expected_cents"] = best_match_expected
+            result["matched_package"] = best_match_package
+            result["difference_cents"] = diff_cents_signed
+            result["difference_percent"] = round(diff_percent * 100, 2)
+
+            if abs(diff_cents_signed) <= tolerance_cents:
+                # Within tolerance -- effectively a match
+                result["verified"] = True
+                result["severity"] = "within_tolerance"
+                result["message"] = (
+                    f"Amount ${amount_cents / 100:.2f} is within tolerance of "
+                    f"'{best_match_package}' (expected ${best_match_expected / 100:.2f}, "
+                    f"diff: {diff_cents_signed:+d} cents)"
+                )
+                logger.info(
+                    "Payment amount within tolerance: %s (session=%s, user=%s)",
+                    result["message"],
+                    session_id,
+                    user_id,
+                )
+                if payment_amount_mismatch:
+                    payment_amount_mismatch.labels(severity="within_tolerance").inc()
+
+            elif diff_cents_signed < 0:
+                # Amount is LESS than expected
+                result["verified"] = False
+                result["severity"] = "under"
+                result["message"] = (
+                    f"Amount ${amount_cents / 100:.2f} is UNDER expected price for "
+                    f"'{best_match_package}' (expected ${best_match_expected / 100:.2f}, "
+                    f"diff: {diff_cents_signed:+d} cents, {result['difference_percent']:.1f}%)"
+                )
+                logger.warning(
+                    "Payment amount UNDER expected: %s (session=%s, user=%s). "
+                    "Stripe is source of truth -- credits will be granted for charged amount.",
+                    result["message"],
+                    session_id,
+                    user_id,
+                )
+                if payment_amount_mismatch:
+                    payment_amount_mismatch.labels(severity="under").inc()
+
+            elif diff_percent > self.AMOUNT_OVER_THRESHOLD_PERCENT:
+                # Amount is SIGNIFICANTLY MORE than expected (>10% over)
+                result["verified"] = False
+                result["severity"] = "over"
+                result["message"] = (
+                    f"Amount ${amount_cents / 100:.2f} is SIGNIFICANTLY OVER expected price for "
+                    f"'{best_match_package}' (expected ${best_match_expected / 100:.2f}, "
+                    f"diff: +{diff_cents_signed} cents, +{result['difference_percent']:.1f}%). "
+                    f"Flagged for review."
+                )
+                logger.error(
+                    "Payment amount SIGNIFICANTLY OVER expected: %s (session=%s, user=%s). "
+                    "Processing payment but flagging for manual review.",
+                    result["message"],
+                    session_id,
+                    user_id,
+                )
+                # Send Sentry alert for significant overpayments
+                try:
+                    capture_payment_error(
+                        RuntimeError(
+                            f"Payment amount significantly over expected: {result['message']}"
+                        ),
+                        operation="payment_amount_verification",
+                        user_id=str(user_id) if user_id else None,
+                        amount=amount_cents / 100,
+                        details={
+                            "session_id": session_id,
+                            "expected_cents": best_match_expected,
+                            "actual_cents": amount_cents,
+                            "difference_percent": result["difference_percent"],
+                            "matched_package": best_match_package,
+                        },
+                    )
+                except Exception:
+                    pass  # Don't fail verification on Sentry errors
+                if payment_amount_mismatch:
+                    payment_amount_mismatch.labels(severity="over").inc()
+
+            else:
+                # Over but within 10% -- slightly over, still acceptable
+                result["verified"] = True
+                result["severity"] = "within_tolerance"
+                result["message"] = (
+                    f"Amount ${amount_cents / 100:.2f} is slightly over expected price for "
+                    f"'{best_match_package}' (expected ${best_match_expected / 100:.2f}, "
+                    f"diff: +{diff_cents_signed} cents, +{result['difference_percent']:.1f}%)"
+                )
+                logger.info(
+                    "Payment amount slightly over expected: %s (session=%s, user=%s)",
+                    result["message"],
+                    session_id,
+                    user_id,
+                )
+                if payment_amount_mismatch:
+                    payment_amount_mismatch.labels(severity="within_tolerance").inc()
+        else:
+            # No known package found at all
+            result["severity"] = "unknown_plan"
+            result["message"] = (
+                f"Amount ${amount_cents / 100:.2f} does not match any known credit "
+                f"package or subscription plan"
+            )
+            logger.warning(
+                "Payment amount does not match ANY known plan: %s (session=%s, user=%s). "
+                "This may be a custom amount or a new plan not yet registered.",
+                result["message"],
+                session_id,
+                user_id,
+            )
+            if payment_amount_mismatch:
+                payment_amount_mismatch.labels(severity="unknown_plan").inc()
+
+        return result
 
     def _handle_payment_succeeded(self, payment_intent):
         """Handle successful payment"""
