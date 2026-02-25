@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from src.services.pyroscope_config import tag_wrapper
+
 logger = logging.getLogger(__name__)
 
 # Try to import Redis for distributed caching
@@ -176,19 +178,21 @@ class ResponseCache:
                 # Wrap Redis get operation in Sentry span
                 cached_data = None
                 if trace_cache_operation:
-                    with trace_cache_operation(
-                        "cache.get",
-                        cache_key,
-                        cache_system="redis",
-                    ) as span:
-                        cached_data = self._redis_client.get(cache_key)
-                        # Set cache hit/miss after we know the result
-                        if span:
-                            span.set_data("cache.hit", cached_data is not None)
-                            if cached_data:
-                                span.set_data("cache.item_size", len(cached_data))
+                    with tag_wrapper({"cache_layer": "response_cache", "cache_op": "read"}):
+                        with trace_cache_operation(
+                            "cache.get",
+                            cache_key,
+                            cache_system="redis",
+                        ) as span:
+                            cached_data = self._redis_client.get(cache_key)
+                            # Set cache hit/miss after we know the result
+                            if span:
+                                span.set_data("cache.hit", cached_data is not None)
+                                if cached_data:
+                                    span.set_data("cache.item_size", len(cached_data))
                 else:
-                    cached_data = self._redis_client.get(cache_key)
+                    with tag_wrapper({"cache_layer": "response_cache", "cache_op": "read"}):
+                        cached_data = self._redis_client.get(cache_key)
 
                 if cached_data:
                     cached_response = json.loads(cached_data)
@@ -313,24 +317,26 @@ class ResponseCache:
 
                 # Wrap Redis setex operation in Sentry span
                 if trace_cache_operation:
-                    with trace_cache_operation(
-                        "cache.put",
-                        cache_key,
-                        item_size=len(serialized_data),
-                        ttl=ttl,
-                        cache_system="redis",
-                    ):
+                    with tag_wrapper({"cache_layer": "response_cache", "cache_op": "write"}):
+                        with trace_cache_operation(
+                            "cache.put",
+                            cache_key,
+                            item_size=len(serialized_data),
+                            ttl=ttl,
+                            cache_system="redis",
+                        ):
+                            self._redis_client.setex(
+                                cache_key,
+                                ttl,
+                                serialized_data,
+                            )
+                else:
+                    with tag_wrapper({"cache_layer": "response_cache", "cache_op": "write"}):
                         self._redis_client.setex(
                             cache_key,
                             ttl,
                             serialized_data,
                         )
-                else:
-                    self._redis_client.setex(
-                        cache_key,
-                        ttl,
-                        serialized_data,
-                    )
 
                 self._stats["sets"] += 1
                 logger.debug(f"Cache SET (Redis): {cache_key[:16]}...")
