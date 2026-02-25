@@ -755,11 +755,28 @@ class TestCreditTransactions:
         assert data["total"] == 3
         assert len(data["transactions"]) == 3
 
-        # Verify transaction structure
+        # Verify transaction structure - only user-safe fields
         first_txn = data["transactions"][0]
         assert first_txn["transaction_type"] == "trial"
         assert first_txn["amount"] == 10.0
-        assert first_txn["balance_after"] == 10.0
+        assert "id" in first_txn
+        assert "description" in first_txn
+        assert "created_at" in first_txn
+
+        # Verify internal fields are NOT exposed to users
+        assert "balance_before" not in first_txn
+        assert "balance_after" not in first_txn
+        assert "payment_id" not in first_txn
+
+        # Verify metadata is sanitized: only safe keys (model, endpoint) are kept
+        api_usage_txn = data["transactions"][2]
+        assert api_usage_txn["transaction_type"] == "api_usage"
+        assert api_usage_txn["metadata"] == {"model": "claude-3-sonnet"}
+        # Internal metadata fields like 'tokens', 'stripe_session_id' should be stripped
+        assert "tokens" not in api_usage_txn["metadata"]
+
+        purchase_txn = data["transactions"][1]
+        assert purchase_txn["metadata"] == {}  # stripe_session_id stripped
 
     @patch("src.routes.users.get_user")
     @patch("src.routes.users.get_user_transactions")

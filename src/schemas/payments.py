@@ -378,8 +378,10 @@ class AddCreditsRequest(BaseModel):
 
     api_key: str
     credits: int = Field(validation_alias=AliasChoices("credits", "amount"))
-    reason: str | None = Field(
-        default=None, description="Optional reason for the credit adjustment"
+    reason: str = Field(
+        ...,
+        min_length=10,
+        description="Required reason for the credit grant (min 10 characters)",
     )
 
 

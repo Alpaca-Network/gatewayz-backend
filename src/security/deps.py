@@ -362,9 +362,15 @@ async def check_credits(
     current_credits = user.get("credits", 0.0)
 
     if current_credits < min_credits:
+        logger.warning(
+            "Insufficient credits for user %s: required=%s, available=%s",
+            user.get("id"),
+            min_credits,
+            current_credits,
+        )
         raise HTTPException(
             status_code=402,
-            detail=f"Insufficient credits. Required: {min_credits}, Available: {current_credits}",
+            detail="Insufficient credits. Please add credits to continue.",
         )
 
     return user

@@ -1840,6 +1840,7 @@ async def get_trending_models_endpoint(
     gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
 ):
     """
@@ -1852,6 +1853,7 @@ async def get_trending_models_endpoint(
         gateway: Gateway filter ('all' for all gateways)
         time_range: Time range for trending calculation
         limit: Number of models to return
+        offset: Number of results to skip for pagination
         sort_by: Sort criteria ('requests', 'tokens', 'users')
 
     Returns:
@@ -1860,14 +1862,16 @@ async def get_trending_models_endpoint(
     Example:
         GET /catalog/models/trending?time_range=24h&limit=10
         GET /catalog/models/trending?gateway=deepinfra&sort_by=tokens
+        GET /catalog/models/trending?limit=10&offset=10
     """
     try:
         _validate_gateway(gateway)
         logger.info(
-            "Fetching trending models: gateway=%s, time_range=%s, sort_by=%s",
+            "Fetching trending models: gateway=%s, time_range=%s, sort_by=%s, offset=%d",
             sanitize_for_logging(gateway),
             sanitize_for_logging(time_range),
             sanitize_for_logging(sort_by),
+            offset,
         )
 
         # Validate sort_by
@@ -1877,9 +1881,16 @@ async def get_trending_models_endpoint(
                 status_code=400, detail=f"Invalid sort_by. Must be one of: {', '.join(valid_sort)}"
             )
 
+        # Fetch a large result set so total_count reflects the true number of
+        # results and the cache key stays stable regardless of pagination params.
+        _TRENDING_BUFFER = 200
         trending = get_trending_models(
-            gateway=gateway, time_range=time_range, limit=limit, sort_by=sort_by
+            gateway=gateway, time_range=time_range, limit=_TRENDING_BUFFER, sort_by=sort_by
         )
+
+        # Get total count BEFORE slicing so pagination metadata is accurate
+        total_count = len(trending)
+        trending = trending[offset : offset + limit]
 
         return {
             "success": True,
@@ -1889,6 +1900,12 @@ async def get_trending_models_endpoint(
             "time_range": time_range,
             "sort_by": sort_by,
             "timestamp": datetime.now(UTC).isoformat(),
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total_count,
+                "has_more": offset + limit < total_count,
+            },
         }
 
     except HTTPException:
@@ -1944,6 +1961,7 @@ async def get_all_gateways_summary_endpoint(
 async def get_provider_top_models_endpoint(
     provider_name: str,
     limit: int = Query(5, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=20),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL),
 ):
     """
@@ -1954,6 +1972,7 @@ async def get_provider_top_models_endpoint(
     Args:
         provider_name: Provider name (e.g., 'openai', 'anthropic')
         limit: Number of models to return
+        offset: Number of results to skip for pagination
         time_range: Time range for statistics
 
     Returns:
@@ -1961,14 +1980,22 @@ async def get_provider_top_models_endpoint(
 
     Example:
         GET /catalog/provider/openai/top-models?limit=5&time_range=7d
+        GET /catalog/provider/openai/top-models?limit=5&offset=5&time_range=7d
     """
     try:
         provider_name = normalize_developer_segment(provider_name) or provider_name
         logger.info("Fetching top models for provider: %s", sanitize_for_logging(provider_name))
 
+        # Fetch a large result set so total_count reflects the true number of
+        # results and the cache key stays stable regardless of pagination params.
+        _TOP_MODELS_BUFFER = 100
         top_models = get_top_models_by_provider(
-            provider_name=provider_name, limit=limit, time_range=time_range
+            provider_name=provider_name, limit=_TOP_MODELS_BUFFER, time_range=time_range
         )
+
+        # Get total count BEFORE slicing so pagination metadata is accurate
+        total_count = len(top_models)
+        top_models = top_models[offset : offset + limit]
 
         return {
             "success": True,
@@ -1977,6 +2004,12 @@ async def get_provider_top_models_endpoint(
             "count": len(top_models),
             "time_range": time_range,
             "timestamp": datetime.now(UTC).isoformat(),
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total_count,
+                "has_more": offset + limit < total_count,
+            },
         }
 
     except HTTPException:
@@ -2295,12 +2328,14 @@ async def get_trending_models_api(
     gateway: str | None = Query("all", description="Gateway filter or 'all'"),
     time_range: str = Query("24h", description=DESC_TIME_RANGE_NO_ALL),
     limit: int = Query(10, description=DESC_NUMBER_OF_MODELS_TO_RETURN, ge=1, le=100),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
     sort_by: str = Query("requests", description="Sort by: 'requests', 'tokens', 'users'"),
 ):
     return await get_trending_models_endpoint(
         gateway=gateway,
         time_range=time_range,
         limit=limit,
+        offset=offset,
         sort_by=sort_by,
     )
 
@@ -2315,6 +2350,8 @@ async def get_low_latency_models_api(
         True,
         description="Include suggested fast alternatives for common model families",
     ),
+    limit: int = Query(default=50, ge=1, le=500, description="Limit number of results"),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
 ):
     """
     Get models optimized for low latency.
@@ -2344,9 +2381,13 @@ async def get_low_latency_models_api(
     else:
         models = get_low_latency_models()
 
+    # Apply offset pagination to the models list
+    total_count = len(models)
+    paginated_models = models[offset : offset + limit]
+
     result = {
-        "models": models,
-        "count": len(models),
+        "models": paginated_models,
+        "count": len(paginated_models),
         "providers_by_speed": get_fastest_providers(),
         "provider_tiers": {
             provider: {
@@ -2359,6 +2400,12 @@ async def get_low_latency_models_api(
                 }.get(tier, "Unknown"),
             }
             for provider, tier in PROVIDER_LATENCY_TIERS.items()
+        },
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "total": total_count,
+            "has_more": offset + limit < total_count,
         },
     }
 
@@ -3212,6 +3259,7 @@ async def discover_huggingface_models(
     ),
     sort: str = Query("likes", description="Sort by: 'likes' or 'downloads'"),
     limit: int = Query(50, description="Number of models to return", ge=1, le=500),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
 ):
     """
     Discover HuggingFace models using the official Hub SDK.
@@ -3225,12 +3273,17 @@ async def discover_huggingface_models(
     try:
         from src.services.huggingface_hub_service import list_huggingface_models
 
-        logger.info(f"Discovering HuggingFace models: task={task}, sort={sort}, limit={limit}")
+        logger.info(
+            f"Discovering HuggingFace models: task={task}, sort={sort}, limit={limit}, offset={offset}"
+        )
 
+        # Fetch a large result set so total_count reflects the true number of
+        # results regardless of pagination params.
+        _HF_DISCOVER_BUFFER = 200
         models = list_huggingface_models(
             task=task,
             sort=sort,
-            limit=limit,
+            limit=_HF_DISCOVER_BUFFER,
         )
 
         if not models:
@@ -3241,14 +3294,30 @@ async def discover_huggingface_models(
                 "source": "huggingface-hub",
                 "task": task,
                 "sort": sort,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "total": 0,
+                    "has_more": False,
+                },
             }
 
+        # Get total count BEFORE slicing so pagination metadata is accurate
+        total_count = len(models)
+        paginated_models = models[offset : offset + limit]
+
         return {
-            "models": models,
-            "count": len(models),
+            "models": paginated_models,
+            "count": len(paginated_models),
             "source": "huggingface-hub",
             "task": task,
             "sort": sort,
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total_count,
+                "has_more": offset + limit < total_count,
+            },
         }
 
     except Exception as e:
@@ -3264,6 +3333,7 @@ async def search_huggingface_models_endpoint(
     q: str = Query(..., description="Search query (model name, description, etc.)", min_length=1),
     task: str | None = Query(None, description="Optional task filter"),
     limit: int = Query(20, description="Number of results to return", ge=1, le=100),
+    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
 ):
     """
     Search for HuggingFace models by query.
@@ -3274,19 +3344,34 @@ async def search_huggingface_models_endpoint(
     try:
         from src.services.huggingface_hub_service import search_models_by_query
 
-        logger.info(f"Searching HuggingFace models: q='{q}', task={task}, limit={limit}")
+        logger.info(
+            f"Searching HuggingFace models: q='{q}', task={task}, limit={limit}, offset={offset}"
+        )
 
+        # Fetch a large result set so total_count reflects the true number of
+        # results regardless of pagination params.
+        _HF_SEARCH_BUFFER = 200
         models = search_models_by_query(
             query=q,
             task=task,
-            limit=limit,
+            limit=_HF_SEARCH_BUFFER,
         )
+
+        # Get total count BEFORE slicing so pagination metadata is accurate
+        total_count = len(models)
+        paginated_models = models[offset : offset + limit]
 
         return {
             "query": q,
-            "models": models,
-            "count": len(models),
+            "models": paginated_models,
+            "count": len(paginated_models),
             "source": "huggingface-hub",
+            "pagination": {
+                "limit": limit,
+                "offset": offset,
+                "total": total_count,
+                "has_more": offset + limit < total_count,
+            },
         }
 
     except Exception as e:

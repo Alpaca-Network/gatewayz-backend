@@ -244,11 +244,20 @@ def safe_update_credits(
     new_balance = credits + delta_float
 
     if new_balance < min_credits:
-        raise ValueError(
-            f"{operation_name}: Insufficient credits. "
-            f"Current: {credits}, Delta: {delta_float}, "
-            f"Would result in: {new_balance}, Minimum: {min_credits}"
+        # SECURITY: Log details server-side, keep ValueError generic to avoid
+        # leaking exact credit amounts if this propagates to an HTTP response.
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "%s: Insufficient credits. current=%.6f, delta=%.6f, "
+            "would_result_in=%.6f, minimum=%.6f",
+            operation_name,
+            credits,
+            delta_float,
+            new_balance,
+            min_credits,
         )
+        raise ValueError(f"{operation_name}: Insufficient credits. Please add credits to continue.")
 
     return round(new_balance, 6)  # Round to 6 decimal places to avoid floating point issues
 

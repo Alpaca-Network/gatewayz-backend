@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -19,6 +20,7 @@ from src.services.image_generation_client import (
     make_google_vertex_image_request,
     process_image_generation_response,
 )
+from src.services.pricing_lookup import get_image_pricing
 from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.performance_tracker import PerformanceTracker
 
@@ -27,10 +29,13 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Provider-specific image generation pricing (cost per image in USD)
-# Based on provider pricing pages as of Jan 2025
-# TODO: Move to database-driven pricing for easier updates
-IMAGE_COST_PER_IMAGE = {
+# DEPRECATED: Hardcoded image pricing fallback.
+# Canonical image pricing now lives in src/data/manual_pricing.json under the
+# "image_pricing" key.  This dict is kept only as a last-resort fallback during
+# the transition period.  It will be removed once all pricing is confirmed to be
+# served from manual_pricing.json.  Do NOT add new entries here -- update
+# manual_pricing.json instead.
+_HARDCODED_IMAGE_COST_PER_IMAGE = {
     "deepinfra": {
         "stable-diffusion-3.5-large": 0.035,
         "stable-diffusion-3.5-medium": 0.02,
@@ -59,43 +64,89 @@ IMAGE_COST_PER_IMAGE = {
 # to avoid revenue loss on new expensive models
 UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
 
+# Resolution-based cost multipliers relative to 1024x1024 base rate
+# Higher resolutions require more compute and should cost more
+RESOLUTION_MULTIPLIERS = {
+    "256x256": 0.5,
+    "512x512": 0.75,
+    "1024x1024": 1.0,  # Base rate
+    "1024x1792": 1.5,  # HD portrait
+    "1792x1024": 1.5,  # HD landscape
+    "2048x2048": 2.0,  # Ultra HD
+}
+# Default multiplier for unknown/unrecognized sizes (backwards compatible)
+DEFAULT_RESOLUTION_MULTIPLIER = 1.0
 
-def get_image_cost(provider: str, model: str, num_images: int = 1) -> tuple[float, float, bool]:
+
+def get_image_cost(
+    provider: str, model: str, num_images: int = 1, size: str = None
+) -> tuple[float, float, bool, float]:
     """
-    Calculate the cost for image generation.
+    Calculate the cost for image generation with resolution-aware pricing.
+
+    Pricing lookup order:
+      1. manual_pricing.json  (``image_pricing`` section, via ``get_image_pricing()``)
+      2. Hardcoded fallback   (``_HARDCODED_IMAGE_COST_PER_IMAGE`` -- deprecated)
+      3. Provider default     (``"default"`` key in hardcoded dict)
+      4. Unknown-provider     (``UNKNOWN_PROVIDER_DEFAULT_COST``)
 
     Args:
         provider: Image generation provider (deepinfra, fal, google-vertex)
         model: Model name
         num_images: Number of images to generate
+        size: Image resolution string (e.g. "1024x1024"). If None, uses default multiplier of 1.0.
 
     Returns:
-        Tuple of (total_cost, cost_per_image, is_fallback_pricing)
+        Tuple of (total_cost, cost_per_image, is_fallback_pricing, resolution_multiplier)
         is_fallback_pricing is True when using default/unknown pricing
+        resolution_multiplier is the multiplier applied based on the requested size
     """
-    provider_pricing = IMAGE_COST_PER_IMAGE.get(provider, {})
     is_fallback = False
 
+    # --- Tier 1: config-driven pricing from manual_pricing.json ---
+    config_result = get_image_pricing(provider, model)
+    if config_result is not None:
+        config_price, config_is_fallback = config_result
+        total_cost = config_price * num_images
+        return total_cost, config_price, config_is_fallback
+
+    # --- Tier 2+: hardcoded fallback (deprecated) ---
+    logger.warning(
+        f"Image pricing not found in manual_pricing.json, falling back to hardcoded dict: "
+        f"provider={provider}, model={model}"
+    )
+
+    provider_pricing = _HARDCODED_IMAGE_COST_PER_IMAGE.get(provider, {})
+
     if model in provider_pricing:
-        cost_per_image = provider_pricing[model]
+        base_cost_per_image = provider_pricing[model]
     elif "default" in provider_pricing:
-        cost_per_image = provider_pricing["default"]
+        base_cost_per_image = provider_pricing["default"]
         is_fallback = True
         logger.warning(
             f"Using default pricing for unknown model: provider={provider}, model={model}, "
-            f"cost_per_image={cost_per_image}"
+            f"base_cost_per_image={base_cost_per_image}"
         )
     else:
         # Unknown provider - use conservative high default to avoid revenue loss
-        cost_per_image = UNKNOWN_PROVIDER_DEFAULT_COST
+        base_cost_per_image = UNKNOWN_PROVIDER_DEFAULT_COST
         is_fallback = True
         logger.warning(
             f"Using fallback pricing for unknown provider: provider={provider}, model={model}, "
-            f"cost_per_image={cost_per_image}"
+            f"base_cost_per_image={base_cost_per_image}"
         )
 
+    # Apply resolution-based multiplier
+    if size is not None:
+        resolution_multiplier = RESOLUTION_MULTIPLIERS.get(
+            size.lower().strip(), DEFAULT_RESOLUTION_MULTIPLIER
+        )
+    else:
+        resolution_multiplier = DEFAULT_RESOLUTION_MULTIPLIER
+
+    cost_per_image = base_cost_per_image * resolution_multiplier
     total_cost = cost_per_image * num_images
-    return total_cost, cost_per_image, is_fallback
+    return total_cost, cost_per_image, is_fallback, resolution_multiplier
 
 
 @router.post("/images/generations", response_model=ImageGenerationResponse, tags=["images"])
@@ -162,6 +213,9 @@ async def generate_images(
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/images/generations")
 
+    # Generate request_id for correlation with billing transactions
+    request_id = str(uuid.uuid4())
+
     # Initialize variables for error handling
     actual_provider = None
     model = None
@@ -223,8 +277,10 @@ async def generate_images(
                 req.provider if req.provider else "deepinfra"
             )  # Default to DeepInfra for images
 
-            # Calculate estimated cost for pre-flight check
-            estimated_cost, cost_per_image, _ = get_image_cost(provider, model, req.n)
+            # Calculate estimated cost for pre-flight check (resolution-aware)
+            estimated_cost, cost_per_image, _, resolution_multiplier = get_image_cost(
+                provider, model, req.n, size=req.size
+            )
 
             # Check if user has enough credits
             # Note: This is a pre-flight check. Actual deduction happens after generation.
@@ -232,13 +288,20 @@ async def generate_images(
             # potential race conditions where balance could change between check and deduction.
             required_credits = estimated_cost * 1.1  # 10% buffer for safety
             if user["credits"] < required_credits:
+                logger.warning(
+                    "Insufficient credits for image generation (user %s): "
+                    "estimated_cost=%.4f, required_with_buffer=%.4f, available=%.4f, "
+                    "cost_per_image=%.4f, n=%d",
+                    user.get("id"),
+                    estimated_cost,
+                    required_credits,
+                    user["credits"],
+                    cost_per_image,
+                    req.n,
+                )
                 raise HTTPException(
                     status_code=402,
-                    detail=(
-                        f"Insufficient credits. Image generation costs ${estimated_cost:.4f} "
-                        f"(${cost_per_image:.4f}/image x {req.n}), requires ${required_credits:.4f} "
-                        f"with safety buffer. Available: ${user['credits']:.4f}"
-                    ),
+                    detail="Insufficient credits. Please add credits to continue.",
                 )
             actual_provider = provider  # Initialize for error handling
 
@@ -301,9 +364,9 @@ async def generate_images(
                 # Calculate inference latency
                 elapsed = max(0.001, time.monotonic() - start)
 
-                # Calculate actual cost using provider pricing for tracing
-                trace_total_cost, trace_cost_per_image, _ = get_image_cost(
-                    actual_provider, model, req.n
+                # Calculate actual cost using provider pricing for tracing (resolution-aware)
+                trace_total_cost, trace_cost_per_image, _, _ = get_image_cost(
+                    actual_provider, model, req.n, size=req.size
                 )
                 # Set cost and metadata on trace using actual USD cost
                 trace_ctx.set_cost(trace_total_cost)
@@ -327,8 +390,18 @@ async def generate_images(
             )
 
             # Calculate actual cost using the provider that was used (may differ from requested)
-            total_cost, cost_per_image, used_fallback_pricing = get_image_cost(
-                actual_provider, model, req.n
+            # Resolution multiplier is applied based on requested size
+            total_cost, cost_per_image, used_fallback_pricing, resolution_multiplier = (
+                get_image_cost(actual_provider, model, req.n, size=req.size)
+            )
+
+            # Audit log: resolution-adjusted pricing for billing transparency
+            logger.info(
+                f"Image pricing: provider={actual_provider}, model={model}, "
+                f"size={req.size}, resolution_multiplier={resolution_multiplier}, "
+                f"cost_per_image=${cost_per_image:.4f}, num_images={req.n}, "
+                f"total_cost=${total_cost:.4f}, fallback_pricing={used_fallback_pricing}, "
+                f"user_id={user.get('id')}"
             )
 
             # Token-equivalent for rate limiting: use 100 tokens per image as a standardized unit
@@ -339,7 +412,24 @@ async def generate_images(
             # The deduct_credits function handles atomic balance updates to prevent race conditions
             actual_balance_after = None
             try:
-                await loop.run_in_executor(executor, deduct_credits, api_key, total_cost)
+                await loop.run_in_executor(
+                    executor,
+                    partial(
+                        deduct_credits,
+                        api_key,
+                        total_cost,
+                        f"Image generation - {model}",
+                        {
+                            "model": model,
+                            "provider": actual_provider,
+                            "num_images": req.n,
+                            "cost_per_image": cost_per_image,
+                            "cost_usd": total_cost,
+                            "endpoint": "/v1/images/generations",
+                            "request_id": request_id,
+                        },
+                    ),
+                )
 
                 # Fetch fresh balance after deduction for accurate reporting
                 # This avoids stale data from the pre-request user lookup
@@ -366,7 +456,7 @@ async def generate_images(
                 logger.error(f"Credit deduction failed for image generation: {e}")
                 raise HTTPException(
                     status_code=402,
-                    detail=f"Payment required: {e}",
+                    detail="Insufficient credits. Please add credits to continue.",
                 )
             except Exception as e:
                 # Unexpected error in billing - fail safe, don't give away free images
@@ -390,6 +480,8 @@ async def generate_images(
                 "user_api_key": f"{api_key[:10]}...",
                 "images_generated": req.n,
                 "used_fallback_pricing": used_fallback_pricing,
+                "size": req.size,
+                "resolution_multiplier": resolution_multiplier,
             }
 
             return processed_response
