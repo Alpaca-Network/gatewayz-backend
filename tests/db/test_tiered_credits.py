@@ -280,9 +280,10 @@ class TestSubscriptionCancellation:
         mock_log_tx.return_value = {"id": "tx_123"}
 
         # Forfeit allowance
-        forfeited = forfeit_subscription_allowance(123)
+        result = forfeit_subscription_allowance(123)
 
-        assert forfeited == 8.0
+        assert result["forfeited_allowance"] == 8.0
+        assert result["retained_purchased_credits"] == 20.0
 
         # Verify update set allowance to 0
         update_call = mock_supabase.table.return_value.update.call_args
@@ -319,7 +320,7 @@ class TestSubscriptionCancellation:
         call_args = mock_log_tx.call_args
         assert call_args is not None
         metadata = call_args.kwargs.get("metadata", {})
-        assert metadata.get("purchased_credits_preserved") == 20.0
+        assert metadata.get("retained_purchased_credits") == 20.0
 
 
 class TestAllowanceFromTier:

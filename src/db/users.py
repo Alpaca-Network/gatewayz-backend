@@ -509,6 +509,7 @@ def add_credits_to_user(
     description: str = "Credits added",
     payment_id: int | None = None,
     metadata: dict | None = None,
+    created_by: str | None = None,
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction.
@@ -522,6 +523,7 @@ def add_credits_to_user(
         description: Description of the transaction
         payment_id: Optional payment ID if this is from a payment
         metadata: Optional metadata dictionary
+        created_by: Optional identifier of who created the transaction (e.g. "admin:123")
     """
     if credits <= 0:
         raise ValueError("Credits must be positive")
@@ -598,6 +600,7 @@ def add_credits_to_user(
                 "purchased_before": purchased_before,
                 "purchased_after": purchased_after,
             },
+            created_by=created_by,
         )
 
         logger.info(
@@ -798,15 +801,15 @@ def deduct_credits(
 
         # Check sufficiency
         if balance_before < tokens:
-            # SECURITY: Sanitize exact credit amounts from error messages
-            # Round to nearest $0.01 to avoid exposing precise financial data in logs
-            balance_rounded = round(balance_before, 2)
-            required_rounded = round(tokens, 2)
-
-            raise ValueError(
-                f"Insufficient credits. Current balance: ~${balance_rounded:.2f}, "
-                f"Required: ~${required_rounded:.2f}. Please add credits to continue."
+            # SECURITY: Log exact amounts server-side for debugging, but do NOT
+            # expose them in the ValueError message (which may reach the HTTP response).
+            logger.warning(
+                "Insufficient credits for user %s: balance=%.6f, required=%.6f",
+                user_id,
+                balance_before,
+                tokens,
             )
+            raise ValueError("Insufficient credits. Please add credits to continue.")
 
         # Calculate deduction breakdown: deduct from allowance first, then purchased
         from_allowance = min(allowance_before, tokens)
@@ -852,18 +855,16 @@ def deduct_credits(
             else:
                 current_balance = "unknown"
 
-            # SECURITY: Sanitize credit amounts in concurrent modification errors too
-            current_rounded = (
-                round(float(current_balance), 2)
-                if isinstance(current_balance, (int, float))
-                else "unknown"
+            # SECURITY: Log details server-side, keep ValueError generic
+            logger.warning(
+                "Failed to update balance due to concurrent modification for user %s: "
+                "current_balance=%s, required=%.6f",
+                user_id,
+                current_balance,
+                tokens,
             )
-            required_rounded = round(tokens, 2)
-
             raise ValueError(
-                f"Failed to update balance due to concurrent modification. "
-                f"Current balance: ~${current_rounded:.2f if isinstance(current_rounded, float) else ''}{current_rounded if not isinstance(current_rounded, float) else ''}, "
-                f"Required: ~${required_rounded:.2f}. Please retry."
+                "Failed to update balance due to concurrent modification. Please retry."
             )
 
         # Log the transaction with breakdown (negative amount for deduction)
@@ -1003,21 +1004,38 @@ def reset_subscription_allowance(user_id: int, allowance_amount: float, tier: st
         return False
 
 
-def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -> float:
+def forfeit_subscription_allowance(
+    user_id: int,
+    raise_on_error: bool = False,
+    effective_date: str | None = None,
+    cancellation_context: str | None = None,
+) -> dict[str, float]:
     """
     Forfeit remaining subscription allowance on cancellation.
-    Purchased credits are preserved.
+
+    Credit handling on cancellation:
+    - subscription_allowance -> SET TO 0 (forfeited, these are monthly tier credits)
+    - purchased_credits -> KEPT (these were paid for separately)
 
     Args:
         user_id: User ID
-        raise_on_error: If True, raises exception on database errors instead of returning 0.0
+        raise_on_error: If True, raises exception on database errors instead of returning empty dict.
+        effective_date: ISO timestamp of when the cancellation takes effect (e.g. period end date).
+        cancellation_context: Human-readable context for the cancellation trigger
+            (e.g. "immediate_cancellation", "period_end_webhook", "subscription_deleted_webhook").
 
     Returns:
-        Amount of allowance that was forfeited (0.0 if user had no allowance)
+        Dict with forfeiture details:
+            - forfeited_allowance: Amount of subscription allowance that was zeroed out
+            - retained_purchased_credits: Amount of purchased credits preserved
+        Returns {"forfeited_allowance": 0.0, "retained_purchased_credits": 0.0} on error
+        if raise_on_error is False.
 
     Raises:
         RuntimeError: If raise_on_error is True and database operation fails
     """
+    empty_result = {"forfeited_allowance": 0.0, "retained_purchased_credits": 0.0}
+
     try:
         from src.db.credit_transactions import TransactionType, log_credit_transaction
 
@@ -1037,13 +1055,18 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
             logger.error(error_msg)
             if raise_on_error:
                 raise RuntimeError(error_msg)
-            return 0.0
+            return empty_result
 
         forfeited_amount = float(user_result.data[0].get("subscription_allowance") or 0)
         purchased = float(user_result.data[0].get("purchased_credits") or 0)
 
+        result = {
+            "forfeited_allowance": forfeited_amount,
+            "retained_purchased_credits": purchased,
+        }
+
         if forfeited_amount > 0:
-            # Set allowance to 0
+            # Set subscription_allowance to 0; purchased_credits are intentionally untouched
             update_result = (
                 client.table("users")
                 .update(
@@ -1062,28 +1085,47 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
                 logger.error(error_msg)
                 if raise_on_error:
                     raise RuntimeError(error_msg)
-                return 0.0
+                return empty_result
 
-            # Log forfeiture
+            # Build rich metadata for audit trail
+            transaction_metadata = {
+                "forfeited_allowance": forfeited_amount,
+                "retained_purchased_credits": purchased,
+                "effective_date": effective_date or now,
+                "cancellation_context": cancellation_context or "unspecified",
+            }
+
+            # Log forfeiture transaction
             log_credit_transaction(
                 user_id=user_id,
                 amount=-forfeited_amount,
                 transaction_type=TransactionType.SUBSCRIPTION_CANCELLATION,
-                description="Subscription allowance forfeited on cancellation",
+                description=(
+                    f"Subscription allowance forfeited on cancellation "
+                    f"(${forfeited_amount:.2f} forfeited, "
+                    f"${purchased:.2f} purchased credits retained)"
+                ),
                 balance_before=forfeited_amount + purchased,
                 balance_after=purchased,
-                metadata={
-                    "forfeited_allowance": forfeited_amount,
-                    "purchased_credits_preserved": purchased,
-                },
+                metadata=transaction_metadata,
             )
 
             # Invalidate cache
             invalidate_user_cache_by_id(user_id)
 
-            logger.info(f"Forfeited ${forfeited_amount} allowance for user {user_id}")
+            logger.info(
+                f"Forfeited ${forfeited_amount:.2f} subscription allowance for user {user_id} "
+                f"(purchased credits ${purchased:.2f} retained, "
+                f"context={cancellation_context or 'unspecified'}, "
+                f"effective_date={effective_date or now})"
+            )
+        else:
+            logger.info(
+                f"No subscription allowance to forfeit for user {user_id} "
+                f"(purchased credits ${purchased:.2f} retained)"
+            )
 
-        return forfeited_amount
+        return result
 
     except Exception as e:
         logger.error(
@@ -1094,7 +1136,7 @@ def forfeit_subscription_allowance(user_id: int, raise_on_error: bool = False) -
             raise RuntimeError(
                 f"Failed to forfeit subscription allowance for user {user_id}: {e}"
             ) from e
-        return 0.0
+        return empty_result
 
 
 def get_all_users() -> list[dict[str, Any]]:

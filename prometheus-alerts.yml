@@ -385,6 +385,39 @@ groups:
           description: "Credit burn rate is {{ $value | humanize }} credits/sec, more than 2x the 6-hour average."
           dashboard_url: "https://grafana.com/d/gatewayz-costs"
 
+      - alert: HighCreditDeductionFailureRate
+        expr: rate(gatewayz_credit_deduction_total{status="failed"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: billing
+        annotations:
+          summary: "High credit deduction failure rate"
+          description: "Credit deduction failures exceeding 0.1/s for 2+ minutes. Revenue at risk."
+          runbook_url: "https://docs.gatewayz.ai/runbooks/credit-deduction-failure"
+
+      - alert: MissedCreditDeductions
+        expr: increase(gatewayz_missed_credit_deductions_usd_total[1h]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Missed credit deductions exceeding $10/hour"
+          description: "Missed credit deductions have exceeded $10 in the last hour. Investigate billing pipeline for failures."
+          dashboard_url: "https://grafana.com/d/gatewayz-costs"
+
+      - alert: HighDefaultPricingUsage
+        expr: rate(gatewayz_default_pricing_usage_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: billing
+        annotations:
+          summary: "Many models falling back to default pricing"
+          description: "Default pricing fallback rate exceeds 1/s for 5+ minutes. Models may be missing pricing data, risking under-billing."
+          dashboard_url: "https://grafana.com/d/gatewayz-costs"
+
   # ==================== HTTP / API Alerts ====================
   - name: http_api
     interval: 1m

@@ -760,31 +760,33 @@ class TestImageGenerationPricing:
         """Test cost calculation for known model"""
         from src.routes.images import get_image_cost
 
-        total_cost, cost_per_image, is_fallback = get_image_cost(
+        total_cost, cost_per_image, is_fallback, resolution_multiplier = get_image_cost(
             "deepinfra", "stable-diffusion-3.5-large", 1
         )
 
         assert total_cost == 0.035
         assert cost_per_image == 0.035
         assert is_fallback is False
+        assert resolution_multiplier == 1.0
 
     def test_get_image_cost_multiple_images(self):
         """Test cost calculation for multiple images"""
         from src.routes.images import get_image_cost
 
-        total_cost, cost_per_image, is_fallback = get_image_cost(
+        total_cost, cost_per_image, is_fallback, resolution_multiplier = get_image_cost(
             "deepinfra", "stable-diffusion-3.5-large", 3
         )
 
         assert total_cost == 0.105
         assert cost_per_image == 0.035
         assert is_fallback is False
+        assert resolution_multiplier == 1.0
 
     def test_get_image_cost_unknown_model_uses_provider_default(self):
         """Test that unknown models use provider default pricing and flag as fallback"""
         from src.routes.images import get_image_cost
 
-        total_cost, cost_per_image, is_fallback = get_image_cost(
+        total_cost, cost_per_image, is_fallback, resolution_multiplier = get_image_cost(
             "deepinfra", "unknown-model-xyz", 1
         )
 
@@ -792,12 +794,13 @@ class TestImageGenerationPricing:
         assert cost_per_image == 0.025
         assert total_cost == 0.025
         assert is_fallback is True  # Flag that fallback pricing was used
+        assert resolution_multiplier == 1.0
 
     def test_get_image_cost_unknown_provider_uses_conservative_default(self):
         """Test that unknown providers use conservative high default to avoid revenue loss"""
         from src.routes.images import UNKNOWN_PROVIDER_DEFAULT_COST, get_image_cost
 
-        total_cost, cost_per_image, is_fallback = get_image_cost(
+        total_cost, cost_per_image, is_fallback, resolution_multiplier = get_image_cost(
             "unknown-provider", "some-model", 1
         )
 
@@ -805,27 +808,110 @@ class TestImageGenerationPricing:
         assert cost_per_image == UNKNOWN_PROVIDER_DEFAULT_COST
         assert cost_per_image == 0.05  # Verify the actual value
         assert is_fallback is True
+        assert resolution_multiplier == 1.0
 
     def test_get_image_cost_fal_flux_models(self):
         """Test pricing for Fal flux models"""
         from src.routes.images import get_image_cost
 
         # Schnell (cheapest)
-        total, per_image, fallback = get_image_cost("fal", "flux/schnell", 1)
+        total, per_image, fallback, res_mult = get_image_cost("fal", "flux/schnell", 1)
         assert per_image == 0.003
         assert fallback is False
+        assert res_mult == 1.0
 
         # Also test with fal-ai prefix
-        total, per_image, fallback = get_image_cost("fal", "fal-ai/flux/schnell", 1)
+        total, per_image, fallback, res_mult = get_image_cost("fal", "fal-ai/flux/schnell", 1)
         assert per_image == 0.003
         assert fallback is False
 
         # Dev
-        total, per_image, fallback = get_image_cost("fal", "flux/dev", 1)
+        total, per_image, fallback, res_mult = get_image_cost("fal", "flux/dev", 1)
         assert per_image == 0.025
         assert fallback is False
 
         # Pro
-        total, per_image, fallback = get_image_cost("fal", "flux-pro", 1)
+        total, per_image, fallback, res_mult = get_image_cost("fal", "flux-pro", 1)
         assert per_image == 0.05
         assert fallback is False
+
+    def test_get_image_cost_resolution_multipliers(self):
+        """Test resolution-aware pricing multipliers"""
+        from src.routes.images import get_image_cost
+
+        base_model = "stable-diffusion-3.5-large"
+        base_cost = 0.035  # Known cost for this model
+
+        # 256x256 should be half price
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="256x256"
+        )
+        assert res_mult == 0.5
+        assert per_image == base_cost * 0.5
+
+        # 512x512 should be 75% of base
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="512x512"
+        )
+        assert res_mult == 0.75
+        assert per_image == base_cost * 0.75
+
+        # 1024x1024 is the base rate
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="1024x1024"
+        )
+        assert res_mult == 1.0
+        assert per_image == base_cost
+
+        # 1024x1792 HD portrait
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="1024x1792"
+        )
+        assert res_mult == 1.5
+        assert per_image == base_cost * 1.5
+
+        # 1792x1024 HD landscape
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="1792x1024"
+        )
+        assert res_mult == 1.5
+        assert per_image == base_cost * 1.5
+
+        # 2048x2048 Ultra HD
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", base_model, 1, size="2048x2048"
+        )
+        assert res_mult == 2.0
+        assert per_image == base_cost * 2.0
+
+    def test_get_image_cost_unknown_size_uses_default_multiplier(self):
+        """Test that unknown sizes default to 1.0 multiplier"""
+        from src.routes.images import get_image_cost
+
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", 1, size="768x768"
+        )
+        assert res_mult == 1.0
+        assert per_image == 0.035  # Base cost unchanged
+
+    def test_get_image_cost_none_size_uses_default_multiplier(self):
+        """Test backwards compatibility: None size uses 1.0 multiplier"""
+        from src.routes.images import get_image_cost
+
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", 1, size=None
+        )
+        assert res_mult == 1.0
+        assert per_image == 0.035
+
+    def test_get_image_cost_resolution_with_multiple_images(self):
+        """Test resolution multiplier applies correctly to multiple images"""
+        from src.routes.images import get_image_cost
+
+        # 2 images at 2048x2048 (2x multiplier)
+        total, per_image, fallback, res_mult = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", 2, size="2048x2048"
+        )
+        assert res_mult == 2.0
+        assert per_image == 0.035 * 2.0
+        assert total == per_image * 2
