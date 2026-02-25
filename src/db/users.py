@@ -912,16 +912,59 @@ def deduct_credits(
             "purchased_after": purchased_after,
         }
 
-        transaction_result = log_credit_transaction(
-            user_id=user_id,
-            amount=-tokens,  # Negative for deduction
-            transaction_type=TransactionType.API_USAGE,
-            description=description,
-            balance_before=balance_before,
-            balance_after=balance_after,
-            metadata=transaction_metadata,
-            request_id=request_id,
-        )
+        # Retry transaction logging to prevent lost request_id records,
+        # which would cause double-charging on idempotent retries.
+        transaction_result = None
+        max_log_retries = 3
+        for attempt in range(max_log_retries):
+            try:
+                transaction_result = log_credit_transaction(
+                    user_id=user_id,
+                    amount=-tokens,  # Negative for deduction
+                    transaction_type=TransactionType.API_USAGE,
+                    description=description,
+                    balance_before=balance_before,
+                    balance_after=balance_after,
+                    metadata=transaction_metadata,
+                    request_id=request_id,
+                )
+                if transaction_result:
+                    break
+            except Exception as log_err:
+                err_msg = str(log_err).lower()
+                # Unique constraint violation on request_id = already recorded
+                if "23505" in err_msg or "unique" in err_msg or "duplicate" in err_msg:
+                    logger.info(
+                        "Transaction for request_id=%s already recorded (duplicate). "
+                        "Treating as idempotent success for user %s.",
+                        request_id,
+                        user_id,
+                    )
+                    transaction_result = {"id": "duplicate-detected"}
+                    break
+                if attempt < max_log_retries - 1:
+                    logger.warning(
+                        "Transaction log attempt %d/%d failed for user %s " "(request_id=%s): %s",
+                        attempt + 1,
+                        max_log_retries,
+                        user_id,
+                        request_id,
+                        log_err,
+                    )
+                else:
+                    logger.critical(
+                        "All %d transaction log attempts failed for user %s. "
+                        "Credits deducted but transaction NOT recorded. "
+                        "request_id=%s, amount=-$%.6f, "
+                        "balance: $%.6f -> $%.6f. "
+                        "MANUAL RECONCILIATION REQUIRED.",
+                        max_log_retries,
+                        user_id,
+                        request_id,
+                        tokens,
+                        balance_before,
+                        balance_after,
+                    )
 
         if not transaction_result:
             logger.error(
