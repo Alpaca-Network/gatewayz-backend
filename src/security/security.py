@@ -225,8 +225,19 @@ def validate_api_key_security(
         logger.debug(f"Checking {table_name} table for API key")
 
         try:
-            # Query for the specific API key
-            result = client.table(table_name).select("*").eq("api_key", api_key).execute()
+            # Primary lookup: hash-based (avoids exposing plaintext in queries)
+            result = None
+            try:
+                from src.utils.crypto import sha256_key_hash
+
+                computed_hash = sha256_key_hash(api_key)
+                result = client.table(table_name).select("*").eq("key_hash", computed_hash).execute()
+            except Exception:
+                pass  # Fall through to plaintext lookup
+
+            # Fallback: plaintext lookup for keys without key_hash (backward compatibility)
+            if not result or not result.data:
+                result = client.table(table_name).select("*").eq("api_key", api_key).execute()
 
             if not result.data:
                 continue

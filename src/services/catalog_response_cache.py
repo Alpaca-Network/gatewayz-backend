@@ -30,6 +30,7 @@ Usage:
 import hashlib
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -49,7 +50,7 @@ except Exception:
 logger = logging.getLogger(__name__)
 
 # Cache TTL constants (in seconds)
-CATALOG_RESPONSE_CACHE_TTL = 300  # 5 minutes
+CATALOG_RESPONSE_CACHE_TTL = 3600  # 60 minutes
 METADATA_CACHE_TTL = 86400  # 24 hours
 
 # Cache key namespace — prepended to every Redis key to avoid collisions with
@@ -64,6 +65,15 @@ CACHE_NAMESPACE = "gw:"
 CATALOG_CACHE_TTL = CATALOG_RESPONSE_CACHE_TTL  # backward-compatible alias
 CATALOG_CACHE_PREFIX = f"{CACHE_NAMESPACE}catalog:v2:"  # Version prefix for easy invalidation
 CATALOG_METADATA_KEY = f"{CACHE_NAMESPACE}catalog:metadata"
+
+# Maximum number of entries in the catalog response cache (CM-8.1.4)
+MAX_CACHE_ENTRIES = 20_000
+MAX_CATALOG_CACHE_ENTRIES = MAX_CACHE_ENTRIES  # alias
+
+# LRU eviction configuration (CM-8.1.6)
+LRU_ENABLED = True
+LRU_EVICTION_BATCH_SIZE = 100  # Number of entries to evict at once
+CATALOG_CACHE_KEYS_INDEX = f"{CACHE_NAMESPACE}catalog_cache:keys_index"  # Sorted set for LRU tracking
 
 
 def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
@@ -101,9 +111,7 @@ def get_catalog_cache_key(gateway: str | None, params: dict) -> str:
     }
 
     # Hash parameters to keep keys short while maintaining uniqueness
-    param_hash = hashlib.md5(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()[
-        :8
-    ]  # Use first 8 chars for readability
+    param_hash = hashlib.sha256(json.dumps(cache_data, sort_keys=True).encode()).hexdigest()
 
     return f"{CATALOG_CACHE_PREFIX}{gateway_key}:{param_hash}"
 
@@ -146,6 +154,12 @@ async def get_cached_catalog_response(gateway: str | None, params: dict) -> dict
             _track_cache_hit(gateway)
             # Refresh TTL so frequently accessed keys stay warm
             redis.expire(cache_key, CATALOG_CACHE_TTL)
+
+            # Update LRU timestamp on cache hit (CM-8.1.6)
+            try:
+                redis.zadd(CATALOG_CACHE_KEYS_INDEX, {cache_key: time.time()})
+            except Exception:
+                pass  # Non-critical — don't fail the read
 
             # Deserialize and return
             return json.loads(cached_data)
@@ -227,8 +241,20 @@ async def cache_catalog_response(
             logger.error(f"Failed to serialize response for caching: {e}")
             return False
 
+        # LRU eviction: enforce MAX_CACHE_ENTRIES limit (CM-8.1.4 / CM-8.1.6)
+        try:
+            _evict_lru_if_needed(redis)
+        except Exception as e:
+            logger.debug(f"LRU eviction check failed (non-critical): {e}")
+
         # Store in Redis with TTL
         redis.setex(cache_key, ttl, serialized)
+
+        # Track this key in the LRU sorted set (CM-8.1.6)
+        try:
+            redis.zadd(CATALOG_CACHE_KEYS_INDEX, {cache_key: time.time()})
+        except Exception:
+            pass  # Non-critical
 
         logger.info(f"💾 Cached response: {cache_key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
 
@@ -355,6 +381,56 @@ def get_cache_stats(gateway: str | None = None) -> dict[str, Any]:
     except redis_module.RedisError as e:
         logger.warning(f"Failed to get cache stats: {e}")
         return {"error": str(e)}
+
+
+# ==================== LRU Eviction ====================
+
+
+def _evict_lru_if_needed(redis) -> int:
+    """
+    Check the sorted set cardinality and evict the oldest entries if we have
+    reached MAX_CACHE_ENTRIES.  Returns the number of evicted entries.
+
+    This is called before every cache write to enforce the 20K entry cap.
+    Eviction removes LRU_EVICTION_BATCH_SIZE entries at a time so we don't
+    have to run this on every single write once we drop below the limit.
+    """
+    if not LRU_ENABLED:
+        return 0
+
+    try:
+        current_count = redis.zcard(CATALOG_CACHE_KEYS_INDEX)
+        if current_count < MAX_CACHE_ENTRIES:
+            return 0
+
+        # Evict the oldest (lowest-score) entries
+        evict_count = LRU_EVICTION_BATCH_SIZE
+        oldest_keys = redis.zrange(CATALOG_CACHE_KEYS_INDEX, 0, evict_count - 1)
+
+        if not oldest_keys:
+            return 0
+
+        # Decode bytes to str if needed (some Redis clients return bytes)
+        decoded_keys = []
+        for k in oldest_keys:
+            decoded_keys.append(k.decode() if isinstance(k, bytes) else k)
+
+        # Delete the cache entries from Redis
+        redis.delete(*decoded_keys)
+
+        # Remove them from the sorted set
+        redis.zrem(CATALOG_CACHE_KEYS_INDEX, *decoded_keys)
+
+        logger.info(f"LRU eviction: removed {len(decoded_keys)} oldest cache entries")
+        return len(decoded_keys)
+
+    except redis_module.RedisError as e:
+        logger.debug(f"LRU eviction failed: {e}")
+        return 0
+
+
+# Public alias so tests can detect the eviction mechanism
+evict_lru = _evict_lru_if_needed
 
 
 # ==================== Private Helper Functions ====================

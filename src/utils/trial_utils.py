@@ -94,7 +94,7 @@ def validate_trial_expiration(user: dict) -> None:
                 )
                 raise HTTPException(
                     status_code=402,
-                    detail="Your 3-day trial period has expired. Please upgrade to continue using the service.",
+                    detail="Your 14-day trial period has expired. Please upgrade to continue using the service.",
                 )
         except HTTPException:
             # Re-raise HTTPException

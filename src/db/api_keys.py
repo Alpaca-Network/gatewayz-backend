@@ -530,6 +530,34 @@ def delete_api_key(api_key: str, user_id: int) -> bool:
         return False
 
 
+def get_api_key_by_hash(key_hash: str) -> dict[str, Any] | None:
+    """Look up an API key record by its SHA-256 hash (constant-time, no decryption needed).
+
+    Args:
+        key_hash: The hex-encoded SHA-256 hash of the API key.
+
+    Returns:
+        Dictionary with API key data if found, None otherwise.
+    """
+
+    def _fetch(client):
+        result = client.table("api_keys_new").select("*").eq("key_hash", key_hash).execute()
+        if result.data and len(result.data) > 0:
+            return result.data[0]
+        return None
+
+    try:
+        return execute_with_retry(
+            _fetch, max_retries=2, retry_delay=0.2, operation_name="get_api_key_by_hash"
+        )
+    except Exception as e:
+        logger.error(
+            "Error getting API key by hash: %s",
+            sanitize_for_logging(str(e)),
+        )
+        return None
+
+
 def validate_api_key(api_key: str) -> dict[str, Any] | None:
     """Validate an API key and return user info if valid"""
     # Lazy import to avoid circular dependency
@@ -540,7 +568,18 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
 
         # Check if key exists in api_keys_new table
         try:
-            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            # Primary lookup: hash-based (avoids exposing plaintext in queries)
+            try:
+                computed_hash = sha256_key_hash(api_key)
+                key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+            except Exception:
+                # Fallback to plaintext lookup if hashing fails (e.g. missing salt during migration)
+                key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+
+            # If hash-based lookup returned nothing, fall back to plaintext lookup
+            # (backward compatibility for keys created before key_hash was populated)
+            if not key_result.data:
+                key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
             if key_result.data:
                 key_data = key_result.data[0]
@@ -1143,9 +1182,17 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
     """
 
     def _fetch_key(client):
-        # Query api_keys_new table for the key
-        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+        # Primary lookup: hash-based (avoids exposing plaintext in queries)
+        try:
+            computed_hash = sha256_key_hash(api_key)
+            key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+            if key_result.data and len(key_result.data) > 0:
+                return key_result.data[0]
+        except Exception:
+            pass  # Fall through to plaintext lookup
 
+        # Fallback: plaintext lookup for keys without key_hash (backward compatibility)
+        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
         if key_result.data and len(key_result.data) > 0:
             return key_result.data[0]
 
