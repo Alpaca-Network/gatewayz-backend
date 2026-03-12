@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from src.config.supabase_config import get_client_for_query
 from src.db.models_catalog_db import bulk_upsert_models
 from src.db.providers_db import (
     create_provider,
@@ -735,6 +736,7 @@ def sync_provider_models(
         )
 
         # Sync to database (unless dry run)
+        stale_result: dict[str, Any] = {}
         if not dry_run:
             logger.info(f"[{provider_slug.upper()}] Starting database sync...")
             db_sync_start = time.time()
@@ -751,6 +753,54 @@ def sync_provider_models(
 
             # Pricing is now synced directly during model sync via metadata.pricing_raw
             # The separate pricing sync service has been deprecated
+
+            # ── Stale model tracking ──────────────────────────────────
+            # Mark models that disappeared from the provider API.
+            # Safety guard: only run if we fetched at least 50% of the
+            # existing active models (avoids mass-deactivation on partial
+            # API failures or rate-limited responses).
+            try:
+                from src.db.models_catalog_db import process_stale_models
+
+                seen_ids = {m["provider_model_id"] for m in db_models if m.get("provider_model_id")}
+
+                # Count existing active models for this provider
+                existing_active = (
+                    get_client_for_query(read_only=True)
+                    .table("models")
+                    .select("id", count="exact")
+                    .eq("provider_id", provider["id"])
+                    .eq("is_active", True)
+                    .execute()
+                )
+                existing_count = existing_active.count or 0
+
+                if existing_count > 0 and len(seen_ids) >= existing_count * 0.5:
+                    stale_result = process_stale_models(
+                        provider_id=provider["id"],
+                        seen_provider_model_ids=seen_ids,
+                        deactivation_threshold=3,
+                    )
+                    if stale_result.get("deactivated", 0) > 0:
+                        logger.warning(
+                            f"[{provider_slug.upper()}] Stale model cleanup | "
+                            f"Reset: {stale_result['reset']} | "
+                            f"Incremented: {stale_result['incremented']} | "
+                            f"Deactivated: {stale_result['deactivated']}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{provider_slug.upper()}] Stale tracking | "
+                            f"Reset: {stale_result.get('reset', 0)} | "
+                            f"Incremented: {stale_result.get('incremented', 0)}"
+                        )
+                elif existing_count > 0:
+                    logger.warning(
+                        f"[{provider_slug.upper()}] Skipping stale detection: "
+                        f"fetched {len(seen_ids)} < 50% of {existing_count} existing active models"
+                    )
+            except Exception as stale_e:
+                logger.error(f"[{provider_slug.upper()}] Stale model tracking failed: {stale_e}")
 
             # Invalidate caches to ensure fresh data is served on next request.
             # In batch_mode, only invalidate provider-specific cache (no cascade
@@ -794,7 +844,7 @@ def sync_provider_models(
             f"Overall Rate: {models_per_sec:.0f} models/sec"
         )
 
-        return {
+        result = {
             "success": True,
             "provider": provider_slug,
             "provider_id": provider["id"],
@@ -807,6 +857,9 @@ def sync_provider_models(
             "total_duration": total_duration,
             "models_per_sec": round(models_per_sec, 2),
         }
+        if stale_result:
+            result["stale_tracking"] = stale_result
+        return result
 
     except Exception as e:
         logger.error(f"Error syncing models for {provider_slug}: {e}", exc_info=True)
