@@ -738,6 +738,21 @@ def sync_provider_models(
         # Sync to database (unless dry run)
         stale_result: dict[str, Any] = {}
         if not dry_run:
+            # Count existing active models BEFORE upsert for accurate stale detection
+            pre_sync_active_count = 0
+            try:
+                existing_active = (
+                    get_client_for_query(read_only=False)
+                    .table("models")
+                    .select("id", count="exact")
+                    .eq("provider_id", provider["id"])
+                    .eq("is_active", True)
+                    .execute()
+                )
+                pre_sync_active_count = existing_active.count or 0
+            except Exception as count_e:
+                logger.warning(f"[{provider_slug.upper()}] Failed to count active models: {count_e}")
+
             logger.info(f"[{provider_slug.upper()}] Starting database sync...")
             db_sync_start = time.time()
             synced_models = bulk_upsert_models(db_models)
@@ -757,25 +772,14 @@ def sync_provider_models(
             # ── Stale model tracking ──────────────────────────────────
             # Mark models that disappeared from the provider API.
             # Safety guard: only run if we fetched at least 50% of the
-            # existing active models (avoids mass-deactivation on partial
+            # pre-sync active models (avoids mass-deactivation on partial
             # API failures or rate-limited responses).
             try:
                 from src.db.models_catalog_db import process_stale_models
 
                 seen_ids = {m["provider_model_id"] for m in db_models if m.get("provider_model_id")}
 
-                # Count existing active models for this provider
-                existing_active = (
-                    get_client_for_query(read_only=True)
-                    .table("models")
-                    .select("id", count="exact")
-                    .eq("provider_id", provider["id"])
-                    .eq("is_active", True)
-                    .execute()
-                )
-                existing_count = existing_active.count or 0
-
-                if existing_count > 0 and len(seen_ids) >= existing_count * 0.5:
+                if pre_sync_active_count > 0 and len(seen_ids) >= pre_sync_active_count * 0.5:
                     stale_result = process_stale_models(
                         provider_id=provider["id"],
                         seen_provider_model_ids=seen_ids,
@@ -794,10 +798,10 @@ def sync_provider_models(
                             f"Reset: {stale_result.get('reset', 0)} | "
                             f"Incremented: {stale_result.get('incremented', 0)}"
                         )
-                elif existing_count > 0:
+                elif pre_sync_active_count > 0:
                     logger.warning(
                         f"[{provider_slug.upper()}] Skipping stale detection: "
-                        f"fetched {len(seen_ids)} < 50% of {existing_count} existing active models"
+                        f"fetched {len(seen_ids)} < 50% of {pre_sync_active_count} existing active models"
                     )
             except Exception as stale_e:
                 logger.error(f"[{provider_slug.upper()}] Stale model tracking failed: {stale_e}")

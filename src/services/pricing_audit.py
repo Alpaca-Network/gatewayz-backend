@@ -361,12 +361,10 @@ def _pricing_summary(model: dict) -> dict[str, str] | None:
 
 def _guess_unmatched_reason(model_id: str, source: str, other_ids: set[str]) -> str:
     """Guess why a model wasn't matched."""
-    norm = _normalize_id(model_id)
     slug = _make_slug(model_id)
 
     # Check if there's a near-match in the other side
     for other_id in other_ids:
-        other_norm = _normalize_id(other_id)
         other_slug = _make_slug(other_id)
 
         # Very close slug match (off by small diff)
@@ -401,17 +399,19 @@ def _get_all_gateways() -> dict[str, str]:
     }
 
 
-def _fetch_provider_models(gateway: str) -> list[dict]:
+def _fetch_provider_models(gateway: str) -> list[dict] | None:
     """Fetch live models directly from the provider's API.
 
     Uses lightweight raw HTTP calls to avoid the enrich_model_with_pricing()
     circular dependency that exists in the normal PROVIDER_FETCH_FUNCTIONS.
+
+    Returns None on error (distinguishes from an empty catalog).
     """
     try:
         return _raw_fetch_provider(gateway)
     except Exception as e:
         logger.error(f"Failed to fetch live provider models for {gateway}: {e}")
-        return []
+        return None
 
 
 # ── Raw provider API fetchers ──────────────────────────────────────────────
@@ -426,7 +426,6 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
 
     from src.config.config import Config
     from src.services.pricing_normalization import (
-        PricingFormat,
         get_provider_format,
         normalize_to_per_token,
     )
@@ -551,8 +550,6 @@ def _extract_raw_pricing(
     normalize_fn,
 ) -> dict[str, str | None]:
     """Extract and normalize pricing from a raw provider API response model."""
-    from src.services.pricing_normalization import PricingFormat
-
     pricing: dict[str, str | None] = {"prompt": None, "completion": None}
 
     raw_pricing = raw.get("pricing") or {}
@@ -568,31 +565,33 @@ def _extract_raw_pricing(
         return pricing
 
     if gateway == "deepinfra":
-        # DeepInfra: pricing.cents_per_input_token / cents_per_output_token
-        # These are in CENTS, so divide by 100 to get $/token
-        # But the system expects per-token, and DeepInfra format is PER_1M
-        # Actually DeepInfra raw data: cents_per_input_token means
-        # cost in cents for one token. So $/token = cents / 100.
-        # But wait — let's check what the DB stores and normalize consistently.
+        # DeepInfra API: cents_per_input_token / cents_per_output_token
+        # Values are in cents per 1M tokens. Convert cents→dollars (/100),
+        # then normalize from per-1M to per-token via normalize_fn.
         cents_in = raw_pricing.get("cents_per_input_token")
         cents_out = raw_pricing.get("cents_per_output_token")
         if cents_in is not None:
             try:
-                # cents_per_token → $/token
-                pricing["prompt"] = str(Decimal(str(cents_in)) / Decimal("100"))
+                dollars_per_1m = float(Decimal(str(cents_in)) / Decimal("100"))
+                normalized = normalize_fn(dollars_per_1m, provider_format)
+                if normalized is not None:
+                    pricing["prompt"] = str(normalized)
             except (InvalidOperation, ValueError):
                 pass
         if cents_out is not None:
             try:
-                pricing["completion"] = str(Decimal(str(cents_out)) / Decimal("100"))
+                dollars_per_1m = float(Decimal(str(cents_out)) / Decimal("100"))
+                normalized = normalize_fn(dollars_per_1m, provider_format)
+                if normalized is not None:
+                    pricing["completion"] = str(normalized)
             except (InvalidOperation, ValueError):
                 pass
         return pricing
 
     # Generic pattern: pricing.input/output or pricing.prompt/completion
     # For most providers: values are per-1M tokens, need normalization to per-token
-    prompt_val = raw_pricing.get("prompt") or raw_pricing.get("input")
-    completion_val = raw_pricing.get("completion") or raw_pricing.get("output")
+    prompt_val = raw_pricing.get("prompt") if raw_pricing.get("prompt") is not None else raw_pricing.get("input")
+    completion_val = raw_pricing.get("completion") if raw_pricing.get("completion") is not None else raw_pricing.get("output")
 
     # Some providers use cents_per_input_token format (groq, fireworks)
     if prompt_val is None:
@@ -637,7 +636,7 @@ def _fetch_db_models_by_gateway() -> dict[str, list[dict]]:
             provider = raw_model.get("providers") or {}
             slug = provider.get("slug", "unknown")
 
-            from src.services.pricing_normalization import get_provider_format, normalize_to_per_token, auto_detect_format
+            from src.services.pricing_normalization import get_provider_format, normalize_to_per_token
 
             metadata = raw_model.get("metadata") or {}
             pricing_raw = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
@@ -856,21 +855,34 @@ def run_pricing_audit(
     # Step 2: Fetch provider models in parallel
     logger.info("Fetching provider catalogs in parallel...")
     provider_models_by_gateway: dict[str, list[dict]] = {}
+    fetch_errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {
             executor.submit(_fetch_provider_models, gw): gw
             for gw in target_gateways
         }
-        for future in as_completed(futures, timeout=180):
-            gw = futures[future]
-            try:
-                models = future.result(timeout=30)
-                provider_models_by_gateway[gw] = models
-                logger.info(f"Fetched {len(models)} models from provider API: {gw}")
-            except Exception as e:
-                provider_models_by_gateway[gw] = []
-                logger.warning(f"Failed to fetch provider models for {gw}: {e}")
+        try:
+            for future in as_completed(futures, timeout=180):
+                gw = futures[future]
+                try:
+                    models = future.result(timeout=30)
+                    if models is None:
+                        provider_models_by_gateway[gw] = []
+                        fetch_errors[gw] = f"Failed to fetch models from {gw} API"
+                    else:
+                        provider_models_by_gateway[gw] = models
+                        logger.info(f"Fetched {len(models)} models from provider API: {gw}")
+                except Exception as e:
+                    provider_models_by_gateway[gw] = []
+                    fetch_errors[gw] = f"Provider fetch exception: {e}"
+                    logger.warning(f"Failed to fetch provider models for {gw}: {e}")
+        except TimeoutError:
+            logger.warning("Provider fetch timed out after 180s; proceeding with partial results")
+            for gw in target_gateways:
+                if gw not in provider_models_by_gateway:
+                    provider_models_by_gateway[gw] = []
+                    fetch_errors[gw] = "Provider fetch timed out"
 
     # Step 3: Audit each gateway
     for gw, display_name in sorted(target_gateways.items()):
@@ -894,6 +906,10 @@ def run_pricing_audit(
             db_models=db_models,
             threshold=threshold_percent,
         )
+
+        # Surface any fetch errors into the gateway result
+        if gw in fetch_errors:
+            gateway_result.errors.append(fetch_errors[gw])
 
         report.gateways[gw] = gateway_result
         report.total_models_audited += gateway_result.total_models
