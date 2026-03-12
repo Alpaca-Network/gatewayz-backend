@@ -751,7 +751,9 @@ def sync_provider_models(
                 )
                 pre_sync_active_count = existing_active.count or 0
             except Exception as count_e:
-                logger.warning(f"[{provider_slug.upper()}] Failed to count active models: {count_e}")
+                logger.warning(
+                    f"[{provider_slug.upper()}] Failed to count active models: {count_e}"
+                )
 
             logger.info(f"[{provider_slug.upper()}] Starting database sync...")
             db_sync_start = time.time()

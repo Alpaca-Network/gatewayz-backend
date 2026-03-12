@@ -433,10 +433,12 @@ def process_stale_models(
     if ids_to_reset:
         for i in range(0, len(ids_to_reset), 500):
             chunk = ids_to_reset[i : i + 500]
-            supabase.table("models").update({
-                "last_seen_in_provider_at": now,
-                "consecutive_missing_count": 0,
-            }).in_("id", chunk).execute()
+            supabase.table("models").update(
+                {
+                    "last_seen_in_provider_at": now,
+                    "consecutive_missing_count": 0,
+                }
+            ).in_("id", chunk).execute()
         result["reset"] = len(ids_to_reset)
 
     # Batch update: increment missing models
@@ -449,19 +451,23 @@ def process_stale_models(
         for count_val, id_list in by_count.items():
             for i in range(0, len(id_list), 500):
                 chunk = id_list[i : i + 500]
-                supabase.table("models").update({
-                    "consecutive_missing_count": count_val,
-                }).in_("id", chunk).execute()
+                supabase.table("models").update(
+                    {
+                        "consecutive_missing_count": count_val,
+                    }
+                ).in_("id", chunk).execute()
         result["incremented"] = len(ids_to_increment)
 
     # Batch update: deactivate models that exceeded threshold
     if ids_to_deactivate:
         for i in range(0, len(ids_to_deactivate), 500):
             chunk = ids_to_deactivate[i : i + 500]
-            supabase.table("models").update({
-                "is_active": False,
-                "consecutive_missing_count": deactivation_threshold,
-            }).in_("id", chunk).execute()
+            supabase.table("models").update(
+                {
+                    "is_active": False,
+                    "consecutive_missing_count": deactivation_threshold,
+                }
+            ).in_("id", chunk).execute()
         result["deactivated"] = len(ids_to_deactivate)
         logger.info(
             f"Deactivated {len(ids_to_deactivate)} stale models for provider_id={provider_id} "

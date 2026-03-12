@@ -293,7 +293,9 @@ def _match_models(
                 if did in matched_db_ids:
                     continue
                 if pid in remaining_provider and did in remaining_db:
-                    matched.append((remaining_provider.pop(pid), remaining_db.pop(did), "strip_prefix"))
+                    matched.append(
+                        (remaining_provider.pop(pid), remaining_db.pop(did), "strip_prefix")
+                    )
                     matched_prov_ids.add(pid)
                     matched_db_ids.add(did)
 
@@ -308,8 +310,10 @@ def _match_models(
 
 
 def _to_decimal(value: Any) -> Decimal | None:
-    """Safely convert a pricing value to Decimal."""
-    if value is None or value == "" or value == "0" or value == 0:
+    """Safely convert a pricing value to Decimal. Returns None for missing data."""
+    if value is None or value == "":
+        return None
+    if value == "0" or value == 0:
         return Decimal("0")
     try:
         d = Decimal(str(value))
@@ -379,7 +383,9 @@ def _guess_unmatched_reason(model_id: str, source: str, other_ids: set[str]) -> 
             return "Contains colon in ID (stripped by DB clean_model_name during sync) — may exist under cleaned name"
         if "(" in model_id:
             return "Contains parenthetical info (stripped by DB clean_model_name) — may exist under cleaned name"
-        return "Model exists in provider API but not found in database — may not have been synced yet"
+        return (
+            "Model exists in provider API but not found in database — may not have been synced yet"
+        )
     else:
         return "Model exists in database but provider no longer lists it — may have been removed or renamed"
 
@@ -534,10 +540,12 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
 
         pricing = _extract_raw_pricing(raw, gateway, provider_format, normalize_to_per_token)
 
-        models.append({
-            "id": model_id,
-            "pricing": pricing,
-        })
+        models.append(
+            {
+                "id": model_id,
+                "pricing": pricing,
+            }
+        )
 
     logger.info(f"Raw fetched {len(models)} models from {gateway} API")
     return models
@@ -577,7 +585,7 @@ def _extract_raw_pricing(
                 if normalized is not None:
                     pricing["prompt"] = str(normalized)
             except (InvalidOperation, ValueError):
-                pass
+                pass  # Skip malformed pricing values
         if cents_out is not None:
             try:
                 dollars_per_1m = float(Decimal(str(cents_out)) / Decimal("100"))
@@ -585,13 +593,21 @@ def _extract_raw_pricing(
                 if normalized is not None:
                     pricing["completion"] = str(normalized)
             except (InvalidOperation, ValueError):
-                pass
+                pass  # Skip malformed pricing values
         return pricing
 
     # Generic pattern: pricing.input/output or pricing.prompt/completion
     # For most providers: values are per-1M tokens, need normalization to per-token
-    prompt_val = raw_pricing.get("prompt") if raw_pricing.get("prompt") is not None else raw_pricing.get("input")
-    completion_val = raw_pricing.get("completion") if raw_pricing.get("completion") is not None else raw_pricing.get("output")
+    prompt_val = (
+        raw_pricing.get("prompt")
+        if raw_pricing.get("prompt") is not None
+        else raw_pricing.get("input")
+    )
+    completion_val = (
+        raw_pricing.get("completion")
+        if raw_pricing.get("completion") is not None
+        else raw_pricing.get("output")
+    )
 
     # Some providers use cents_per_input_token format (groq, fireworks)
     if prompt_val is None:
@@ -600,7 +616,7 @@ def _extract_raw_pricing(
             try:
                 prompt_val = float(cents_in) / 100  # cents → dollars per 1M
             except (ValueError, TypeError):
-                pass
+                pass  # Skip non-numeric pricing values
 
     if completion_val is None:
         cents_out = raw_pricing.get("cents_per_output_token")
@@ -608,7 +624,7 @@ def _extract_raw_pricing(
             try:
                 completion_val = float(cents_out) / 100  # cents → dollars per 1M
             except (ValueError, TypeError):
-                pass
+                pass  # Skip non-numeric pricing values
 
     # Normalize to per-token
     if prompt_val is not None:
@@ -636,7 +652,10 @@ def _fetch_db_models_by_gateway() -> dict[str, list[dict]]:
             provider = raw_model.get("providers") or {}
             slug = provider.get("slug", "unknown")
 
-            from src.services.pricing_normalization import get_provider_format, normalize_to_per_token
+            from src.services.pricing_normalization import (
+                get_provider_format,
+                normalize_to_per_token,
+            )
 
             metadata = raw_model.get("metadata") or {}
             pricing_raw = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
@@ -661,8 +680,13 @@ def _fetch_db_models_by_gateway() -> dict[str, list[dict]]:
             if not pricing.get("prompt") and raw_model.get("pricing_original_prompt") is not None:
                 norm = normalize_to_per_token(raw_model["pricing_original_prompt"], provider_fmt)
                 pricing["prompt"] = str(norm) if norm is not None else None
-            if not pricing.get("completion") and raw_model.get("pricing_original_completion") is not None:
-                norm = normalize_to_per_token(raw_model["pricing_original_completion"], provider_fmt)
+            if (
+                not pricing.get("completion")
+                and raw_model.get("pricing_original_completion") is not None
+            ):
+                norm = normalize_to_per_token(
+                    raw_model["pricing_original_completion"], provider_fmt
+                )
                 pricing["completion"] = str(norm) if norm is not None else None
 
             model_entry = {
@@ -711,22 +735,26 @@ def _audit_gateway(
     # Process unmatched provider models
     for m in sorted(unmatched_prov, key=lambda x: x.get("id", "")):
         mid = m.get("id", "")
-        result.unmatched_provider.append(UnmatchedModel(
-            model_id=mid,
-            source="provider",
-            reason=_guess_unmatched_reason(mid, "provider", all_db_ids),
-            pricing=_pricing_summary(m),
-        ))
+        result.unmatched_provider.append(
+            UnmatchedModel(
+                model_id=mid,
+                source="provider",
+                reason=_guess_unmatched_reason(mid, "provider", all_db_ids),
+                pricing=_pricing_summary(m),
+            )
+        )
 
     # Process unmatched DB models
     for m in sorted(unmatched_db, key=lambda x: x.get("id", "")):
         mid = m.get("id", "")
-        result.unmatched_db.append(UnmatchedModel(
-            model_id=mid,
-            source="database",
-            reason=_guess_unmatched_reason(mid, "database", all_prov_ids),
-            pricing=_pricing_summary(m),
-        ))
+        result.unmatched_db.append(
+            UnmatchedModel(
+                model_id=mid,
+                source="database",
+                reason=_guess_unmatched_reason(mid, "database", all_prov_ids),
+                pricing=_pricing_summary(m),
+            )
+        )
 
     # Compare pricing for matched models
     for prov_model, db_model, match_method in matched_pairs:
@@ -739,12 +767,14 @@ def _audit_gateway(
         # Skip models where provider has no pricing data
         if prov_pricing["prompt"] is None and prov_pricing["completion"] is None:
             result.models_without_pricing += 1
-            result.matched_models.append(MatchedModel(
-                provider_id=prov_id,
-                db_id=db_id,
-                match_method=match_method,
-                pricing_status="no_provider_pricing",
-            ))
+            result.matched_models.append(
+                MatchedModel(
+                    provider_id=prov_id,
+                    db_id=db_id,
+                    match_method=match_method,
+                    pricing_status="no_provider_pricing",
+                )
+            )
             continue
 
         result.models_with_pricing += 1
@@ -760,51 +790,59 @@ def _audit_gateway(
             if db_val is None:
                 if prov_val > 0:
                     has_mismatch = True
-                    result.mismatches.append(PricingMismatch(
-                        model_id=prov_id,
-                        db_model_id=db_id,
-                        gateway=gateway,
-                        field=price_field,
-                        provider_price=str(prov_val),
-                        db_price="MISSING",
-                        difference_percent=100.0,
-                        provider_price_per_million=_per_million(prov_val),
-                        db_price_per_million="MISSING",
-                    ))
+                    result.mismatches.append(
+                        PricingMismatch(
+                            model_id=prov_id,
+                            db_model_id=db_id,
+                            gateway=gateway,
+                            field=price_field,
+                            provider_price=str(prov_val),
+                            db_price="MISSING",
+                            difference_percent=100.0,
+                            provider_price_per_million=_per_million(prov_val),
+                            db_price_per_million="MISSING",
+                        )
+                    )
                 continue
 
             diff_pct = _calc_diff_percent(prov_val, db_val)
 
             if diff_pct > threshold:
                 has_mismatch = True
-                result.mismatches.append(PricingMismatch(
-                    model_id=prov_id,
-                    db_model_id=db_id,
-                    gateway=gateway,
-                    field=price_field,
-                    provider_price=str(prov_val),
-                    db_price=str(db_val),
-                    difference_percent=round(diff_pct, 2),
-                    provider_price_per_million=_per_million(prov_val),
-                    db_price_per_million=_per_million(db_val),
-                ))
+                result.mismatches.append(
+                    PricingMismatch(
+                        model_id=prov_id,
+                        db_model_id=db_id,
+                        gateway=gateway,
+                        field=price_field,
+                        provider_price=str(prov_val),
+                        db_price=str(db_val),
+                        difference_percent=round(diff_pct, 2),
+                        provider_price_per_million=_per_million(prov_val),
+                        db_price_per_million=_per_million(db_val),
+                    )
+                )
 
         if has_mismatch:
             result.models_mismatched += 1
-            result.matched_models.append(MatchedModel(
-                provider_id=prov_id,
-                db_id=db_id,
-                match_method=match_method,
-                pricing_status="mismatch",
-            ))
+            result.matched_models.append(
+                MatchedModel(
+                    provider_id=prov_id,
+                    db_id=db_id,
+                    match_method=match_method,
+                    pricing_status="mismatch",
+                )
+            )
         else:
             result.models_matched += 1
-            result.matched_models.append(MatchedModel(
-                provider_id=prov_id,
-                db_id=db_id,
-                match_method=match_method,
-                pricing_status="match",
-            ))
+            result.matched_models.append(
+                MatchedModel(
+                    provider_id=prov_id,
+                    db_id=db_id,
+                    match_method=match_method,
+                    pricing_status="match",
+                )
+            )
 
     return result
 
@@ -836,9 +874,7 @@ def run_pricing_audit(
 
     all_gateways = _get_all_gateways()
     if gateways:
-        target_gateways = {
-            g: all_gateways.get(g, g) for g in gateways if g in all_gateways
-        }
+        target_gateways = {g: all_gateways.get(g, g) for g in gateways if g in all_gateways}
     else:
         target_gateways = all_gateways
 
@@ -858,10 +894,7 @@ def run_pricing_audit(
     fetch_errors: dict[str, str] = {}
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {
-            executor.submit(_fetch_provider_models, gw): gw
-            for gw in target_gateways
-        }
+        futures = {executor.submit(_fetch_provider_models, gw): gw for gw in target_gateways}
         try:
             for future in as_completed(futures, timeout=180):
                 gw = futures[future]
@@ -950,41 +983,49 @@ def _serialize_report(report: PricingAuditReport) -> dict[str, Any]:
     for gw, gw_result in report.gateways.items():
         mismatches_list = []
         for m in gw_result.mismatches:
-            mismatches_list.append({
-                "model_id": m.model_id,
-                "db_model_id": m.db_model_id,
-                "field": m.field,
-                "provider_price_per_token": m.provider_price,
-                "db_price_per_token": m.db_price,
-                "provider_price_per_million": m.provider_price_per_million,
-                "db_price_per_million": m.db_price_per_million,
-                "difference_percent": m.difference_percent,
-            })
+            mismatches_list.append(
+                {
+                    "model_id": m.model_id,
+                    "db_model_id": m.db_model_id,
+                    "field": m.field,
+                    "provider_price_per_token": m.provider_price,
+                    "db_price_per_token": m.db_price,
+                    "provider_price_per_million": m.provider_price_per_million,
+                    "db_price_per_million": m.db_price_per_million,
+                    "difference_percent": m.difference_percent,
+                }
+            )
 
         unmatched_provider_list = []
         for u in gw_result.unmatched_provider:
-            unmatched_provider_list.append({
-                "model_id": u.model_id,
-                "reason": u.reason,
-                "pricing": u.pricing,
-            })
+            unmatched_provider_list.append(
+                {
+                    "model_id": u.model_id,
+                    "reason": u.reason,
+                    "pricing": u.pricing,
+                }
+            )
 
         unmatched_db_list = []
         for u in gw_result.unmatched_db:
-            unmatched_db_list.append({
-                "model_id": u.model_id,
-                "reason": u.reason,
-                "pricing": u.pricing,
-            })
+            unmatched_db_list.append(
+                {
+                    "model_id": u.model_id,
+                    "reason": u.reason,
+                    "pricing": u.pricing,
+                }
+            )
 
         matched_list = []
         for m in gw_result.matched_models:
-            matched_list.append({
-                "provider_id": m.provider_id,
-                "db_id": m.db_id,
-                "match_method": m.match_method,
-                "pricing_status": m.pricing_status,
-            })
+            matched_list.append(
+                {
+                    "provider_id": m.provider_id,
+                    "db_id": m.db_id,
+                    "match_method": m.match_method,
+                    "pricing_status": m.pricing_status,
+                }
+            )
 
         result["gateways"][gw] = {
             "display_name": gw_result.gateway_display_name,
