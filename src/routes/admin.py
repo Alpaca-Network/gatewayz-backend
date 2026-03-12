@@ -2587,9 +2587,47 @@ async def get_model_usage_analytics(
 
 
 # ============================================================================
-# ADMIN PRICING SCHEDULER - Automated Pricing Sync (Phase 2.5/Phase 3)
+# ADMIN PRICING AUDIT - Compare provider vs DB pricing
 # ============================================================================
-# Endpoints to monitor and control the automated pricing sync scheduler
+
+
+@router.get("/admin/pricing-audit", tags=["admin"])
+async def run_pricing_audit(
+    admin_user: dict = Depends(require_admin),
+    gateway: str = Query(
+        None,
+        description="Specific gateway(s) to audit, comma-separated (e.g. 'openrouter,deepinfra'). Omit to audit all.",
+    ),
+    threshold: float = Query(
+        0.0,
+        description="Minimum percentage difference to flag as a mismatch (default: 0% = exact match)",
+        ge=0.0,
+        le=100.0,
+    ),
+):
+    """
+    Run a pricing audit comparing live provider catalogs against database pricing.
+
+    Returns a report grouped by gateway/provider with:
+    - Summary stats (total models, mismatches, missing)
+    - Per-gateway breakdown with individual model mismatches
+    - Pricing shown in both per-token and per-million-token formats
+
+    Requires admin authentication.
+    """
+    from src.services.pricing_audit import run_pricing_audit as execute_audit
+
+    gateways = None
+    if gateway:
+        gateways = [g.strip().lower() for g in gateway.split(",") if g.strip()]
+
+    report = await asyncio.to_thread(
+        execute_audit,
+        gateways=gateways,
+        threshold_percent=threshold,
+    )
+
+    return report
 
 
 # ============================================================================

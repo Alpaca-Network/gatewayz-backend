@@ -359,6 +359,124 @@ def activate_model(model_id: int) -> dict[str, Any] | None:
     return update_model(model_id, {"is_active": True})
 
 
+def process_stale_models(
+    provider_id: int,
+    seen_provider_model_ids: set[str],
+    deactivation_threshold: int = 3,
+) -> dict[str, Any]:
+    """
+    Track and deactivate models that are no longer listed by a provider.
+
+    After a successful provider sync, call this with the set of model IDs
+    that were returned by the provider API.  Models in the DB for this
+    provider that are NOT in the set get their consecutive_missing_count
+    incremented.  Once the count reaches the threshold, they are
+    soft-deactivated (is_active = false).
+
+    Args:
+        provider_id: The provider's database ID.
+        seen_provider_model_ids: Set of provider_model_id values returned
+            by the provider API in this sync cycle.
+        deactivation_threshold: Number of consecutive misses before
+            deactivation (default: 3).
+
+    Returns:
+        Dict with counts: reset, incremented, deactivated.
+    """
+    from datetime import UTC, datetime
+
+    supabase = get_client_for_query(read_only=False)
+    now = datetime.now(UTC).isoformat()
+    result = {"reset": 0, "incremented": 0, "deactivated": 0}
+
+    # Fetch all active models for this provider
+    all_active: list[dict] = []
+    page_size = SUPABASE_PAGE_SIZE
+    offset = 0
+    while True:
+        batch = (
+            supabase.table("models")
+            .select("id, provider_model_id, consecutive_missing_count")
+            .eq("provider_id", provider_id)
+            .eq("is_active", True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        ).data or []
+        all_active.extend(batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    if not all_active:
+        return result
+
+    # Split into seen vs unseen
+    ids_to_reset: list[int] = []
+    ids_to_increment: list[tuple[int, int]] = []  # (id, new_count)
+    ids_to_deactivate: list[int] = []
+
+    for model in all_active:
+        db_id = model["id"]
+        pmid = model.get("provider_model_id", "")
+
+        if pmid in seen_provider_model_ids:
+            # Model is still listed — reset counter
+            ids_to_reset.append(db_id)
+        else:
+            new_count = (model.get("consecutive_missing_count") or 0) + 1
+            if new_count >= deactivation_threshold:
+                ids_to_deactivate.append(db_id)
+            else:
+                ids_to_increment.append((db_id, new_count))
+
+    # Batch update: reset seen models
+    if ids_to_reset:
+        for i in range(0, len(ids_to_reset), 500):
+            chunk = ids_to_reset[i : i + 500]
+            supabase.table("models").update(
+                {
+                    "last_seen_in_provider_at": now,
+                    "consecutive_missing_count": 0,
+                }
+            ).in_("id", chunk).execute()
+        result["reset"] = len(ids_to_reset)
+
+    # Batch update: increment missing models
+    # Unfortunately Supabase doesn't support per-row values in batch,
+    # so we update each count value in groups
+    if ids_to_increment:
+        by_count: dict[int, list[int]] = {}
+        for db_id, new_count in ids_to_increment:
+            by_count.setdefault(new_count, []).append(db_id)
+        for count_val, id_list in by_count.items():
+            for i in range(0, len(id_list), 500):
+                chunk = id_list[i : i + 500]
+                supabase.table("models").update(
+                    {
+                        "consecutive_missing_count": count_val,
+                    }
+                ).in_("id", chunk).execute()
+        result["incremented"] = len(ids_to_increment)
+
+    # Batch update: deactivate models that exceeded threshold
+    if ids_to_deactivate:
+        for i in range(0, len(ids_to_deactivate), 500):
+            chunk = ids_to_deactivate[i : i + 500]
+            supabase.table("models").update(
+                {
+                    "is_active": False,
+                    "consecutive_missing_count": deactivation_threshold,
+                }
+            ).in_("id", chunk).execute()
+        result["deactivated"] = len(ids_to_deactivate)
+        logger.info(
+            f"Deactivated {len(ids_to_deactivate)} stale models for provider_id={provider_id} "
+            f"(missing for {deactivation_threshold}+ consecutive syncs)"
+        )
+
+    return result
+
+
 def update_model_health(
     model_id: int,
     health_status: str,
