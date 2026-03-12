@@ -7,12 +7,15 @@ Works without Redis using in-memory storage
 import asyncio
 import logging
 import time
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from dataclasses import dataclass
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
 
 logger = logging.getLogger(__name__)
+
+MAX_FALLBACK_KEYS = 500
+FALLBACK_TTL_SECONDS = 900  # 15 minutes
 
 
 def _calculate_burst_window_description(config: "RateLimitConfig") -> str:
@@ -89,6 +92,10 @@ class InMemoryRateLimiter:
         self.burst_tokens = defaultdict(int)
         self.last_burst_refill = defaultdict(float)
         self.lock = asyncio.Lock()
+        self._key_order = OrderedDict()
+        self._key_last_accessed = {}
+        self._max_keys = MAX_FALLBACK_KEYS
+        self._ttl = FALLBACK_TTL_SECONDS
 
     async def check_rate_limit(
         self, api_key: str, config: RateLimitConfig, tokens_used: int = 0, request_type: str = "api"
@@ -96,6 +103,32 @@ class InMemoryRateLimiter:
         """Check rate limit for API key"""
         async with self.lock:
             current_time = time.time()
+
+            # Evict expired keys (TTL-based)
+            self._evict_expired_keys(current_time)
+
+            # Track key access order for LRU eviction
+            if api_key in self._key_order:
+                self._key_order.move_to_end(api_key)
+            else:
+                self._key_order[api_key] = True
+                # Evict LRU key if we exceed the cap (skip keys with in-flight requests)
+                while len(self._key_order) > self._max_keys:
+                    evicted_key = next(
+                        (
+                            key
+                            for key in self._key_order
+                            if self.concurrent_requests.get(key, 0) == 0
+                        ),
+                        None,
+                    )
+                    if evicted_key is None:
+                        break  # All keys have active requests, can't evict
+                    del self._key_order[evicted_key]
+                    self._remove_key_data(evicted_key)
+
+            # Update last access time for TTL tracking
+            self._key_last_accessed[api_key] = current_time
 
             # Clean up old entries
             await self._cleanup_old_entries(api_key, current_time)
@@ -279,6 +312,26 @@ class InMemoryRateLimiter:
             int(current_time) + 60,
         )
         return result
+
+    def _remove_key_data(self, key: str):
+        """Remove all data for a key from every data structure."""
+        self.request_windows.pop(key, None)
+        self.token_windows.pop(key, None)
+        self.concurrent_requests.pop(key, None)
+        self.burst_tokens.pop(key, None)
+        self.last_burst_refill.pop(key, None)
+        self._key_last_accessed.pop(key, None)
+
+    def _evict_expired_keys(self, current_time: float):
+        """Remove keys not accessed in the last FALLBACK_TTL_SECONDS."""
+        expired = [
+            key
+            for key, last_access in self._key_last_accessed.items()
+            if current_time - last_access > self._ttl and self.concurrent_requests.get(key, 0) == 0
+        ]
+        for key in expired:
+            self._key_order.pop(key, None)
+            self._remove_key_data(key)
 
 
 class FallbackRateLimitManager:

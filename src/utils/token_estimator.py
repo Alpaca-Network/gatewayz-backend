@@ -6,9 +6,8 @@ Provides two estimation strategies:
    Install with ``pip install tiktoken``. When available, token counts
    closely match what most LLM providers report.
 
-2. **Word-based heuristic** (fallback): Splits on whitespace and applies
-   a ~0.75 tokens-per-word ratio, which empirically outperforms the
-   naive "4 chars = 1 token" rule across English and code.
+2. **Character-based heuristic** (fallback): Uses ~1 token per 4
+   characters, a simple and spec-compliant approximation.
 
 Both strategies handle multimodal (list-of-parts) content gracefully,
 extracting only the text segments.
@@ -113,8 +112,8 @@ _TOKENS_PER_MESSAGE_OVERHEAD = 4
 def count_tokens_text(text: str) -> int:
     """Count tokens in a plain text string.
 
-    Uses tiktoken when available, otherwise falls back to a word-based
-    heuristic (0.75 tokens per whitespace-delimited word).
+    Uses tiktoken when available, otherwise falls back to a character-based
+    heuristic (~1 token per 4 characters).
 
     Returns:
         Integer token count (always >= 0).
@@ -130,14 +129,8 @@ def count_tokens_text(text: str) -> int:
             # If encoding fails for any reason, fall through to heuristic
             pass
 
-    # Fallback: word-based heuristic
-    # ~0.75 tokens per word is empirically more accurate than 4 chars / token.
-    # Rationale: average English word is ~4.7 chars, and average token is ~3.5
-    # chars for BPE tokenizers, giving a ratio of about 0.74 tokens per word.
-    # For code, the ratio is somewhat higher (~1.0) due to punctuation, but
-    # 0.75 is a good middle ground across mixed workloads.
-    word_count = len(text.split())
-    return max(1, int(word_count * 0.75))
+    # Fallback: character-based heuristic (~1 token per 4 characters).
+    return max(1, len(text) // 4)
 
 
 def count_tokens_messages(messages: Iterable[dict] | None) -> int:
@@ -197,7 +190,7 @@ def get_estimation_method() -> str:
         ``"tiktoken"`` or ``"word_heuristic"``.
     """
     enc = _get_tiktoken_encoding()
-    return "tiktoken" if enc is not None else "word_heuristic"
+    return "tiktoken" if enc is not None else "char_heuristic"
 
 
 # ---------------------------------------------------------------------------

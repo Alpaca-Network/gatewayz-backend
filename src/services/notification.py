@@ -4,6 +4,7 @@ Notification Service
 Handles low balance notifications, trial expiry alerts, and user communication
 """
 
+import json
 import logging
 import os
 from datetime import UTC, datetime, timedelta
@@ -24,6 +25,7 @@ from src.schemas.notification import (
     TrialExpiryAlert,
 )
 from src.services.trial_validation import validate_trial_access
+from src.utils.security_validators import generate_webhook_signature
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ class NotificationService:
                     plan_expiry_reminder_days=data.get("plan_expiry_reminder_days", 7),
                     usage_alerts=data.get("usage_alerts", True),
                     webhook_url=data.get("webhook_url"),
+                    webhook_secret=data.get("webhook_secret"),
                     created_at=(
                         datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
                         if data.get("created_at")
@@ -389,13 +392,24 @@ class NotificationService:
             logger.error(f"Error sending email notification via Resend: {e}")
             return False
 
-    def send_webhook_notification(self, webhook_url: str, data: dict[str, Any]) -> bool:
-        """Send webhook notification"""
+    def send_webhook_notification(
+        self, webhook_url: str, data: dict[str, Any], webhook_secret: str | None = None
+    ) -> bool:
+        """Send webhook notification, optionally HMAC-signed when a secret is provided"""
         try:
-            response = requests.post(
-                webhook_url, json=data, headers={"Content-Type": "application/json"}, timeout=10
-            )
-            return response.status_code == 200
+            headers = {"Content-Type": "application/json"}
+
+            if webhook_secret:
+                payload_json = json.dumps(data, separators=(",", ":"), sort_keys=True)
+                signature = generate_webhook_signature(payload_json, webhook_secret)
+                headers["X-Webhook-Signature"] = signature
+                response = requests.post(
+                    webhook_url, data=payload_json, headers=headers, timeout=10
+                )
+            else:
+                response = requests.post(webhook_url, json=data, headers=headers, timeout=10)
+
+            return 200 <= response.status_code < 300
         except Exception as e:
             logger.error(f"Error sending webhook notification: {e}")
             return False
@@ -426,6 +440,7 @@ class NotificationService:
                             "content": request.content,
                             "metadata": request.metadata,
                         },
+                        webhook_secret=preferences.webhook_secret,
                     )
 
             # Record notification
