@@ -6,7 +6,6 @@ Sets its own environment variables and mocks all external I/O.
 """
 
 import os
-import time as _time_module
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 

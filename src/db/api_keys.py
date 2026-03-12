@@ -6,6 +6,7 @@ from typing import Any
 from postgrest import APIError
 
 from src.config.supabase_config import execute_with_retry, get_supabase_client
+from src.config.usage_limits import TRIAL_DURATION_DAYS
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
@@ -190,7 +191,7 @@ def create_api_key(
         trial_data = {}
         if is_primary:
             trial_start = datetime.now(UTC)
-            trial_end = trial_start + timedelta(days=3)
+            trial_end = trial_start + timedelta(days=TRIAL_DURATION_DAYS)
             # Use the provided subscription_status (e.g., "bot" for temp emails, "trial" for normal)
             is_trial = subscription_status == "trial"
             trial_data = {
@@ -569,16 +570,18 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
         # Check if key exists in api_keys_new table
         try:
             # Primary lookup: hash-based (avoids exposing plaintext in queries)
+            hash_lookup_attempted = False
             try:
                 computed_hash = sha256_key_hash(api_key)
                 key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
-            except Exception:
-                # Fallback to plaintext lookup if hashing fails (e.g. missing salt during migration)
+                hash_lookup_attempted = True
+            except (ValueError, RuntimeError, KeyError) as e:
+                logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
                 key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
-            # If hash-based lookup returned nothing, fall back to plaintext lookup
+            # Only fall back to plaintext when the hash lookup succeeded but found nothing
             # (backward compatibility for keys created before key_hash was populated)
-            if not key_result.data:
+            if hash_lookup_attempted and not key_result.data:
                 key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
 
             if key_result.data:
@@ -1183,18 +1186,26 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
 
     def _fetch_key(client):
         # Primary lookup: hash-based (avoids exposing plaintext in queries)
+        hash_lookup_attempted = False
         try:
             computed_hash = sha256_key_hash(api_key)
             key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+            hash_lookup_attempted = True
             if key_result.data and len(key_result.data) > 0:
                 return key_result.data[0]
-        except Exception:
-            pass  # Fall through to plaintext lookup
+        except (ValueError, RuntimeError, KeyError) as e:
+            logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
+            # Fallback: plaintext lookup if hashing fails
+            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            if key_result.data and len(key_result.data) > 0:
+                return key_result.data[0]
+            return None
 
-        # Fallback: plaintext lookup for keys without key_hash (backward compatibility)
-        key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
-        if key_result.data and len(key_result.data) > 0:
-            return key_result.data[0]
+        # Only fall back to plaintext when the hash lookup succeeded but found nothing
+        if hash_lookup_attempted and not key_result.data:
+            key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+            if key_result.data and len(key_result.data) > 0:
+                return key_result.data[0]
 
         return None
 

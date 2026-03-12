@@ -106,7 +106,7 @@ Every request passes through the ingress layer before anything else. This is the
 
 #### Authentication & Authorization
 - **API key authentication** with keys encrypted at rest (AES-128 Fernet)
-- **HMAC-SHA256** key hashing for fast lookup without decryption
+- **Salted SHA-256** key hashing for fast lookup without decryption (hash-first with plaintext fallback)
 - **Role-based access control (RBAC)** — admin, developer, user tiers with distinct permissions
 - **Per-key IP allowlists** — restrict an API key to specific IP addresses or ranges
 - **Domain restrictions** — limit which domains can use a key

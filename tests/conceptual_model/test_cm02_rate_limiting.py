@@ -10,10 +10,9 @@ Tests the three-layer rate limiting system:
 
 import asyncio
 import hashlib
-import time
 from collections import defaultdict, deque
-from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import UTC, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -22,12 +21,8 @@ import pytest
 # ---------------------------------------------------------------------------
 from src.middleware.security_middleware import (
     DEFAULT_IP_LIMIT,
-    FINGERPRINT_LIMIT,
-    STRICT_IP_LIMIT,
-    VELOCITY_COOLDOWN_SECONDS,
     VELOCITY_ERROR_THRESHOLD,
     VELOCITY_MIN_REQUESTS,
-    VELOCITY_WINDOW_SECONDS,
     SecurityMiddleware,
 )
 
@@ -39,7 +34,6 @@ from src.services.rate_limiting import (
     ENTERPRISE_CONFIG,
     PREMIUM_CONFIG,
     RateLimitConfig,
-    RateLimitResult,
     SlidingWindowRateLimiter,
 )
 
@@ -50,7 +44,6 @@ from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     _hash_ip,
     check_anonymous_rate_limit,
-    get_anonymous_usage_count,
     increment_anonymous_usage,
 )
 
@@ -58,9 +51,7 @@ from src.services.anonymous_rate_limiter import (
 # Layer 4 imports (Fallback / graceful degradation)
 # ---------------------------------------------------------------------------
 from src.services.rate_limiting_fallback import (
-    FallbackRateLimitManager,
     InMemoryRateLimiter,
-    RateLimitConfig as FallbackRateLimitConfig,
 )
 
 

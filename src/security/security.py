@@ -227,16 +227,19 @@ def validate_api_key_security(
         try:
             # Primary lookup: hash-based (avoids exposing plaintext in queries)
             result = None
+            hash_lookup_attempted = False
             try:
                 from src.utils.crypto import sha256_key_hash
 
                 computed_hash = sha256_key_hash(api_key)
                 result = client.table(table_name).select("*").eq("key_hash", computed_hash).execute()
-            except Exception:
-                pass  # Fall through to plaintext lookup
+                hash_lookup_attempted = True
+            except (ValueError, RuntimeError, KeyError) as e:
+                logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
+                result = client.table(table_name).select("*").eq("api_key", api_key).execute()
 
-            # Fallback: plaintext lookup for keys without key_hash (backward compatibility)
-            if not result or not result.data:
+            # Only fall back to plaintext when the hash lookup succeeded but found nothing
+            if hash_lookup_attempted and (not result or not result.data):
                 result = client.table(table_name).select("*").eq("api_key", api_key).execute()
 
             if not result.data:

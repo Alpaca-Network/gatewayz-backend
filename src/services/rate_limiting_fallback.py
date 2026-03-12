@@ -318,6 +318,7 @@ class InMemoryRateLimiter:
         expired = [
             key for key, last_access in self._key_last_accessed.items()
             if current_time - last_access > self._ttl
+            and self.concurrent_requests.get(key, 0) == 0
         ]
         for key in expired:
             self._key_order.pop(key, None)

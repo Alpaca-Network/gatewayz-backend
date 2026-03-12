@@ -18,19 +18,19 @@ from unittest.mock import MagicMock, patch
 class TestCM1601WebhookPayloadHmacSigned:
     def test_webhook_payload_hmac_signed(self):
         """CM states outgoing webhook payloads are HMAC-signed.
-        generate_webhook_signature exists in security_validators but is NOT
-        called inside NotificationService.send_webhook_notification."""
+        Verified: generate_webhook_signature is called inside
+        send_webhook_notification when a webhook_secret is provided."""
         from src.utils.security_validators import generate_webhook_signature
         from src.services.notification import NotificationService
 
         # The function exists
         assert callable(generate_webhook_signature)
 
-        # But it is NOT wired into send_webhook_notification
+        # Verified: generate_webhook_signature is called inside send_webhook_notification
         source = inspect.getsource(NotificationService.send_webhook_notification)
         assert "generate_webhook_signature" in source, (
-            "send_webhook_notification should call generate_webhook_signature "
-            "to HMAC-sign the payload, but it does not"
+            "send_webhook_notification must call generate_webhook_signature "
+            "to HMAC-sign the payload"
         )
 
 

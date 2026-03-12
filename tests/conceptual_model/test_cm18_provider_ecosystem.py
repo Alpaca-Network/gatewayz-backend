@@ -140,7 +140,7 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
                 pass
 
         assert checked > 0, "Should be able to import at least some provider clients"
-        coverage = has_interface / checked if checked > 0 else 0
+        coverage = has_interface / checked
         assert coverage >= 0.75, (
             f"At least 75% of checked provider clients should have a "
             f"request-sending function. Checked {checked}, found {has_interface} "

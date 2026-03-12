@@ -247,14 +247,13 @@ async def cache_catalog_response(
         except Exception as e:
             logger.debug(f"LRU eviction check failed (non-critical): {e}")
 
-        # Store in Redis with TTL
-        redis.setex(cache_key, ttl, serialized)
-
-        # Track this key in the LRU sorted set (CM-8.1.6)
-        try:
-            redis.zadd(CATALOG_CACHE_KEYS_INDEX, {cache_key: time.time()})
-        except Exception:
-            pass  # Non-critical
+        # Store in Redis with TTL and track in LRU sorted set atomically
+        # Using a pipeline reduces the window where a cache entry exists
+        # without a corresponding sorted-set record (or vice versa).
+        pipe = redis.pipeline()
+        pipe.setex(cache_key, ttl, serialized)
+        pipe.zadd(CATALOG_CACHE_KEYS_INDEX, {cache_key: time.time()})
+        pipe.execute()
 
         logger.info(f"💾 Cached response: {cache_key} (TTL: {ttl}s, size: {len(serialized)} bytes)")
 
@@ -324,6 +323,8 @@ def invalidate_catalog_cache(gateway: str | None = None) -> int:
             if keys:
                 # Batch delete for efficiency
                 redis.delete(*keys)
+                # Keep sorted set in sync — remove evicted keys from LRU index
+                redis.zrem(CATALOG_CACHE_KEYS_INDEX, *keys)
                 deleted_count += len(keys)
 
             if cursor == 0:
@@ -403,26 +404,37 @@ def _evict_lru_if_needed(redis) -> int:
         if current_count < MAX_CACHE_ENTRIES:
             return 0
 
-        # Evict the oldest (lowest-score) entries
-        evict_count = LRU_EVICTION_BATCH_SIZE
-        oldest_keys = redis.zrange(CATALOG_CACHE_KEYS_INDEX, 0, evict_count - 1)
+        excess = current_count - MAX_CACHE_ENTRIES + LRU_EVICTION_BATCH_SIZE
+        # Fetch more than needed to account for stale (TTL-expired) entries
+        batch_size = min(excess * 2, current_count)
+        oldest_keys = redis.zrange(CATALOG_CACHE_KEYS_INDEX, 0, batch_size - 1)
 
         if not oldest_keys:
             return 0
 
         # Decode bytes to str if needed (some Redis clients return bytes)
-        decoded_keys = []
-        for k in oldest_keys:
-            decoded_keys.append(k.decode() if isinstance(k, bytes) else k)
+        decoded_keys = [k.decode() if isinstance(k, bytes) else k for k in oldest_keys]
 
-        # Delete the cache entries from Redis
-        redis.delete(*decoded_keys)
+        real_evictions = 0
+        for key in decoded_keys:
+            if real_evictions >= excess:
+                break
+            # Check if the key still exists in Redis (may have expired via TTL)
+            if redis.exists(key):
+                # Real entry — evict it
+                redis.delete(key)
+                redis.zrem(CATALOG_CACHE_KEYS_INDEX, key)
+                real_evictions += 1
+            else:
+                # Stale entry — just clean the sorted set, don't count as eviction
+                redis.zrem(CATALOG_CACHE_KEYS_INDEX, key)
 
-        # Remove them from the sorted set
-        redis.zrem(CATALOG_CACHE_KEYS_INDEX, *decoded_keys)
-
-        logger.info(f"LRU eviction: removed {len(decoded_keys)} oldest cache entries")
-        return len(decoded_keys)
+        if real_evictions > 0:
+            logger.info(
+                f"LRU eviction: removed {real_evictions} catalog cache entries "
+                f"(sorted set had {current_count} records)"
+            )
+        return real_evictions
 
     except redis_module.RedisError as e:
         logger.debug(f"LRU eviction failed: {e}")

@@ -32,6 +32,7 @@ from src.services.simple_health_cache import (
     DEFAULT_TTL_SUMMARY,
     SimpleHealthCache,
 )
+import src.services.local_memory_cache as lmc_mod
 from src.services.local_memory_cache import LocalMemoryCache, get_local_cache
 
 # Patch target for catalog_response_cache's own imported reference
@@ -238,8 +239,6 @@ class TestSupportingCaches:
         assert cache.default_ttl == 900.0
 
         # Verify the global singleton config
-        import src.services.local_memory_cache as lmc_mod
-
         old = lmc_mod._local_cache
         try:
             lmc_mod._local_cache = None
@@ -313,6 +312,9 @@ class TestCacheDegradation:
         error = redis_lib.RedisError("Connection refused")
         mock_r.get.side_effect = error
         mock_r.setex.side_effect = error
+        # cache_catalog_response now uses a pipeline for setex+zadd,
+        # so the error must surface from pipeline.execute()
+        mock_r.pipeline.return_value.execute.side_effect = error
 
         with patch(_CRC_REDIS, return_value=mock_r):
             # Read should return None, not raise
@@ -366,7 +368,8 @@ class TestCacheDegradation:
             asyncio.get_event_loop().run_until_complete(
                 cache_catalog_response(gateway, params, response_data)
             )
-            mock_r.setex.assert_called_once()
+            # setex is now called on the pipeline, not directly on the Redis client
+            pipe_mock.setex.assert_called_once()
 
             # Second call: cache hit (Redis now returns stored data)
             cache_key = get_catalog_cache_key(gateway, params)

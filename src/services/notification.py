@@ -411,7 +411,7 @@ class NotificationService:
                     webhook_url, json=data, headers=headers, timeout=10
                 )
 
-            return response.status_code == 200
+            return 200 <= response.status_code < 300
         except Exception as e:
             logger.error(f"Error sending webhook notification: {e}")
             return False
