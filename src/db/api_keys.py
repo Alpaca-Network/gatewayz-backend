@@ -573,16 +573,22 @@ def validate_api_key(api_key: str) -> dict[str, Any] | None:
             hash_lookup_attempted = False
             try:
                 computed_hash = sha256_key_hash(api_key)
-                key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+                key_result = (
+                    client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+                )
                 hash_lookup_attempted = True
             except (ValueError, RuntimeError, KeyError) as e:
                 logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))
-                key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+                key_result = (
+                    client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+                )
 
             # Only fall back to plaintext when the hash lookup succeeded but found nothing
             # (backward compatibility for keys created before key_hash was populated)
             if hash_lookup_attempted and not key_result.data:
-                key_result = client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+                key_result = (
+                    client.table("api_keys_new").select("*").eq("api_key", api_key).execute()
+                )
 
             if key_result.data:
                 key_data = key_result.data[0]
@@ -1189,7 +1195,9 @@ def get_api_key_by_key(api_key: str) -> dict[str, Any] | None:
         hash_lookup_attempted = False
         try:
             computed_hash = sha256_key_hash(api_key)
-            key_result = client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+            key_result = (
+                client.table("api_keys_new").select("*").eq("key_hash", computed_hash).execute()
+            )
             hash_lookup_attempted = True
             if key_result.data and len(key_result.data) > 0:
                 return key_result.data[0]

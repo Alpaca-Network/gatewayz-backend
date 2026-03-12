@@ -26,10 +26,10 @@ from src.services.provider_failover import (
     should_failover,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helper: create a CircuitBreaker with Redis disabled (in-memory only)
 # ---------------------------------------------------------------------------
+
 
 def _make_breaker(provider: str = "test-provider", **config_overrides) -> CircuitBreaker:
     """Create a CircuitBreaker that uses in-memory state (no Redis)."""
@@ -166,7 +166,9 @@ class TestModelAwareRules:
     def test_openai_models_failover_only_to_openai_or_openrouter(self):
         """CM-5.2.1: openai/* models are restricted to [openai, openrouter]."""
         full_chain = list(FALLBACK_PROVIDER_PRIORITY)
-        with patch("src.services.model_transformations.apply_model_alias", return_value="openai/gpt-4o"):
+        with patch(
+            "src.services.model_transformations.apply_model_alias", return_value="openai/gpt-4o"
+        ):
             result = enforce_model_failover_rules("openai/gpt-4o", full_chain)
         assert set(result).issubset({"openai", "openrouter"})
         assert result[0] == "openai"  # native provider first
@@ -175,7 +177,10 @@ class TestModelAwareRules:
     def test_anthropic_models_failover_only_to_anthropic_or_openrouter(self):
         """CM-5.2.2: anthropic/* models are restricted to [anthropic, openrouter]."""
         full_chain = list(FALLBACK_PROVIDER_PRIORITY)
-        with patch("src.services.model_transformations.apply_model_alias", return_value="anthropic/claude-3-opus"):
+        with patch(
+            "src.services.model_transformations.apply_model_alias",
+            return_value="anthropic/claude-3-opus",
+        ):
             result = enforce_model_failover_rules("anthropic/claude-3-opus", full_chain)
         assert set(result).issubset({"anthropic", "openrouter"})
         assert result[0] == "anthropic"  # native provider first
@@ -184,10 +189,11 @@ class TestModelAwareRules:
     def test_opensource_models_failover_across_all_providers(self):
         """CM-5.2.3: meta-llama/* models can fail over to any provider."""
         full_chain = list(FALLBACK_PROVIDER_PRIORITY)
-        with patch("src.services.model_transformations.apply_model_alias", return_value="meta-llama/Llama-3.3-70B-Instruct"):
-            result = enforce_model_failover_rules(
-                "meta-llama/Llama-3.3-70B-Instruct", full_chain
-            )
+        with patch(
+            "src.services.model_transformations.apply_model_alias",
+            return_value="meta-llama/Llama-3.3-70B-Instruct",
+        ):
+            result = enforce_model_failover_rules("meta-llama/Llama-3.3-70B-Instruct", full_chain)
         # The full chain should be returned (no restriction)
         assert result == full_chain
 

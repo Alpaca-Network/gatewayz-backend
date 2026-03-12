@@ -18,13 +18,12 @@ from src.services.models import (
 )
 from src.services.pricing_lookup import GATEWAY_PROVIDERS, enrich_model_with_pricing
 
-
 # Known modality types used across all provider clients in the codebase.
 KNOWN_MODALITIES = {
-    MODALITY_TEXT_TO_TEXT,   # "text->text"
+    MODALITY_TEXT_TO_TEXT,  # "text->text"
     MODALITY_TEXT_TO_IMAGE,  # "text->image"
     MODALITY_TEXT_TO_AUDIO,  # "text->audio"
-    "text\u2192text",        # Unicode arrow variant used in some catalog entries
+    "text\u2192text",  # Unicode arrow variant used in some catalog entries
     "text\u2192image",
     "text\u2192audio",
 }
@@ -68,12 +67,12 @@ class TestModelMetadata:
         """CM-9.1.1: Every model has id, name, provider_slug, context_length, pricing."""
         # Verify the canonical fixture has all required fields
         for field in REQUIRED_MODEL_FIELDS:
-            assert field in sample_model_catalog_entry, (
-                f"Required field '{field}' missing from model catalog entry"
-            )
-            assert sample_model_catalog_entry[field] is not None, (
-                f"Required field '{field}' is None"
-            )
+            assert (
+                field in sample_model_catalog_entry
+            ), f"Required field '{field}' missing from model catalog entry"
+            assert (
+                sample_model_catalog_entry[field] is not None
+            ), f"Required field '{field}' is None"
 
         # Also verify several synthetic entries
         entries = [
@@ -88,20 +87,20 @@ class TestModelMetadata:
         ]
         for entry in entries:
             for field in REQUIRED_MODEL_FIELDS:
-                assert field in entry, (
-                    f"Required field '{field}' missing from model '{entry.get('id')}'"
-                )
-                assert entry[field] is not None, (
-                    f"Required field '{field}' is None for model '{entry.get('id')}'"
-                )
+                assert (
+                    field in entry
+                ), f"Required field '{field}' missing from model '{entry.get('id')}'"
+                assert (
+                    entry[field] is not None
+                ), f"Required field '{field}' is None for model '{entry.get('id')}'"
 
     @pytest.mark.cm_verified
     def test_model_id_is_canonical_format(self, sample_model_catalog_entry):
         """CM-9.1.2: Model IDs follow the {org}/{model-name} canonical format."""
         model_id = sample_model_catalog_entry["id"]
-        assert "/" in model_id, (
-            f"Model ID '{model_id}' does not follow '{{org}}/{{model-name}}' format"
-        )
+        assert (
+            "/" in model_id
+        ), f"Model ID '{model_id}' does not follow '{{org}}/{{model-name}}' format"
 
         parts = model_id.split("/", 1)
         assert len(parts) == 2, f"Model ID '{model_id}' must have exactly one '/' separator"
@@ -118,9 +117,7 @@ class TestModelMetadata:
         ]
         for mid in valid_ids:
             parts = mid.split("/", 1)
-            assert len(parts) == 2 and all(parts), (
-                f"'{mid}' does not match canonical format"
-            )
+            assert len(parts) == 2 and all(parts), f"'{mid}' does not match canonical format"
 
     @pytest.mark.cm_verified
     def test_pricing_field_never_null(self, sample_model_catalog_entry):
@@ -142,9 +139,9 @@ class TestModelMetadata:
     def test_modality_is_known_type(self, sample_model_catalog_entry):
         """CM-9.1.4: Modality is one of the known types defined in the codebase."""
         modality = sample_model_catalog_entry.get("modality")
-        assert modality in KNOWN_MODALITIES, (
-            f"Modality '{modality}' is not one of the known types: {KNOWN_MODALITIES}"
-        )
+        assert (
+            modality in KNOWN_MODALITIES
+        ), f"Modality '{modality}' is not one of the known types: {KNOWN_MODALITIES}"
 
         # Verify all standard modalities are recognized
         for mod in [MODALITY_TEXT_TO_TEXT, MODALITY_TEXT_TO_IMAGE, MODALITY_TEXT_TO_AUDIO]:
@@ -191,20 +188,17 @@ class TestCatalogInclusionRules:
         # deepinfra is a GATEWAY_PROVIDER, so models without pricing get filtered out
         assert "deepinfra" in GATEWAY_PROVIDERS
 
-        with patch(
-            "src.services.pricing_lookup._get_pricing_from_database", return_value=None
-        ), patch(
-            "src.services.pricing_lookup.get_model_pricing", return_value=None
-        ), patch(
-            "src.services.pricing_lookup._get_cross_reference_pricing", return_value=None
-        ), patch(
-            "src.services.pricing_lookup._is_building_catalog", return_value=False
+        with (
+            patch("src.services.pricing_lookup._get_pricing_from_database", return_value=None),
+            patch("src.services.pricing_lookup.get_model_pricing", return_value=None),
+            patch("src.services.pricing_lookup._get_cross_reference_pricing", return_value=None),
+            patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
         ):
             result = enrich_model_with_pricing(model, gateway="deepinfra")
 
-        assert result is None, (
-            "Gateway provider model without pricing must be excluded (return None)"
-        )
+        assert (
+            result is None
+        ), "Gateway provider model without pricing must be excluded (return None)"
 
     @pytest.mark.cm_verified
     def test_model_with_inactive_provider_excluded(self):
@@ -214,17 +208,17 @@ class TestCatalogInclusionRules:
         An unregistered provider slug means the model should not appear.
         """
         unregistered_slug = "totally-unknown-provider-xyz"
-        assert unregistered_slug not in GATEWAY_REGISTRY, (
-            "Test requires an unregistered provider slug"
-        )
+        assert (
+            unregistered_slug not in GATEWAY_REGISTRY
+        ), "Test requires an unregistered provider slug"
 
         # When a provider is not in GATEWAY_REGISTRY, its models are never fetched
         # by the catalog building process (PROVIDER_SLUGS is derived from GATEWAY_REGISTRY).
         from src.routes.catalog import PROVIDER_SLUGS
 
-        assert unregistered_slug not in PROVIDER_SLUGS, (
-            "Unregistered provider must not appear in PROVIDER_SLUGS"
-        )
+        assert (
+            unregistered_slug not in PROVIDER_SLUGS
+        ), "Unregistered provider must not appear in PROVIDER_SLUGS"
 
         # Additionally, if such a model somehow appears and is in GATEWAY_PROVIDERS,
         # it would be filtered out due to missing pricing.
@@ -262,11 +256,9 @@ class TestCatalogInclusionRules:
         merged = merge_models_by_slug(list_a, list_b, list_c)
 
         ids = [m["id"] for m in merged]
-        assert len(ids) == len(set(i.lower() for i in ids)), (
-            f"Duplicate IDs found after merge: {ids}"
-        )
+        assert len(ids) == len(
+            set(i.lower() for i in ids)
+        ), f"Duplicate IDs found after merge: {ids}"
 
         # Expect exactly 3 unique models
-        assert len(merged) == 3, (
-            f"Expected 3 unique models after dedup, got {len(merged)}"
-        )
+        assert len(merged) == 3, f"Expected 3 unique models after dedup, got {len(merged)}"

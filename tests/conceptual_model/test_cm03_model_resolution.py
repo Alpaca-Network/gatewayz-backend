@@ -97,9 +97,7 @@ def test_provider_detection_format_based_rules():
             "src.services.provider_selector": None,
         },
     ):
-        provider = detect_provider_from_model_id(
-            "accounts/fireworks/models/deepseek-v3p1"
-        )
+        provider = detect_provider_from_model_id("accounts/fireworks/models/deepseek-v3p1")
     assert provider == "fireworks"
 
 
@@ -149,9 +147,7 @@ def test_model_id_transformation_per_provider():
     assert fw_result == "accounts/fireworks/models/llama-v3p3-70b-instruct"
 
     # OpenRouter: model keeps org/model format (lowercased)
-    or_result = transform_model_id(
-        "openai/gpt-4", provider="openrouter", use_multi_provider=False
-    )
+    or_result = transform_model_id("openai/gpt-4", provider="openrouter", use_multi_provider=False)
     assert or_result == "openai/gpt-4"
 
 

@@ -33,19 +33,18 @@ os.environ.setdefault("ENCRYPTION_KEY", _TEST_FERNET_KEY)
 
 import pytest
 
-
 # === Marker Registration ===
 
+
 def pytest_configure(config):
-    config.addinivalue_line(
-        "markers", "cm_verified: CM claim matches code - test should PASS"
-    )
+    config.addinivalue_line("markers", "cm_verified: CM claim matches code - test should PASS")
     config.addinivalue_line(
         "markers", "cm_gap: CM claim differs from code - test asserts spec, expected to fail"
     )
 
 
 # === Frozen Time Helper ===
+
 
 class FrozenTime:
     """Helper for controlling time in tests."""
@@ -67,6 +66,7 @@ class FrozenTime:
 
 # === Fixtures ===
 
+
 @pytest.fixture
 def fernet_key():
     """A valid Fernet encryption key for crypto tests."""
@@ -82,8 +82,10 @@ def frozen_time():
     start = 1700000000.0  # Fixed epoch timestamp
     ft = FrozenTime(start)
 
-    with patch("time.time", side_effect=lambda: ft.current), \
-         patch("time.monotonic", side_effect=lambda: ft.current):
+    with (
+        patch("time.time", side_effect=lambda: ft.current),
+        patch("time.monotonic", side_effect=lambda: ft.current),
+    ):
         yield ft
 
 
@@ -102,12 +104,36 @@ def mock_supabase():
     mock.table.return_value = table_mock
 
     # Support all PostgREST chain methods
-    for method in ["select", "insert", "update", "delete", "upsert",
-                    "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike",
-                    "is_", "in_", "not_", "or_", "and_",
-                    "order", "limit", "offset", "range", "single",
-                    "filter", "match", "contains", "contained_by",
-                    "text_search"]:
+    for method in [
+        "select",
+        "insert",
+        "update",
+        "delete",
+        "upsert",
+        "eq",
+        "neq",
+        "gt",
+        "gte",
+        "lt",
+        "lte",
+        "like",
+        "ilike",
+        "is_",
+        "in_",
+        "not_",
+        "or_",
+        "and_",
+        "order",
+        "limit",
+        "offset",
+        "range",
+        "single",
+        "filter",
+        "match",
+        "contains",
+        "contained_by",
+        "text_search",
+    ]:
         getattr(table_mock, method).return_value = table_mock
 
     # Default execute response
@@ -124,10 +150,19 @@ def mock_supabase():
     ]
     # Dynamically patch any db/service modules that have already imported the function
     import sys
+
     for mod_path in [
-        "src.db.users", "src.db.api_keys", "src.db.plans", "src.db.trials",
-        "src.db.credit_transactions", "src.db.chat_history", "src.db.activity",
-        "src.db.roles", "src.db.rate_limits", "src.db.coupons", "src.db.referral",
+        "src.db.users",
+        "src.db.api_keys",
+        "src.db.plans",
+        "src.db.trials",
+        "src.db.credit_transactions",
+        "src.db.chat_history",
+        "src.db.activity",
+        "src.db.roles",
+        "src.db.rate_limits",
+        "src.db.coupons",
+        "src.db.referral",
         "src.services.partner_trial_service",
     ]:
         # Only patch if the module is loaded AND has the attribute
@@ -201,6 +236,7 @@ def mock_provider_response():
     Usage:
         response = mock_provider_response(status_code=200, json_data={"choices": [...]})
     """
+
     def _make_response(
         status_code: int = 200,
         json_data: dict | None = None,

@@ -232,7 +232,9 @@ def validate_api_key_security(
                 from src.utils.crypto import sha256_key_hash
 
                 computed_hash = sha256_key_hash(api_key)
-                result = client.table(table_name).select("*").eq("key_hash", computed_hash).execute()
+                result = (
+                    client.table(table_name).select("*").eq("key_hash", computed_hash).execute()
+                )
                 hash_lookup_attempted = True
             except (ValueError, RuntimeError, KeyError) as e:
                 logger.warning("Hash lookup unavailable, falling back to plaintext: %s", str(e))

@@ -23,10 +23,10 @@ from src.services.intelligent_health_monitor import (
     MonitoringTier,
 )
 
-
 # ===================================================================
 # 11.1 Critical tier - 5 minute interval
 # ===================================================================
+
 
 @pytest.mark.cm_verified
 def test_health_check_critical_tier_5min_interval():
@@ -35,14 +35,15 @@ def test_health_check_critical_tier_5min_interval():
     monitor.__init__()
 
     critical_config = monitor.tier_config[MonitoringTier.CRITICAL]
-    assert critical_config["interval_seconds"] == 300, (
-        f"Expected CRITICAL tier interval of 300s (5 min), got {critical_config['interval_seconds']}s"
-    )
+    assert (
+        critical_config["interval_seconds"] == 300
+    ), f"Expected CRITICAL tier interval of 300s (5 min), got {critical_config['interval_seconds']}s"
 
 
 # ===================================================================
 # 11.2 Popular tier - 30 minute interval
 # ===================================================================
+
 
 @pytest.mark.cm_verified
 def test_health_check_popular_tier_30min_interval():
@@ -50,14 +51,15 @@ def test_health_check_popular_tier_30min_interval():
     monitor = IntelligentHealthMonitor()
 
     popular_config = monitor.tier_config[MonitoringTier.POPULAR]
-    assert popular_config["interval_seconds"] == 1800, (
-        f"Expected POPULAR tier interval of 1800s (30 min), got {popular_config['interval_seconds']}s"
-    )
+    assert (
+        popular_config["interval_seconds"] == 1800
+    ), f"Expected POPULAR tier interval of 1800s (30 min), got {popular_config['interval_seconds']}s"
 
 
 # ===================================================================
 # 11.3 Standard tier - 2 to 4 hour interval
 # ===================================================================
+
 
 @pytest.mark.cm_verified
 def test_health_check_standard_tier_2_to_4hr_interval():
@@ -68,13 +70,13 @@ def test_health_check_standard_tier_2_to_4hr_interval():
     on_demand_interval = monitor.tier_config[MonitoringTier.ON_DEMAND]["interval_seconds"]
 
     # STANDARD tier is 7200s (2 hours)
-    assert standard_interval == 7200, (
-        f"Expected STANDARD tier interval of 7200s (2 hr), got {standard_interval}s"
-    )
+    assert (
+        standard_interval == 7200
+    ), f"Expected STANDARD tier interval of 7200s (2 hr), got {standard_interval}s"
     # ON_DEMAND tier (least used models) is 14400s (4 hours), covering the upper bound
-    assert on_demand_interval == 14400, (
-        f"Expected ON_DEMAND tier interval of 14400s (4 hr), got {on_demand_interval}s"
-    )
+    assert (
+        on_demand_interval == 14400
+    ), f"Expected ON_DEMAND tier interval of 14400s (4 hr), got {on_demand_interval}s"
     # Both fall within the 2-4 hour range
     assert 7200 <= standard_interval <= 14400
     assert 7200 <= on_demand_interval <= 14400
@@ -83,6 +85,7 @@ def test_health_check_standard_tier_2_to_4hr_interval():
 # ===================================================================
 # 11.4 Passive health captures from inference
 # ===================================================================
+
 
 @pytest.mark.cm_verified
 @pytest.mark.asyncio
@@ -121,6 +124,7 @@ async def test_passive_health_captures_from_inference():
 # 11.5 /health always returns 200
 # ===================================================================
 
+
 @pytest.mark.cm_verified
 @pytest.mark.asyncio
 async def test_health_endpoint_always_returns_200():
@@ -147,6 +151,7 @@ async def test_health_endpoint_always_returns_200():
 # 11.6 Health response contains version
 # ===================================================================
 
+
 @pytest.mark.cm_verified
 def test_health_response_contains_version():
     """CM-11.6: The FastAPI app is configured with an API version string."""
@@ -163,6 +168,7 @@ def test_health_response_contains_version():
 # ===================================================================
 # 11.7 Health response contains status
 # ===================================================================
+
 
 @pytest.mark.cm_verified
 @pytest.mark.asyncio
@@ -184,6 +190,7 @@ async def test_health_response_contains_status():
 # 11.8 Health response contains timestamp
 # ===================================================================
 
+
 @pytest.mark.cm_verified
 @pytest.mark.asyncio
 async def test_health_response_contains_timestamp():
@@ -199,6 +206,7 @@ async def test_health_response_contains_timestamp():
         assert "timestamp" in response, "Health response must contain 'timestamp' field"
         # Verify it's a valid ISO format timestamp
         from datetime import datetime
+
         ts = datetime.fromisoformat(response["timestamp"])
         assert ts is not None
 
@@ -207,15 +215,16 @@ async def test_health_response_contains_timestamp():
 # 11.9 Incident severity levels
 # ===================================================================
 
+
 @pytest.mark.cm_verified
 def test_incident_severity_levels():
     """CM-11.9: System supports Critical, High, Medium, and Low severity levels."""
     # Verify the enum has all four expected levels
     expected_levels = {"critical", "high", "medium", "low"}
     actual_levels = {s.value for s in IncidentSeverity}
-    assert actual_levels == expected_levels, (
-        f"Expected severity levels {expected_levels}, got {actual_levels}"
-    )
+    assert (
+        actual_levels == expected_levels
+    ), f"Expected severity levels {expected_levels}, got {actual_levels}"
 
     # Verify the monitor maps consecutive failures to correct severities
     monitor = IntelligentHealthMonitor()

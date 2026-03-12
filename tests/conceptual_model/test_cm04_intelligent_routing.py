@@ -22,7 +22,6 @@ from src.services.code_router import (
     parse_router_model_string as code_parse,
 )
 
-
 # ===================================================================
 # 4.1 General Router
 # ===================================================================
@@ -193,11 +192,18 @@ class TestCodeRouterParsing:
             "baselines": {},
         }
 
-        with patch("src.services.code_router._load_quality_priors", return_value=mock_priors), \
-             patch("src.services.code_router.get_model_tiers", return_value=mock_priors["model_tiers"]), \
-             patch("src.services.code_router.get_fallback_model", return_value=mock_priors["fallback_model"]), \
-             patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]), \
-             patch("src.services.code_router.get_classifier") as mock_classifier_fn:
+        with (
+            patch("src.services.code_router._load_quality_priors", return_value=mock_priors),
+            patch(
+                "src.services.code_router.get_model_tiers", return_value=mock_priors["model_tiers"]
+            ),
+            patch(
+                "src.services.code_router.get_fallback_model",
+                return_value=mock_priors["fallback_model"],
+            ),
+            patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]),
+            patch("src.services.code_router.get_classifier") as mock_classifier_fn,
+        ):
 
             mock_classifier = MagicMock()
             mock_classifier.classify.return_value = {
@@ -277,11 +283,18 @@ class TestCodeRouterParsing:
             "baselines": {},
         }
 
-        with patch("src.services.code_router._load_quality_priors", return_value=mock_priors), \
-             patch("src.services.code_router.get_model_tiers", return_value=mock_priors["model_tiers"]), \
-             patch("src.services.code_router.get_fallback_model", return_value=mock_priors["fallback_model"]), \
-             patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]), \
-             patch("src.services.code_router.get_classifier") as mock_classifier_fn:
+        with (
+            patch("src.services.code_router._load_quality_priors", return_value=mock_priors),
+            patch(
+                "src.services.code_router.get_model_tiers", return_value=mock_priors["model_tiers"]
+            ),
+            patch(
+                "src.services.code_router.get_fallback_model",
+                return_value=mock_priors["fallback_model"],
+            ),
+            patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]),
+            patch("src.services.code_router.get_classifier") as mock_classifier_fn,
+        ):
 
             mock_classifier = MagicMock()
             mock_classifier_fn.return_value = mock_classifier

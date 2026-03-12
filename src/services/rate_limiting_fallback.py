@@ -303,7 +303,6 @@ class InMemoryRateLimiter:
         )
         return result
 
-
     def _remove_key_data(self, key: str):
         """Remove all data for a key from every data structure."""
         self.request_windows.pop(key, None)
@@ -316,9 +315,9 @@ class InMemoryRateLimiter:
     def _evict_expired_keys(self, current_time: float):
         """Remove keys not accessed in the last FALLBACK_TTL_SECONDS."""
         expired = [
-            key for key, last_access in self._key_last_accessed.items()
-            if current_time - last_access > self._ttl
-            and self.concurrent_requests.get(key, 0) == 0
+            key
+            for key, last_access in self._key_last_accessed.items()
+            if current_time - last_access > self._ttl and self.concurrent_requests.get(key, 0) == 0
         ]
         for key in expired:
             self._key_order.pop(key, None)

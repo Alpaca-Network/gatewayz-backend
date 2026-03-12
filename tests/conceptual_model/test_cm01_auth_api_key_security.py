@@ -87,9 +87,7 @@ class TestCM03ApiKeyHmacSha256Hashing:
 
         # Verify it matches manual HMAC-SHA256 computation
         salt = os.environ["API_GATEWAY_SALT"]
-        expected = hmac.new(
-            salt.encode(), key_a.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        expected = hmac.new(salt.encode(), key_a.encode("utf-8"), hashlib.sha256).hexdigest()
         assert hash_a1 == expected
 
 
@@ -103,9 +101,9 @@ class TestCM04HmacLookupWithoutDecryption:
         constant-time hash-based key lookup without decryption."""
         from src.db import api_keys
 
-        assert hasattr(api_keys, "get_api_key_by_hash"), (
-            "Expected get_api_key_by_hash to be defined in src.db.api_keys"
-        )
+        assert hasattr(
+            api_keys, "get_api_key_by_hash"
+        ), "Expected get_api_key_by_hash to be defined in src.db.api_keys"
         assert callable(api_keys.get_api_key_by_hash)
 
 
@@ -128,11 +126,14 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
         # Reload the crypto module so it picks up the new keyring env vars
         import importlib
         import src.utils.crypto as crypto_mod
+
         importlib.reload(crypto_mod)
 
         # Mock check_plan_entitlements to avoid Supabase call
-        with patch("src.db.api_keys.check_plan_entitlements", return_value={}), \
-             patch("src.db.api_keys.check_key_name_uniqueness", return_value=True):
+        with (
+            patch("src.db.api_keys.check_plan_entitlements", return_value={}),
+            patch("src.db.api_keys.check_key_name_uniqueness", return_value=True),
+        ):
 
             # Capture what gets inserted
             captured_payload = {}
@@ -149,6 +150,7 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
             original_insert.side_effect = capture_insert
 
             from src.db.api_keys import create_api_key
+
             api_key, key_id = create_api_key(
                 user_id=1,
                 key_name="test-key",
@@ -157,9 +159,9 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
 
             # The plaintext api_key is stored (legacy), but encrypted_key must differ
             if "encrypted_key" in captured_payload:
-                assert captured_payload["encrypted_key"] != api_key, (
-                    "encrypted_key in DB must not equal the plaintext API key"
-                )
+                assert (
+                    captured_payload["encrypted_key"] != api_key
+                ), "encrypted_key in DB must not equal the plaintext API key"
             # At minimum, key_hash should be present and differ from plaintext
             if "key_hash" in captured_payload:
                 assert captured_payload["key_hash"] != api_key
@@ -178,9 +180,9 @@ class TestCM06RbacThreeTiersExist:
             if not attr.startswith("_") and isinstance(getattr(UserRole, attr), str)
         }
         expected_roles = {"admin", "developer", "user"}
-        assert expected_roles.issubset(defined_roles), (
-            f"Expected roles {expected_roles}, found {defined_roles}"
-        )
+        assert expected_roles.issubset(
+            defined_roles
+        ), f"Expected roles {expected_roles}, found {defined_roles}"
 
 
 # ---------------------------------------------------------------------------
@@ -198,13 +200,9 @@ class TestCM07AdminRoleHasAllPermissions:
         }
         admin_level = role_hierarchy[UserRole.ADMIN]
         for role, level in role_hierarchy.items():
-            assert admin_level >= level, (
-                f"Admin ({admin_level}) should be >= {role} ({level})"
-            )
+            assert admin_level >= level, f"Admin ({admin_level}) should be >= {role} ({level})"
         # Admin must be strictly the highest
-        non_admin_levels = [
-            lvl for r, lvl in role_hierarchy.items() if r != UserRole.ADMIN
-        ]
+        non_admin_levels = [lvl for r, lvl in role_hierarchy.items() if r != UserRole.ADMIN]
         assert admin_level > max(non_admin_levels)
 
         # Also verify update_user_role accepts "admin" as valid
@@ -228,9 +226,7 @@ class TestCM08FreeRoleHasMinimumPermissions:
         # USER must be the lowest
         assert user_level == min(role_hierarchy.values())
         # Strictly lower than all others
-        other_levels = [
-            lvl for r, lvl in role_hierarchy.items() if r != UserRole.USER
-        ]
+        other_levels = [lvl for r, lvl in role_hierarchy.items() if r != UserRole.USER]
         assert user_level < min(other_levels)
 
 
@@ -278,23 +274,17 @@ class TestCM11DomainRestrictionBlocksWrongDomain:
     def test_domain_restriction_blocks_wrong_domain(self):
         """A referer from an unlisted domain must be rejected."""
         allowed_domains = ["example.com", "app.mysite.io"]
-        assert validate_domain_referrers(
-            "https://evil.com/page", allowed_domains
-        ) is False
+        assert validate_domain_referrers("https://evil.com/page", allowed_domains) is False
 
     def test_domain_restriction_allows_correct_domain(self):
         """A referer from a listed domain must be accepted."""
         allowed_domains = ["example.com"]
-        assert validate_domain_referrers(
-            "https://example.com/dashboard", allowed_domains
-        ) is True
+        assert validate_domain_referrers("https://example.com/dashboard", allowed_domains) is True
 
     def test_domain_restriction_allows_subdomain(self):
         """A subdomain of an allowed domain must be accepted."""
         allowed_domains = ["example.com"]
-        assert validate_domain_referrers(
-            "https://app.example.com/page", allowed_domains
-        ) is True
+        assert validate_domain_referrers("https://app.example.com/page", allowed_domains) is True
 
     def test_domain_restriction_blocks_missing_referer(self):
         """A missing referer must be rejected when domains are configured."""

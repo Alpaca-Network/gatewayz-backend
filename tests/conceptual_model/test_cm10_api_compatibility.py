@@ -17,10 +17,10 @@ from src.services.stream_normalizer import (
 )
 from src.services.anthropic_transformer import transform_openai_to_anthropic
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_openai_response(
     content: str = "Hello!",
@@ -140,7 +140,7 @@ class TestOpenAIStreamingSSEFormat:
         assert sse.endswith("\n\n")
 
         # The payload between "data: " and "\n\n" must be valid JSON
-        json_str = sse[len("data: "):-2]
+        json_str = sse[len("data: ") : -2]
         parsed = json.loads(json_str)
         assert "choices" in parsed
         assert parsed["choices"][0]["delta"]["content"] == "Hi"
@@ -237,7 +237,9 @@ class TestAnthropicResponseFormatHasContent:
 
     def test_anthropic_response_format_has_content(self):
         openai_resp = _make_openai_response(content="Bonjour!")
-        anthropic_resp = transform_openai_to_anthropic(openai_resp, model="claude-sonnet-4-5-20250929")
+        anthropic_resp = transform_openai_to_anthropic(
+            openai_resp, model="claude-sonnet-4-5-20250929"
+        )
 
         assert "content" in anthropic_resp
         assert isinstance(anthropic_resp["content"], list)
@@ -254,7 +256,9 @@ class TestAnthropicResponseFormatHasUsage:
 
     def test_anthropic_response_format_has_usage(self):
         openai_resp = _make_openai_response(prompt_tokens=15, completion_tokens=20)
-        anthropic_resp = transform_openai_to_anthropic(openai_resp, model="claude-sonnet-4-5-20250929")
+        anthropic_resp = transform_openai_to_anthropic(
+            openai_resp, model="claude-sonnet-4-5-20250929"
+        )
 
         assert "usage" in anthropic_resp
         usage = anthropic_resp["usage"]
@@ -334,7 +338,7 @@ class TestResponseNormalizedRegardlessOfProvider:
                 "choices": [{"index": 0, "delta": {"content": "x"}, "finish_reason": None}],
             }
             result = normalizer.normalize_chunk(chunk)
-            parsed = json.loads(result.to_sse()[len("data: "):-2])
+            parsed = json.loads(result.to_sse()[len("data: ") : -2])
             # Remove id/created since they differ by timestamp
             parsed.pop("id", None)
             parsed.pop("created", None)
@@ -376,7 +380,7 @@ class TestProviderSpecificFieldsStripped:
         assert result is not None
 
         sse = result.to_sse()
-        parsed = json.loads(sse[len("data: "):-2])
+        parsed = json.loads(sse[len("data: ") : -2])
 
         # NormalizedChunk.to_sse() only emits id, object, created, model, choices
         assert set(parsed.keys()) == {"id", "object", "created", "model", "choices"}

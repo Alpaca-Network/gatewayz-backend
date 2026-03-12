@@ -65,8 +65,9 @@ class TestCM1603WebhookCreditsDepletedEventTriggered:
             ).NotificationService.check_low_balance_alert
         )
         # The check uses <= threshold which covers depleted (0 credits)
-        assert "current_credits <= low_balance_threshold" in source or \
-               "current_credits <=" in source, (
+        assert (
+            "current_credits <= low_balance_threshold" in source or "current_credits <=" in source
+        ), (
             "Low balance check must fire when credits are at or below threshold "
             "(covers credits.depleted at 0)"
         )
@@ -86,15 +87,13 @@ class TestCM1604WebhookRetryExponentialBackoff:
 
         source = inspect.getsource(NotificationService.send_webhook_notification)
         # Uses timeout on HTTP request
-        assert "timeout" in source, (
-            "Webhook notification must use a timeout on the HTTP request"
-        )
+        assert "timeout" in source, "Webhook notification must use a timeout on the HTTP request"
 
         # Notification system records failures for retry
         create_source = inspect.getsource(NotificationService.create_notification)
-        assert "FAILED" in create_source or "failed" in create_source.lower(), (
-            "Notification system must track failed deliveries for retry"
-        )
+        assert (
+            "FAILED" in create_source or "failed" in create_source.lower()
+        ), "Notification system must track failed deliveries for retry"
 
 
 # ---------------------------------------------------------------------------
@@ -106,20 +105,17 @@ class TestCM1605StripeWebhookAlwaysReturns200:
         """The Stripe webhook handler always returns HTTP 200, even when
         processing encounters errors. This prevents Stripe from retrying."""
         source = inspect.getsource(
-            __import__(
-                "src.routes.payments", fromlist=["stripe_webhook"]
-            ).stripe_webhook
+            __import__("src.routes.payments", fromlist=["stripe_webhook"]).stripe_webhook
         )
         # Must always return 200
-        assert "status_code=200" in source, (
-            "Stripe webhook must always return status_code=200"
-        )
+        assert "status_code=200" in source, "Stripe webhook must always return status_code=200"
         # Must handle exceptions without raising
-        assert "except Exception" in source or "except ValueError" in source, (
-            "Stripe webhook must catch exceptions to avoid non-200 responses"
-        )
+        assert (
+            "except Exception" in source or "except ValueError" in source
+        ), "Stripe webhook must catch exceptions to avoid non-200 responses"
         # Comment or code confirms the always-200 pattern
-        assert "Always return 200" in source or "always returns" in source.lower() or \
-               "ALWAYS returns HTTP 200" in source, (
-            "Stripe webhook should document the always-200 pattern"
-        )
+        assert (
+            "Always return 200" in source
+            or "always returns" in source.lower()
+            or "ALWAYS returns HTTP 200" in source
+        ), "Stripe webhook should document the always-200 pattern"

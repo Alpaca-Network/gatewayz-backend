@@ -54,7 +54,6 @@ from src.services.rate_limiting_fallback import (
     InMemoryRateLimiter,
 )
 
-
 # ===================================================================
 # 2.1 Layer 1: IP-Level Rate Limiting (SecurityMiddleware)
 # ===================================================================
@@ -69,8 +68,14 @@ class TestLayer1IPRateLimiting:
         mw = SecurityMiddleware(dummy_app, redis_client=redis_client)
         return mw
 
-    def _make_request(self, ip="1.2.3.4", auth_header="", user_agent="Mozilla/5.0",
-                      path="/v1/chat/completions", method="POST"):
+    def _make_request(
+        self,
+        ip="1.2.3.4",
+        auth_header="",
+        user_agent="Mozilla/5.0",
+        path="/v1/chat/completions",
+        method="POST",
+    ):
         """Create a mock Request object."""
         request = MagicMock()
         request.url.path = path
@@ -106,9 +111,9 @@ class TestLayer1IPRateLimiting:
         allowed = asyncio.get_event_loop().run_until_complete(
             mw._check_limit("ip:1.2.3.4", DEFAULT_IP_LIMIT)
         )
-        assert allowed is True, (
-            f"Request should be allowed when under IP rate limit of {DEFAULT_IP_LIMIT} RPM"
-        )
+        assert (
+            allowed is True
+        ), f"Request should be allowed when under IP rate limit of {DEFAULT_IP_LIMIT} RPM"
 
     # CM-2.1.2
     @pytest.mark.cm_verified
@@ -126,9 +131,9 @@ class TestLayer1IPRateLimiting:
         blocked = asyncio.get_event_loop().run_until_complete(
             mw._check_limit("ip:10.0.0.1", DEFAULT_IP_LIMIT)
         )
-        assert blocked is False, (
-            f"Request should be blocked after exceeding IP rate limit of {DEFAULT_IP_LIMIT} RPM"
-        )
+        assert (
+            blocked is False
+        ), f"Request should be blocked after exceeding IP rate limit of {DEFAULT_IP_LIMIT} RPM"
 
     # CM-2.1.3
     @pytest.mark.cm_verified
@@ -317,12 +322,12 @@ class TestLayer2APIKeyRateLimiting:
         # Sliding window pipe: day tokens at limit
         window_pipe = MagicMock()
         window_pipe.execute.return_value = [
-            0,                      # minute requests
-            0,                      # minute tokens
-            0,                      # hour requests
-            0,                      # hour tokens
-            0,                      # day requests
-            str(day_token_limit),   # day tokens at limit
+            0,  # minute requests
+            0,  # minute tokens
+            0,  # hour requests
+            0,  # hour tokens
+            0,  # day requests
+            str(day_token_limit),  # day tokens at limit
         ]
         for m in ["get", "incr", "incrby", "expire"]:
             getattr(window_pipe, m).return_value = window_pipe
@@ -386,9 +391,12 @@ class TestLayer2APIKeyRateLimiting:
 
         window_pipe = MagicMock()
         window_pipe.execute.return_value = [
-            0, 0,   # minute: requests, tokens
-            0, 0,   # hour: requests, tokens
-            0, str(config.tokens_per_day),  # day: requests, tokens (at limit)
+            0,
+            0,  # minute: requests, tokens
+            0,
+            0,  # hour: requests, tokens
+            0,
+            str(config.tokens_per_day),  # day: requests, tokens (at limit)
         ]
         for m in ["get", "incr", "incrby", "expire"]:
             getattr(window_pipe, m).return_value = window_pipe
@@ -436,9 +444,9 @@ class TestLayer2APIKeyRateLimiting:
 
         assert result.allowed is True
         # X-RateLimit-Limit (total limit)
-        assert result.ratelimit_limit_requests == 100, (
-            f"Expected ratelimit_limit_requests=100, got {result.ratelimit_limit_requests}"
-        )
+        assert (
+            result.ratelimit_limit_requests == 100
+        ), f"Expected ratelimit_limit_requests=100, got {result.ratelimit_limit_requests}"
         # X-RateLimit-Remaining (should be less than limit after one request)
         assert result.remaining_requests < 100
         # X-RateLimit-Reset (Unix timestamp in the future)
@@ -495,11 +503,10 @@ class TestLayer3AnonymousRateLimiting:
         """Anonymous rate limiter returns 'allowed: False' when daily limit exceeded."""
         test_ip = "198.51.100.99"
 
-        with patch(
-            "src.services.anonymous_rate_limiter._get_redis_client", return_value=None
-        ):
+        with patch("src.services.anonymous_rate_limiter._get_redis_client", return_value=None):
             # Reset in-memory cache for this test
             from src.services import anonymous_rate_limiter
+
             anonymous_rate_limiter._anonymous_usage_cache.clear()
 
             # Use up all allowed requests
@@ -619,7 +626,7 @@ class TestGracefulDegradation:
             )
 
             # Fail-open: request should be allowed
-            assert result.allowed is True, (
-                "Request must be allowed (fail-open) when rate limiting infrastructure fails"
-            )
+            assert (
+                result.allowed is True
+            ), "Request must be allowed (fail-open) when rate limiting infrastructure fails"
             assert result.reason is not None, "Should include a reason for the fail-open"

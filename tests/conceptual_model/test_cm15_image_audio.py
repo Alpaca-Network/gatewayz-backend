@@ -23,13 +23,13 @@ class TestCM1501ImageGenerationDeductsCredits:
 
         source = inspect.getsource(images)
         # The route must call deduct_credits for billing
-        assert "deduct_credits" in source, (
-            "Image generation route must call deduct_credits to bill the user"
-        )
+        assert (
+            "deduct_credits" in source
+        ), "Image generation route must call deduct_credits to bill the user"
         # Verify it also checks credits before generation
-        assert "Insufficient credits" in source, (
-            "Image generation route must check for insufficient credits"
-        )
+        assert (
+            "Insufficient credits" in source
+        ), "Image generation route must check for insufficient credits"
 
 
 # ---------------------------------------------------------------------------
@@ -50,9 +50,7 @@ class TestCM1502ImageGenerationInsufficientCredits402:
 
         # Verify the route source contains 402 status for insufficient credits
         source = inspect.getsource(generate_images)
-        assert "status_code=402" in source, (
-            "Image route must return 402 for insufficient credits"
-        )
+        assert "status_code=402" in source, "Image route must return 402 for insufficient credits"
 
 
 # ---------------------------------------------------------------------------
@@ -68,10 +66,10 @@ class TestCM1503AudioTranscriptionReturnsText:
 
         source = inspect.getsource(audio)
         # The response must include a "text" field
-        assert '"text"' in source or "'text'" in source, (
-            "Audio transcription response must include a 'text' field"
-        )
+        assert (
+            '"text"' in source or "'text'" in source
+        ), "Audio transcription response must include a 'text' field"
         # Verify it also handles billing
-        assert "deduct_credits" in source or "_deduct_audio_credits" in source, (
-            "Audio transcription must deduct credits"
-        )
+        assert (
+            "deduct_credits" in source or "_deduct_audio_credits" in source
+        ), "Audio transcription must deduct credits"

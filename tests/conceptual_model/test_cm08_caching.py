@@ -57,12 +57,14 @@ class TestExactMatchResponseCache:
         params = {"limit": 100, "offset": 0}
         response_data = {"models": [{"id": "test/model"}], "total": 1}
 
-        cached_json = json.dumps({
-            **response_data,
-            "_cached_at": "2025-01-01T00:00:00",
-            "_cache_ttl": CATALOG_CACHE_TTL,
-            "_cache_key": get_catalog_cache_key(gateway, params),
-        })
+        cached_json = json.dumps(
+            {
+                **response_data,
+                "_cached_at": "2025-01-01T00:00:00",
+                "_cache_ttl": CATALOG_CACHE_TTL,
+                "_cache_key": get_catalog_cache_key(gateway, params),
+            }
+        )
 
         mock_r = MagicMock()
         mock_r.get.return_value = cached_json
@@ -124,9 +126,7 @@ class TestExactMatchResponseCache:
         key = get_catalog_cache_key(gateway, params)
 
         # The key should end with the full SHA-256 hexdigest
-        assert expected_sha256 in key, (
-            f"Expected SHA-256 hash '{expected_sha256}' in key '{key}'."
-        )
+        assert expected_sha256 in key, f"Expected SHA-256 hash '{expected_sha256}' in key '{key}'."
 
     @pytest.mark.cm_verified
     def test_exact_match_cache_max_20k_entries(self):
@@ -185,9 +185,9 @@ class TestSupportingCaches:
     @pytest.mark.cm_verified
     def test_catalog_l1_cache_ttl_60_minutes(self):
         """CM-8.2.2: Catalog L1 (response) cache has 60-minute TTL."""
-        assert CATALOG_RESPONSE_CACHE_TTL == 3600, (
-            f"Expected 3600s (60min), got {CATALOG_RESPONSE_CACHE_TTL}s"
-        )
+        assert (
+            CATALOG_RESPONSE_CACHE_TTL == 3600
+        ), f"Expected 3600s (60min), got {CATALOG_RESPONSE_CACHE_TTL}s"
         assert CATALOG_CACHE_TTL == CATALOG_RESPONSE_CACHE_TTL
 
     @pytest.mark.cm_verified
@@ -198,14 +198,14 @@ class TestSupportingCaches:
             ModelCatalogCache,
         )
 
-        assert PROVIDER_MODELS_CACHE_TTL == 1800, (
-            f"Expected 1800s (30min), got {PROVIDER_MODELS_CACHE_TTL}s"
-        )
+        assert (
+            PROVIDER_MODELS_CACHE_TTL == 1800
+        ), f"Expected 1800s (30min), got {PROVIDER_MODELS_CACHE_TTL}s"
         assert ModelCatalogCache.TTL_PROVIDER == 1800
 
-        assert 900 <= PROVIDER_MODELS_CACHE_TTL <= 1800, (
-            f"Provider cache TTL {PROVIDER_MODELS_CACHE_TTL}s outside 15-30 min range"
-        )
+        assert (
+            900 <= PROVIDER_MODELS_CACHE_TTL <= 1800
+        ), f"Provider cache TTL {PROVIDER_MODELS_CACHE_TTL}s outside 15-30 min range"
 
     @pytest.mark.cm_verified
     def test_health_cache_ttl_6_minutes(self):
@@ -225,12 +225,8 @@ class TestSupportingCaches:
             cache.set(f"key_{i}", f"value_{i}")
 
         stats = cache.get_stats()
-        assert stats["entries"] <= 500, (
-            f"Cache has {stats['entries']} entries, expected <= 500"
-        )
-        assert stats["evictions"] >= 10, (
-            f"Expected at least 10 evictions, got {stats['evictions']}"
-        )
+        assert stats["entries"] <= 500, f"Cache has {stats['entries']} entries, expected <= 500"
+        assert stats["evictions"] >= 10, f"Expected at least 10 evictions, got {stats['evictions']}"
 
     @pytest.mark.cm_verified
     def test_local_memory_cache_ttl_15_minutes(self):
@@ -373,12 +369,14 @@ class TestCacheDegradation:
 
             # Second call: cache hit (Redis now returns stored data)
             cache_key = get_catalog_cache_key(gateway, params)
-            mock_r.get.return_value = json.dumps({
-                **response_data,
-                "_cached_at": "2025-01-01T00:00:00",
-                "_cache_ttl": CATALOG_CACHE_TTL,
-                "_cache_key": cache_key,
-            })
+            mock_r.get.return_value = json.dumps(
+                {
+                    **response_data,
+                    "_cached_at": "2025-01-01T00:00:00",
+                    "_cache_ttl": CATALOG_CACHE_TTL,
+                    "_cache_key": cache_key,
+                }
+            )
             mock_r.expire.return_value = True
 
             result = asyncio.get_event_loop().run_until_complete(

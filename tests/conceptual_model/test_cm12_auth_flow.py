@@ -164,11 +164,11 @@ def test_api_key_format_gw_env_prefix():
 
     for env_tag, expected_prefix in test_cases.items():
         key = generate_secure_api_key(environment_tag=env_tag)
-        assert key.startswith(expected_prefix), (
-            f"Key for env '{env_tag}' should start with '{expected_prefix}', got '{key[:20]}...'"
-        )
+        assert key.startswith(
+            expected_prefix
+        ), f"Key for env '{env_tag}' should start with '{expected_prefix}', got '{key[:20]}...'"
         # Verify there is a random part after the prefix
-        random_part = key[len(expected_prefix):]
+        random_part = key[len(expected_prefix) :]
         assert len(random_part) > 0, "Key should have a random part after the prefix"
 
 
@@ -190,8 +190,11 @@ def test_auth_info_priority_email_first():
         type="email", email="user@example.com", address=None, phone_number=None, name=None
     )
     google_account = SimpleNamespace(
-        type="google_oauth", email="user@gmail.com", address="user@gmail.com",
-        phone_number=None, name="User"
+        type="google_oauth",
+        email="user@gmail.com",
+        address="user@gmail.com",
+        phone_number=None,
+        name="User",
     )
     phone_account = SimpleNamespace(
         type="phone", email=None, address=None, phone_number="+1234567890", name=None
@@ -228,8 +231,11 @@ def test_auth_info_priority_google_over_phone():
     from src.routes.auth import _resolve_account_email
 
     google_account = SimpleNamespace(
-        type="google_oauth", email="user@gmail.com", address="user@gmail.com",
-        phone_number=None, name="User"
+        type="google_oauth",
+        email="user@gmail.com",
+        address="user@gmail.com",
+        phone_number=None,
+        name="User",
     )
     phone_account = SimpleNamespace(
         type="phone", email=None, address=None, phone_number="+1234567890", name=None
@@ -345,9 +351,9 @@ def test_temp_email_detection_blocks_registration():
     ]
 
     for email in disposable_domains:
-        assert is_temporary_email_domain(email), (
-            f"{email} should be detected as a temporary email domain"
-        )
+        assert is_temporary_email_domain(
+            email
+        ), f"{email} should be detected as a temporary email domain"
 
     # Legitimate domains should NOT be flagged
     legitimate_emails = [
@@ -359,6 +365,6 @@ def test_temp_email_detection_blocks_registration():
     ]
 
     for email in legitimate_emails:
-        assert not is_temporary_email_domain(email), (
-            f"{email} should NOT be flagged as a temporary email domain"
-        )
+        assert not is_temporary_email_domain(
+            email
+        ), f"{email} should NOT be flagged as a temporary email domain"

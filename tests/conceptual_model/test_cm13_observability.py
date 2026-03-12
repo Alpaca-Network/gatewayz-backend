@@ -97,6 +97,7 @@ class TestCM1306SentryCapturesExceptions:
 
         # Verify that the module references sentry_sdk.capture_exception
         import inspect
+
         source = inspect.getsource(AutoSentryMiddleware)
         assert "capture_exception" in source
 

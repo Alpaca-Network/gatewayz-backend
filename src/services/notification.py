@@ -407,9 +407,7 @@ class NotificationService:
                     webhook_url, data=payload_json, headers=headers, timeout=10
                 )
             else:
-                response = requests.post(
-                    webhook_url, json=data, headers=headers, timeout=10
-                )
+                response = requests.post(webhook_url, json=data, headers=headers, timeout=10)
 
             return 200 <= response.status_code < 300
         except Exception as e:

@@ -22,9 +22,7 @@ class TestCM1701CreateAppReturnsFastapiInstance:
         # Import the already-created app (create_app is called at module level)
         from src.main import app
 
-        assert isinstance(app, FastAPI), (
-            f"Expected FastAPI instance, got {type(app).__name__}"
-        )
+        assert isinstance(app, FastAPI), f"Expected FastAPI instance, got {type(app).__name__}"
 
 
 # ---------------------------------------------------------------------------
@@ -39,11 +37,12 @@ class TestCM1702VercelEntryPointImportsApp:
         # api/index.py imports from src.main
         # We test that the module-level import chain works
         import importlib
+
         module = importlib.import_module("api.index")
         assert hasattr(module, "app"), "api/index.py must export 'app'"
-        assert isinstance(module.app, FastAPI), (
-            f"api/index.py 'app' must be FastAPI, got {type(module.app).__name__}"
-        )
+        assert isinstance(
+            module.app, FastAPI
+        ), f"api/index.py 'app' must be FastAPI, got {type(module.app).__name__}"
 
 
 # ---------------------------------------------------------------------------
@@ -71,13 +70,13 @@ class TestCM1703AppIncludesAllRouteGroups:
 
         # Check for key route groups (using substring matching on paths)
         expected_patterns = [
-            "chat",       # /v1/chat/completions
-            "auth",       # /auth or /api/auth
-            "user",       # /users or /api/users
-            "admin",      # /api/admin
-            "health",     # /health or /api/health
-            "payment",    # /api/stripe or payments
-            "model",      # /models or /v1/models
+            "chat",  # /v1/chat/completions
+            "auth",  # /auth or /api/auth
+            "user",  # /users or /api/users
+            "admin",  # /api/admin
+            "health",  # /health or /api/health
+            "payment",  # /api/stripe or payments
+            "model",  # /models or /v1/models
         ]
 
         for pattern in expected_patterns:

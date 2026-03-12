@@ -150,14 +150,20 @@ class TestCreditDeductionOrder:
 
         # Mock RPC atomic path to succeed and capture params
         rpc_result = MagicMock()
-        rpc_result.data = {"success": True, "transaction_id": "tx1",
-                           "new_allowance": 2.0, "new_purchased": 10.0,
-                           "new_balance": 12.0}
+        rpc_result.data = {
+            "success": True,
+            "transaction_id": "tx1",
+            "new_allowance": 2.0,
+            "new_purchased": 10.0,
+            "new_balance": 12.0,
+        }
         mock_supabase.rpc.return_value.execute.return_value = rpc_result
 
-        with patch("src.db.plans.is_admin_tier_user", return_value=False), \
-             patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"), \
-             patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None):
+        with (
+            patch("src.db.plans.is_admin_tier_user", return_value=False),
+            patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
+        ):
             deduct_credits("test-api-key", 3.0, "test", request_id="req-1")
 
         # Verify from_allowance = min(5.0, 3.0) = 3.0 and from_purchased = 0
@@ -179,14 +185,20 @@ class TestCreditDeductionOrder:
         table_mock.execute.side_effect = [key_lookup, user_lookup]
 
         rpc_result = MagicMock()
-        rpc_result.data = {"success": True, "transaction_id": "tx2",
-                           "new_allowance": 0.0, "new_purchased": 7.0,
-                           "new_balance": 7.0}
+        rpc_result.data = {
+            "success": True,
+            "transaction_id": "tx2",
+            "new_allowance": 0.0,
+            "new_purchased": 7.0,
+            "new_balance": 7.0,
+        }
         mock_supabase.rpc.return_value.execute.return_value = rpc_result
 
-        with patch("src.db.plans.is_admin_tier_user", return_value=False), \
-             patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"), \
-             patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None):
+        with (
+            patch("src.db.plans.is_admin_tier_user", return_value=False),
+            patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
+        ):
             deduct_credits("test-api-key", 5.0, "test", request_id="req-2")
 
         rpc_call = mock_supabase.rpc.call_args
@@ -234,8 +246,10 @@ class TestPreFlightCreditCheck:
         """CM-6.3.1: Zero credits triggers a 402 before any provider call."""
         from src.services.credit_precheck import estimate_and_check_credits
 
-        with patch("src.services.credit_precheck.calculate_cost", return_value=0.05), \
-             patch("src.services.credit_precheck.estimate_message_tokens", return_value=100):
+        with (
+            patch("src.services.credit_precheck.calculate_cost", return_value=0.05),
+            patch("src.services.credit_precheck.estimate_message_tokens", return_value=100),
+        ):
             result = estimate_and_check_credits(
                 model_id="gpt-4o",
                 messages=[{"role": "user", "content": "Hello"}],
@@ -253,8 +267,10 @@ class TestPreFlightCreditCheck:
         from src.services.credit_precheck import calculate_maximum_cost
 
         fake_cost = 0.10
-        with patch("src.services.credit_precheck.calculate_cost", return_value=fake_cost), \
-             patch("src.services.credit_precheck.estimate_message_tokens", return_value=50):
+        with (
+            patch("src.services.credit_precheck.calculate_cost", return_value=fake_cost),
+            patch("src.services.credit_precheck.estimate_message_tokens", return_value=50),
+        ):
             max_cost, input_tokens, max_output_tokens = calculate_maximum_cost(
                 model_id="gpt-4o",
                 messages=[{"role": "user", "content": "Hello"}],
@@ -269,8 +285,10 @@ class TestPreFlightCreditCheck:
         """CM-6.3.3: If user has enough credits the check returns allowed=True."""
         from src.services.credit_precheck import estimate_and_check_credits
 
-        with patch("src.services.credit_precheck.calculate_cost", return_value=0.01), \
-             patch("src.services.credit_precheck.estimate_message_tokens", return_value=50):
+        with (
+            patch("src.services.credit_precheck.calculate_cost", return_value=0.01),
+            patch("src.services.credit_precheck.estimate_message_tokens", return_value=50),
+        ):
             result = estimate_and_check_credits(
                 model_id="gpt-4o",
                 messages=[{"role": "user", "content": "Hello"}],
@@ -331,27 +349,34 @@ class TestIdempotentDeduction:
         from src.db.users import deduct_credits
 
         user_lookup = MagicMock(
-            data=[{"id": 42, "subscription_allowance": 10.0,
-                   "purchased_credits": 10.0, "tier": "pro"}]
+            data=[
+                {"id": 42, "subscription_allowance": 10.0, "purchased_credits": 10.0, "tier": "pro"}
+            ]
         )
         key_lookup = MagicMock(data=[{"user_id": 42}])
 
         rpc_result = MagicMock()
-        rpc_result.data = {"success": True, "transaction_id": "tx-new",
-                           "new_allowance": 9.9, "new_purchased": 10.0,
-                           "new_balance": 19.9}
+        rpc_result.data = {
+            "success": True,
+            "transaction_id": "tx-new",
+            "new_allowance": 9.9,
+            "new_purchased": 10.0,
+            "new_balance": 19.9,
+        }
         mock_supabase.rpc.return_value.execute.return_value = rpc_result
 
         for req_id in ("req-A", "req-B"):
             table_mock = mock_supabase.table.return_value
             table_mock.execute.side_effect = [key_lookup, user_lookup]
 
-            with patch(
-                "src.db.credit_transactions.get_transaction_by_request_id",
-                return_value=None,
-            ), \
-                 patch("src.db.plans.is_admin_tier_user", return_value=False), \
-                 patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"):
+            with (
+                patch(
+                    "src.db.credit_transactions.get_transaction_by_request_id",
+                    return_value=None,
+                ),
+                patch("src.db.plans.is_admin_tier_user", return_value=False),
+                patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"),
+            ):
                 deduct_credits("test-key", 0.05, "test", request_id=req_id)
 
         # RPC should have been called twice (once per unique request_id)
@@ -375,8 +400,10 @@ class TestAutoRefund:
         assert "provider_error" in REFUNDABLE_ERROR_TYPES
 
         # Verify refund_credits accepts provider_error reason
-        with patch("src.db.users.add_credits_to_user") as mock_add, \
-             patch("src.services.credit_handler._record_refund_metrics"):
+        with (
+            patch("src.db.users.add_credits_to_user") as mock_add,
+            patch("src.services.credit_handler._record_refund_metrics"),
+        ):
             mock_add.return_value = None  # Sync function wrapped in to_thread
 
             result = asyncio.get_event_loop().run_until_complete(
@@ -398,8 +425,10 @@ class TestAutoRefund:
 
         assert "timeout_error" in REFUNDABLE_ERROR_TYPES
 
-        with patch("src.db.users.add_credits_to_user") as mock_add, \
-             patch("src.services.credit_handler._record_refund_metrics"):
+        with (
+            patch("src.db.users.add_credits_to_user") as mock_add,
+            patch("src.services.credit_handler._record_refund_metrics"),
+        ):
             mock_add.return_value = None
 
             result = asyncio.get_event_loop().run_until_complete(
@@ -465,13 +494,15 @@ class TestHighValueModelProtection:
             if error:
                 captured_errors.append(error)
 
-        with patch("src.services.models._is_building_catalog", return_value=False), \
-             patch("src.services.pricing.normalize_model_id_for_pricing", side_effect=lambda x: x), \
-             patch("src.services.model_transformations.apply_model_alias", return_value=None), \
-             patch("src.services.pricing._pricing_cache", {}), \
-             patch("src.services.pricing._get_pricing_from_database", return_value=None), \
-             patch("src.services.pricing._get_pricing_from_cache_fallback", return_value=None), \
-             patch("src.services.pricing._track_default_pricing_usage", side_effect=spy_track):
+        with (
+            patch("src.services.models._is_building_catalog", return_value=False),
+            patch("src.services.pricing.normalize_model_id_for_pricing", side_effect=lambda x: x),
+            patch("src.services.model_transformations.apply_model_alias", return_value=None),
+            patch("src.services.pricing._pricing_cache", {}),
+            patch("src.services.pricing._get_pricing_from_database", return_value=None),
+            patch("src.services.pricing._get_pricing_from_cache_fallback", return_value=None),
+            patch("src.services.pricing._track_default_pricing_usage", side_effect=spy_track),
+        ):
             result = get_model_pricing("openai/gpt-4-turbo")
 
         # The function catches the ValueError and returns default pricing...

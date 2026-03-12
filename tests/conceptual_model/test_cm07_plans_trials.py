@@ -27,9 +27,7 @@ def test_new_user_gets_5_dollar_credits(mock_supabase):
 
     sig = inspect.signature(create_enhanced_user)
     default_credits = sig.parameters["credits"].default
-    assert default_credits == 5.0, (
-        f"Expected default credits=5.0, got {default_credits}"
-    )
+    assert default_credits == 5.0, f"Expected default credits=5.0, got {default_credits}"
 
 
 # ---------------------------------------------------------------------------
@@ -44,9 +42,7 @@ def test_new_user_gets_14_day_trial():
 
     sig = inspect.signature(start_trial_for_key)
     default_trial_days = sig.parameters["trial_days"].default
-    assert default_trial_days == 14, (
-        f"Expected trial_days default=14, got {default_trial_days}"
-    )
+    assert default_trial_days == 14, f"Expected trial_days default=14, got {default_trial_days}"
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +61,9 @@ def test_trial_1m_token_limit(mock_supabase):
     # Configure mock: api key lookup succeeds
     key_lookup = MagicMock()
     key_lookup.data = [{"id": "key-uuid-123"}]
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = key_lookup
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        key_lookup
+    )
 
     # Configure rpc to return over-limit response
     rpc_result = MagicMock()
@@ -100,7 +98,9 @@ def test_trial_10k_request_limit(mock_supabase):
 
     key_lookup = MagicMock()
     key_lookup.data = [{"id": "key-uuid-456"}]
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = key_lookup
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        key_lookup
+    )
 
     rpc_result = MagicMock()
     rpc_result.data = {
@@ -148,9 +148,10 @@ def test_expired_trial_returns_402():
             logger_instance=MagicMock(),
         )
 
-    assert exc_info.value.status_code in (402, 403), (
-        f"Expected 402 or 403 for expired trial, got {exc_info.value.status_code}"
-    )
+    assert exc_info.value.status_code in (
+        402,
+        403,
+    ), f"Expected 402 or 403 for expired trial, got {exc_info.value.status_code}"
 
 
 # ---------------------------------------------------------------------------
@@ -226,21 +227,51 @@ def test_plan_tiers_exist(mock_supabase):
     from src.db.plans import get_all_plans
 
     expected_tiers = [
-        {"id": 1, "name": "Trial", "price_per_month": 0, "is_active": True,
-         "daily_request_limit": 1000, "monthly_request_limit": 25000,
-         "daily_token_limit": 500_000, "monthly_token_limit": 15_000_000},
-        {"id": 2, "name": "Dev", "price_per_month": 29, "is_active": True,
-         "daily_request_limit": 5000, "monthly_request_limit": 100000,
-         "daily_token_limit": 2_000_000, "monthly_token_limit": 60_000_000},
-        {"id": 3, "name": "Team", "price_per_month": 99, "is_active": True,
-         "daily_request_limit": 25000, "monthly_request_limit": 500000,
-         "daily_token_limit": 10_000_000, "monthly_token_limit": 300_000_000},
-        {"id": 4, "name": "Enterprise", "price_per_month": 499, "is_active": True,
-         "daily_request_limit": 100000, "monthly_request_limit": 2000000,
-         "daily_token_limit": 50_000_000, "monthly_token_limit": 1_500_000_000},
+        {
+            "id": 1,
+            "name": "Trial",
+            "price_per_month": 0,
+            "is_active": True,
+            "daily_request_limit": 1000,
+            "monthly_request_limit": 25000,
+            "daily_token_limit": 500_000,
+            "monthly_token_limit": 15_000_000,
+        },
+        {
+            "id": 2,
+            "name": "Dev",
+            "price_per_month": 29,
+            "is_active": True,
+            "daily_request_limit": 5000,
+            "monthly_request_limit": 100000,
+            "daily_token_limit": 2_000_000,
+            "monthly_token_limit": 60_000_000,
+        },
+        {
+            "id": 3,
+            "name": "Team",
+            "price_per_month": 99,
+            "is_active": True,
+            "daily_request_limit": 25000,
+            "monthly_request_limit": 500000,
+            "daily_token_limit": 10_000_000,
+            "monthly_token_limit": 300_000_000,
+        },
+        {
+            "id": 4,
+            "name": "Enterprise",
+            "price_per_month": 499,
+            "is_active": True,
+            "daily_request_limit": 100000,
+            "monthly_request_limit": 2000000,
+            "daily_token_limit": 50_000_000,
+            "monthly_token_limit": 1_500_000_000,
+        },
     ]
 
-    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = expected_tiers
+    mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value.data = (
+        expected_tiers
+    )
 
     plans = get_all_plans()
     tier_names = {p["name"] for p in plans}
@@ -266,31 +297,41 @@ def test_team_has_higher_rate_limits_than_dev(mock_supabase):
 
     # Mock Dev plan user
     dev_plan = {
-        "id": 2, "name": "Dev", "price_per_month": 29, "is_active": True,
-        "daily_request_limit": 5000, "monthly_request_limit": 100000,
-        "daily_token_limit": 2_000_000, "monthly_token_limit": 60_000_000,
+        "id": 2,
+        "name": "Dev",
+        "price_per_month": 29,
+        "is_active": True,
+        "daily_request_limit": 5000,
+        "monthly_request_limit": 100000,
+        "daily_token_limit": 2_000_000,
+        "monthly_token_limit": 60_000_000,
         "features": ["basic_models", "standard_support"],
     }
     team_plan = {
-        "id": 3, "name": "Team", "price_per_month": 99, "is_active": True,
-        "daily_request_limit": 25000, "monthly_request_limit": 500000,
-        "daily_token_limit": 10_000_000, "monthly_token_limit": 300_000_000,
+        "id": 3,
+        "name": "Team",
+        "price_per_month": 99,
+        "is_active": True,
+        "daily_request_limit": 25000,
+        "monthly_request_limit": 500000,
+        "daily_token_limit": 10_000_000,
+        "monthly_token_limit": 300_000_000,
         "features": ["basic_models", "premium_models", "priority_support"],
     }
 
     # Simulate check_plan_entitlements by directly comparing plan limits
-    assert team_plan["daily_request_limit"] > dev_plan["daily_request_limit"], (
-        "Team daily RPM should exceed Dev"
-    )
-    assert team_plan["monthly_request_limit"] > dev_plan["monthly_request_limit"], (
-        "Team monthly RPM should exceed Dev"
-    )
-    assert team_plan["daily_token_limit"] > dev_plan["daily_token_limit"], (
-        "Team daily token limit should exceed Dev"
-    )
-    assert team_plan["monthly_token_limit"] > dev_plan["monthly_token_limit"], (
-        "Team monthly token limit should exceed Dev"
-    )
+    assert (
+        team_plan["daily_request_limit"] > dev_plan["daily_request_limit"]
+    ), "Team daily RPM should exceed Dev"
+    assert (
+        team_plan["monthly_request_limit"] > dev_plan["monthly_request_limit"]
+    ), "Team monthly RPM should exceed Dev"
+    assert (
+        team_plan["daily_token_limit"] > dev_plan["daily_token_limit"]
+    ), "Team daily token limit should exceed Dev"
+    assert (
+        team_plan["monthly_token_limit"] > dev_plan["monthly_token_limit"]
+    ), "Team monthly token limit should exceed Dev"
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +350,14 @@ def test_purchased_credits_survive_plan_change(mock_supabase):
 
     # Mock plan lookup
     plan_data = {
-        "id": 3, "name": "Team", "price_per_month": 99, "is_active": True,
-        "daily_request_limit": 25000, "monthly_request_limit": 500000,
-        "daily_token_limit": 10_000_000, "monthly_token_limit": 300_000_000,
+        "id": 3,
+        "name": "Team",
+        "price_per_month": 99,
+        "is_active": True,
+        "daily_request_limit": 25000,
+        "monthly_request_limit": 500000,
+        "daily_token_limit": 10_000_000,
+        "monthly_token_limit": 300_000_000,
         "features": ["basic_models", "premium_models"],
     }
 
@@ -345,13 +391,13 @@ def test_purchased_credits_survive_plan_change(mock_supabase):
         call_count["n"] += 1
         n = call_count["n"]
         if n == 1:
-            return plan_lookup_result      # get_plan_by_id
+            return plan_lookup_result  # get_plan_by_id
         elif n == 2:
-            return deactivate_result       # deactivate old plans
+            return deactivate_result  # deactivate old plans
         elif n == 3:
-            return insert_result           # insert new plan
+            return insert_result  # insert new plan
         elif n == 4:
-            return update_status_result    # update subscription_status
+            return update_status_result  # update subscription_status
         return MagicMock(data=[])
 
     table_mock.execute.side_effect = execute_side_effect
@@ -364,6 +410,6 @@ def test_purchased_credits_survive_plan_change(mock_supabase):
     # Inspect all update() calls to ensure none touched 'credits'.
     for call in table_mock.update.call_args_list:
         update_payload = call[0][0] if call[0] else call[1].get("data", {})
-        assert "credits" not in update_payload, (
-            "assign_user_plan must not modify credits during plan change"
-        )
+        assert (
+            "credits" not in update_payload
+        ), "assign_user_plan must not modify credits during plan change"

@@ -73,7 +73,9 @@ MAX_CATALOG_CACHE_ENTRIES = MAX_CACHE_ENTRIES  # alias
 # LRU eviction configuration (CM-8.1.6)
 LRU_ENABLED = True
 LRU_EVICTION_BATCH_SIZE = 100  # Number of entries to evict at once
-CATALOG_CACHE_KEYS_INDEX = f"{CACHE_NAMESPACE}catalog_cache:keys_index"  # Sorted set for LRU tracking
+CATALOG_CACHE_KEYS_INDEX = (
+    f"{CACHE_NAMESPACE}catalog_cache:keys_index"  # Sorted set for LRU tracking
+)
 
 
 def get_catalog_cache_key(gateway: str | None, params: dict) -> str:

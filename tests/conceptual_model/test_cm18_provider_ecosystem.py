@@ -22,9 +22,7 @@ class TestCM1801AtLeast30ProvidersRegistered:
     def test_at_least_30_providers_registered(self):
         """There must be at least 30 *_client.py files in src/services/,
         matching the CM claim of 30+ provider integrations."""
-        services_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "src", "services"
-        )
+        services_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", "services")
         services_dir = os.path.normpath(services_dir)
         client_files = glob.glob(os.path.join(services_dir, "*_client.py"))
 
@@ -44,9 +42,7 @@ class TestCM1802EachProviderHasClientModule:
         should have a corresponding *_client.py in src/services/."""
         from src.routes.catalog import GATEWAY_REGISTRY
 
-        services_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "src", "services"
-        )
+        services_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", "services")
         services_dir = os.path.normpath(services_dir)
 
         client_basenames = {
@@ -84,9 +80,7 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
     def test_provider_client_implements_required_interface(self):
         """Provider client modules should have a function for sending
         requests (send_request, make_*_request, or similar callable)."""
-        services_dir = os.path.join(
-            os.path.dirname(__file__), "..", "..", "src", "services"
-        )
+        services_dir = os.path.join(os.path.dirname(__file__), "..", "..", "src", "services")
         services_dir = os.path.normpath(services_dir)
         client_files = glob.glob(os.path.join(services_dir, "*_client.py"))
 
@@ -96,9 +90,14 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
 
         # Pick well-known provider clients to test
         key_clients = [
-            "openrouter_client", "deepinfra_client", "fireworks_client",
-            "groq_client", "together_client", "cerebras_client",
-            "featherless_client", "chutes_client",
+            "openrouter_client",
+            "deepinfra_client",
+            "fireworks_client",
+            "groq_client",
+            "together_client",
+            "cerebras_client",
+            "featherless_client",
+            "chutes_client",
         ]
 
         for client_name in key_clients:
@@ -112,11 +111,11 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
                 function_names = [name for name, _ in members]
 
                 has_send = any(
-                    "request" in name.lower() or
-                    "send" in name.lower() or
-                    "chat" in name.lower() or
-                    "completion" in name.lower() or
-                    "stream" in name.lower()
+                    "request" in name.lower()
+                    or "send" in name.lower()
+                    or "chat" in name.lower()
+                    or "completion" in name.lower()
+                    or "stream" in name.lower()
                     for name in function_names
                 )
 
@@ -125,10 +124,10 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
                 for cls_name, cls in classes:
                     cls_methods = [m for m in dir(cls) if not m.startswith("_")]
                     has_send = has_send or any(
-                        "request" in m.lower() or
-                        "send" in m.lower() or
-                        "chat" in m.lower() or
-                        "completion" in m.lower()
+                        "request" in m.lower()
+                        or "send" in m.lower()
+                        or "chat" in m.lower()
+                        or "completion" in m.lower()
                         for m in cls_methods
                     )
 
