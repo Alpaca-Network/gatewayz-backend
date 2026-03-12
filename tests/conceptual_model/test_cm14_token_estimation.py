@@ -6,8 +6,9 @@ the CM-specified 1-token-per-4-chars rule vs. the actual 0.75-tokens-per-word
 heuristic in code.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------

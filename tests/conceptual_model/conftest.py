@@ -10,26 +10,31 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 # === Environment setup (BEFORE any src imports) ===
-os.environ.setdefault("TESTING", "true")
-os.environ.setdefault("APP_ENV", "testing")
-os.environ.setdefault("SUPABASE_URL", "http://fake-supabase.localhost")
-os.environ.setdefault("SUPABASE_KEY", "fake-supabase-key-for-testing")
-os.environ.setdefault("OPENROUTER_API_KEY", "fake-openrouter-key")
-os.environ.setdefault("API_GATEWAY_SALT", "test-salt-minimum-sixteen-chars-long")
-os.environ.setdefault("ADMIN_API_KEY", "fake-admin-api-key")
-os.environ.setdefault("STRIPE_SECRET_KEY", "sk_test_fake")
-os.environ.setdefault("STRIPE_WEBHOOK_SECRET", "whsec_test_fake")
-os.environ.setdefault("PROMETHEUS_ENABLED", "false")
-os.environ.setdefault("TEMPO_ENABLED", "false")
-os.environ.setdefault("SENTRY_DSN", "")
-os.environ.setdefault("ARIZE_API_KEY", "")
-os.environ.setdefault("BRAINTRUST_API_KEY", "")
+# Use direct assignment (not setdefault) to ensure isolation from root conftest.
+_ENV_OVERRIDES = {
+    "TESTING": "true",
+    "APP_ENV": "testing",
+    "SUPABASE_URL": "http://fake-supabase.localhost",
+    "SUPABASE_KEY": "fake-supabase-key-for-testing",
+    "OPENROUTER_API_KEY": "fake-openrouter-key",
+    "API_GATEWAY_SALT": "test-salt-minimum-sixteen-chars-long",
+    "ADMIN_API_KEY": "fake-admin-api-key",
+    "STRIPE_SECRET_KEY": "sk_test_fake",
+    "STRIPE_WEBHOOK_SECRET": "whsec_test_fake",
+    "PROMETHEUS_ENABLED": "false",
+    "TEMPO_ENABLED": "false",
+    "SENTRY_DSN": "",
+    "ARIZE_API_KEY": "",
+    "BRAINTRUST_API_KEY": "",
+}
+for _k, _v in _ENV_OVERRIDES.items():
+    os.environ[_k] = _v
 
 # Generate a valid Fernet key for encryption tests
 from cryptography.fernet import Fernet
 
 _TEST_FERNET_KEY = Fernet.generate_key().decode()
-os.environ.setdefault("ENCRYPTION_KEY", _TEST_FERNET_KEY)
+os.environ["ENCRYPTION_KEY"] = _TEST_FERNET_KEY
 
 import pytest
 
@@ -85,7 +90,10 @@ def frozen_time():
     with (
         patch("time.time", side_effect=lambda: ft.current),
         patch("time.monotonic", side_effect=lambda: ft.current),
+        patch("datetime.datetime", wraps=datetime) as mock_dt,
     ):
+        mock_dt.now = lambda tz=None: ft.now(tz)
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
         yield ft
 
 
@@ -193,10 +201,17 @@ def mock_redis():
     mock.ttl.return_value = -2
     mock.scan.return_value = (0, [])
 
+    # Sorted set support (used by LRU cache)
+    mock.zadd.return_value = 1
+    mock.zcard.return_value = 0
+    mock.zrange.return_value = []
+    mock.zrem.return_value = 1
+    mock.zscore.return_value = None
+
     # Pipeline support
     pipe_mock = MagicMock()
     pipe_mock.execute.return_value = []
-    for method in ["get", "set", "setex", "incr", "expire", "delete"]:
+    for method in ["get", "set", "setex", "incr", "expire", "delete", "zadd", "zrem"]:
         getattr(pipe_mock, method).return_value = pipe_mock
     mock.pipeline.return_value = pipe_mock
 

@@ -6,10 +6,10 @@ corresponding *_client.py module, and client modules implement the
 required interface.
 """
 
-import os
 import glob
 import importlib
 import inspect
+import os
 
 import pytest
 

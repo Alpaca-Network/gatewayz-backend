@@ -5,8 +5,9 @@ Tests verifying that Prometheus metrics, Sentry error capture,
 OpenTelemetry tracing, and activity audit logging are properly wired.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -16,8 +17,9 @@ from unittest.mock import MagicMock, patch
 class TestCM1301PrometheusInferenceRequestCounter:
     def test_prometheus_inference_request_counter(self):
         """The model_inference_requests_total Prometheus Counter must exist."""
-        from src.services.prometheus_metrics import model_inference_requests
         from prometheus_client import Counter
+
+        from src.services.prometheus_metrics import model_inference_requests
 
         assert isinstance(model_inference_requests, Counter)
         # prometheus_client Counter strips _total suffix in _name internally
@@ -31,8 +33,9 @@ class TestCM1301PrometheusInferenceRequestCounter:
 class TestCM1302PrometheusInferenceDurationHistogram:
     def test_prometheus_inference_duration_histogram(self):
         """The model_inference_duration_seconds Histogram must exist."""
-        from src.services.prometheus_metrics import model_inference_duration
         from prometheus_client import Histogram
+
+        from src.services.prometheus_metrics import model_inference_duration
 
         assert isinstance(model_inference_duration, Histogram)
         assert model_inference_duration._name == "model_inference_duration_seconds"
@@ -45,8 +48,9 @@ class TestCM1302PrometheusInferenceDurationHistogram:
 class TestCM1303PrometheusTokensUsedCounter:
     def test_prometheus_tokens_used_counter(self):
         """The tokens_used_total Prometheus Counter must exist."""
-        from src.services.prometheus_metrics import tokens_used
         from prometheus_client import Counter
+
+        from src.services.prometheus_metrics import tokens_used
 
         assert isinstance(tokens_used, Counter)
         assert "tokens_used" in tokens_used._name
@@ -59,8 +63,9 @@ class TestCM1303PrometheusTokensUsedCounter:
 class TestCM1304PrometheusCreditsUsedCounter:
     def test_prometheus_credits_used_counter(self):
         """The credits_used_total Prometheus Counter must exist."""
-        from src.services.prometheus_metrics import credits_used
         from prometheus_client import Counter
+
+        from src.services.prometheus_metrics import credits_used
 
         assert isinstance(credits_used, Counter)
         assert "credits_used" in credits_used._name
@@ -73,8 +78,9 @@ class TestCM1304PrometheusCreditsUsedCounter:
 class TestCM1305PrometheusTtfcHistogram:
     def test_prometheus_ttfc_histogram(self):
         """The time_to_first_chunk_seconds Histogram must exist."""
-        from src.services.prometheus_metrics import time_to_first_chunk_seconds
         from prometheus_client import Histogram
+
+        from src.services.prometheus_metrics import time_to_first_chunk_seconds
 
         assert isinstance(time_to_first_chunk_seconds, Histogram)
         assert time_to_first_chunk_seconds._name == "time_to_first_chunk_seconds"
@@ -127,8 +133,9 @@ class TestCM1308AuditLogOnSecurityViolation:
     def test_audit_log_on_security_violation(self):
         """The log_activity function exists and accepts the expected arguments
         for recording API activity (which includes security-related events)."""
-        from src.db.activity import log_activity
         import inspect
+
+        from src.db.activity import log_activity
 
         sig = inspect.signature(log_activity)
         param_names = list(sig.parameters.keys())

@@ -15,25 +15,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 import redis as redis_lib
 
-from src.services.catalog_response_cache import (
-    CATALOG_CACHE_TTL,
-    CATALOG_RESPONSE_CACHE_TTL,
-    get_catalog_cache_key,
-)
+import src.services.local_memory_cache as lmc_mod
 from src.services.auth_cache import (
     API_KEY_CACHE_TTL,
     AUTH_CACHE_TTL,
     USER_CACHE_TTL,
 )
+from src.services.catalog_response_cache import (
+    CATALOG_CACHE_TTL,
+    CATALOG_RESPONSE_CACHE_TTL,
+    get_catalog_cache_key,
+)
+from src.services.local_memory_cache import LocalMemoryCache, get_local_cache
 from src.services.simple_health_cache import (
-    DEFAULT_TTL_SYSTEM,
-    DEFAULT_TTL_PROVIDERS,
     DEFAULT_TTL_MODELS,
+    DEFAULT_TTL_PROVIDERS,
     DEFAULT_TTL_SUMMARY,
+    DEFAULT_TTL_SYSTEM,
     SimpleHealthCache,
 )
-import src.services.local_memory_cache as lmc_mod
-from src.services.local_memory_cache import LocalMemoryCache, get_local_cache
 
 # Patch target for catalog_response_cache's own imported reference
 _CRC_REDIS = "src.services.catalog_response_cache.get_redis_client"
@@ -51,6 +51,7 @@ class TestExactMatchResponseCache:
     def test_exact_match_cache_hit(self):
         """CM-8.1.1: Same params produce a cache hit on second lookup."""
         import asyncio
+
         from src.services.catalog_response_cache import get_cached_catalog_response
 
         gateway = "openrouter"
@@ -83,6 +84,7 @@ class TestExactMatchResponseCache:
     def test_exact_match_cache_miss(self):
         """CM-8.1.2: Different params produce a cache miss."""
         import asyncio
+
         from src.services.catalog_response_cache import get_cached_catalog_response
 
         gateway = "openrouter"
@@ -257,6 +259,7 @@ class TestCacheDegradation:
     def test_redis_down_falls_back_to_local_memory(self):
         """CM-8.3.1: When Redis is unavailable, local memory cache still works."""
         import asyncio
+
         from src.services.catalog_response_cache import get_cached_catalog_response
 
         # Patch the module-level reference so get_redis_client returns None
@@ -277,6 +280,7 @@ class TestCacheDegradation:
     def test_all_caches_miss_falls_through_to_db(self):
         """CM-8.3.2: When all caches miss, request falls through to database."""
         import asyncio
+
         from src.services.catalog_response_cache import get_cached_catalog_response
 
         mock_r = MagicMock()
@@ -299,6 +303,7 @@ class TestCacheDegradation:
     def test_cache_failure_never_blocks_request(self):
         """CM-8.3.3: Cache exceptions are caught; request proceeds without error."""
         import asyncio
+
         from src.services.catalog_response_cache import (
             cache_catalog_response,
             get_cached_catalog_response,
@@ -333,6 +338,7 @@ class TestCacheDegradation:
     def test_db_query_cache_reduces_load(self):
         """CM-8.3.4: Repeated queries served from cache reduce DB load."""
         import asyncio
+
         from src.services.catalog_response_cache import (
             cache_catalog_response,
             get_cached_catalog_response,

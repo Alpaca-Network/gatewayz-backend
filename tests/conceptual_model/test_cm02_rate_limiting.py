@@ -27,6 +27,16 @@ from src.middleware.security_middleware import (
 )
 
 # ---------------------------------------------------------------------------
+# Layer 3 imports (Anonymous rate limiting)
+# ---------------------------------------------------------------------------
+from src.services.anonymous_rate_limiter import (
+    ANONYMOUS_DAILY_LIMIT,
+    _hash_ip,
+    check_anonymous_rate_limit,
+    increment_anonymous_usage,
+)
+
+# ---------------------------------------------------------------------------
 # Layer 2 imports (API key-level rate limiting)
 # ---------------------------------------------------------------------------
 from src.services.rate_limiting import (
@@ -35,16 +45,6 @@ from src.services.rate_limiting import (
     PREMIUM_CONFIG,
     RateLimitConfig,
     SlidingWindowRateLimiter,
-)
-
-# ---------------------------------------------------------------------------
-# Layer 3 imports (Anonymous rate limiting)
-# ---------------------------------------------------------------------------
-from src.services.anonymous_rate_limiter import (
-    ANONYMOUS_DAILY_LIMIT,
-    _hash_ip,
-    check_anonymous_rate_limit,
-    increment_anonymous_usage,
 )
 
 # ---------------------------------------------------------------------------

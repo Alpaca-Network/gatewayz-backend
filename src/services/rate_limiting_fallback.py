@@ -112,9 +112,19 @@ class InMemoryRateLimiter:
                 self._key_order.move_to_end(api_key)
             else:
                 self._key_order[api_key] = True
-                # Evict LRU key if we exceed the cap
+                # Evict LRU key if we exceed the cap (skip keys with in-flight requests)
                 while len(self._key_order) > self._max_keys:
-                    evicted_key, _ = self._key_order.popitem(last=False)
+                    evicted_key = next(
+                        (
+                            key
+                            for key in self._key_order
+                            if self.concurrent_requests.get(key, 0) == 0
+                        ),
+                        None,
+                    )
+                    if evicted_key is None:
+                        break  # All keys have active requests, can't evict
+                    del self._key_order[evicted_key]
                     self._remove_key_data(evicted_key)
 
             # Update last access time for TTL tracking

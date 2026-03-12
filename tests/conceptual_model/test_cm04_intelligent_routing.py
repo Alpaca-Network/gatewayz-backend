@@ -14,13 +14,11 @@ from src.schemas.general_router import (
     GeneralRouterSettings,
     RouteTestRequest,
 )
-from src.services.general_router import (
-    parse_router_model_string as general_parse,
-)
 from src.services.code_router import (
     CodeRouter,
-    parse_router_model_string as code_parse,
 )
+from src.services.code_router import parse_router_model_string as code_parse
+from src.services.general_router import parse_router_model_string as general_parse
 
 # ===================================================================
 # 4.1 General Router

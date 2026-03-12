@@ -24,8 +24,8 @@ import pytest
 def test_login_rate_limit_10_per_15min():
     """11th login attempt from same IP within 15 min window returns 429 (not allowed)."""
     from src.services.auth_rate_limiting import (
-        AuthRateLimiter,
         AuthRateLimitConfig,
+        AuthRateLimiter,
         AuthRateLimitType,
     )
 
@@ -60,8 +60,8 @@ def test_login_rate_limit_10_per_15min():
 def test_register_rate_limit_3_per_hour():
     """4th registration attempt from same IP within 1 hour returns 429."""
     from src.services.auth_rate_limiting import (
-        AuthRateLimiter,
         AuthRateLimitConfig,
+        AuthRateLimiter,
         AuthRateLimitType,
     )
 

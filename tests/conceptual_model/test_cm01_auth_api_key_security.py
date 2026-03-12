@@ -125,6 +125,7 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
 
         # Reload the crypto module so it picks up the new keyring env vars
         import importlib
+
         import src.utils.crypto as crypto_mod
 
         importlib.reload(crypto_mod)

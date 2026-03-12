@@ -6,8 +6,9 @@ the Vercel entry point imports successfully, and all major route
 groups are registered.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 
 # ---------------------------------------------------------------------------
@@ -32,11 +33,11 @@ class TestCM1701CreateAppReturnsFastapiInstance:
 class TestCM1702VercelEntryPointImportsApp:
     def test_vercel_entry_point_imports_app(self):
         """api/index.py must export an 'app' object that is a FastAPI instance."""
-        from fastapi import FastAPI
-
         # api/index.py imports from src.main
         # We test that the module-level import chain works
         import importlib
+
+        from fastapi import FastAPI
 
         module = importlib.import_module("api.index")
         assert hasattr(module, "app"), "api/index.py must export 'app'"

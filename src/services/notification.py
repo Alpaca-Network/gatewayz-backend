@@ -15,7 +15,6 @@ import resend
 
 from src.config.supabase_config import get_supabase_client
 from src.db.plans import get_user_plan
-from src.utils.security_validators import generate_webhook_signature
 from src.schemas.notification import (
     LowBalanceAlert,
     NotificationChannel,
@@ -26,6 +25,7 @@ from src.schemas.notification import (
     TrialExpiryAlert,
 )
 from src.services.trial_validation import validate_trial_access
+from src.utils.security_validators import generate_webhook_signature
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,9 @@ retry with exponential backoff, and Stripe webhook 200-always behaviour.
 """
 
 import inspect
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -20,8 +20,8 @@ class TestCM1601WebhookPayloadHmacSigned:
         """CM states outgoing webhook payloads are HMAC-signed.
         Verified: generate_webhook_signature is called inside
         send_webhook_notification when a webhook_secret is provided."""
-        from src.utils.security_validators import generate_webhook_signature
         from src.services.notification import NotificationService
+        from src.utils.security_validators import generate_webhook_signature
 
         # The function exists
         assert callable(generate_webhook_signature)

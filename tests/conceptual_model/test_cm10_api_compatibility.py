@@ -10,12 +10,12 @@ import time
 
 import pytest
 
+from src.services.anthropic_transformer import transform_openai_to_anthropic
 from src.services.stream_normalizer import (
     NormalizedChunk,
     StreamNormalizer,
     create_done_sse,
 )
-from src.services.anthropic_transformer import transform_openai_to_anthropic
 
 # ---------------------------------------------------------------------------
 # Helpers

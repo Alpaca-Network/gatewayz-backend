@@ -5,8 +5,9 @@ Tests verifying credit deduction for image generation, insufficient-credits
 handling, and audio transcription response structure.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -19,6 +20,7 @@ class TestCM1501ImageGenerationDeductsCredits:
         generation. Verify by inspecting that deduct_credits is imported and
         used in the image route module."""
         import inspect
+
         from src.routes import images
 
         source = inspect.getsource(images)
@@ -39,8 +41,9 @@ class TestCM1501ImageGenerationDeductsCredits:
 class TestCM1502ImageGenerationInsufficientCredits402:
     def test_image_generation_insufficient_credits_402(self):
         """When a user has 0 credits, the image endpoint raises HTTP 402."""
-        from src.routes.images import get_image_cost, generate_images
         import inspect
+
+        from src.routes.images import generate_images, get_image_cost
 
         # Verify that the cost calculation works (non-zero cost)
         total_cost, cost_per_image, *_ = get_image_cost(
@@ -62,6 +65,7 @@ class TestCM1503AudioTranscriptionReturnsText:
         """The audio transcription route returns a response containing
         a 'text' field with the transcribed content."""
         import inspect
+
         from src.routes import audio
 
         source = inspect.getsource(audio)

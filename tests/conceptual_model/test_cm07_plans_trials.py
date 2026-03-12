@@ -23,6 +23,7 @@ from fastapi import HTTPException
 def test_new_user_gets_5_dollar_credits(mock_supabase):
     """create_enhanced_user defaults to credits=5.0 ($5.00)."""
     import inspect
+
     from src.db.users import create_enhanced_user
 
     sig = inspect.signature(create_enhanced_user)
@@ -38,6 +39,7 @@ def test_new_user_gets_5_dollar_credits(mock_supabase):
 def test_new_user_gets_14_day_trial():
     """start_trial_for_key should default to trial_days=14."""
     import inspect
+
     from src.db.trials import start_trial_for_key
 
     sig = inspect.signature(start_trial_for_key)

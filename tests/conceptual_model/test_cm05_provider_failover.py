@@ -19,8 +19,8 @@ from src.services.circuit_breaker import (
     CircuitState,
 )
 from src.services.provider_failover import (
-    FALLBACK_PROVIDER_PRIORITY,
     FAILOVER_STATUS_CODES,
+    FALLBACK_PROVIDER_PRIORITY,
     build_provider_failover_chain,
     enforce_model_failover_rules,
     should_failover,
