@@ -18,9 +18,9 @@ restartPolicyMaxRetries = 10
 # and starts 10+ background tasks - needs ~60-90s to be fully ready.
 # Previous 30s timeout caused deployment failures on cold containers.
 healthcheckPath = "/health/railway"
-healthcheckTimeout = 120
+healthcheckTimeout = 300
 healthcheckInterval = 10
-initialDelaySeconds = 30
+initialDelaySeconds = 45
 
 # ============================================
 # Cron Jobs - Automated Model & Pricing Sync
