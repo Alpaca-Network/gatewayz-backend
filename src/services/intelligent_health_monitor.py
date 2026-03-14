@@ -919,38 +919,17 @@ class IntelligentHealthMonitor:
                 stored_gateway = m.get("gateway")
                 # If gateway is not set, use provider as gateway since that's what's stored
                 effective_gateway = stored_gateway if stored_gateway else stored_provider
-
-                # Determine health status using uptime percentage thresholds
-                # instead of relying solely on the last single check result
-                uptime = m.get("uptime_percentage_24h", 0.0)
-                call_count = m.get("call_count", 0)
-                last_status = m.get("last_status")
-
-                if call_count == 0:
-                    status = "unknown"
-                elif uptime >= 95.0:
-                    status = "healthy"
-                elif uptime >= 80.0:
-                    status = "degraded"
-                elif uptime > 0:
-                    status = "unhealthy"
-                elif last_status == "success":
-                    # No uptime data yet but last check succeeded
-                    status = "healthy"
-                else:
-                    status = "unhealthy"
-
                 models_data.append(
                     {
                         "model_id": m.get("model") or "unknown",
                         "provider": stored_provider,
                         "gateway": effective_gateway,
-                        "status": status,
+                        "status": "healthy" if m.get("last_status") == "success" else "unhealthy",
                         "response_time_ms": m.get("last_response_time_ms"),
                         "avg_response_time_ms": m.get("last_response_time_ms"),
-                        "uptime_percentage": uptime,
+                        "uptime_percentage": m.get("uptime_percentage_24h", 0.0),
                         "error_count": m.get("error_count", 0),
-                        "total_requests": call_count,
+                        "total_requests": m.get("call_count", 0),
                         "last_checked": m.get("last_called_at"),
                     }
                 )
@@ -980,12 +959,9 @@ class IntelligentHealthMonitor:
                     }
                 p = providers_map[key]
                 p["total_models"] += 1
-                model_status = m.get("status", "unknown")
-                if model_status == "healthy":
+                if m.get("status") == "healthy":
                     p["healthy_models"] += 1
-                elif model_status == "degraded":
-                    p["degraded_models"] += 1
-                elif model_status == "unhealthy":
+                else:
                     p["unhealthy_models"] += 1
                 if m.get("response_time_ms"):
                     p["response_times"].append(m["response_time_ms"])
@@ -996,7 +972,7 @@ class IntelligentHealthMonitor:
                 if p["response_times"]:
                     p["avg_response_time_ms"] = sum(p["response_times"]) / len(p["response_times"])
                 if p["total_models"] > 0:
-                    p["overall_uptime"] = ((p["healthy_models"] + p["degraded_models"]) / p["total_models"]) * 100
+                    p["overall_uptime"] = (p["healthy_models"] / p["total_models"]) * 100
                 if p["unhealthy_models"] > p["total_models"] * 0.5:
                     p["status"] = "offline"
                 elif p["unhealthy_models"] > 0:
@@ -1065,8 +1041,7 @@ class IntelligentHealthMonitor:
             # NOTE: tracked counts are from models we actually checked health for
             tracked_models = len(models_data)
             tracked_healthy_models = sum(1 for m in models_data if m.get("status") == "healthy")
-            tracked_degraded_models = sum(1 for m in models_data if m.get("status") == "degraded")
-            tracked_unhealthy_models = sum(1 for m in models_data if m.get("status") == "unhealthy")
+            tracked_unhealthy_models = tracked_models - tracked_healthy_models
             tracked_providers = len(providers_data)
             healthy_providers = sum(1 for p in providers_data if p.get("status") == "online")
             degraded_providers = sum(1 for p in providers_data if p.get("status") == "degraded")
@@ -1077,19 +1052,16 @@ class IntelligentHealthMonitor:
             # Otherwise, report 0 healthy until we have actual health data
             if tracked_models > 0 and total_models > 0:
                 # For models we haven't tracked, we don't know their status
-                # Report only what we actually know from uptime-based thresholds
+                # Report only what we actually know: healthy = tracked healthy, unhealthy = tracked unhealthy
                 # Untracked models are in "unknown" state (not counted as healthy or unhealthy)
                 healthy_models = tracked_healthy_models
-                degraded_models = tracked_degraded_models
                 unhealthy_models = tracked_unhealthy_models
-                # Ensure counts never exceed total_models (data consistency)
+                # Ensure healthy_models never exceeds total_models (data consistency)
                 healthy_models = min(healthy_models, total_models)
-                degraded_models = min(degraded_models, total_models - healthy_models)
-                unhealthy_models = min(unhealthy_models, total_models - healthy_models - degraded_models)
+                unhealthy_models = min(unhealthy_models, total_models - healthy_models)
             else:
                 # No tracking data available
                 healthy_models = 0
-                degraded_models = 0
                 unhealthy_models = 0
 
             # Determine overall status based on tracked data
@@ -1108,9 +1080,9 @@ class IntelligentHealthMonitor:
             else:
                 overall_status = "healthy"
 
-            # Calculate system uptime from tracked models (healthy + degraded count as operational)
+            # Calculate system uptime from tracked models
             system_uptime = (
-                ((tracked_healthy_models + tracked_degraded_models) / tracked_models * 100) if tracked_models > 0 else 0.0
+                (tracked_healthy_models / tracked_models * 100) if tracked_models > 0 else 0.0
             )
 
             # Calculate healthy gateways based on provider health data
@@ -1206,7 +1178,7 @@ class IntelligentHealthMonitor:
                 "unhealthy_providers": unhealthy_providers,
                 "total_models": total_models,
                 "healthy_models": healthy_models,
-                "degraded_models": degraded_models,
+                "degraded_models": 0,  # Not tracked - models are either healthy or unhealthy
                 "unhealthy_models": unhealthy_models,
                 "total_gateways": total_gateways,
                 "healthy_gateways": healthy_gateways,
