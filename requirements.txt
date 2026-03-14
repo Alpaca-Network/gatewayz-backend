@@ -68,7 +68,7 @@ opentelemetry-exporter-otlp-proto-http==1.33.0
 
 # Loki Logging
 python-json-logger>=2.0.7
-loki-logger-handler>=1.2.0
+loki-logger-handler>=1.0.0,<2.0.0
 
 # Arize AI Observability - Pinned to prevent dependency resolution issues
 arize-otel==0.11.0
