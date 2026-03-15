@@ -309,8 +309,25 @@ def transform_normalized_model_to_db_schema(
             # Store relevant architecture info
             architecture_str = architecture.get("tokenizer") or architecture.get("instruct_type")
 
-        # Extract pricing
+        # Extract pricing and normalize to per-token format
         pricing = extract_pricing(normalized_model)
+
+        # Normalize pricing to per-token if the provider uses a different format
+        # (e.g., per-1M for NEAR, DeepInfra, etc.)
+        # This prevents storing inflated values in metadata.pricing_raw
+        from src.services.pricing_normalization import (
+            get_provider_format,
+            normalize_to_per_token,
+            PricingFormat,
+        )
+
+        source_gateway = normalized_model.get("source_gateway", provider_slug)
+        provider_format = get_provider_format(source_gateway)
+        if provider_format != PricingFormat.PER_TOKEN:
+            for field in ("prompt", "completion", "image", "request"):
+                if pricing[field] is not None and pricing[field] != Decimal("0"):
+                    normalized_val = normalize_to_per_token(pricing[field], provider_format)
+                    pricing[field] = normalized_val if normalized_val is not None else Decimal("0")
 
         # Extract capabilities
         capabilities = extract_capabilities(normalized_model)
