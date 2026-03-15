@@ -656,12 +656,16 @@ async def get_catalog_models(
             model_id = model.get("id", "unknown")
             health_data = health_lookup.get(model_id, {})
 
-            # Use health data if available, otherwise default to None/unknown
+            # Use health data if available; catalog-only models are "available"
             transformed = {
                 "model_id": model_id,
+                "name": model.get("name") or model.get("display_name") or model_id,
                 "provider": model.get("source_gateway", "unknown"),
+                "provider_slug": model.get("provider_slug", model.get("source_gateway", "unknown")),
                 "gateway": model.get("source_gateway", "unknown"),
-                "status": health_data.get("status", "unknown"),
+                "status": health_data.get("status", "available"),
+                "context_length": model.get("context_length"),
+                "modality": model.get("modality"),
                 "response_time_ms": health_data.get("response_time_ms"),
                 "avg_response_time_ms": health_data.get("avg_response_time_ms"),
                 "uptime_percentage": health_data.get("uptime_percentage"),
