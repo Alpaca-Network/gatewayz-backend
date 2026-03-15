@@ -930,6 +930,18 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
         except (ValueError, TypeError, InvalidOperation):
             continue
 
+        # Guard: if price looks too large for per-token format (> 0.001),
+        # auto-detect the format and normalize to per-token.
+        # Per-token prices should be < 0.001 (even GPT-4 is ~$0.00003/token).
+        from src.services.pricing_normalization import auto_detect_format, normalize_to_per_token
+
+        if input_price > Decimal("0.001"):
+            detected = auto_detect_format(float(input_price))
+            input_price = normalize_to_per_token(input_price, detected) or Decimal("0")
+        if output_price > Decimal("0.001"):
+            detected = auto_detect_format(float(output_price))
+            output_price = normalize_to_per_token(output_price, detected) or Decimal("0")
+
         row = {
             "model_id": model_id,
             "price_per_input_token": str(input_price),
