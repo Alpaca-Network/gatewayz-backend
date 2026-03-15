@@ -23,7 +23,9 @@ from src.services.canopywave_client import fetch_models_from_canopywave
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.chutes_client import fetch_models_from_chutes
 from src.services.clarifai_client import fetch_models_from_clarifai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
+from src.services.cloudflare_workers_ai_client import (
+    fetch_models_from_cloudflare_workers_ai,
+)
 from src.services.cohere_client import fetch_models_from_cohere
 from src.services.deepinfra_client import fetch_models_from_deepinfra
 from src.services.fal_image_client import fetch_models_from_fal
@@ -41,6 +43,11 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.openai_client import fetch_models_from_openai
 from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.pricing_normalization import (
+    PricingFormat,
+    get_provider_format,
+    normalize_to_per_token,
+)
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.sybil_client import fetch_models_from_sybil
 from src.services.together_client import fetch_models_from_together
@@ -315,12 +322,6 @@ def transform_normalized_model_to_db_schema(
         # Normalize pricing to per-token if the provider uses a different format
         # (e.g., per-1M for NEAR, DeepInfra, etc.)
         # This prevents storing inflated values in metadata.pricing_raw
-        from src.services.pricing_normalization import (
-            get_provider_format,
-            normalize_to_per_token,
-            PricingFormat,
-        )
-
         source_gateway = normalized_model.get("source_gateway", provider_slug)
         provider_format = get_provider_format(source_gateway)
         if provider_format != PricingFormat.PER_TOKEN:
