@@ -6,14 +6,15 @@ are protected by either:
 - Router-level dependencies=[Depends(require_admin)]
 - Per-route Depends(require_admin) or Depends(get_admin_key)
 
+Catches both:
+- Inline admin paths: @router.get("/admin/users")
+- Prefix-based admin routers: APIRouter(prefix="/admin/model-sync")
+
 The only intentional exception is POST /admin/create (user registration).
 """
 
-import ast
 import re
 from pathlib import Path
-
-import pytest
 
 
 # Routes intentionally public (documented exceptions)
@@ -34,10 +35,55 @@ def _get_route_files():
     return sorted(routes_dir.glob("*.py"))
 
 
+def _has_router_level_auth(source: str) -> bool:
+    """Check if router has global auth dependency."""
+    return (
+        "dependencies=[Depends(require_admin)]" in source
+        or "dependencies=[Depends(get_admin_key)]" in source
+    )
+
+
+def _has_admin_prefix(source: str) -> bool:
+    """Check if APIRouter uses a prefix containing 'admin'."""
+    return bool(re.search(
+        r'APIRouter\([^)]*prefix\s*=\s*["\'][^"\']*admin',
+        source,
+        re.DOTALL,
+    ))
+
+
+def _find_admin_routes_in_decorators(source: str) -> list[tuple[str, str]]:
+    """Find route decorators with /admin in the path."""
+    return re.findall(
+        r'@router\.(get|post|put|patch|delete)\(\s*["\']([^"\']*admin[^"\']*)["\']',
+        source,
+    )
+
+
+def _route_has_auth_in_signature(source: str, method: str, path: str) -> bool:
+    """Check if a specific route's function signature includes admin auth."""
+    decorator_pattern = rf'@router\.{method}\(\s*["\']({re.escape(path)})["\']'
+    dec_match = re.search(decorator_pattern, source)
+    if not dec_match:
+        return True  # Can't find decorator, assume OK
+
+    chunk_after = source[dec_match.start():dec_match.start() + 2000]
+    func_match = re.search(
+        r'(async )?def \w+\((.*?)\)\s*(->\s*\S+\s*)?:',
+        chunk_after,
+        re.DOTALL,
+    )
+    if not func_match:
+        return True  # Can't parse signature, assume OK
+
+    func_params = func_match.group(2)
+    return "require_admin" in func_params or "get_admin_key" in func_params
+
+
 def test_model_sync_router_has_auth_dependency():
     """
     CRITICAL: model_sync.py must have require_admin at router level.
-    This was the primary finding in the O2 security audit — 11 admin
+    This was the primary finding in the O2 security audit - 11 admin
     endpoints were completely unprotected.
     """
     source = Path("src/routes/model_sync.py").read_text()
@@ -52,64 +98,52 @@ def test_model_sync_router_has_auth_dependency():
 def test_no_admin_route_without_auth():
     """
     Scan all route files for /admin paths and verify they have auth.
-    Files can protect routes either at the router level (dependencies=[...])
-    or per-route (Depends(require_admin) in function signature).
+
+    Catches two patterns:
+    1. Routes with /admin in the decorator path (e.g., @router.get("/admin/users"))
+    2. Routers with /admin in the prefix (e.g., APIRouter(prefix="/admin/model-sync"))
+       where individual routes don't contain "admin" in their path
     """
     unprotected = []
 
     for route_file in _get_route_files():
         source = route_file.read_text()
 
-        # Check if router has global auth dependency
-        has_router_level_auth = (
-            "dependencies=[Depends(require_admin)]" in source
-            or "dependencies=[Depends(get_admin_key)]" in source
-        )
+        if route_file.name in FILES_WITH_INLINE_AUTH:
+            continue
 
-        # Find all route decorators with /admin in the path
-        admin_routes = re.findall(
-            r'@router\.(get|post|put|patch|delete)\(\s*["\']([^"\']*admin[^"\']*)["\']',
-            source,
-        )
+        has_global_auth = _has_router_level_auth(source)
 
+        # Pattern 1: Prefix-based admin routers without router-level auth
+        if _has_admin_prefix(source) and not has_global_auth:
+            # This file has an admin prefix but no router-level auth.
+            # Every route in this file is an admin route that's unprotected.
+            all_routes = re.findall(
+                r'@router\.(get|post|put|patch|delete)\(\s*["\']([^"\']*)["\']',
+                source,
+            )
+            for method, path in all_routes:
+                if not _route_has_auth_in_signature(source, method, path):
+                    unprotected.append(
+                        f"{route_file.name}: {method.upper()} {path} (prefix-based admin router)"
+                    )
+
+        # Pattern 2: Inline admin paths in decorators
+        admin_routes = _find_admin_routes_in_decorators(source)
         if not admin_routes:
             continue
 
-        if has_router_level_auth:
-            # All routes in this file are protected at router level
+        if has_global_auth:
             continue
 
-        if route_file.name in FILES_WITH_INLINE_AUTH:
-            # These files call require_admin inside function body (not via Depends)
-            # Verified by manual security audit
-            continue
-
-        # Check each admin route individually
         for method, path in admin_routes:
             if path in INTENTIONAL_PUBLIC_ADMIN_ROUTES:
                 continue
 
-            # Find the decorator line, then capture everything up to the
-            # closing parenthesis of the function signature (handles multi-line)
-            decorator_pattern = rf'@router\.{method}\(\s*["\']({re.escape(path)})["\']'
-            dec_match = re.search(decorator_pattern, source)
-            if not dec_match:
-                continue
-
-            # Get the chunk from decorator to the next function body (colon + newline)
-            chunk_after = source[dec_match.start():dec_match.start() + 2000]
-            # Find function signature (everything between def ... and the closing ):)
-            func_match = re.search(r'(async )?def \w+\((.*?)\)\s*(->\s*\S+\s*)?:', chunk_after, re.DOTALL)
-            if func_match:
-                func_params = func_match.group(2)
-                has_auth = (
-                    "require_admin" in func_params
-                    or "get_admin_key" in func_params
+            if not _route_has_auth_in_signature(source, method, path):
+                unprotected.append(
+                    f"{route_file.name}: {method.upper()} {path}"
                 )
-                if not has_auth:
-                    unprotected.append(
-                        f"{route_file.name}: {method.upper()} {path}"
-                    )
 
     assert not unprotected, (
         f"Found {len(unprotected)} admin route(s) without authentication:\n"
