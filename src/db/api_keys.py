@@ -6,7 +6,7 @@ from typing import Any
 from postgrest import APIError
 
 from src.config.supabase_config import execute_with_retry, get_supabase_client
-from src.config.usage_limits import TRIAL_DURATION_DAYS
+from src.config.usage_limits import TRIAL_CREDITS_AMOUNT, TRIAL_DURATION_DAYS
 from src.db.plans import check_plan_entitlements
 from src.db.postgrest_schema import is_schema_cache_error
 from src.utils.crypto import encrypt_api_key, last4, sha256_key_hash
@@ -203,7 +203,7 @@ def create_api_key(
                 "trial_used_credits": 0.0,
                 "trial_max_tokens": 100000 if is_trial else 0,
                 "trial_max_requests": 1000 if is_trial else 0,
-                "trial_credits": 5.0 if is_trial else 0.0,
+                "trial_credits": TRIAL_CREDITS_AMOUNT if is_trial else 0.0,
                 "trial_converted": False,
                 "subscription_status": subscription_status,
                 "subscription_plan": "free_trial" if is_trial else "bot",
