@@ -31,16 +31,17 @@ FILES_WITH_INLINE_AUTH = {
 
 def _get_route_files():
     """Get all route files in src/routes/."""
-    routes_dir = Path("src/routes")
+    routes_dir = Path(__file__).parent.parent.parent / "src" / "routes"
     return sorted(routes_dir.glob("*.py"))
 
 
 def _has_router_level_auth(source: str) -> bool:
     """Check if router has global auth dependency."""
-    return (
-        "dependencies=[Depends(require_admin)]" in source
-        or "dependencies=[Depends(get_admin_key)]" in source
-    )
+    return bool(re.search(
+        r'dependencies\s*=\s*\[.*?Depends\((require_admin|get_admin_key)\)',
+        source,
+        re.DOTALL,
+    ))
 
 
 def _has_admin_prefix(source: str) -> bool:
@@ -86,11 +87,16 @@ def test_model_sync_router_has_auth_dependency():
     This was the primary finding in the O2 security audit - 11 admin
     endpoints were completely unprotected.
     """
-    source = Path("src/routes/model_sync.py").read_text()
+    project_root = Path(__file__).parent.parent.parent
+    source = (project_root / "src" / "routes" / "model_sync.py").read_text()
     assert "require_admin" in source, (
         "model_sync.py must import require_admin"
     )
-    assert "dependencies=[Depends(require_admin)]" in source, (
+    assert re.search(
+        r'dependencies\s*=\s*\[.*?Depends\(require_admin\)',
+        source,
+        re.DOTALL,
+    ), (
         "model_sync.py router must have dependencies=[Depends(require_admin)]"
     )
 
@@ -110,6 +116,10 @@ def test_no_admin_route_without_auth():
         source = route_file.read_text()
 
         if route_file.name in FILES_WITH_INLINE_AUTH:
+            assert "_require_admin_dependency" in source, (
+                f"{route_file.name} is in FILES_WITH_INLINE_AUTH but no longer "
+                "contains inline auth. Update FILES_WITH_INLINE_AUTH if auth was moved."
+            )
             continue
 
         has_global_auth = _has_router_level_auth(source)
@@ -153,6 +163,7 @@ def test_no_admin_route_without_auth():
 
 def test_bandit_false_positives_suppressed():
     """Verify nosec comments are present on known false positives."""
+    project_root = Path(__file__).parent.parent.parent
     checks = [
         ("src/routes/admin.py", "nosec B324"),
         ("src/routes/health_timeline.py", "nosec B324"),
@@ -160,7 +171,7 @@ def test_bandit_false_positives_suppressed():
         ("src/services/huggingface_hub_service.py", "nosec B615"),
     ]
     for filepath, nosec_tag in checks:
-        source = Path(filepath).read_text()
+        source = (project_root / filepath).read_text()
         assert nosec_tag in source, (
             f"{filepath} missing '{nosec_tag}' suppression for Bandit false positive"
         )
