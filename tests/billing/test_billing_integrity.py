@@ -10,12 +10,7 @@ Covers:
 """
 
 import inspect
-import re
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 
 # =========================================================================
 # KR1: Credit Deduction Atomicity
@@ -25,22 +20,22 @@ import pytest
 def test_deduct_credits_uses_atomic_rpc():
     """deduct_credits should try atomic_deduct_credits RPC as primary path."""
     source = Path("src/db/users.py").read_text()
-    assert 'client.rpc("atomic_deduct_credits"' in source, (
-        "deduct_credits must call atomic_deduct_credits RPC"
-    )
+    assert (
+        'client.rpc("atomic_deduct_credits"' in source
+    ), "deduct_credits must call atomic_deduct_credits RPC"
 
 
 def test_legacy_path_rolls_back_on_log_failure():
     """Legacy path must roll back balance when transaction log fails."""
     source = Path("src/db/users.py").read_text()
     # After "Transaction log failed", there should be a rollback (update back to before values)
-    assert "Rolling back balance" in source, (
-        "Legacy path must roll back balance when log_credit_transaction fails"
-    )
+    assert (
+        "Rolling back balance" in source
+    ), "Legacy path must roll back balance when log_credit_transaction fails"
     # The old "Don't raise here" comment should be gone
-    assert "Don't raise here" not in source, (
-        "Legacy path must NOT silently swallow transaction log failures"
-    )
+    assert (
+        "Don't raise here" not in source
+    ), "Legacy path must NOT silently swallow transaction log failures"
 
 
 # =========================================================================
@@ -71,10 +66,10 @@ def test_pricing_precheck_returns_422():
     source = Path("src/routes/chat.py").read_text()
     # Find the precheck block and verify it raises 422
     precheck_start = source.find("await get_model_pricing_async(req.model)")
-    chunk = source[precheck_start:precheck_start + 500]
-    assert "status_code=422" in chunk, (
-        "Pricing pre-check must return 422 for unpriced high-value models"
-    )
+    chunk = source[precheck_start : precheck_start + 800]
+    assert (
+        "status_code=422" in chunk
+    ), "Pricing pre-check must return 422 for unpriced high-value models"
 
 
 # =========================================================================
@@ -99,14 +94,16 @@ def test_streaming_background_task_only_after_done_event():
     generator must follow the [DONE] yield.
     """
     source = Path("src/routes/chat.py").read_text()
-    # Find the yield of [DONE] and the create_task call within the generator
-    done_pos = source.index("yield create_done_sse()")
-    # The create_task call that schedules the background processing
-    task_call_pos = source.index("asyncio.create_task(\n", done_pos - 500)
-    # create_task should be AFTER the yield (or very close — within the same block)
-    # Both should exist in the streaming generator
-    assert "yield create_done_sse()" in source
-    assert "asyncio.create_task(" in source
+    # Find the LAST yield of [DONE] — the main streaming generator's final yield
+    done_pos = source.rfind("yield create_done_sse()")
+    assert done_pos > 0, "yield create_done_sse() not found"
+    # The create_task call that schedules background processing should follow it
+    task_call_pos = source.find("asyncio.create_task(", done_pos)
+    assert task_call_pos > 0, "asyncio.create_task() not found after final done yield"
+    assert task_call_pos > done_pos, (
+        f"asyncio.create_task (pos {task_call_pos}) must appear after "
+        f"the final yield create_done_sse() (pos {done_pos})"
+    )
 
 
 def test_reconciliation_table_exists():
@@ -119,6 +116,7 @@ def test_reconciliation_table_exists():
 def test_refund_transaction_type_exists():
     """TransactionType.REFUND must exist for manual admin refunds."""
     from src.db.credit_transactions import TransactionType
+
     assert TransactionType.REFUND == "refund"
 
 
@@ -129,11 +127,13 @@ def test_refund_transaction_type_exists():
 
 def test_trial_duration_matches_config():
     from src.config.usage_limits import TRIAL_DURATION_DAYS
+
     assert TRIAL_DURATION_DAYS == 14  # Standard trial is 14 days
 
 
 def test_trial_credits_is_5_dollars():
     from src.config.usage_limits import TRIAL_CREDITS_AMOUNT
+
     assert TRIAL_CREDITS_AMOUNT == 5.0
 
 
@@ -141,11 +141,12 @@ def test_start_trial_default_matches_config():
     """start_trial_for_key() default trial_days must match TRIAL_DURATION_DAYS."""
     from src.config.usage_limits import TRIAL_DURATION_DAYS
     from src.db.trials import start_trial_for_key
+
     sig = inspect.signature(start_trial_for_key)
     default_days = sig.parameters["trial_days"].default
-    assert default_days == TRIAL_DURATION_DAYS, (
-        f"Default is {default_days} but config says {TRIAL_DURATION_DAYS}"
-    )
+    assert (
+        default_days == TRIAL_DURATION_DAYS
+    ), f"Default is {default_days} but config says {TRIAL_DURATION_DAYS}"
 
 
 def test_api_keys_uses_config_constants():
@@ -163,6 +164,7 @@ def test_api_keys_uses_config_constants():
 def test_free_model_zero_cost():
     """Free models (:free suffix) always cost $0."""
     from src.services.pricing import calculate_cost
+
     cost = calculate_cost("openai/gpt-4o:free", 10000, 5000)
     assert cost == 0.0
 
@@ -171,9 +173,9 @@ def test_zero_tokens_skip_logic_exists():
     """deduct_credits must skip deduction for near-zero amounts."""
     source = Path("src/db/users.py").read_text()
     # Check the early return for tiny amounts exists
-    assert "tokens < 0.000001" in source, (
-        "deduct_credits must skip deduction for amounts below $0.000001"
-    )
+    assert (
+        "tokens < 0.000001" in source
+    ), "deduct_credits must skip deduction for amounts below $0.000001"
     assert "Skipping credit deduction for minimal amount" in source
 
 
@@ -181,6 +183,6 @@ def test_atomic_rpc_migration_exists():
     """The atomic_deduct_credits migration must exist."""
     migrations_dir = Path("supabase/migrations")
     atomic_migrations = [f.name for f in migrations_dir.glob("*atomic_deduct_credits*")]
-    assert len(atomic_migrations) > 0, (
-        "atomic_deduct_credits migration must exist in supabase/migrations/"
-    )
+    assert (
+        len(atomic_migrations) > 0
+    ), "atomic_deduct_credits migration must exist in supabase/migrations/"

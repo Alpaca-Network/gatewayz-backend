@@ -2031,20 +2031,30 @@ async def chat_completions(
             try:
                 await get_model_pricing_async(req.model)
             except ValueError as pricing_err:
-                logger.warning(
-                    "Pricing pre-check failed (request_id=%s, model=%s): %s",
-                    request_id, req.model, str(pricing_err),
+                err_str = str(pricing_err)
+                is_pricing_missing = (
+                    "Pricing data not available" in err_str
+                    or "HIGH_VALUE_MODEL_PRICING_MISSING" in err_str
                 )
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error": {
-                            "message": str(pricing_err),
-                            "type": "pricing_unavailable",
-                            "code": "model_pricing_missing",
-                        }
-                    },
-                )
+                if is_pricing_missing:
+                    logger.warning(
+                        "Pricing pre-check failed (request_id=%s, model=%s): %s",
+                        request_id,
+                        req.model,
+                        err_str,
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "error": {
+                                "message": err_str,
+                                "type": "pricing_unavailable",
+                                "code": "model_pricing_missing",
+                            }
+                        },
+                    )
+                # Unknown ValueError — let it propagate as 500
+                raise
 
         # Pre-check plan limits before streaming (fail fast) - only for authenticated users
         if not is_anonymous:

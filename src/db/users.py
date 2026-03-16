@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.config.usage_limits import TRIAL_DURATION_DAYS
 from src.db.api_keys import create_api_key
 from src.services.prometheus_metrics import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
@@ -187,7 +188,7 @@ def create_enhanced_user(
     privy_user_id: str | None = None,
     subscription_status: str = "trial",
 ) -> dict[str, Any]:
-    """Create a new user with automatic 3-day trial and $5 credits (limited to $1/day usage).
+    """Create a new user with automatic trial and $5 credits (limited to $1/day usage).
 
     Args:
         username: User's username
@@ -202,7 +203,7 @@ def create_enhanced_user(
 
         # Prepare user data with trial setup
         trial_start = datetime.now(UTC)
-        trial_end = trial_start + timedelta(days=3)
+        trial_end = trial_start + timedelta(days=TRIAL_DURATION_DAYS)
 
         user_data = {
             "username": username,
@@ -1081,22 +1082,37 @@ def deduct_credits(
                     f"LEGACY: Transaction log failed for user {user_id}. "
                     f"Rolling back balance. Amount: -${tokens:.6f}"
                 )
+                rollback_failed = False
                 try:
-                    client.table("users").update({
-                        "subscription_allowance": allowance_before,
-                        "purchased_credits": purchased_before,
-                        "updated_at": datetime.now(UTC).isoformat(),
-                    }).eq("id", user_id).execute()
+                    (
+                        client.table("users")
+                        .update(
+                            {
+                                "subscription_allowance": allowance_before,
+                                "purchased_credits": purchased_before,
+                                "updated_at": datetime.now(UTC).isoformat(),
+                            }
+                        )
+                        .eq("id", user_id)
+                        .execute()
+                    )
                     logger.info(f"Balance rolled back for user {user_id}")
                 except Exception as rollback_err:
+                    rollback_failed = True
                     logger.critical(
                         f"CRITICAL: Balance rollback ALSO failed for user {user_id}. "
                         f"Credits deducted without audit log. Amount: ${tokens:.6f}. "
                         f"Manual reconciliation required. Rollback error: {rollback_err}"
                     )
-                raise RuntimeError(
-                    "Credit deduction rolled back — transaction logging failed. Please retry."
-                )
+                    raise RuntimeError(
+                        "Credit deduction failed AND rollback failed — "
+                        "manual reconciliation required. Do NOT retry."
+                    ) from rollback_err
+                if not rollback_failed:
+                    raise RuntimeError(
+                        "Credit deduction rolled back — "
+                        "transaction logging failed. Please retry."
+                    )
             else:
                 logger.info(
                     "LEGACY deducted $%s from user %s. Balance: $%s → $%s "
