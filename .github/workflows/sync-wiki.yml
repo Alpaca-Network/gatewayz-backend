@@ -1,0 +1,87 @@
+name: Sync Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/routes/**"
+      - "tests/**"
+      - "src/services/**"
+      - "src/db/**"
+      - "supabase/migrations/**"
+      - "scripts/wiki/**"
+      - ".github/workflows/sync-wiki.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-wiki:
+    name: Regenerate Wiki Pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout backend repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Checkout wiki repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}.wiki
+          path: wiki
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate API Mappings
+        run: |
+          python scripts/wiki/generate_api_mappings.py > wiki/API-Mappings.md 2> /tmp/api-mappings-stats.txt
+          cat /tmp/api-mappings-stats.txt
+
+      - name: Generate Test Mapping
+        run: |
+          python scripts/wiki/generate_test_mapping.py > wiki/Test-Mapping.md 2> /tmp/test-mapping-stats.txt
+          cat /tmp/test-mapping-stats.txt
+
+      - name: Generate Wiki Stats
+        run: |
+          python scripts/wiki/generate_wiki_stats.py wiki
+          cat wiki/.wiki-stats.txt
+
+      - name: Check for changes
+        id: changes
+        working-directory: wiki
+        run: |
+          # Remove stats file (not a wiki page)
+          rm -f .wiki-stats.txt
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No wiki changes detected"
+          else
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Wiki changes detected:"
+            git diff --cached --stat
+          fi
+
+      - name: Push to wiki
+        if: steps.changes.outputs.has_changes == 'true'
+        working-directory: wiki
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Auto-update: regenerate API Mappings and Test Mapping from code
+
+          Triggered by commit ${{ github.sha }} on ${{ github.ref_name }}
+
+          Co-Authored-By: github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          git push
+          echo "Wiki updated successfully"
