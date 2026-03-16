@@ -459,13 +459,14 @@ def create_app() -> FastAPI:
     # ==================== Load All Routes ====================
     logger.info("Loading application routes...")
 
-    # Write to file for debugging in CI
-    try:
-        with open("/tmp/route_loading_debug.txt", "w") as f:
-            f.write("Starting route loading...\n")
-            f.flush()
-    except Exception:
-        pass
+    # Write to file for debugging in CI (development/CI only)
+    if not Config.IS_PRODUCTION:
+        try:
+            with open("/tmp/route_loading_debug.txt", "w") as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
+                f.write("Starting route loading...\n")
+                f.flush()
+        except Exception:
+            pass
 
     # Define v1 routes (OpenAI-compatible API endpoints)
     # These routes are mounted under /v1 prefix via v1_router

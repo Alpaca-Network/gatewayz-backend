@@ -11,8 +11,10 @@ import asyncio
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+
+from src.security.deps import require_admin
 
 from src.db.models_catalog_db import (
     flush_models_table,
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/admin/model-sync",
     tags=["Admin - Model Sync"],
+    dependencies=[Depends(require_admin)],
 )
 
 

@@ -2318,7 +2318,7 @@ async def get_chat_requests_summary_admin(
 
         # Create cache key based on filters
         filter_str = f"{model_id}:{provider_id}:{model_name}:{start_date}:{end_date}"
-        filter_hash = hashlib.md5(filter_str.encode()).hexdigest()
+        filter_hash = hashlib.md5(filter_str.encode()).hexdigest()  # nosec B324 - MD5 for cache key, not security
         cache_key = f"chat_summary:filters:{filter_hash}"
 
         redis_client = get_redis_client()
