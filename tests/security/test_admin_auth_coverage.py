@@ -16,7 +16,6 @@ The only intentional exception is POST /admin/create (user registration).
 import re
 from pathlib import Path
 
-
 # Routes intentionally public (documented exceptions)
 INTENTIONAL_PUBLIC_ADMIN_ROUTES = {
     "/create",  # POST /admin/create - user registration in admin.py
@@ -37,20 +36,24 @@ def _get_route_files():
 
 def _has_router_level_auth(source: str) -> bool:
     """Check if router has global auth dependency."""
-    return bool(re.search(
-        r'dependencies\s*=\s*\[.*?Depends\((require_admin|get_admin_key)\)',
-        source,
-        re.DOTALL,
-    ))
+    return bool(
+        re.search(
+            r"dependencies\s*=\s*\[.*?Depends\((require_admin|get_admin_key)\)",
+            source,
+            re.DOTALL,
+        )
+    )
 
 
 def _has_admin_prefix(source: str) -> bool:
     """Check if APIRouter uses a prefix containing 'admin'."""
-    return bool(re.search(
-        r'APIRouter\([^)]*prefix\s*=\s*["\'][^"\']*admin',
-        source,
-        re.DOTALL,
-    ))
+    return bool(
+        re.search(
+            r'APIRouter\([^)]*prefix\s*=\s*["\'][^"\']*admin',
+            source,
+            re.DOTALL,
+        )
+    )
 
 
 def _find_admin_routes_in_decorators(source: str) -> list[tuple[str, str]]:
@@ -68,9 +71,9 @@ def _route_has_auth_in_signature(source: str, method: str, path: str) -> bool:
     if not dec_match:
         return True  # Can't find decorator, assume OK
 
-    chunk_after = source[dec_match.start():dec_match.start() + 2000]
+    chunk_after = source[dec_match.start() : dec_match.start() + 2000]
     func_match = re.search(
-        r'(async )?def \w+\((.*?)\)\s*(->\s*\S+\s*)?:',
+        r"(async )?def \w+\((.*?)\)\s*(->\s*\S+\s*)?:",
         chunk_after,
         re.DOTALL,
     )
@@ -89,16 +92,12 @@ def test_model_sync_router_has_auth_dependency():
     """
     project_root = Path(__file__).parent.parent.parent
     source = (project_root / "src" / "routes" / "model_sync.py").read_text()
-    assert "require_admin" in source, (
-        "model_sync.py must import require_admin"
-    )
+    assert "require_admin" in source, "model_sync.py must import require_admin"
     assert re.search(
-        r'dependencies\s*=\s*\[.*?Depends\(require_admin\)',
+        r"dependencies\s*=\s*\[.*?Depends\(require_admin\)",
         source,
         re.DOTALL,
-    ), (
-        "model_sync.py router must have dependencies=[Depends(require_admin)]"
-    )
+    ), "model_sync.py router must have dependencies=[Depends(require_admin)]"
 
 
 def test_no_admin_route_without_auth():
@@ -151,13 +150,12 @@ def test_no_admin_route_without_auth():
                 continue
 
             if not _route_has_auth_in_signature(source, method, path):
-                unprotected.append(
-                    f"{route_file.name}: {method.upper()} {path}"
-                )
+                unprotected.append(f"{route_file.name}: {method.upper()} {path}")
 
-    assert not unprotected, (
-        f"Found {len(unprotected)} admin route(s) without authentication:\n"
-        + "\n".join(f"  - {r}" for r in unprotected)
+    assert (
+        not unprotected
+    ), f"Found {len(unprotected)} admin route(s) without authentication:\n" + "\n".join(
+        f"  - {r}" for r in unprotected
     )
 
 
@@ -172,6 +170,6 @@ def test_bandit_false_positives_suppressed():
     ]
     for filepath, nosec_tag in checks:
         source = (project_root / filepath).read_text()
-        assert nosec_tag in source, (
-            f"{filepath} missing '{nosec_tag}' suppression for Bandit false positive"
-        )
+        assert (
+            nosec_tag in source
+        ), f"{filepath} missing '{nosec_tag}' suppression for Bandit false positive"

@@ -571,7 +571,9 @@ async def delete_rate_limits(
                 )
                 deleted_from_rate_limit_configs = len(result.data) > 0 if result.data else False
         except Exception as e:
-            logger.debug(f"Could not delete from rate_limit_configs table: {e}")  # nosec B608 - Supabase .eq() is parameterized
+            logger.debug(
+                f"Could not delete from rate_limit_configs table: {e}"
+            )  # nosec B608 - Supabase .eq() is parameterized
 
         # Try to reset rate_limit_config in api_keys_new table
         reset_in_api_keys = False
