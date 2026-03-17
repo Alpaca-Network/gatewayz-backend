@@ -298,6 +298,50 @@ def get_user_activity_log(
         return []
 
 
+def log_security_event(
+    event_type: str,
+    ip_address: str | None = None,
+    user_id: int | None = None,
+    api_key_id: str | None = None,
+    details: dict | None = None,
+) -> dict | None:
+    """
+    Log a security-related event to the security_audit_log table.
+
+    This function is designed to be non-blocking and safe to call from
+    middleware — it will never raise an exception.
+
+    Args:
+        event_type: Type of security event (e.g., "rate_limit_block", "auth_failure")
+        ip_address: Client IP address
+        user_id: User ID if known
+        api_key_id: API key ID if known
+        details: Additional event details as a JSON-serializable dict
+
+    Returns:
+        Created audit log record or None on error
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table("security_audit_log")
+            .insert(
+                {
+                    "event_type": event_type,
+                    "ip_address": ip_address,
+                    "user_id": user_id,
+                    "api_key_id": api_key_id,
+                    "details": details or {},
+                }
+            )
+            .execute()
+        )
+        return result.data[0] if result.data else None
+    except Exception as e:
+        logger.error(f"Failed to log security event: {e}")
+        return None
+
+
 def get_provider_from_model(model: str) -> str:
     """
     Determine provider from model name

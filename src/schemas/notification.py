@@ -21,6 +21,7 @@ class NotificationType(str, Enum):  # noqa: UP042
     PLAN_EXPIRED = "plan_expired"
     SUBSCRIPTION_EXPIRING = "subscription_expiring"
     CREDIT_ADDED = "credit_added"
+    CREDITS_DEPLETED = "credits_depleted"
     USAGE_ALERT = "usage_alert"
     WELCOME = "welcome"
     PASSWORD_RESET = "password_reset"

@@ -99,7 +99,9 @@ def test_get_model_pricing_exception_returns_default(monkeypatch, mod):
 
     monkeypatch.setattr("src.services.models.get_cached_models", boom)
     monkeypatch.setattr("src.services.models._is_building_catalog", lambda: False)
-    out = mod.get_model_pricing("openai/gpt-4o")
+    # Use a non-high-value model so default pricing fallback is allowed.
+    # High-value models (gpt-4, claude-3, etc.) raise ValueError instead.
+    out = mod.get_model_pricing("some-org/small-model")
     assert out["found"] is False
     assert math.isclose(out["prompt"], 0.00002)
     assert math.isclose(out["completion"], 0.00002)
