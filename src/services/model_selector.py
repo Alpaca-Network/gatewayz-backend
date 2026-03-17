@@ -419,7 +419,9 @@ def _hash_for_selection(conversation_id: str, category: str) -> int:
     Same conversation + category = same hash = same model choice.
     """
     data = f"{conversation_id}:{category}"
-    hash_bytes = hashlib.md5(data.encode()).digest()
+    hash_bytes = hashlib.md5(
+        data.encode()
+    ).digest()  # nosec B324 - MD5 for deterministic routing, not security
     return int.from_bytes(hash_bytes[:4], byteorder="big")
 
 
