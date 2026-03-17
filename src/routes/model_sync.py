@@ -14,12 +14,11 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from src.security.deps import require_admin
-
 from src.db.models_catalog_db import (
     flush_models_table,
     flush_providers_table,
 )
+from src.security.deps import require_admin
 from src.services.incremental_sync import (
     sync_all_providers_incremental,
 )
