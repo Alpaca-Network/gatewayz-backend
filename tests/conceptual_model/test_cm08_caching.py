@@ -22,10 +22,10 @@ from src.services.auth_cache import (
     USER_CACHE_TTL,
 )
 from src.services.catalog_response_cache import (
+    CATALOG_CACHE_KEYS_INDEX,
     CATALOG_CACHE_TTL,
     CATALOG_RESPONSE_CACHE_TTL,
     MAX_CACHE_ENTRIES,
-    CATALOG_CACHE_KEYS_INDEX,
     get_catalog_cache_key,
 )
 from src.services.local_memory_cache import LocalMemoryCache, get_local_cache
