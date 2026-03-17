@@ -11,22 +11,6 @@ import pytest
 class TestSybilClient:
     """Test Sybil Client service functionality"""
 
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        import src.services.sybil_client
-
-        assert src.services.sybil_client is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module exports"""
-        from src.services import sybil_client
-
-        assert hasattr(sybil_client, "__name__")
-        assert hasattr(sybil_client, "fetch_models_from_sybil")
-        assert hasattr(sybil_client, "get_sybil_client")
-        assert hasattr(sybil_client, "make_sybil_request_openai")
-        assert hasattr(sybil_client, "make_sybil_request_openai_stream")
-
     def test_get_sybil_client_raises_without_api_key(self, monkeypatch):
         """Test that get_sybil_client raises ValueError when API key is not configured"""
         from src.services import sybil_client

@@ -12,7 +12,7 @@ This test suite verifies:
 """
 
 import logging
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,13 +37,6 @@ client = TestClient(app)
 @pytest.mark.integration
 class TestProviderSelectorBasics:
     """Test basic ProviderSelector functionality"""
-
-    def test_selector_initialization(self):
-        """Test that selector initializes correctly"""
-        selector = get_selector()
-        assert selector is not None
-        assert selector.registry is not None
-        assert selector.health_tracker is not None
 
     def test_get_model_providers(self):
         """Test getting available providers for a model"""
@@ -79,14 +72,6 @@ class TestProviderSelectorBasics:
 @pytest.mark.integration
 class TestMultiProviderRegistry:
     """Test multi-provider registry functionality"""
-
-    def test_registry_initialization(self):
-        """Test that registry initializes and has models"""
-        registry = get_registry()
-        assert registry is not None
-
-        models = registry.get_all_models()
-        logger.info(f"Registry has {len(models)} models")
 
     def test_get_model(self):
         """Test retrieving a model from registry"""

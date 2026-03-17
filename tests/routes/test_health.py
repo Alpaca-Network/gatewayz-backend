@@ -125,20 +125,11 @@ def mock_model_health():
 
 
 class TestBasicHealthCheck:
-    """Test basic health check endpoint"""
+    """Test basic health check endpoint
 
-    def test_health_check_returns_200(self, client):
-        """Basic health check returns 200 OK"""
-        response = client.get("/health")
-        assert response.status_code == 200
-
-    def test_health_check_returns_healthy_status(self, client):
-        """Health check returns healthy status"""
-        response = client.get("/health")
-        data = response.json()
-
-        assert "status" in data
-        assert data["status"] == "healthy"
+    Note: test_health_check_returns_200 and test_health_check_returns_healthy_status
+    moved to tests/conceptual_model/test_cm11_health_monitoring.py (CM-11.5 and CM-11.7).
+    """
 
     def test_health_check_no_auth_required(self, client):
         """Health check doesn't require authentication"""
@@ -643,11 +634,8 @@ class TestHealthErrorHandling:
         data = response.json()
         assert data["overall_status"] == "unknown"
 
-    def test_health_check_always_works(self, client):
-        """Basic health check should never fail"""
-        # Even if everything is broken, /health should return 200
-        response = client.get("/health")
-        assert response.status_code == 200
+    # Note: test_health_check_always_works moved to
+    # tests/conceptual_model/test_cm11_health_monitoring.py (CM-11.5).
 
 
 class TestHealthEdgeCases:

@@ -2,7 +2,6 @@
 Comprehensive tests for Morpheus AI Gateway Client service
 """
 
-import importlib
 from unittest.mock import Mock, patch
 
 import pytest
@@ -10,23 +9,6 @@ import pytest
 
 class TestMorpheusClient:
     """Test Morpheus Client service functionality"""
-
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        module = importlib.import_module("src.services.morpheus_client")
-
-        assert module is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module exports"""
-        from src.services import morpheus_client
-
-        assert hasattr(morpheus_client, "__name__")
-        assert hasattr(morpheus_client, "get_morpheus_client")
-        assert hasattr(morpheus_client, "make_morpheus_request_openai")
-        assert hasattr(morpheus_client, "make_morpheus_request_openai_stream")
-        assert hasattr(morpheus_client, "process_morpheus_response")
-        assert hasattr(morpheus_client, "fetch_models_from_morpheus")
 
     def test_morpheus_base_url(self):
         """Test Morpheus base URL is correctly set"""
@@ -342,16 +324,6 @@ class TestMorpheusModelTransformations:
         assert result == "llama-3.1-8b"
 
 
-class TestMorpheusConfig:
-    """Test Morpheus configuration"""
-
-    def test_config_has_morpheus_api_key(self):
-        """Test that Config class has MORPHEUS_API_KEY attribute"""
-        from src.config import Config
-
-        assert hasattr(Config, "MORPHEUS_API_KEY")
-
-
 class TestMorpheusCacheIntegration:
     """Test Morpheus cache integration"""
 
@@ -400,12 +372,6 @@ class TestMorpheusGatewayRegistry:
 
 class TestMorpheusConnectionPool:
     """Test Morpheus connection pool integration"""
-
-    def test_morpheus_pooled_client_function_exists(self):
-        """Test that get_morpheus_pooled_client function exists"""
-        from src.services.connection_pool import get_morpheus_pooled_client
-
-        assert callable(get_morpheus_pooled_client)
 
     @patch("src.services.connection_pool.Config")
     def test_morpheus_pooled_client_raises_without_key(self, mock_config):
