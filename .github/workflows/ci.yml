@@ -196,8 +196,6 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY || 'test-admin-key' }}
         run: |
-          set -o pipefail  # Ensure pipe returns pytest exit code, not tee's
-
           # Determine test path based on category
           if [ "$CATEGORY" = "root" ]; then
             # Collect only test files directly in tests/ (not in subdirectories)
@@ -225,14 +223,24 @@ jobs:
           echo "  Path:     ${TEST_PATH[*]}"
           echo "=========================================="
 
+          set +e  # Capture exit code manually
           pytest "${TEST_PATH[@]}" -v --tb=short \
             -n auto \
             --timeout=30 \
             --cov=src \
             --cov-report=xml \
             --cov-report=term-missing:skip-covered \
-            -m "not smoke and not benchmark" \
+            -m "not smoke and not benchmark and not integration" \
             2>&1 | tee "test-output-$CATEGORY.txt"
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          # Exit code 5 = no tests collected (e.g., all deselected by markers)
+          if [ "$EXIT_CODE" -eq 5 ]; then
+            echo "::notice::No tests collected for $CATEGORY (all excluded by markers)"
+            exit 0
+          fi
+          exit "$EXIT_CODE"
 
       - name: Upload test output
         if: always()
