@@ -1,0 +1,140 @@
+name: Conceptual Model Tests
+
+on:
+  pull_request:
+    branches: [main, staging, develop]
+    paths:
+      - "src/**"
+      - "tests/conceptual_model/**"
+      - ".github/workflows/conceptual-model-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/conceptual_model/**"
+  workflow_dispatch:
+
+concurrency:
+  group: cm-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  conceptual-model-tests:
+    name: CM Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+
+      - name: Restore wheelhouse cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/wheels
+          key: ${{ runner.os }}-wheels-${{ hashFiles('requirements*.txt', 'pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-wheels-
+
+      - name: Install dependencies
+        run: |
+          pip install --no-index --find-links=.cache/wheels -r requirements.txt 2>/dev/null \
+            || pip install -r requirements.txt
+          pip install --no-index --find-links=.cache/wheels pytest pytest-xdist pytest-timeout 2>/dev/null \
+            || pip install pytest pytest-xdist pytest-timeout
+
+      - name: Run Conceptual Model tests
+        env:
+          TESTING: "true"
+          APP_ENV: "testing"
+          SUPABASE_URL: "https://test.supabase.co"
+          SUPABASE_KEY: "test-key"
+          OPENROUTER_API_KEY: "test-key"
+          ENCRYPTION_KEY: "test-encryption-key-32-bytes!!"
+          ADMIN_API_KEY: "test-admin-key"
+          API_GATEWAY_SALT: "test-salt-minimum-sixteen-chars-long"
+          STRIPE_SECRET_KEY: "sk_test_fake"
+          STRIPE_WEBHOOK_SECRET: "whsec_test_fake"
+          SENTRY_DSN: ""
+          PROMETHEUS_ENABLED: "false"
+        run: |
+          pytest tests/conceptual_model/ \
+            -v \
+            --tb=short \
+            -n auto \
+            --timeout=30 \
+            --junitxml=cm-test-results.xml \
+            2>&1 | tee cm-test-output.txt
+
+          # Extract summary for PR comment
+          echo "## Conceptual Model Test Results" > cm-summary.md
+          echo "" >> cm-summary.md
+
+          # Count results from pytest output
+          TOTAL=$(grep -c "PASSED\|FAILED\|ERROR\|SKIPPED" cm-test-output.txt || echo "0")
+          PASSED=$(grep -c "PASSED" cm-test-output.txt || echo "0")
+          FAILED=$(grep -c "FAILED" cm-test-output.txt || echo "0")
+          ERRORS=$(grep -c "ERROR" cm-test-output.txt || echo "0")
+
+          echo "| Metric | Count |" >> cm-summary.md
+          echo "|--------|-------|" >> cm-summary.md
+          echo "| Total | ${TOTAL} |" >> cm-summary.md
+          echo "| Passed | ${PASSED} |" >> cm-summary.md
+          echo "| Failed | ${FAILED} |" >> cm-summary.md
+          echo "| Errors | ${ERRORS} |" >> cm-summary.md
+          echo "" >> cm-summary.md
+
+          # List failures if any
+          if [ "${FAILED}" -gt 0 ] || [ "${ERRORS}" -gt 0 ]; then
+            echo "### Failures" >> cm-summary.md
+            echo '```' >> cm-summary.md
+            grep "FAILED\|ERROR" cm-test-output.txt | head -30 >> cm-summary.md
+            echo '```' >> cm-summary.md
+          fi
+
+          # Per-section breakdown
+          echo "" >> cm-summary.md
+          echo "### Coverage by Section" >> cm-summary.md
+          echo "| Section | Passed | Failed |" >> cm-summary.md
+          echo "|---------|--------|--------|" >> cm-summary.md
+          for f in tests/conceptual_model/test_cm*.py; do
+            section=$(basename "${f}" .py | sed 's/test_cm[0-9]*_//' | sed 's/_/ /g')
+            num=$(echo "${f}" | grep -o 'cm[0-9]*' | grep -o '[0-9]*')
+            p=$(grep "${f}" cm-test-output.txt | grep -c "PASSED" || echo "0")
+            fl=$(grep "${f}" cm-test-output.txt | grep -c "FAILED" || echo "0")
+            echo "| CM-${num}: ${section} | ${p} | ${fl} |" >> cm-summary.md
+          done
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cm-test-results
+          path: |
+            cm-test-results.xml
+            cm-test-output.txt
+            cm-summary.md
+
+      - name: Comment PR with results
+        if: github.event_name == 'pull_request' && always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: cm-tests
+          path: cm-summary.md
