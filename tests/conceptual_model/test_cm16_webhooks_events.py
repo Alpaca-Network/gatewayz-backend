@@ -186,9 +186,7 @@ class TestCM1604WebhookRetryExponentialBackoff:
                 webhook_secret="test_secret",
             )
             # With retry, post should be called more than once
-            assert mock_post.call_count > 1, (
-                "send_webhook_notification should retry on failure"
-            )
+            assert mock_post.call_count > 1, "send_webhook_notification should retry on failure"
 
 
 # ---------------------------------------------------------------------------
