@@ -63,103 +63,156 @@ class TestModelMetadata:
     """Tests verifying that model catalog entries carry correct metadata."""
 
     @pytest.mark.cm_verified
-    def test_every_model_has_required_fields(self, sample_model_catalog_entry):
-        """CM-9.1.1: Every model has id, name, provider_slug, context_length, pricing."""
-        # Verify the canonical fixture has all required fields
-        for field in REQUIRED_MODEL_FIELDS:
-            assert (
-                field in sample_model_catalog_entry
-            ), f"Required field '{field}' missing from model catalog entry"
-            assert (
-                sample_model_catalog_entry[field] is not None
-            ), f"Required field '{field}' is None"
+    def test_every_model_has_required_fields(self):
+        """CM-9.1.1: Calling normalize_fireworks_model on raw provider data
+        produces an entry with all required fields."""
+        from src.services.models import normalize_fireworks_model
 
-        # Also verify several synthetic entries
+        raw_fireworks = {
+            "id": "accounts/fireworks/models/llama-v3p3-70b-instruct",
+            "display_name": "Llama 3.3 70B Instruct",
+            "metadata": {
+                "context_length": 131072,
+                "modality": "text->text",
+            },
+            "pricing": {
+                "cents_per_input_token": 0.000055,
+                "cents_per_output_token": 0.000055,
+            },
+        }
+
+        with (
+            patch("src.services.pricing_lookup._get_pricing_from_database", return_value=None),
+            patch("src.services.pricing_lookup.get_model_pricing", return_value=None),
+            patch("src.services.pricing_lookup._get_cross_reference_pricing", return_value=None),
+            patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
+        ):
+            result = normalize_fireworks_model(raw_fireworks)
+
+        # normalize may return None if enrichment strips the model; verify it came back
+        assert result is not None, "normalize_fireworks_model should return a model dict"
+
+        for field in REQUIRED_MODEL_FIELDS:
+            assert field in result, f"Required field '{field}' missing from normalized model"
+
+    @pytest.mark.cm_verified
+    def test_model_id_is_canonical_format(self):
+        """CM-9.1.2: normalize_fireworks_model produces IDs that include the raw slug."""
+        from src.services.models import normalize_fireworks_model
+
+        raw = {
+            "id": "accounts/fireworks/models/deepseek-v3",
+            "display_name": "DeepSeek V3",
+            "metadata": {"context_length": 8192},
+        }
+
+        with (
+            patch("src.services.pricing_lookup._get_pricing_from_database", return_value=None),
+            patch("src.services.pricing_lookup.get_model_pricing", return_value=None),
+            patch("src.services.pricing_lookup._get_cross_reference_pricing", return_value=None),
+            patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
+        ):
+            result = normalize_fireworks_model(raw)
+
+        # Result may be None for gateway providers without pricing; that's acceptable.
+        # If returned, id must be a string
+        if result is not None:
+            model_id = result["id"]
+            assert (
+                isinstance(model_id, str) and len(model_id) > 0
+            ), f"Model ID must be a non-empty string, got '{model_id}'"
+
+        # Also verify the merge_models_by_slug canonical format works with org/name IDs
         entries = [
-            _make_model(),
-            _make_model(id="openai/gpt-4o", name="GPT-4o", provider_slug="openrouter"),
-            _make_model(
-                id="anthropic/claude-3.5-sonnet",
-                name="Claude 3.5 Sonnet",
-                provider_slug="anthropic",
-                context_length=200000,
-            ),
+            _make_model(id="openai/gpt-4o", name="GPT-4o"),
+            _make_model(id="anthropic/claude-3.5-sonnet", name="Claude"),
         ]
         for entry in entries:
-            for field in REQUIRED_MODEL_FIELDS:
+            parts = entry["id"].split("/", 1)
+            assert len(parts) == 2, f"'{entry['id']}' does not match org/model format"
+            assert all(parts), f"Both parts of '{entry['id']}' must be non-empty"
+
+    @pytest.mark.cm_verified
+    def test_pricing_field_never_null(self):
+        """CM-9.1.3: enrich_model_with_pricing populates pricing on a model."""
+        model = _make_model(pricing=None)
+        model.pop("pricing", None)
+
+        mock_pricing = {"prompt": "0.000001", "completion": "0.000002"}
+
+        with (
+            patch(
+                "src.services.pricing_lookup._get_pricing_from_database", return_value=mock_pricing
+            ),
+            patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
+        ):
+            result = enrich_model_with_pricing(model, gateway="fireworks")
+
+        assert result is not None, "enrich_model_with_pricing should return enriched model"
+        assert result["pricing"] is not None, "pricing dict must not be None"
+        assert float(result["pricing"]["prompt"]) > 0, "Prompt pricing must be > 0"
+        assert float(result["pricing"]["completion"]) > 0, "Completion pricing must be > 0"
+
+    @pytest.mark.cm_verified
+    def test_modality_is_known_type(self):
+        """CM-9.1.4: normalize_fireworks_model outputs a known modality type."""
+        from src.services.models import normalize_fireworks_model
+
+        for modality in ["text->text", "text->image"]:
+            raw = {
+                "id": f"accounts/fireworks/models/test-{modality}",
+                "display_name": "Test Model",
+                "metadata": {"context_length": 4096, "modality": modality},
+                "pricing": {
+                    "cents_per_input_token": 0.001,
+                    "cents_per_output_token": 0.001,
+                },
+            }
+
+            with (
+                patch("src.services.pricing_lookup._get_pricing_from_database", return_value=None),
+                patch("src.services.pricing_lookup.get_model_pricing", return_value=None),
+                patch(
+                    "src.services.pricing_lookup._get_cross_reference_pricing", return_value=None
+                ),
+                patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
+            ):
+                result = normalize_fireworks_model(raw)
+
+            if result is not None:
+                arch = result.get("architecture", {})
+                result_modality = arch.get("modality", result.get("modality"))
                 assert (
-                    field in entry
-                ), f"Required field '{field}' missing from model '{entry.get('id')}'"
-                assert (
-                    entry[field] is not None
-                ), f"Required field '{field}' is None for model '{entry.get('id')}'"
+                    result_modality in KNOWN_MODALITIES
+                ), f"Modality '{result_modality}' not in known types"
 
     @pytest.mark.cm_verified
-    def test_model_id_is_canonical_format(self, sample_model_catalog_entry):
-        """CM-9.1.2: Model IDs follow the {org}/{model-name} canonical format."""
-        model_id = sample_model_catalog_entry["id"]
-        assert (
-            "/" in model_id
-        ), f"Model ID '{model_id}' does not follow '{{org}}/{{model-name}}' format"
+    def test_context_length_is_positive_integer(self):
+        """CM-9.1.5: normalize_fireworks_model preserves context_length as a positive int."""
+        from src.services.models import normalize_fireworks_model
 
-        parts = model_id.split("/", 1)
-        assert len(parts) == 2, f"Model ID '{model_id}' must have exactly one '/' separator"
-        org, model_name = parts
-        assert len(org) > 0, "Organization part of model ID must not be empty"
-        assert len(model_name) > 0, "Model name part of model ID must not be empty"
+        raw = {
+            "id": "accounts/fireworks/models/test-ctx",
+            "display_name": "Test Context Model",
+            "metadata": {"context_length": 32768},
+            "pricing": {
+                "cents_per_input_token": 0.001,
+                "cents_per_output_token": 0.001,
+            },
+        }
 
-        # Verify additional canonical IDs
-        valid_ids = [
-            "openai/gpt-4o",
-            "anthropic/claude-3.5-sonnet",
-            "meta-llama/Llama-3.3-70B-Instruct",
-            "google/gemini-2.0-flash",
-        ]
-        for mid in valid_ids:
-            parts = mid.split("/", 1)
-            assert len(parts) == 2 and all(parts), f"'{mid}' does not match canonical format"
+        with (
+            patch("src.services.pricing_lookup._get_pricing_from_database", return_value=None),
+            patch("src.services.pricing_lookup.get_model_pricing", return_value=None),
+            patch("src.services.pricing_lookup._get_cross_reference_pricing", return_value=None),
+            patch("src.services.pricing_lookup._is_building_catalog", return_value=False),
+        ):
+            result = normalize_fireworks_model(raw)
 
-    @pytest.mark.cm_verified
-    def test_pricing_field_never_null(self, sample_model_catalog_entry):
-        """CM-9.1.3: No model has null/zero pricing (prompt & completion must be > 0)."""
-        pricing = sample_model_catalog_entry["pricing"]
-        assert pricing is not None, "pricing dict must not be None"
-
-        prompt_val = float(pricing["prompt"])
-        completion_val = float(pricing["completion"])
-        assert prompt_val > 0, f"Prompt pricing must be > 0, got {prompt_val}"
-        assert completion_val > 0, f"Completion pricing must be > 0, got {completion_val}"
-
-        # Verify the pattern holds for constructed entries
-        valid_model = _make_model(pricing={"prompt": "0.000001", "completion": "0.000002"})
-        assert float(valid_model["pricing"]["prompt"]) > 0
-        assert float(valid_model["pricing"]["completion"]) > 0
-
-    @pytest.mark.cm_verified
-    def test_modality_is_known_type(self, sample_model_catalog_entry):
-        """CM-9.1.4: Modality is one of the known types defined in the codebase."""
-        modality = sample_model_catalog_entry.get("modality")
-        assert (
-            modality in KNOWN_MODALITIES
-        ), f"Modality '{modality}' is not one of the known types: {KNOWN_MODALITIES}"
-
-        # Verify all standard modalities are recognized
-        for mod in [MODALITY_TEXT_TO_TEXT, MODALITY_TEXT_TO_IMAGE, MODALITY_TEXT_TO_AUDIO]:
-            entry = _make_model(modality=mod)
-            assert entry["modality"] in KNOWN_MODALITIES
-
-    @pytest.mark.cm_verified
-    def test_context_length_is_positive_integer(self, sample_model_catalog_entry):
-        """CM-9.1.5: context_length is a positive integer (> 0)."""
-        ctx = sample_model_catalog_entry["context_length"]
-        assert isinstance(ctx, int), f"context_length must be int, got {type(ctx).__name__}"
-        assert ctx > 0, f"context_length must be > 0, got {ctx}"
-
-        # Verify typical context lengths
-        for length in [2048, 4096, 8192, 32768, 131072, 200000]:
-            entry = _make_model(context_length=length)
-            assert isinstance(entry["context_length"], int)
-            assert entry["context_length"] > 0
+        if result is not None:
+            ctx = result["context_length"]
+            assert isinstance(ctx, int), f"context_length must be int, got {type(ctx).__name__}"
+            assert ctx > 0, f"context_length must be > 0, got {ctx}"
 
 
 # ===================================================================

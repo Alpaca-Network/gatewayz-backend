@@ -5,13 +5,14 @@ from typing import Any
 
 from src.config.redis_config import get_redis_config
 from src.config.supabase_config import get_supabase_client
+from src.config.usage_limits import TRIAL_DURATION_DAYS
 from src.services.pyroscope_config import tag_wrapper
 from src.utils.db_safety import DatabaseResultError, safe_get_first
 
 logger = logging.getLogger(__name__)
 
 
-def start_trial_for_key(api_key: str, trial_days: int = 14) -> dict[str, Any]:
+def start_trial_for_key(api_key: str, trial_days: int = TRIAL_DURATION_DAYS) -> dict[str, Any]:
     """Start a free trial for an API key"""
     try:
         client = get_supabase_client()
