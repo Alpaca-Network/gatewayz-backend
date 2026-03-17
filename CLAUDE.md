@@ -48,7 +48,8 @@ src/                           # 85,080 LOC Python
 ├── models/                   # health_models.py, image_models.py
 └── utils/                    # 15 utilities: validators, auto_sentry, crypto, retry, etc
 
-tests/                        # 228 tests in 13 directories (unit, integration, e2e, health, smoke, etc)
+tests/                        # 228+ tests in 13 directories (unit, integration, e2e, health, smoke, etc)
+├── conceptual_model/         # 186 tests verifying code matches Conceptual Model spec (see README.md inside)
 docs/                         # 121 files (architecture, api, setup, deployment, integrations)
 supabase/migrations/          # 36 SQL migrations
 scripts/                      # checks, database, integration-tests, utilities
@@ -115,6 +116,9 @@ python src/main.py  # or uvicorn src.main:app --reload
 **DB Changes**: Create migration in `supabase/migrations/`, apply via CLI, update `src/db/` module
 
 **Tests**: `pytest` (all), `pytest --cov=src` (coverage), `pytest tests/integration/` (specific)
+
+**Conceptual Model Tests**: `pytest tests/conceptual_model/ -v` (186 tests verifying code matches the spec).
+See `tests/conceptual_model/README.md` for details. Uses `@pytest.mark.cm_verified` (should pass) and `@pytest.mark.cm_gap` (expected to fail — documents delta). Runs automatically on PRs via `conceptual-model-tests.yml` workflow.
 
 ---
 
