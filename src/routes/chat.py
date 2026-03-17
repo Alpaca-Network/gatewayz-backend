@@ -448,7 +448,7 @@ from src.services.health_routing import (
     should_use_health_based_routing,
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.pricing import calculate_cost_async
+from src.services.pricing import calculate_cost_async, get_model_pricing_async
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
@@ -2023,6 +2023,38 @@ async def chat_completions(
         # Credit check (only for authenticated non-trial users)
         if not is_anonymous and not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise APIExceptions.payment_required(credits=user.get("credits", 0.0))
+
+        # Pricing pre-check: block high-value models without pricing BEFORE
+        # hitting any upstream provider. get_model_pricing_async() raises ValueError
+        # for high-value models if only default pricing is available.
+        if not is_anonymous and not trial.get("is_trial", False):
+            try:
+                await get_model_pricing_async(req.model)
+            except ValueError as pricing_err:
+                err_str = str(pricing_err)
+                is_pricing_missing = (
+                    "Pricing data not available" in err_str
+                    or "HIGH_VALUE_MODEL_PRICING_MISSING" in err_str
+                )
+                if is_pricing_missing:
+                    logger.warning(
+                        "Pricing pre-check failed (request_id=%s, model=%s): %s",
+                        request_id,
+                        req.model,
+                        err_str,
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "error": {
+                                "message": err_str,
+                                "type": "pricing_unavailable",
+                                "code": "model_pricing_missing",
+                            }
+                        },
+                    )
+                # Unknown ValueError — let it propagate as 500
+                raise
 
         # Pre-check plan limits before streaming (fail fast) - only for authenticated users
         if not is_anonymous:
