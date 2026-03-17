@@ -17,4 +17,4 @@ jobs:
       - uses: actions/add-to-project@v1.0.2
         with:
           project-url: https://github.com/orgs/Alpaca-Network/projects/6
-          github-token: ${{ secrets.PROJECT_TOKEN }}
+          github-token: ${{ secrets.WIKI_PAT }}
