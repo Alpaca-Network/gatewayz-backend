@@ -96,15 +96,30 @@ class TestCM03ApiKeyHmacSha256Hashing:
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 class TestCM04HmacLookupWithoutDecryption:
-    def test_hmac_lookup_without_decryption(self):
-        """get_api_key_by_hash() should exist in src.db.api_keys for
-        constant-time hash-based key lookup without decryption."""
-        from src.db import api_keys
+    def test_hmac_lookup_without_decryption(self, mock_supabase):
+        """CM-1.4: get_api_key_by_hash() performs a DB lookup by key_hash
+        without decryption. Verify it queries Supabase and returns the row."""
+        from src.db.api_keys import get_api_key_by_hash
 
-        assert hasattr(
-            api_keys, "get_api_key_by_hash"
-        ), "Expected get_api_key_by_hash to be defined in src.db.api_keys"
-        assert callable(api_keys.get_api_key_by_hash)
+        # Configure mock to return a row when queried with the right hash
+        expected_row = {"id": 42, "key_hash": "abc123", "user_id": 7, "status": "active"}
+        mock_supabase.table.return_value.execute.return_value.data = [expected_row]
+
+        result = get_api_key_by_hash("abc123")
+
+        assert result == expected_row
+        # Verify it queried the api_keys_new table with the hash
+        mock_supabase.table.assert_called_with("api_keys_new")
+
+    def test_hmac_lookup_returns_none_when_not_found(self, mock_supabase):
+        """CM-1.4: get_api_key_by_hash() returns None when no key matches."""
+        from src.db.api_keys import get_api_key_by_hash
+
+        mock_supabase.table.return_value.execute.return_value.data = []
+
+        result = get_api_key_by_hash("nonexistent_hash")
+
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -174,16 +189,24 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
 @pytest.mark.cm_verified
 class TestCM06RbacThreeTiersExist:
     def test_rbac_three_tiers_exist(self):
-        """CM specifies three RBAC tiers: admin, developer, user."""
-        defined_roles = {
-            getattr(UserRole, attr)
-            for attr in dir(UserRole)
-            if not attr.startswith("_") and isinstance(getattr(UserRole, attr), str)
-        }
-        expected_roles = {"admin", "developer", "user"}
-        assert expected_roles.issubset(
-            defined_roles
-        ), f"Expected roles {expected_roles}, found {defined_roles}"
+        """CM-1.6: Three RBAC tiers (admin, developer, user) are enforced by
+        update_user_role which rejects any role outside this set."""
+        from src.db.roles import update_user_role
+
+        mock_client = MagicMock()
+        mock_client.table.return_value.update.return_value.eq.return_value.execute.return_value.data = [
+            {"id": 1, "role": "admin"}
+        ]
+
+        with patch("src.db.roles.get_supabase_client", return_value=mock_client):
+            # Valid roles are accepted
+            for role in ["admin", "developer", "user"]:
+                result = update_user_role(user_id=1, new_role=role)
+                assert result is True, f"update_user_role should accept '{role}'"
+
+            # Invalid role is rejected (returns False)
+            result = update_user_role(user_id=1, new_role="superuser")
+            assert result is False, "update_user_role should reject invalid role 'superuser'"
 
 
 # ---------------------------------------------------------------------------
@@ -191,23 +214,24 @@ class TestCM06RbacThreeTiersExist:
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 class TestCM07AdminRoleHasAllPermissions:
-    def test_admin_role_has_all_permissions(self):
-        """Admin role must be the highest tier and a superset of all others.
-        Verified via the role hierarchy: ADMIN > DEVELOPER > USER."""
-        role_hierarchy = {
-            UserRole.USER: 0,
-            UserRole.DEVELOPER: 1,
-            UserRole.ADMIN: 2,
-        }
-        admin_level = role_hierarchy[UserRole.ADMIN]
-        for role, level in role_hierarchy.items():
-            assert admin_level >= level, f"Admin ({admin_level}) should be >= {role} ({level})"
-        # Admin must be strictly the highest
-        non_admin_levels = [lvl for r, lvl in role_hierarchy.items() if r != UserRole.ADMIN]
-        assert admin_level > max(non_admin_levels)
+    @pytest.mark.asyncio
+    async def test_admin_role_has_all_permissions(self):
+        """CM-1.7: Admin role passes the require_admin gate; non-admin is rejected
+        with HTTP 403."""
+        from fastapi import HTTPException
 
-        # Also verify update_user_role accepts "admin" as valid
-        assert UserRole.ADMIN == "admin"
+        from src.security.deps import require_admin
+
+        # Admin user should pass through
+        admin_user = {"id": 1, "role": "admin", "is_admin": True}
+        result = await require_admin(user=admin_user)
+        assert result == admin_user
+
+        # Non-admin (developer) should be rejected with 403
+        dev_user = {"id": 2, "role": "developer", "is_admin": False}
+        with pytest.raises(HTTPException) as exc_info:
+            await require_admin(user=dev_user)
+        assert exc_info.value.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -215,20 +239,20 @@ class TestCM07AdminRoleHasAllPermissions:
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 class TestCM08FreeRoleHasMinimumPermissions:
-    def test_free_role_has_minimum_permissions(self):
-        """The 'user' role (lowest tier) must be the most restricted.
-        Verified via the role hierarchy."""
-        role_hierarchy = {
-            UserRole.USER: 0,
-            UserRole.DEVELOPER: 1,
-            UserRole.ADMIN: 2,
-        }
-        user_level = role_hierarchy[UserRole.USER]
-        # USER must be the lowest
-        assert user_level == min(role_hierarchy.values())
-        # Strictly lower than all others
-        other_levels = [lvl for r, lvl in role_hierarchy.items() if r != UserRole.USER]
-        assert user_level < min(other_levels)
+    @pytest.mark.asyncio
+    async def test_free_role_has_minimum_permissions(self):
+        """CM-1.8: The 'user' role (lowest tier) is rejected by require_admin,
+        confirming it has the most restricted permissions."""
+        from fastapi import HTTPException
+
+        from src.security.deps import require_admin
+
+        # Plain 'user' role must be rejected by the admin gate
+        basic_user = {"id": 3, "role": "user", "is_admin": False}
+        with pytest.raises(HTTPException) as exc_info:
+            await require_admin(user=basic_user)
+        assert exc_info.value.status_code == 403
+        assert "Administrator privileges required" in str(exc_info.value.detail)
 
 
 # ---------------------------------------------------------------------------

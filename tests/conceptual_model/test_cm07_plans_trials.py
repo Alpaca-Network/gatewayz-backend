@@ -21,30 +21,82 @@ from fastapi import HTTPException
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 def test_new_user_gets_5_dollar_credits(mock_supabase):
-    """create_enhanced_user defaults to credits=5.0 ($5.00)."""
-    import inspect
-
+    """create_enhanced_user inserts a user row with credits=5.0 ($5.00)."""
     from src.db.users import create_enhanced_user
 
-    sig = inspect.signature(create_enhanced_user)
-    default_credits = sig.parameters["credits"].default
-    assert default_credits == 5.0, f"Expected default credits=5.0, got {default_credits}"
+    # Mock the API key creation that happens inside create_enhanced_user
+    with patch(
+        "src.db.users.create_api_key",
+        return_value=("gw_live_testkey123456789012345678901234567890123", "hashed"),
+    ):
+        # Set up mock to return a valid user
+        insert_result = MagicMock()
+        insert_result.data = [
+            {"id": 1, "username": "testuser", "email": "test@example.com", "credits": 5.0}
+        ]
+        mock_supabase.table.return_value.insert.return_value.execute.return_value = insert_result
+
+        # Mock the update call for replacing temp API key
+        update_result = MagicMock()
+        update_result.data = [
+            {"id": 1, "api_key": "gw_live_testkey123456789012345678901234567890123"}
+        ]
+        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value = (
+            update_result
+        )
+
+        create_enhanced_user(
+            username="testuser",
+            email="test@example.com",
+            auth_method="privy",
+        )
+
+    # Verify the insert payload included credits=5.0
+    insert_call = mock_supabase.table.return_value.insert.call_args
+    inserted_data = insert_call[0][0]
+    assert (
+        inserted_data["credits"] == 5.0
+    ), f"Expected credits=5.0 in insert payload, got {inserted_data.get('credits')}"
 
 
 # ---------------------------------------------------------------------------
 # CM-7.2  New user gets 3-day trial  (cm_gap -- code defaults to 14 days
 #         in start_trial_for_key, but create_enhanced_user uses 3 days)
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-def test_new_user_gets_14_day_trial():
-    """start_trial_for_key should default to trial_days=14."""
-    import inspect
-
+@pytest.mark.cm_gap
+@pytest.mark.xfail(
+    reason="CM spec says 3-day trial but code defaults to 14 days in start_trial_for_key"
+)
+def test_new_user_gets_14_day_trial(mock_supabase):
+    """start_trial_for_key should default to trial_days=3 per CM spec."""
     from src.db.trials import start_trial_for_key
 
-    sig = inspect.signature(start_trial_for_key)
-    default_trial_days = sig.parameters["trial_days"].default
-    assert default_trial_days == 14, f"Expected trial_days default=14, got {default_trial_days}"
+    # Set up mock chain for API key lookup
+    key_lookup = MagicMock()
+    key_lookup.data = [{"id": "key-uuid-123", "user_id": 1}]
+    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        key_lookup
+    )
+
+    # Mock the trial grant RPC
+    grant_result = MagicMock()
+    grant_result.data = {"success": True}
+    # Mock the start_trial RPC
+    trial_result = MagicMock()
+    trial_result.data = {"success": True, "trial_days": 3}
+
+    mock_supabase.rpc.return_value.execute.side_effect = [grant_result, trial_result]
+
+    result = start_trial_for_key("test-api-key")
+
+    # CM spec says default should be 3 days, but code uses 14
+    # Check that the start_trial RPC was called with trial_days=3
+    rpc_calls = mock_supabase.rpc.call_args_list
+    start_trial_call = [c for c in rpc_calls if c[0][0] == "start_trial"]
+    assert len(start_trial_call) == 1
+    assert (
+        start_trial_call[0][0][1]["trial_days"] == 3
+    ), "CM spec says default trial should be 3 days"
 
 
 # ---------------------------------------------------------------------------
@@ -223,8 +275,8 @@ def test_plan_tiers_exist(mock_supabase):
     """get_all_plans returns plans; verify that 4 canonical tiers can be
     retrieved (Trial, Dev, Team, Enterprise).
 
-    Since plan data lives in the DB, we mock the return to prove the code
-    path works and the tier names are recognized by the system.
+    We mock the DB to return realistic plan data and verify the function
+    properly returns all tiers with expected hierarchy (price ordering).
     """
     from src.db.plans import get_all_plans
 
@@ -276,13 +328,24 @@ def test_plan_tiers_exist(mock_supabase):
     )
 
     plans = get_all_plans()
-    tier_names = {p["name"] for p in plans}
 
+    # Verify all 4 tiers returned
+    tier_names = [p["name"] for p in plans]
     assert "Trial" in tier_names
     assert "Dev" in tier_names
     assert "Team" in tier_names
     assert "Enterprise" in tier_names
     assert len(plans) == 4
+
+    # Verify plans come back ordered by price (ascending) as requested via .order()
+    prices = [p["price_per_month"] for p in plans]
+    assert prices == sorted(prices), "Plans should be ordered by price ascending"
+
+    # Verify tier hierarchy: each tier has higher limits than the previous
+    for i in range(1, len(plans)):
+        assert (
+            plans[i]["daily_request_limit"] > plans[i - 1]["daily_request_limit"]
+        ), f"{plans[i]['name']} daily_request_limit should exceed {plans[i-1]['name']}"
 
 
 # ---------------------------------------------------------------------------
@@ -290,49 +353,69 @@ def test_plan_tiers_exist(mock_supabase):
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 def test_team_has_higher_rate_limits_than_dev(mock_supabase):
-    """Team plan daily/monthly request limits exceed Dev plan limits.
+    """Team plan limits exceed Dev plan limits when queried via check_plan_entitlements.
 
-    We mock check_plan_entitlements for two users on different plans and
-    compare the limits.
+    We mock get_user_plan to return Dev for user 1 and Team for user 2,
+    then call check_plan_entitlements for each and compare the limits.
     """
     from src.db.plans import check_plan_entitlements
 
-    # Mock Dev plan user
-    dev_plan = {
-        "id": 2,
-        "name": "Dev",
-        "price_per_month": 29,
-        "is_active": True,
+    dev_plan_data = {
+        "user_plan_id": 10,
+        "user_id": 1,
+        "plan_id": 2,
+        "plan_name": "Dev",
+        "plan_description": "",
         "daily_request_limit": 5000,
         "monthly_request_limit": 100000,
         "daily_token_limit": 2_000_000,
         "monthly_token_limit": 60_000_000,
+        "price_per_month": 29,
         "features": ["basic_models", "standard_support"],
-    }
-    team_plan = {
-        "id": 3,
-        "name": "Team",
-        "price_per_month": 99,
+        "start_date": datetime.now(UTC).isoformat(),
+        "end_date": (datetime.now(UTC) + timedelta(days=30)).isoformat(),
         "is_active": True,
+    }
+
+    team_plan_data = {
+        "user_plan_id": 20,
+        "user_id": 2,
+        "plan_id": 3,
+        "plan_name": "Team",
+        "plan_description": "",
         "daily_request_limit": 25000,
         "monthly_request_limit": 500000,
         "daily_token_limit": 10_000_000,
         "monthly_token_limit": 300_000_000,
+        "price_per_month": 99,
         "features": ["basic_models", "premium_models", "priority_support"],
+        "start_date": datetime.now(UTC).isoformat(),
+        "end_date": (datetime.now(UTC) + timedelta(days=30)).isoformat(),
+        "is_active": True,
     }
 
-    # Simulate check_plan_entitlements by directly comparing plan limits
+    with (
+        patch("src.db.plans.is_admin_tier_user", return_value=False),
+        patch("src.db.plans.get_user_plan") as mock_get_plan,
+    ):
+
+        # First call for Dev user, second for Team user
+        mock_get_plan.side_effect = [dev_plan_data, team_plan_data]
+
+        dev_entitlements = check_plan_entitlements(user_id=1)
+        team_entitlements = check_plan_entitlements(user_id=2)
+
     assert (
-        team_plan["daily_request_limit"] > dev_plan["daily_request_limit"]
-    ), "Team daily RPM should exceed Dev"
+        team_entitlements["daily_request_limit"] > dev_entitlements["daily_request_limit"]
+    ), "Team daily request limit should exceed Dev"
     assert (
-        team_plan["monthly_request_limit"] > dev_plan["monthly_request_limit"]
-    ), "Team monthly RPM should exceed Dev"
+        team_entitlements["monthly_request_limit"] > dev_entitlements["monthly_request_limit"]
+    ), "Team monthly request limit should exceed Dev"
     assert (
-        team_plan["daily_token_limit"] > dev_plan["daily_token_limit"]
+        team_entitlements["daily_token_limit"] > dev_entitlements["daily_token_limit"]
     ), "Team daily token limit should exceed Dev"
     assert (
-        team_plan["monthly_token_limit"] > dev_plan["monthly_token_limit"]
+        team_entitlements["monthly_token_limit"] > dev_entitlements["monthly_token_limit"]
     ), "Team monthly token limit should exceed Dev"
 
 

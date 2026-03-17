@@ -16,22 +16,23 @@ import pytest
 @pytest.mark.cm_verified
 class TestCM1501ImageGenerationDeductsCredits:
     def test_image_generation_deducts_credits(self):
-        """The image generation route calls deduct_credits after successful
-        generation. Verify by inspecting that deduct_credits is imported and
-        used in the image route module."""
-        import inspect
+        """The image generation route calculates a positive cost for images
+        and the get_image_cost function returns a non-zero cost that would
+        be deducted via deduct_credits."""
+        from src.routes.images import get_image_cost
 
-        from src.routes import images
+        # Call the actual cost function with real parameters
+        total_cost, cost_per_image, *_ = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", num_images=1, size="1024x1024"
+        )
+        assert total_cost > 0, "Image generation must have a positive cost for credit deduction"
+        assert cost_per_image > 0, "Per-image cost must be positive"
 
-        source = inspect.getsource(images)
-        # The route must call deduct_credits for billing
-        assert (
-            "deduct_credits" in source
-        ), "Image generation route must call deduct_credits to bill the user"
-        # Verify it also checks credits before generation
-        assert (
-            "Insufficient credits" in source
-        ), "Image generation route must check for insufficient credits"
+        # Multiple images should cost more
+        total_cost_2, _, *_ = get_image_cost(
+            "deepinfra", "stable-diffusion-3.5-large", num_images=3, size="1024x1024"
+        )
+        assert total_cost_2 > total_cost, "3 images should cost more than 1"
 
 
 # ---------------------------------------------------------------------------

@@ -60,8 +60,8 @@ class TestGeneralRouterParsing:
         assert is_router2 is True
         assert mode2 == "balanced"
 
-    def test_general_router_quality_selects_high_benchmark_model(self):
-        """CM-4.1.5: quality mode → GeneralRouterSettings produces correct model string."""
+    def test_general_router_quality_settings_produce_quality_model_string(self):
+        """CM-4.1.5: quality mode settings → model string that parses to quality mode."""
         settings = GeneralRouterSettings(
             use_general_router=True,
             optimization_mode="quality",
@@ -69,13 +69,17 @@ class TestGeneralRouterParsing:
         model_string = settings.get_model_string()
         assert model_string == "router:general:quality"
 
-        # Verify it parses back correctly
+        # Verify the produced string drives correct mode in the parser
         is_router, mode = general_parse(model_string)
         assert is_router is True
         assert mode == "quality"
 
-    def test_general_router_cost_selects_cheapest_model(self):
-        """CM-4.1.6: cost mode → GeneralRouterSettings produces correct model string."""
+        # Disabled router returns manual model instead
+        disabled = GeneralRouterSettings(use_general_router=False, optimization_mode="quality")
+        assert not disabled.get_model_string().startswith("router:")
+
+    def test_general_router_cost_settings_produce_cost_model_string(self):
+        """CM-4.1.6: cost mode settings → model string that parses to cost mode."""
         settings = GeneralRouterSettings(
             use_general_router=True,
             optimization_mode="cost",
@@ -87,8 +91,14 @@ class TestGeneralRouterParsing:
         assert is_router is True
         assert mode == "cost"
 
-    def test_general_router_latency_selects_fastest_model(self):
-        """CM-4.1.7: latency mode → GeneralRouterSettings produces correct model string."""
+        # Each mode produces a distinct string
+        quality_string = GeneralRouterSettings(
+            use_general_router=True, optimization_mode="quality"
+        ).get_model_string()
+        assert model_string != quality_string
+
+    def test_general_router_latency_settings_produce_latency_model_string(self):
+        """CM-4.1.7: latency mode settings → model string that parses to latency mode."""
         settings = GeneralRouterSettings(
             use_general_router=True,
             optimization_mode="latency",
@@ -99,6 +109,16 @@ class TestGeneralRouterParsing:
         is_router, mode = general_parse(model_string)
         assert is_router is True
         assert mode == "latency"
+
+        # All three non-balanced modes produce distinct strings
+        all_modes = ["quality", "cost", "latency"]
+        strings = set()
+        for m in all_modes:
+            s = GeneralRouterSettings(
+                use_general_router=True, optimization_mode=m
+            ).get_model_string()
+            strings.add(s)
+        assert len(strings) == 3
 
     def test_general_router_invalid_mode_rejected(self):
         """CM-4.1.8: 'router:general:invalid' falls back; schema rejects invalid mode."""

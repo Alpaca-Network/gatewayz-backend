@@ -152,17 +152,22 @@ async def test_health_endpoint_always_returns_200():
 # ===================================================================
 
 
-@pytest.mark.cm_verified
-def test_health_response_contains_version():
-    """CM-11.6: The FastAPI app is configured with an API version string."""
-    # The version is set on the FastAPI app object in create_app().
-    # We verify the app carries a version attribute used by docs and health consumers.
-    from src.main import create_app
+@pytest.mark.cm_gap
+@pytest.mark.xfail(reason="/health handler returns no version field")
+@pytest.mark.asyncio
+async def test_health_response_contains_version():
+    """CM-11.6: /health response body must include a 'version' field."""
+    with patch(
+        "src.routes.health.get_initialization_status",
+        return_value={"initialized": True, "has_error": False},
+    ):
+        from src.routes.health import health_check
 
-    app = create_app()
-    assert app.version is not None
-    assert isinstance(app.version, str)
-    assert len(app.version) > 0, "App version must be a non-empty string"
+        response = await health_check()
+
+        assert "version" in response, "Health response must contain 'version' field"
+        assert isinstance(response["version"], str)
+        assert len(response["version"]) > 0
 
 
 # ===================================================================

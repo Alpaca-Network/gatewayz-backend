@@ -5,7 +5,7 @@ Tests verifying that Prometheus metrics, Sentry error capture,
 OpenTelemetry tracing, and activity audit logging are properly wired.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -16,14 +16,16 @@ import pytest
 @pytest.mark.cm_verified
 class TestCM1301PrometheusInferenceRequestCounter:
     def test_prometheus_inference_request_counter(self):
-        """The model_inference_requests_total Prometheus Counter must exist."""
-        from prometheus_client import Counter
-
+        """The model_inference_requests_total Prometheus Counter must exist and accept labels."""
         from src.services.prometheus_metrics import model_inference_requests
 
-        assert isinstance(model_inference_requests, Counter)
-        # prometheus_client Counter strips _total suffix in _name internally
-        assert "model_inference_requests" in model_inference_requests._name
+        # Call .labels() with the expected label set and verify it returns a child collector
+        child = model_inference_requests.labels(
+            provider="test", model="test-model", status="success"
+        )
+        assert child is not None
+        # Incrementing should not raise
+        child.inc()
 
 
 # ---------------------------------------------------------------------------
@@ -32,13 +34,13 @@ class TestCM1301PrometheusInferenceRequestCounter:
 @pytest.mark.cm_verified
 class TestCM1302PrometheusInferenceDurationHistogram:
     def test_prometheus_inference_duration_histogram(self):
-        """The model_inference_duration_seconds Histogram must exist."""
-        from prometheus_client import Histogram
-
+        """The model_inference_duration_seconds Histogram must exist and accept observations."""
         from src.services.prometheus_metrics import model_inference_duration
 
-        assert isinstance(model_inference_duration, Histogram)
-        assert model_inference_duration._name == "model_inference_duration_seconds"
+        child = model_inference_duration.labels(provider="test", model="test-model")
+        assert child is not None
+        # Observing a value should not raise
+        child.observe(0.5)
 
 
 # ---------------------------------------------------------------------------
@@ -47,13 +49,12 @@ class TestCM1302PrometheusInferenceDurationHistogram:
 @pytest.mark.cm_verified
 class TestCM1303PrometheusTokensUsedCounter:
     def test_prometheus_tokens_used_counter(self):
-        """The tokens_used_total Prometheus Counter must exist."""
-        from prometheus_client import Counter
-
+        """The tokens_used_total Prometheus Counter must exist and accept labels."""
         from src.services.prometheus_metrics import tokens_used
 
-        assert isinstance(tokens_used, Counter)
-        assert "tokens_used" in tokens_used._name
+        child = tokens_used.labels(provider="test", model="test-model", token_type="input")
+        assert child is not None
+        child.inc(100)
 
 
 # ---------------------------------------------------------------------------
@@ -62,13 +63,12 @@ class TestCM1303PrometheusTokensUsedCounter:
 @pytest.mark.cm_verified
 class TestCM1304PrometheusCreditsUsedCounter:
     def test_prometheus_credits_used_counter(self):
-        """The credits_used_total Prometheus Counter must exist."""
-        from prometheus_client import Counter
-
+        """The credits_used_total Prometheus Counter must exist and accept labels."""
         from src.services.prometheus_metrics import credits_used
 
-        assert isinstance(credits_used, Counter)
-        assert "credits_used" in credits_used._name
+        child = credits_used.labels(provider="test", model="test-model")
+        assert child is not None
+        child.inc(0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -77,13 +77,12 @@ class TestCM1304PrometheusCreditsUsedCounter:
 @pytest.mark.cm_verified
 class TestCM1305PrometheusTtfcHistogram:
     def test_prometheus_ttfc_histogram(self):
-        """The time_to_first_chunk_seconds Histogram must exist."""
-        from prometheus_client import Histogram
-
+        """The time_to_first_chunk_seconds Histogram must exist and accept observations."""
         from src.services.prometheus_metrics import time_to_first_chunk_seconds
 
-        assert isinstance(time_to_first_chunk_seconds, Histogram)
-        assert time_to_first_chunk_seconds._name == "time_to_first_chunk_seconds"
+        child = time_to_first_chunk_seconds.labels(provider="test", model="test-model")
+        assert child is not None
+        child.observe(1.2)
 
 
 # ---------------------------------------------------------------------------
@@ -91,21 +90,37 @@ class TestCM1305PrometheusTtfcHistogram:
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 class TestCM1306SentryCapturesExceptions:
-    def test_sentry_captures_exceptions(self):
-        """AutoSentryMiddleware class exists and calls sentry_sdk.capture_exception
+    @pytest.mark.asyncio
+    async def test_sentry_captures_exceptions(self):
+        """AutoSentryMiddleware calls sentry_sdk.capture_exception
         when an unhandled exception propagates through the ASGI stack."""
         from src.middleware.auto_sentry_middleware import AutoSentryMiddleware
 
-        # Verify the middleware class is importable and has the expected interface
-        assert callable(AutoSentryMiddleware)
-        middleware = AutoSentryMiddleware(app=MagicMock())
-        assert callable(middleware.__call__)
+        # Create a mock ASGI app that raises an exception
+        error = RuntimeError("test error")
 
-        # Verify that the module references sentry_sdk.capture_exception
-        import inspect
+        async def failing_app(scope, receive, send):
+            raise error
 
-        source = inspect.getsource(AutoSentryMiddleware)
-        assert "capture_exception" in source
+        middleware = AutoSentryMiddleware(app=failing_app)
+
+        # Build a minimal ASGI scope
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/test",
+            "headers": [],
+            "query_string": b"",
+        }
+
+        with (
+            patch("src.middleware.auto_sentry_middleware.SENTRY_AVAILABLE", True),
+            patch("src.middleware.auto_sentry_middleware.sentry_sdk") as mock_sentry,
+        ):
+            with pytest.raises(RuntimeError):
+                await middleware(scope, AsyncMock(), AsyncMock())
+
+            mock_sentry.capture_exception.assert_called_once_with(error)
 
 
 # ---------------------------------------------------------------------------
@@ -114,35 +129,35 @@ class TestCM1306SentryCapturesExceptions:
 @pytest.mark.cm_verified
 class TestCM1307OpentelemetryTraceCreatedPerRequest:
     def test_opentelemetry_trace_created_per_request(self):
-        """OpenTelemetryConfig provides initialize() and instrument_fastapi()
-        which wire up per-request tracing via FastAPIInstrumentor."""
+        """OpenTelemetryConfig.initialize() returns a bool indicating success/failure."""
         from src.config.opentelemetry_config import OpenTelemetryConfig
 
-        assert hasattr(OpenTelemetryConfig, "initialize")
-        assert hasattr(OpenTelemetryConfig, "instrument_fastapi")
-        assert hasattr(OpenTelemetryConfig, "get_tracer")
-        assert callable(OpenTelemetryConfig.initialize)
-        assert callable(OpenTelemetryConfig.instrument_fastapi)
+        # Reset state so initialize() actually runs
+        OpenTelemetryConfig._initialized = False
+
+        # Call initialize - it returns True (if deps available) or False (if not)
+        result = OpenTelemetryConfig.initialize()
+        assert isinstance(result, bool), "initialize() must return a bool"
 
 
 # ---------------------------------------------------------------------------
 # CM-13.8  Audit log on security violation (activity logging function exists)
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
+@pytest.mark.cm_gap
+@pytest.mark.xfail(reason="log_activity is inference logger, no security audit path exists")
 class TestCM1308AuditLogOnSecurityViolation:
-    def test_audit_log_on_security_violation(self):
-        """The log_activity function exists and accepts the expected arguments
-        for recording API activity (which includes security-related events)."""
-        import inspect
-
+    def test_audit_log_on_security_violation(self, mock_supabase):
+        """log_activity should accept a security violation event type,
+        but it only supports inference logging (model/provider/tokens/cost)."""
         from src.db.activity import log_activity
 
-        sig = inspect.signature(log_activity)
-        param_names = list(sig.parameters.keys())
-
-        # Must accept at minimum: user_id, model, provider, tokens, cost
-        assert "user_id" in param_names
-        assert "model" in param_names
-        assert "provider" in param_names
-        assert "tokens" in param_names
-        assert "cost" in param_names
+        # Try to log a security event - the function has no event_type parameter
+        result = log_activity(
+            user_id=1,
+            model="n/a",
+            provider="n/a",
+            tokens=0,
+            cost=0.0,
+            event_type="security_violation",
+        )
+        assert result is not None
