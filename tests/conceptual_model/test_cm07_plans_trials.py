@@ -67,7 +67,7 @@ def test_new_user_gets_5_dollar_credits(mock_supabase):
 @pytest.mark.xfail(
     reason="CM spec says 3-day trial but code defaults to 14 days in start_trial_for_key"
 )
-def test_new_user_gets_14_day_trial(mock_supabase):
+def test_new_user_gets_3_day_trial(mock_supabase):
     """start_trial_for_key should default to trial_days=3 per CM spec."""
     from src.db.trials import start_trial_for_key
 
