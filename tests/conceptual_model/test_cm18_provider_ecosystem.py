@@ -83,11 +83,11 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
 
         for client_name in key_clients:
             module = importlib.import_module(f"src.services.{client_name}")
-            members = dict(
-                (name, obj)
+            members = {
+                name: obj
                 for name, obj in vars(module).items()
                 if callable(obj) and not name.startswith("_")
-            )
+            }
 
             has_request_fn = any(
                 "request" in name.lower()
