@@ -144,6 +144,7 @@ jobs:
           - e2e
           - health
           - billing
+          - conceptual_model
           - root
 
     steps:
@@ -200,25 +201,31 @@ jobs:
           # Determine test path based on category
           if [ "$CATEGORY" = "root" ]; then
             # Collect only test files directly in tests/ (not in subdirectories)
-            TEST_PATH=$(find tests/ -maxdepth 1 -name "test_*.py" -type f | sort | tr '\n' ' ')
-            if [ -z "$TEST_PATH" ]; then
-              echo "No root-level test files found — skipping"
+            mapfile -t TEST_FILES < <(find tests/ -maxdepth 1 -name "test_*.py" -type f | sort)
+            if [ "${#TEST_FILES[@]}" -eq 0 ]; then
+              echo "::warning::No root-level test files found — skipping"
               exit 0
             fi
+            TEST_PATH=("${TEST_FILES[@]}")
           else
-            TEST_PATH="tests/$CATEGORY/"
-            if [ ! -d "$TEST_PATH" ]; then
-              echo "Directory $TEST_PATH does not exist — skipping"
+            TEST_PATH=("tests/$CATEGORY/")
+            if [ ! -d "${TEST_PATH[0]}" ]; then
+              echo "::warning::Directory tests/$CATEGORY/ does not exist — skipping"
+              exit 0
+            fi
+            # Check if directory has any test files (pytest exits 5 on empty collection)
+            if ! find "${TEST_PATH[0]}" -name "test_*.py" -type f | grep -q .; then
+              echo "::warning::No test files in tests/$CATEGORY/ — skipping"
               exit 0
             fi
           fi
 
           echo "=========================================="
           echo "  Category: $CATEGORY"
-          echo "  Path:     $TEST_PATH"
+          echo "  Path:     ${TEST_PATH[*]}"
           echo "=========================================="
 
-          pytest $TEST_PATH -v --tb=short \
+          pytest "${TEST_PATH[@]}" -v --tb=short \
             -n auto \
             --timeout=30 \
             --cov=src \
@@ -295,10 +302,10 @@ jobs:
             [ -f "$f" ] || continue
             CATEGORY=$(echo "$f" | sed 's/test-output-//;s/\.txt//')
 
-            PASSED=$(grep -c "PASSED" "$f" 2>/dev/null || echo "0")
-            FAILED=$(grep -c "FAILED" "$f" 2>/dev/null || echo "0")
-            SKIPPED=$(grep -c "SKIPPED" "$f" 2>/dev/null || echo "0")
-            ERRORS=$(grep -c "ERROR" "$f" 2>/dev/null || echo "0")
+            PASSED=$(grep -cE '^tests/\S+.*PASSED' "$f" 2>/dev/null || echo "0")
+            FAILED=$(grep -cE '^tests/\S+.*FAILED' "$f" 2>/dev/null || echo "0")
+            SKIPPED=$(grep -cE '^tests/\S+.*SKIPPED' "$f" 2>/dev/null || echo "0")
+            ERRORS=$(grep -cE '^tests/\S+.*ERROR' "$f" 2>/dev/null || echo "0")
 
             if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
               STATUS="FAIL"
@@ -335,13 +342,11 @@ jobs:
           mkdir -p coverage-data
 
           # Copy and rename each .coverage file from the downloaded artifacts
-          count=1
           for artifact_dir in coverage-artifacts/coverage-*; do
             if [ -d "$artifact_dir" ] && [ -f "$artifact_dir/.coverage" ]; then
               CATEGORY=$(basename "$artifact_dir" | sed 's/coverage-//')
               echo "Found coverage for: $CATEGORY"
               cp "$artifact_dir/.coverage" "coverage-data/.coverage.$CATEGORY"
-              count=$((count + 1))
             fi
           done
 
@@ -411,7 +416,7 @@ jobs:
   build:
     name: Build Verification
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, test, coverage]  # Only run if lint and tests pass
+    needs: [lint, test, coverage]  # Build blocked by lint and test failures; coverage always runs
 
     steps:
       - name: Checkout code
