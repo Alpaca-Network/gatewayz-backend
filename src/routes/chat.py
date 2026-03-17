@@ -3538,9 +3538,17 @@ async def chat_completions(
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
 
-        pricing_info = get_model_pricing(model)
-        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-        output_cost = completion_tokens * pricing_info.get("completion", 0)
+        try:
+            pricing_info = get_model_pricing(model)
+            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+            output_cost = completion_tokens * pricing_info.get("completion", 0)
+        except ValueError:
+            logger.warning(
+                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                f"using zero cost for analytics record"
+            )
+            input_cost = 0.0
+            output_cost = 0.0
 
         background_tasks.add_task(
             save_chat_completion_request_with_cost,
@@ -4724,9 +4732,17 @@ async def unified_responses(
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
 
-        pricing_info = get_model_pricing(model)
-        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-        output_cost = completion_tokens * pricing_info.get("completion", 0)
+        try:
+            pricing_info = get_model_pricing(model)
+            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+            output_cost = completion_tokens * pricing_info.get("completion", 0)
+        except ValueError:
+            logger.warning(
+                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                f"using zero cost for analytics record"
+            )
+            input_cost = 0.0
+            output_cost = 0.0
 
         background_tasks.add_task(
             save_chat_completion_request_with_cost,

@@ -638,6 +638,27 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 f"🛡️ Blocked Aggressive IP: {client_ip} (Limit: {ip_limit} RPM){mode_indicator}"
             )
 
+            # Log security event to audit table (non-blocking)
+            try:
+                from src.db.activity import log_security_event
+
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        log_security_event,
+                        event_type="rate_limit_block",
+                        ip_address=client_ip,
+                        details={
+                            "limit_type": "ip",
+                            "limit": ip_limit,
+                            "fingerprint": fingerprint,
+                            "velocity_mode": velocity_active,
+                            "user_tier": user_tier,
+                        },
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to log security audit event: {e}")
+
             _ip_reset_ts = str(int(time.time()) + 60)
             headers = {
                 # IETF draft standard headers (RateLimit-*); RateLimit-Reset is seconds until reset
@@ -683,6 +704,27 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             logger.warning(
                 f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}"
             )
+
+            # Log security event to audit table (non-blocking)
+            try:
+                from src.db.activity import log_security_event
+
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        log_security_event,
+                        event_type="rate_limit_block",
+                        ip_address=client_ip,
+                        details={
+                            "limit_type": "fingerprint",
+                            "limit": fp_limit,
+                            "fingerprint": fingerprint,
+                            "velocity_mode": velocity_active,
+                            "user_tier": user_tier,
+                        },
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to log security audit event: {e}")
 
             _fp_reset_ts = str(int(time.time()) + 60)
             headers = {

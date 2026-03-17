@@ -507,17 +507,14 @@ class TestAutoRefund:
 class TestHighValueModelProtection:
     """CM-6.6: Premium models are blocked when only default pricing is available."""
 
-    @pytest.mark.cm_gap
-    @pytest.mark.xfail(
-        reason="ValueError caught by outer except; default pricing returned instead of blocking"
-    )
+    @pytest.mark.cm_verified
     def test_premium_model_blocked_if_pricing_is_default(self):
         """CM-6.6.1: GPT-4/Claude/Gemini should be BLOCKED when only default pricing is available.
 
-        The code raises ValueError for high-value models with no pricing, but the
-        outer except catches it and returns default pricing anyway. The test asserts
-        the INTENDED behavior (blocking), which currently fails because the function
-        returns default pricing instead.
+        get_model_pricing contains a HIGH_VALUE_MODEL_PATTERNS list and raises
+        ValueError when a matching model has no real pricing. The ValueError
+        propagates to the caller, blocking the request and preventing
+        under-billing for high-value models.
         """
         from src.services.pricing import get_model_pricing
 
@@ -528,12 +525,6 @@ class TestHighValueModelProtection:
             patch("src.services.pricing._pricing_cache", {}),
             patch("src.services.pricing._get_pricing_from_database", return_value=None),
             patch("src.services.pricing._get_pricing_from_cache_fallback", return_value=None),
-            patch("src.services.pricing._track_default_pricing_usage"),
         ):
-            result = get_model_pricing("openai/gpt-4-turbo")
-
-        # INTENDED behavior: high-value model with no pricing should be blocked
-        # ACTUAL behavior: ValueError is caught, default pricing returned (source="default")
-        assert (
-            result["found"] is True
-        ), "High-value model should not fall through to default pricing"
+            with pytest.raises(ValueError, match="Pricing data not available"):
+                get_model_pricing("openai/gpt-4-turbo")

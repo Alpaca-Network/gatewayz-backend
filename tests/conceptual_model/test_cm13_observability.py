@@ -141,23 +141,44 @@ class TestCM1307OpentelemetryTraceCreatedPerRequest:
 
 
 # ---------------------------------------------------------------------------
-# CM-13.8  Audit log on security violation (activity logging function exists)
+# CM-13.8  Audit log on security violation (dedicated security audit logger)
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_gap
-@pytest.mark.xfail(reason="log_activity is inference logger, no security audit path exists")
+@pytest.mark.cm_verified
 class TestCM1308AuditLogOnSecurityViolation:
-    def test_audit_log_on_security_violation(self, mock_supabase):
-        """log_activity should accept a security violation event type,
-        but it only supports inference logging (model/provider/tokens/cost)."""
-        from src.db.activity import log_activity
+    def test_audit_log_on_security_violation(self):
+        """log_security_event writes a row to security_audit_log with the
+        correct event_type, ip_address, and details payload."""
+        from src.db.activity import log_security_event
 
-        # Try to log a security event - the function has no event_type parameter
-        result = log_activity(
-            user_id=1,
-            model="n/a",
-            provider="n/a",
-            tokens=0,
-            cost=0.0,
-            event_type="security_violation",
-        )
+        fake_row = {
+            "id": 1,
+            "event_type": "rate_limit_block",
+            "ip_address": "192.168.1.100",
+            "user_id": None,
+            "api_key_id": None,
+            "details": {"limit_type": "ip", "limit": 300},
+            "created_at": "2026-03-16T00:00:00+00:00",
+        }
+
+        mock_execute = MagicMock(return_value=MagicMock(data=[fake_row]))
+        mock_insert = MagicMock(return_value=MagicMock(execute=mock_execute))
+        mock_table = MagicMock(return_value=MagicMock(insert=mock_insert))
+        mock_client = MagicMock(table=mock_table)
+
+        with patch("src.db.activity.get_supabase_client", return_value=mock_client):
+            result = log_security_event(
+                event_type="rate_limit_block",
+                ip_address="192.168.1.100",
+                details={"limit_type": "ip", "limit": 300},
+            )
+
         assert result is not None
+        assert result["event_type"] == "rate_limit_block"
+        assert result["ip_address"] == "192.168.1.100"
+
+        # Verify the insert was called with expected payload
+        mock_table.assert_called_once_with("security_audit_log")
+        insert_payload = mock_insert.call_args[0][0]
+        assert insert_payload["event_type"] == "rate_limit_block"
+        assert insert_payload["ip_address"] == "192.168.1.100"
+        assert insert_payload["details"] == {"limit_type": "ip", "limit": 300}

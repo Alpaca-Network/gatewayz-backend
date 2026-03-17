@@ -853,6 +853,8 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         }
         return default_pricing
 
+    except ValueError:
+        raise  # Re-raise pricing guard — do NOT fall back to default
     except Exception as e:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
         _track_default_pricing_usage(model_id, error=str(e))
@@ -1543,9 +1545,8 @@ def get_pricing_coverage_report(model_ids: list[str]) -> dict[str, Any]:
             if not pricing.get("found", False) or pricing.get("source") == "default":
                 uncovered.append(model_id)
         except Exception:
-            # get_model_pricing catches ValueError internally for high-value
-            # models and returns default pricing instead. Any exception here
-            # means an unexpected failure, so treat the model as uncovered.
+            # ValueError is raised for high-value models with missing pricing.
+            # Any exception here (including ValueError) means the model is uncovered.
             uncovered.append(model_id)
 
     total = len(model_ids)

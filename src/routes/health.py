@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from src.config.config import Config
 from src.config.supabase_config import get_initialization_status, supabase
 from src.models.health_models import (
     HealthCheckRequest,
@@ -121,6 +122,7 @@ async def health_check():
     response = {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
+        "version": Config.APP_VERSION,
     }
 
     # Add database status if there are issues
