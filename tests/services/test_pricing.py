@@ -156,26 +156,8 @@ def test_get_model_pricing_handles_multiple_provider_suffixes(monkeypatch, mod):
 # -------------------- calculate_cost --------------------
 
 
-def test_calculate_cost_happy(monkeypatch, mod):
-    # Force a specific pricing (pricing is per token)
-    # $0.00001 per prompt token, $0.00002 per completion token
-    monkeypatch.setattr(
-        mod,
-        "get_model_pricing",
-        lambda model_id: {"prompt": 0.00001, "completion": 0.00002, "found": True},
-    )
-    cost = mod.calculate_cost("any/model", prompt_tokens=1000, completion_tokens=500)
-    # 1000 * 0.00001 + 500 * 0.00002 = 0.01 + 0.01 = 0.02
-    assert math.isclose(cost, 0.02)
-
-
-def test_calculate_cost_zero_tokens(monkeypatch, mod):
-    monkeypatch.setattr(
-        mod,
-        "get_model_pricing",
-        lambda _: {"prompt": 0.00003, "completion": 0.00006, "found": True},
-    )
-    assert mod.calculate_cost("m", 0, 0) == 0.0
+# Note: test_calculate_cost_happy and test_calculate_cost_zero_tokens moved to
+# tests/conceptual_model/test_cm06_credit_system.py (CM-6.1.1 and CM-6.1.2).
 
 
 def test_calculate_cost_uses_fallback_on_exception(monkeypatch, mod):

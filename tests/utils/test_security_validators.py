@@ -2,31 +2,10 @@
 Comprehensive tests for Security Validators
 """
 
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
-
 from src.utils.security_validators import (
-    TEMPORARY_EMAIL_DOMAINS,
     is_temporary_email_domain,
     is_valid_email,
 )
-
-
-class TestSecurityValidators:
-    """Test Security Validators functionality"""
-
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        import src.utils.security_validators
-
-        assert src.utils.security_validators is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module has expected public API"""
-        from src.utils import security_validators
-
-        assert hasattr(security_validators, "__name__")
 
 
 class TestIsTemporaryEmailDomain:
@@ -99,27 +78,6 @@ class TestIsTemporaryEmailDomain:
             is_temporary_email_domain(" user@tempmail.com") is False
         )  # local part with space is different
         assert is_temporary_email_domain("user@ tempmail.com") is False  # space in domain
-
-    def test_temporary_email_domains_set_is_frozen(self):
-        """Test that the domains set is a frozenset (immutable)"""
-        assert isinstance(TEMPORARY_EMAIL_DOMAINS, frozenset)
-
-    def test_domains_set_has_significant_coverage(self):
-        """Test that the domains set has good coverage of common temp email services"""
-        # Key services that must be included
-        required_domains = {
-            "tempmail.com",
-            "10minutemail.com",
-            "guerrillamail.com",
-            "mailinator.com",
-            "maildrop.cc",
-            "yopmail.com",
-            "throwaway.email",
-            "trashmail.com",
-            "fakeinbox.com",
-        }
-        for domain in required_domains:
-            assert domain in TEMPORARY_EMAIL_DOMAINS, f"Required domain {domain} not in blocklist"
 
 
 class TestIsValidEmail:

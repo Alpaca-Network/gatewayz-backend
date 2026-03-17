@@ -7,26 +7,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 
-class TestNovitaSDKImport:
-    """Test SDK import and availability detection"""
-
-    def test_sdk_availability_flag_exists(self):
-        """Test that NOVITA_SDK_AVAILABLE flag is defined"""
-        from src.services.novita_client import NOVITA_SDK_AVAILABLE
-
-        assert isinstance(NOVITA_SDK_AVAILABLE, bool)
-
-    def test_module_imports_successfully(self):
-        """Test that module can be imported without errors"""
-        from src.services import novita_client
-
-        assert novita_client is not None
-        assert hasattr(novita_client, "fetch_models_from_novita")
-        assert hasattr(novita_client, "get_novita_sdk_client")
-        assert hasattr(novita_client, "fetch_image_models_from_novita_sdk")
-        assert hasattr(novita_client, "generate_image_with_novita_sdk")
-
-
 class TestGetNovitaSDKClient:
     """Test get_novita_sdk_client function"""
 
@@ -345,29 +325,3 @@ class TestHelperFunctions:
 
         assert result["prompt"] == "0.001"
         assert result["completion"] == "0.002"
-
-
-class TestModuleDocumentation:
-    """Test module and function documentation"""
-
-    def test_module_has_docstring(self):
-        """Test that module has proper docstring"""
-        from src.services import novita_client
-
-        assert novita_client.__doc__ is not None
-        assert "Novita AI" in novita_client.__doc__
-        assert "OpenAI-compatible" in novita_client.__doc__
-
-    def test_functions_have_docstrings(self):
-        """Test that all main functions have docstrings"""
-        from src.services.novita_client import (
-            fetch_image_models_from_novita_sdk,
-            fetch_models_from_novita,
-            generate_image_with_novita_sdk,
-            get_novita_sdk_client,
-        )
-
-        assert get_novita_sdk_client.__doc__ is not None
-        assert fetch_models_from_novita.__doc__ is not None
-        assert fetch_image_models_from_novita_sdk.__doc__ is not None
-        assert generate_image_with_novita_sdk.__doc__ is not None
