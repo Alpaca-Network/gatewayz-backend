@@ -177,15 +177,14 @@ def test_api_key_format_gw_env_prefix():
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 def test_auth_info_priority_email_first():
-    """When user has email + Google + phone linked accounts, email is selected first.
+    """When user has email + Google + phone linked accounts, email is resolved first.
 
-    The auth route iterates linked_accounts and sets email from the first
-    email-type account. Once email is set, subsequent accounts do not override it.
-    Priority: email > google_oauth > phone.
+    _resolve_account_email returns the first valid email from an account's
+    email/address fields. The email-type account returns its email, and
+    when processed first it takes priority over Google/phone accounts.
     """
     from src.routes.auth import _resolve_account_email
 
-    # Simulate linked accounts in the order they appear
     email_account = SimpleNamespace(
         type="email", email="user@example.com", address=None, phone_number=None, name=None
     )
@@ -200,26 +199,25 @@ def test_auth_info_priority_email_first():
         type="phone", email=None, address=None, phone_number="+1234567890", name=None
     )
 
-    # The auth route processes accounts in order and picks email first
-    # Simulate the priority logic from privy_auth_callback
-    email = None
-    auth_method = "email"  # default
+    # Call the actual function on each account type
+    email_result = _resolve_account_email(email_account)
+    google_result = _resolve_account_email(google_account)
+    phone_result = _resolve_account_email(phone_account)
 
+    # Email account resolves to its email
+    assert email_result == "user@example.com"
+    # Google account resolves to its email
+    assert google_result == "user@gmail.com"
+    # Phone account has no email
+    assert phone_result is None
+
+    # When iterating [email, google, phone], the first non-None email wins → email priority
     accounts = [email_account, google_account, phone_account]
-    for account in accounts:
-        account_email = _resolve_account_email(account)
-        if account.type == "phone" and account.phone_number:
-            if not email:
-                auth_method = "phone"
-        elif account.type == "email" and account_email and not email:
-            email = account_email
-            auth_method = "email"
-        elif account.type == "google_oauth" and account_email and not email:
-            email = account_email
-            auth_method = "google"
-
-    assert email == "user@example.com", f"Email account should take priority, got {email}"
-    assert auth_method == "email"
+    resolved = next(
+        (_resolve_account_email(a) for a in accounts if _resolve_account_email(a)),
+        None,
+    )
+    assert resolved == "user@example.com", f"Email account should take priority, got {resolved}"
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +225,7 @@ def test_auth_info_priority_email_first():
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 def test_auth_info_priority_google_over_phone():
-    """When user has Google + phone (no email account), Google email is selected."""
+    """When user has Google + phone (no email account), Google email is resolved."""
     from src.routes.auth import _resolve_account_email
 
     google_account = SimpleNamespace(
@@ -241,21 +239,20 @@ def test_auth_info_priority_google_over_phone():
         type="phone", email=None, address=None, phone_number="+1234567890", name=None
     )
 
-    email = None
-    auth_method = "email"  # default
+    # Call the actual function
+    google_result = _resolve_account_email(google_account)
+    phone_result = _resolve_account_email(phone_account)
 
+    assert google_result == "user@gmail.com"
+    assert phone_result is None
+
+    # When iterating [google, phone], first non-None email wins → google
     accounts = [google_account, phone_account]
-    for account in accounts:
-        account_email = _resolve_account_email(account)
-        if account.type == "phone" and account.phone_number:
-            if not email:
-                auth_method = "phone"
-        elif account.type == "google_oauth" and account_email and not email:
-            email = account_email
-            auth_method = "google"
-
-    assert email == "user@gmail.com", f"Google email should be selected, got {email}"
-    assert auth_method == "google"
+    resolved = next(
+        (_resolve_account_email(a) for a in accounts if _resolve_account_email(a)),
+        None,
+    )
+    assert resolved == "user@gmail.com", f"Google email should be selected, got {resolved}"
 
 
 # ---------------------------------------------------------------------------

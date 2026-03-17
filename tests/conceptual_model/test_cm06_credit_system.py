@@ -206,31 +206,65 @@ class TestCreditDeductionOrder:
         assert params["p_from_allowance"] == 2.0
         assert params["p_from_purchased"] == 3.0
 
-    def test_purchased_credits_never_expire(self):
-        """CM-6.2.3: No TTL or expiration logic is applied to purchased_credits."""
-        # The deduct_credits function reads purchased_credits from DB without any
-        # expiration check.  This test verifies the code path does not filter by date.
-        import inspect
+    def test_purchased_credits_never_expire(self, mock_supabase):
+        """CM-6.2.3: Purchased credits are deductible regardless of time elapsed."""
+        from src.db.users import deduct_credits
 
-        from src.db import users
+        # Simulate a user whose purchased_credits have been sitting for a long time
+        # (no expiration filter should prevent deduction)
+        user_lookup = self._make_user_lookup(0.0, 50.0)  # only purchased, no allowance
+        key_lookup = MagicMock(data=[{"user_id": 42}])
 
-        source = inspect.getsource(users.deduct_credits)
-        # There should be no expiration/TTL logic on purchased_credits
-        assert "expir" not in source.lower()
-        assert "ttl" not in source.lower()
+        table_mock = mock_supabase.table.return_value
+        table_mock.execute.side_effect = [key_lookup, user_lookup]
 
-    def test_subscription_allowance_does_not_roll_over(self):
-        """CM-6.2.4: subscription_allowance is reset on renewal; unused portion is lost.
+        rpc_result = MagicMock()
+        rpc_result.data = {
+            "success": True,
+            "transaction_id": "tx-old",
+            "new_allowance": 0.0,
+            "new_purchased": 45.0,
+            "new_balance": 45.0,
+        }
+        mock_supabase.rpc.return_value.execute.return_value = rpc_result
 
-        The SUBSCRIPTION_RENEWAL transaction type exists in TransactionType,
-        and the renewal flow resets allowance (not adds to it).
-        """
-        from src.db.credit_transactions import TransactionType
+        with (
+            patch("src.db.plans.is_admin_tier_user", return_value=False),
+            patch("src.services.daily_usage_limiter.enforce_daily_usage_limit"),
+            patch("src.db.credit_transactions.get_transaction_by_request_id", return_value=None),
+        ):
+            deduct_credits("test-api-key", 5.0, "test", request_id="req-old")
 
-        # Verify the renewal type exists
-        assert TransactionType.SUBSCRIPTION_RENEWAL == "subscription_renewal"
-        # And cancellation forfeits allowance
-        assert TransactionType.SUBSCRIPTION_CANCELLATION == "subscription_cancellation"
+        # Verify purchased credits were used (no expiration blocked the deduction)
+        rpc_call = mock_supabase.rpc.call_args
+        params = rpc_call[0][1] if rpc_call[0] else rpc_call[1]
+        assert params["p_from_allowance"] == 0.0
+        assert params["p_from_purchased"] == 5.0
+
+    def test_subscription_allowance_does_not_roll_over(self, mock_supabase):
+        """CM-6.2.4: subscription_allowance is reset on renewal; unused portion is lost."""
+        from src.db.users import reset_subscription_allowance
+
+        # User has $8 remaining allowance + $5 purchased
+        user_data = MagicMock()
+        user_data.data = [{"subscription_allowance": 8.0, "purchased_credits": 5.0}]
+
+        update_result = MagicMock()
+        update_result.data = [{"id": 42}]
+
+        table_mock = mock_supabase.table.return_value
+        table_mock.execute.side_effect = [user_data, update_result]
+
+        # Mock log_credit_transaction to avoid DB call
+        with patch("src.db.credit_transactions.log_credit_transaction"):
+            result = reset_subscription_allowance(user_id=42, allowance_amount=10.0, tier="pro")
+
+        assert result is True
+
+        # Verify the update call set allowance to new amount (not old + new)
+        update_call = table_mock.update.call_args
+        update_data = update_call[0][0]
+        assert update_data["subscription_allowance"] == 10.0  # replaced, not 18.0
 
 
 # ---------------------------------------------------------------------------
@@ -470,29 +504,22 @@ class TestAutoRefund:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.cm_verified
 class TestHighValueModelProtection:
     """CM-6.6: Premium models are blocked when only default pricing is available."""
 
+    @pytest.mark.cm_gap
+    @pytest.mark.xfail(
+        reason="ValueError caught by outer except; default pricing returned instead of blocking"
+    )
     def test_premium_model_blocked_if_pricing_is_default(self):
-        """CM-6.6.1: GPT-4/Claude/Gemini are blocked when only default pricing is available.
+        """CM-6.6.1: GPT-4/Claude/Gemini should be BLOCKED when only default pricing is available.
 
-        get_model_pricing contains a HIGH_VALUE_MODEL_PATTERNS list and raises
-        ValueError when a matching model has no real pricing. Although the
-        outer except catches it (returning default pricing), the ValueError
-        is still raised internally -- proving the protection logic exists and
-        fires for premium models. We verify by calling get_model_pricing with
-        all pricing sources returning None and confirming the ValueError IS
-        raised inside the function (captured via a side-effect spy on
-        _track_default_pricing_usage which receives the error string).
+        The code raises ValueError for high-value models with no pricing, but the
+        outer except catches it and returns default pricing anyway. The test asserts
+        the INTENDED behavior (blocking), which currently fails because the function
+        returns default pricing instead.
         """
         from src.services.pricing import get_model_pricing
-
-        captured_errors = []
-
-        def spy_track(model_id, error=None):
-            if error:
-                captured_errors.append(error)
 
         with (
             patch("src.services.models._is_building_catalog", return_value=False),
@@ -501,13 +528,12 @@ class TestHighValueModelProtection:
             patch("src.services.pricing._pricing_cache", {}),
             patch("src.services.pricing._get_pricing_from_database", return_value=None),
             patch("src.services.pricing._get_pricing_from_cache_fallback", return_value=None),
-            patch("src.services.pricing._track_default_pricing_usage", side_effect=spy_track),
+            patch("src.services.pricing._track_default_pricing_usage"),
         ):
             result = get_model_pricing("openai/gpt-4-turbo")
 
-        # The function catches the ValueError and returns default pricing...
-        assert result["source"] == "default"
-        assert result["found"] is False
-        # ...but the high-value protection DID fire (error was logged)
-        assert len(captured_errors) == 1
-        assert "Pricing data not available" in captured_errors[0]
+        # INTENDED behavior: high-value model with no pricing should be blocked
+        # ACTUAL behavior: ValueError is caught, default pricing returned (source="default")
+        assert (
+            result["found"] is True
+        ), "High-value model should not fall through to default pricing"

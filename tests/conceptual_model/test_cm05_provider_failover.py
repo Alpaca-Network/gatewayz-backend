@@ -11,6 +11,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 
 from src.services.circuit_breaker import (
     CircuitBreaker,
@@ -63,12 +64,14 @@ class TestFailoverChain:
 
     @pytest.mark.cm_verified
     def test_failover_chain_has_14_providers(self):
-        """CM-5.1.1: FALLBACK_PROVIDER_PRIORITY contains exactly 14 providers."""
-        assert len(FALLBACK_PROVIDER_PRIORITY) == 14
+        """CM-5.1.1: build_provider_failover_chain produces a chain with 14 providers."""
+        chain = build_provider_failover_chain("openrouter")
+        assert len(chain) == 14
 
     @pytest.mark.cm_verified
     def test_failover_chain_ordered_by_reliability(self):
-        """CM-5.1.2: Chain order reflects the documented reliability ranking."""
+        """CM-5.1.2: build_provider_failover_chain preserves reliability ranking after initial."""
+        chain = build_provider_failover_chain("onerouter")
         expected_order = (
             "onerouter",
             "openai",
@@ -85,56 +88,56 @@ class TestFailoverChain:
             "fireworks",
             "together",
         )
-        assert FALLBACK_PROVIDER_PRIORITY == expected_order
+        assert tuple(chain) == expected_order
 
     # --- Status codes that SHOULD trigger failover ---
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_502(self):
-        """CM-5.1.3: 502 is in FAILOVER_STATUS_CODES."""
-        assert 502 in FAILOVER_STATUS_CODES
+        """CM-5.1.3: should_failover returns True for 502."""
+        assert should_failover(HTTPException(status_code=502)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_503(self):
-        """CM-5.1.4: 503 is in FAILOVER_STATUS_CODES."""
-        assert 503 in FAILOVER_STATUS_CODES
+        """CM-5.1.4: should_failover returns True for 503."""
+        assert should_failover(HTTPException(status_code=503)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_504(self):
-        """CM-5.1.5: 504 is in FAILOVER_STATUS_CODES."""
-        assert 504 in FAILOVER_STATUS_CODES
+        """CM-5.1.5: should_failover returns True for 504."""
+        assert should_failover(HTTPException(status_code=504)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_401(self):
-        """CM-5.1.6: 401 is in FAILOVER_STATUS_CODES."""
-        assert 401 in FAILOVER_STATUS_CODES
+        """CM-5.1.6: should_failover returns True for 401."""
+        assert should_failover(HTTPException(status_code=401)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_402(self):
-        """CM-5.1.7: 402 is in FAILOVER_STATUS_CODES."""
-        assert 402 in FAILOVER_STATUS_CODES
+        """CM-5.1.7: should_failover returns True for 402."""
+        assert should_failover(HTTPException(status_code=402)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_403(self):
-        """CM-5.1.8: 403 is in FAILOVER_STATUS_CODES."""
-        assert 403 in FAILOVER_STATUS_CODES
+        """CM-5.1.8: should_failover returns True for 403."""
+        assert should_failover(HTTPException(status_code=403)) is True
 
     @pytest.mark.cm_verified
     def test_failover_retries_on_404(self):
-        """CM-5.1.9: 404 is in FAILOVER_STATUS_CODES."""
-        assert 404 in FAILOVER_STATUS_CODES
+        """CM-5.1.9: should_failover returns True for 404."""
+        assert should_failover(HTTPException(status_code=404)) is True
 
     # --- Status codes that should NOT trigger failover ---
 
     @pytest.mark.cm_verified
     def test_failover_does_NOT_trigger_on_400(self):
-        """CM-5.1.10: 400 is NOT in FAILOVER_STATUS_CODES."""
-        assert 400 not in FAILOVER_STATUS_CODES
+        """CM-5.1.10: should_failover returns False for 400."""
+        assert should_failover(HTTPException(status_code=400)) is False
 
     @pytest.mark.cm_verified
     def test_failover_does_NOT_trigger_on_429(self):
-        """CM-5.1.11: 429 is NOT in FAILOVER_STATUS_CODES."""
-        assert 429 not in FAILOVER_STATUS_CODES
+        """CM-5.1.11: should_failover returns False for 429."""
+        assert should_failover(HTTPException(status_code=429)) is False
 
     @pytest.mark.cm_verified
     def test_failover_transparent_to_caller(self):
@@ -240,16 +243,25 @@ class TestCircuitBreaker:
         with pytest.raises(CircuitBreakerError):
             breaker.call(lambda: "should not execute")
 
-    @pytest.mark.cm_verified
+    @pytest.mark.cm_gap
+    @pytest.mark.xfail(reason="CM spec says 5min cooldown but code uses 60s")
     @patch("src.services.circuit_breaker.get_redis_client", return_value=None)
     def test_circuit_breaker_recovery_after_60_seconds(self, _mock_redis):
-        """CM-5.3.5: Circuit breaker recovery timeout is 60 seconds."""
+        """CM-5.3.5: After timeout_seconds elapse, OPEN transitions to HALF_OPEN."""
         breaker = CircuitBreaker("provider-e")
         _fail_n(breaker, 5)
         assert breaker._state == CircuitState.OPEN
 
-        # Assert the 60s timeout matching code and spec
-        assert breaker.config.timeout_seconds == 60
+        # Advance time past the 60s timeout by manipulating _opened_at
+        breaker._opened_at = time.time() - 61
+
+        # The next call attempt should transition to HALF_OPEN and succeed
+        result = breaker.call(lambda: "recovered")
+        assert result == "recovered"
+        assert breaker._state == CircuitState.HALF_OPEN
+
+        # CM spec says cooldown should be 5 minutes (300s), but code uses 60s
+        assert breaker.config.timeout_seconds == 300
 
     @pytest.mark.cm_verified
     @patch("src.services.circuit_breaker.get_redis_client", return_value=None)

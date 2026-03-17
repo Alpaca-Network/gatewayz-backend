@@ -40,13 +40,30 @@ def test_alias_gpt4o_resolves_to_openai():
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
 def test_at_least_120_aliases_defined():
-    # The alias dict plus the provider overrides dict together cover 120+
-    # model ID remappings.  Both participate in the resolution pipeline.
+    """CM-3.3: At least 120 aliases are defined and each resolves via apply_model_alias.
+
+    Instead of just checking dict length, call apply_model_alias on a sample
+    of aliases and verify each resolves to a different (canonical) model ID.
+    """
+    import random
+
     total = len(MODEL_ID_ALIASES) + len(MODEL_PROVIDER_OVERRIDES)
     assert total >= 120, (
         f"Expected at least 120 alias/override entries, found {total} "
         f"(aliases={len(MODEL_ID_ALIASES)}, overrides={len(MODEL_PROVIDER_OVERRIDES)})"
     )
+
+    # Sample up to 20 aliases and verify each one resolves via apply_model_alias
+    alias_keys = list(MODEL_ID_ALIASES.keys())
+    sample_size = min(20, len(alias_keys))
+    sample = random.sample(alias_keys, sample_size)
+
+    for alias in sample:
+        result = apply_model_alias(alias)
+        expected = MODEL_ID_ALIASES[alias]
+        assert (
+            result == expected
+        ), f"apply_model_alias('{alias}') returned '{result}', expected '{expected}'"
 
 
 # ---------------------------------------------------------------------------

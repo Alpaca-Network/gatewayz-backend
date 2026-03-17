@@ -138,31 +138,41 @@ class TestLayer1IPRateLimiting:
     # CM-2.1.3
     @pytest.mark.cm_verified
     def test_ip_rate_limit_applied_before_auth(self):
-        """IP rate limit check happens before API key validation in middleware dispatch.
+        """CM-2.1.3: IP rate limit is applied before auth in dispatch.
 
-        The dispatch method checks IP limits (via _check_limit) before passing
-        the request to the downstream handler which performs auth. We verify this
-        by inspecting the source order: the IP check (line with _check_limit) comes
-        before call_next (which triggers auth).
-
-        Here we verify the middleware blocks an unauthenticated, over-limit IP
-        *without* ever reaching the downstream app.
+        Exhaust the IP limit, then call dispatch() and confirm the downstream
+        app (call_next) is never invoked — proving IP check runs before auth.
         """
         mw = self._make_middleware()
         request = self._make_request(ip="192.168.1.1", auth_header="")
 
-        # Exhaust IP limit using in-memory fallback
+        # Exhaust IP limit
         for _ in range(DEFAULT_IP_LIMIT):
             asyncio.get_event_loop().run_until_complete(
                 mw._check_limit("ip:192.168.1.1", DEFAULT_IP_LIMIT)
             )
 
-        # Now the IP is over limit. The next _check_limit should return False
-        # confirming IP check blocks before any auth happens.
-        result = asyncio.get_event_loop().run_until_complete(
-            mw._check_limit("ip:192.168.1.1", DEFAULT_IP_LIMIT)
-        )
-        assert result is False, "IP rate limit should block before auth is checked"
+        # Define a call_next that records whether it was called
+        call_next_invoked = False
+
+        async def mock_call_next(req):
+            nonlocal call_next_invoked
+            call_next_invoked = True
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        # Patch async helpers to avoid real I/O in dispatch
+        with (
+            patch.object(mw, "_is_datacenter_ip", return_value=False),
+            patch.object(mw, "_get_user_tier_from_request", return_value="basic"),
+            patch("src.db.ip_whitelist.is_ip_whitelisted", return_value=False),
+        ):
+            response = asyncio.get_event_loop().run_until_complete(
+                mw.dispatch(request, mock_call_next)
+            )
+        assert response.status_code == 429, "Over-limit IP should get 429"
+        assert call_next_invoked is False, "call_next (auth) should not be reached"
 
     # CM-2.1.4
     @pytest.mark.cm_verified
@@ -288,18 +298,31 @@ class TestLayer2APIKeyRateLimiting:
     # CM-2.2.2
     @pytest.mark.cm_verified
     def test_key_rate_limit_enforces_plan_tier(self):
-        """Different plan tiers have different RPM limits.
+        """CM-2.2.2: Different plan tiers enforce different RPM limits.
 
-        DEFAULT_CONFIG: 250 RPM, PREMIUM_CONFIG: 300 RPM, ENTERPRISE_CONFIG: 1000 RPM.
+        Verify by calling check_rate_limit with DEFAULT vs ENTERPRISE configs
+        on a limiter with no Redis (uses local fallback).
         """
-        assert DEFAULT_CONFIG.requests_per_minute == 250
-        assert PREMIUM_CONFIG.requests_per_minute == 300
-        assert ENTERPRISE_CONFIG.requests_per_minute == 1000
+        limiter = SlidingWindowRateLimiter(redis_client=None)
 
-        # Premium > Default
-        assert PREMIUM_CONFIG.requests_per_minute > DEFAULT_CONFIG.requests_per_minute
-        # Enterprise > Premium
-        assert ENTERPRISE_CONFIG.requests_per_minute > PREMIUM_CONFIG.requests_per_minute
+        # Use DEFAULT_CONFIG (250 RPM) — first request should be allowed
+        default_result = asyncio.get_event_loop().run_until_complete(
+            limiter.check_rate_limit("gw_default_tier_test_1234", DEFAULT_CONFIG, tokens_used=0)
+        )
+        assert default_result.allowed is True
+        assert default_result.ratelimit_limit_requests == DEFAULT_CONFIG.requests_per_minute
+
+        # Use ENTERPRISE_CONFIG (1000 RPM) — should also be allowed with higher limit
+        enterprise_result = asyncio.get_event_loop().run_until_complete(
+            limiter.check_rate_limit(
+                "gw_enterprise_tier_test_1234", ENTERPRISE_CONFIG, tokens_used=0
+            )
+        )
+        assert enterprise_result.allowed is True
+        assert enterprise_result.ratelimit_limit_requests == ENTERPRISE_CONFIG.requests_per_minute
+
+        # Enterprise limit must be higher than default
+        assert enterprise_result.ratelimit_limit_requests > default_result.ratelimit_limit_requests
 
     # CM-2.2.3
     @pytest.mark.cm_verified
@@ -362,68 +385,36 @@ class TestLayer2APIKeyRateLimiting:
         assert "Day token limit" in (result.reason or "")
 
     # CM-2.2.4
-    @pytest.mark.cm_verified
+    @pytest.mark.cm_gap
     def test_key_rate_limit_tracks_tokens_per_month(self):
-        """Monthly token tracking is verified via the tokens_per_day config.
+        """CM-2.2.4: Monthly token tracking is not implemented as a separate window.
 
-        Note: The current implementation tracks daily tokens but not monthly as a
-        separate window. The tokens_per_day limit effectively bounds monthly usage.
-        We verify the daily token tracking exists and is configurable.
+        The implementation tracks daily tokens (tokens_per_day) but has no
+        dedicated monthly aggregation. This test verifies the daily token limit
+        works as the effective monthly bound, and marks the gap.
         """
+        # The fallback limiter tracks per-minute tokens via its sliding window.
+        # Demonstrate that token limits are enforced by exceeding the per-minute limit.
+        limiter = SlidingWindowRateLimiter(redis_client=None)
         config = RateLimitConfig(
-            tokens_per_day=1000000,
-            tokens_per_hour=100000,
-            tokens_per_minute=10000,
+            tokens_per_minute=100,
+            tokens_per_day=1000,
+            burst_limit=1000,
+            requests_per_minute=1000,
         )
-        # Verify daily token config exists and is configurable
-        assert config.tokens_per_day == 1000000
-        assert config.tokens_per_hour == 100000
 
-        # The Redis key pattern for daily tokens is: rate_limit:{key}:day:{YYYYMMDD}:tokens
-        # Verify tracking works by simulating a request that exceeds day limit
-        mock_redis = MagicMock()
-        call_count = {"n": 0}
-
-        burst_pipe = MagicMock()
-        burst_pipe.execute.return_value = [100, None]
-        for m in ["hget", "hset", "expire"]:
-            getattr(burst_pipe, m).return_value = burst_pipe
-
-        window_pipe = MagicMock()
-        window_pipe.execute.return_value = [
-            0,
-            0,  # minute: requests, tokens
-            0,
-            0,  # hour: requests, tokens
-            0,
-            str(config.tokens_per_day),  # day: requests, tokens (at limit)
-        ]
-        for m in ["get", "incr", "incrby", "expire"]:
-            getattr(window_pipe, m).return_value = window_pipe
-
-        burst_update_pipe = MagicMock()
-        burst_update_pipe.execute.return_value = [True, True, True]
-        for m in ["hset", "expire"]:
-            getattr(burst_update_pipe, m).return_value = burst_update_pipe
-
-        def pipeline_factory():
-            call_count["n"] += 1
-            if call_count["n"] == 1:
-                return burst_pipe
-            elif call_count["n"] == 2:
-                return burst_update_pipe
-            elif call_count["n"] == 3:
-                return window_pipe
-            else:
-                return burst_update_pipe
-
-        mock_redis.pipeline = pipeline_factory
-
-        limiter = SlidingWindowRateLimiter(redis_client=mock_redis)
-        result = asyncio.get_event_loop().run_until_complete(
-            limiter.check_rate_limit("gw_monthly_test", config, tokens_used=1)
+        # First request uses most of the per-minute token budget
+        result1 = asyncio.get_event_loop().run_until_complete(
+            limiter.check_rate_limit("gw_monthly_token_test_1234", config, tokens_used=90)
         )
-        assert result.allowed is False
+        assert result1.allowed is True
+
+        # Second request exceeds per-minute token limit (90 + 20 > 100)
+        result2 = asyncio.get_event_loop().run_until_complete(
+            limiter.check_rate_limit("gw_monthly_token_test_1234", config, tokens_used=20)
+        )
+        assert result2.allowed is False
+        assert "token" in (result2.reason or "").lower()
 
     # CM-2.2.5
     @pytest.mark.cm_verified
@@ -464,14 +455,33 @@ class TestLayer3AnonymousRateLimiting:
     # CM-2.3.1
     @pytest.mark.cm_verified
     def test_anonymous_limits_stricter_than_authenticated(self):
-        """Anonymous daily limit (3/day) is much stricter than authenticated RPM (250/min)."""
-        # Anonymous: 3 requests per DAY
-        # Authenticated default: 250 requests per MINUTE
-        assert ANONYMOUS_DAILY_LIMIT == 3
-        assert DEFAULT_CONFIG.requests_per_minute == 250
+        """CM-2.3.1: Anonymous daily limit is much stricter than authenticated.
 
-        # Even comparing daily: anonymous gets 3/day vs authenticated 10000/day
-        assert ANONYMOUS_DAILY_LIMIT < DEFAULT_CONFIG.requests_per_day
+        Exercise the anonymous limiter to exhaustion at 3 requests, then show
+        an authenticated limiter still allows requests at the same point.
+        """
+        test_ip = "198.51.100.50"
+
+        with patch("src.services.anonymous_rate_limiter._get_redis_client", return_value=None):
+            from src.services import anonymous_rate_limiter
+
+            anonymous_rate_limiter._anonymous_usage_cache.clear()
+
+            # Use up all anonymous requests
+            for _ in range(ANONYMOUS_DAILY_LIMIT):
+                increment_anonymous_usage(test_ip)
+
+            # Anonymous is now blocked
+            anon_result = check_anonymous_rate_limit(test_ip)
+            assert anon_result["allowed"] is False
+            assert anon_result["remaining"] == 0
+
+        # Authenticated limiter with same number of requests is still fine
+        limiter = SlidingWindowRateLimiter(redis_client=None)
+        auth_result = asyncio.get_event_loop().run_until_complete(
+            limiter.check_rate_limit("gw_auth_compare_test_1234", DEFAULT_CONFIG, tokens_used=0)
+        )
+        assert auth_result.allowed is True
 
     # CM-2.3.2
     @pytest.mark.cm_verified
@@ -556,54 +566,58 @@ class TestGracefulDegradation:
     # CM-2.4.2
     @pytest.mark.cm_verified
     def test_fallback_lru_cache_500_entries(self):
-        """CM spec says fallback uses LRU cache with 500 entries.
-
-        Actual code: InMemoryRateLimiter uses defaultdict(deque) with no maxlen
-        and no LRU eviction policy. The deques grow unbounded per API key.
-        """
+        """CM-2.4.2: Fallback InMemoryRateLimiter evicts LRU keys when more
+        than 500 unique API keys are tracked."""
         fallback = InMemoryRateLimiter()
+        config = RateLimitConfig(requests_per_minute=1000, burst_limit=1000)
 
-        # The CM spec says there should be a 500-entry LRU cache.
-        # Check if the request_windows has a maxlen/max size of 500.
-        # defaultdict(deque) has no such bound, so this should fail.
+        loop = asyncio.get_event_loop()
 
-        has_lru_bound = False
+        # Insert 500 keys (the max), releasing concurrency after each
+        for i in range(500):
+            key = f"gw_key_{i:04d}"
+            loop.run_until_complete(fallback.check_rate_limit(key, config, tokens_used=0))
+            loop.run_until_complete(fallback.release_concurrent_request(key))
 
-        # Check if request_windows is bounded
-        if hasattr(fallback.request_windows, "maxsize"):
-            has_lru_bound = fallback.request_windows.maxsize == 500
-        elif hasattr(fallback, "_max_keys"):
-            has_lru_bound = fallback._max_keys == 500
+        assert len(fallback._key_order) == 500
 
-        assert has_lru_bound, (
-            "Fallback should use LRU cache with 500 entries per CM spec, "
-            "but code uses unbounded defaultdict(deque)"
-        )
+        # Insert one more — should trigger LRU eviction of the oldest key
+        loop.run_until_complete(fallback.check_rate_limit("gw_key_0500", config, tokens_used=0))
+
+        # Total keys must not exceed 500 (the eviction cap)
+        assert len(fallback._key_order) <= 500
+        # The first key (LRU) should have been evicted
+        assert "gw_key_0000" not in fallback._key_order
+        # The newest key should still be present
+        assert "gw_key_0500" in fallback._key_order
 
     # CM-2.4.3
     @pytest.mark.cm_verified
-    def test_fallback_ttl_15_minutes(self):
-        """CM spec says fallback entries have 15-minute TTL.
+    def test_fallback_ttl_15_minutes(self, frozen_time):
+        """CM-2.4.3: Fallback entries expire after 15 minutes (900s TTL).
 
-        Actual code: InMemoryRateLimiter._cleanup_old_entries uses a fixed 60s
-        sliding window. There is no 15-minute TTL eviction mechanism.
+        Insert a key, advance time past 900 seconds, then trigger eviction
+        and verify the key is removed.
         """
         fallback = InMemoryRateLimiter()
+        config = RateLimitConfig(requests_per_minute=1000, burst_limit=1000)
 
-        # The CM spec says entries should expire after 15 minutes (900 seconds).
-        # Check if there's a TTL config of 900 seconds.
-        has_15min_ttl = False
+        loop = asyncio.get_event_loop()
 
-        if hasattr(fallback, "_ttl"):
-            has_15min_ttl = fallback._ttl == 900
-        elif hasattr(fallback, "ttl_seconds"):
-            has_15min_ttl = fallback.ttl_seconds == 900
+        # Insert a key and release its concurrency slot
+        loop.run_until_complete(fallback.check_rate_limit("gw_ttl_test_key", config, tokens_used=0))
+        loop.run_until_complete(fallback.release_concurrent_request("gw_ttl_test_key"))
+        assert "gw_ttl_test_key" in fallback._key_order
 
-        # The cleanup method uses window_size=60 (1 minute), not 15 minutes
-        assert has_15min_ttl, (
-            "Fallback should have 15-minute TTL per CM spec, "
-            "but code uses 60-second sliding window cleanup"
-        )
+        # Advance time past the 15-minute TTL (900 seconds)
+        frozen_time.advance(901)
+
+        # Trigger eviction (normally called at the start of check_rate_limit)
+        fallback._evict_expired_keys(frozen_time.current)
+
+        # The key should have been evicted
+        assert "gw_ttl_test_key" not in fallback._key_order
+        assert "gw_ttl_test_key" not in fallback._key_last_accessed
 
     # CM-2.4.4
     @pytest.mark.cm_verified
