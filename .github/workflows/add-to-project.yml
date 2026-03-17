@@ -3,8 +3,6 @@ name: Add to Gatewayz API Project
 on:
   issues:
     types: [opened]
-  pull_request_target:
-    types: [opened]
 
 permissions:
   contents: read
@@ -14,7 +12,7 @@ jobs:
     name: Add to project
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/add-to-project@31b3f3ccdc584546fc445612dec3f38ff3b00d44 # v1.0.2
+      - uses: actions/add-to-project@v1.0.2
         with:
           project-url: https://github.com/orgs/Alpaca-Network/projects/6
           github-token: ${{ secrets.WIKI_PAT }}
