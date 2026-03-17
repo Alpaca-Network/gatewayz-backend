@@ -1,185 +1,25 @@
-"""
-Comprehensive tests for Morpheus AI Gateway Client service
+"""Tests for Morpheus-specific functionality.
+
+Standard get_client / make_request / stream / process_response tests are
+in test_provider_clients_parametrized.py.
 """
 
-import importlib
 from unittest.mock import Mock, patch
 
 import pytest
 
 
-class TestMorpheusClient:
-    """Test Morpheus Client service functionality"""
-
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        module = importlib.import_module("src.services.morpheus_client")
-
-        assert module is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module exports"""
-        from src.services import morpheus_client
-
-        assert hasattr(morpheus_client, "__name__")
-        assert hasattr(morpheus_client, "get_morpheus_client")
-        assert hasattr(morpheus_client, "make_morpheus_request_openai")
-        assert hasattr(morpheus_client, "make_morpheus_request_openai_stream")
-        assert hasattr(morpheus_client, "process_morpheus_response")
-        assert hasattr(morpheus_client, "fetch_models_from_morpheus")
+class TestMorpheusBaseUrl:
+    """Test Morpheus base URL"""
 
     def test_morpheus_base_url(self):
-        """Test Morpheus base URL is correctly set"""
         from src.services.morpheus_client import MORPHEUS_BASE_URL
 
         assert MORPHEUS_BASE_URL == "https://api.mor.org/api/v1"
 
-    @patch("src.services.morpheus_client.Config")
-    def test_get_morpheus_client_raises_without_api_key(self, mock_config):
-        """Test that get_morpheus_client raises error without API key"""
-        mock_config.MORPHEUS_API_KEY = None
 
-        from src.services.morpheus_client import get_morpheus_client
-
-        with pytest.raises(ValueError, match="Morpheus API key not configured"):
-            get_morpheus_client()
-
-    @patch("src.services.morpheus_client.get_morpheus_pooled_client")
-    @patch("src.services.morpheus_client.Config")
-    def test_get_morpheus_client_returns_pooled_client(self, mock_config, mock_get_pooled):
-        """Test that get_morpheus_client returns pooled client"""
-        mock_config.MORPHEUS_API_KEY = "test-key"
-        mock_client = Mock()
-        mock_get_pooled.return_value = mock_client
-
-        from src.services.morpheus_client import get_morpheus_client
-
-        client = get_morpheus_client()
-        assert client == mock_client
-        mock_get_pooled.assert_called_once()
-
-    @patch("src.services.morpheus_client.get_morpheus_client")
-    def test_make_morpheus_request_openai(self, mock_get_client):
-        """Test making a request through Morpheus"""
-        mock_client = Mock()
-        mock_response = Mock()
-        mock_client.chat.completions.create.return_value = mock_response
-        mock_get_client.return_value = mock_client
-
-        from src.services.morpheus_client import make_morpheus_request_openai
-
-        messages = [{"role": "user", "content": "Hello"}]
-        model = "llama-3.1-8b"
-
-        response = make_morpheus_request_openai(messages, model, max_tokens=100)
-
-        mock_client.chat.completions.create.assert_called_once_with(
-            model=model, messages=messages, max_tokens=100
-        )
-        assert response == mock_response
-
-    @patch("src.services.morpheus_client.get_morpheus_client")
-    def test_make_morpheus_request_openai_stream(self, mock_get_client):
-        """Test making a streaming request through Morpheus"""
-        mock_client = Mock()
-        mock_stream = Mock()
-        mock_client.chat.completions.create.return_value = mock_stream
-        mock_get_client.return_value = mock_client
-
-        from src.services.morpheus_client import make_morpheus_request_openai_stream
-
-        messages = [{"role": "user", "content": "Hello"}]
-        model = "llama-3.1-8b"
-
-        stream = make_morpheus_request_openai_stream(messages, model, max_tokens=100)
-
-        mock_client.chat.completions.create.assert_called_once_with(
-            model=model, messages=messages, stream=True, max_tokens=100
-        )
-        assert stream == mock_stream
-
-    def test_process_morpheus_response(self):
-        """Test processing Morpheus response"""
-        from src.services.morpheus_client import process_morpheus_response
-
-        # Create mock response
-        mock_message = Mock()
-        mock_message.content = "Hello, I'm an AI assistant."
-        mock_message.role = "assistant"
-        mock_message.tool_calls = None
-
-        mock_choice = Mock()
-        mock_choice.index = 0
-        mock_choice.message = mock_message
-        mock_choice.finish_reason = "stop"
-
-        mock_usage = Mock()
-        mock_usage.prompt_tokens = 10
-        mock_usage.completion_tokens = 20
-        mock_usage.total_tokens = 30
-
-        mock_response = Mock()
-        mock_response.id = "chatcmpl-123"
-        mock_response.object = "chat.completion"
-        mock_response.created = 1234567890
-        mock_response.model = "llama-3.1-8b"
-        mock_response.choices = [mock_choice]
-        mock_response.usage = mock_usage
-
-        result = process_morpheus_response(mock_response)
-
-        assert result["id"] == "chatcmpl-123"
-        assert result["object"] == "chat.completion"
-        assert result["created"] == 1234567890
-        assert result["model"] == "llama-3.1-8b"
-        assert len(result["choices"]) == 1
-        assert result["choices"][0]["index"] == 0
-        assert result["choices"][0]["finish_reason"] == "stop"
-        # Verify message content and structure
-        assert "message" in result["choices"][0]
-        message = result["choices"][0]["message"]
-        assert "content" in message or "role" in message
-        assert result["usage"]["prompt_tokens"] == 10
-        assert result["usage"]["completion_tokens"] == 20
-        assert result["usage"]["total_tokens"] == 30
-
-    def test_process_morpheus_response_with_tool_calls(self):
-        """Test processing Morpheus response with tool calls"""
-        from src.services.morpheus_client import process_morpheus_response
-
-        # Create mock response with tool calls
-        mock_tool_call = Mock()
-        mock_tool_call.id = "call_123"
-        mock_tool_call.type = "function"
-        mock_tool_call.function = Mock()
-        mock_tool_call.function.name = "get_weather"
-        mock_tool_call.function.arguments = '{"location": "NYC"}'
-
-        mock_message = Mock()
-        mock_message.content = None
-        mock_message.role = "assistant"
-        mock_message.tool_calls = [mock_tool_call]
-
-        mock_choice = Mock()
-        mock_choice.index = 0
-        mock_choice.message = mock_message
-        mock_choice.finish_reason = "tool_calls"
-
-        mock_response = Mock()
-        mock_response.id = "chatcmpl-456"
-        mock_response.object = "chat.completion"
-        mock_response.created = 1234567890
-        mock_response.model = "llama-3.1-8b"
-        mock_response.choices = [mock_choice]
-        mock_response.usage = None
-
-        result = process_morpheus_response(mock_response)
-
-        assert result["id"] == "chatcmpl-456"
-        assert result["choices"][0]["finish_reason"] == "tool_calls"
-        assert "message" in result["choices"][0]
-        # Usage should be empty dict when None
-        assert result["usage"] == {}
+class TestFetchModelsFromMorpheus:
+    """Test fetch_models_from_morpheus and related caching."""
 
     @patch("httpx.get")
     @patch("src.services.morpheus_client.Config")

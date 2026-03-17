@@ -198,7 +198,7 @@ jobs:
             --cov=src \
             --cov-report=xml \
             --cov-report=term \
-            -m "not smoke" 2>&1 | tee test-output-shard-${{ matrix.shard }}.txt
+            -m "not smoke and not benchmark" 2>&1 | tee test-output-shard-${{ matrix.shard }}.txt
 
           TEST_EXIT_CODE=$?
 

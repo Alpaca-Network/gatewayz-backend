@@ -32,11 +32,10 @@ def test_new_user_gets_5_dollar_credits(mock_supabase):
 
 
 # ---------------------------------------------------------------------------
-# CM-7.2  New user gets 3-day trial  (cm_gap -- code defaults to 14 days
-#         in start_trial_for_key, but create_enhanced_user uses 3 days)
+# CM-7.2  New user trial duration defaults to 14 days
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified
-def test_new_user_gets_14_day_trial():
+def test_new_user_trial_defaults_to_14_days():
     """start_trial_for_key should default to trial_days=14."""
     import inspect
 
