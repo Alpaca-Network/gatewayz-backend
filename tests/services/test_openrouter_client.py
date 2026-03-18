@@ -17,7 +17,7 @@ def mod():
 def reset_circuit_breaker():
     """Reset openrouter circuit breaker to CLOSED state before each test."""
     mock_cb = MagicMock()
-    mock_cb.call = lambda fn, **kwargs: fn()
+    mock_cb.call = lambda fn, *args, **kwargs: fn(*args, **kwargs)
     with patch("src.services.openrouter_client.get_circuit_breaker", return_value=mock_cb):
         yield
 
