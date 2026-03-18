@@ -87,6 +87,9 @@ class TestCircuitBreakerStateTransitions:
         cb.record_failure()
         cb.record_failure()
 
+        # Ensure recovery timeout has elapsed (avoid timing race with recovery_timeout=0)
+        cb.last_failure_time = time.time() - 1
+
         # Transition to HALF_OPEN
         cb.can_execute()
         assert cb.state == CircuitBreakerState.HALF_OPEN
@@ -105,6 +108,9 @@ class TestCircuitBreakerStateTransitions:
         # Force OPEN state
         cb.record_failure()
         cb.record_failure()
+
+        # Ensure recovery timeout has elapsed (avoid timing race with recovery_timeout=0)
+        cb.last_failure_time = time.time() - 1
 
         # Transition to HALF_OPEN
         cb.can_execute()

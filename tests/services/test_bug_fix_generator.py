@@ -25,7 +25,7 @@ from src.services.bug_fix_generator import (
 from src.services.error_monitor import ErrorCategory, ErrorPattern, ErrorSeverity
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_anthropic_key(monkeypatch):
     """Mock ANTHROPIC_API_KEY in Config class."""
     from src.config import config
