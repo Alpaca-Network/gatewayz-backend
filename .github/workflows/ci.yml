@@ -139,6 +139,7 @@ jobs:
             paths: "tests/db/"
           - category: integration
             paths: "tests/integration/ tests/e2e/"
+            marker_filter: "not smoke and not benchmark"
           - category: billing
             paths: "tests/billing/ tests/schemas/"
           - category: infrastructure
@@ -232,7 +233,7 @@ jobs:
             --cov=src \
             --cov-report=xml \
             --cov-report=term-missing:skip-covered \
-            -m "not smoke and not benchmark and not integration" \
+            -m "${{ matrix.marker_filter || 'not smoke and not benchmark and not integration' }}" \
             2>&1 | tee "test-output-$CATEGORY.txt"
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
