@@ -799,7 +799,7 @@ class TestApiKeyIntegration:
         mock_get_keys.return_value = [
             {
                 "id": 1,
-                "api_key": "gw_live_newkey123",
+                "api_key": "gw_live_newkey123",  # ggignore - fake test key
                 "key_name": "Integration Test Key",
                 "environment_tag": "live",
                 "is_active": True,
