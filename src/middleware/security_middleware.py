@@ -633,7 +633,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # 1. Check IP-based limit (skip for authenticated users and test environment)
         _skip_rate_limit = os.environ.get("TESTING") == "true"
-        if not _skip_rate_limit and not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"ip:{client_ip}", ip_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_ip_tier").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
@@ -700,7 +704,11 @@ class SecurityMiddleware(BaseHTTPMiddleware):
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
         #    Skip for authenticated users and test environment
-        if not _skip_rate_limit and not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"fp:{fingerprint}", fp_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
