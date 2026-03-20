@@ -575,10 +575,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         return self._local_cache[full_key] <= limit
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # Skip rate limiting entirely in test environment
-        if os.environ.get("TESTING") == "true":
-            return await call_next(request)
-
         # Skip security checks for internal/health endpoints
         if request.url.path in ["/health", "/metrics", "/api/health", "/favicon.ico"]:
             return await call_next(request)
@@ -635,8 +631,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         ip_limit = self._get_effective_limit(base_ip_limit, user_tier)
         fp_limit = self._get_effective_limit(FINGERPRINT_LIMIT, user_tier)
 
-        # 1. Check IP-based limit (skip for authenticated users - they have API key rate limiting)
-        if not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
+        # 1. Check IP-based limit (skip for authenticated users and test environment)
+        _skip_rate_limit = os.environ.get("TESTING") == "true"
+        if not _skip_rate_limit and not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
             rate_limited_requests.labels(limit_type="security_ip_tier").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
@@ -702,8 +699,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
-        #    Skip for authenticated users — they are already rate-limited by API key
-        if not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
+        #    Skip for authenticated users and test environment
+        if not _skip_rate_limit and not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(

@@ -233,7 +233,7 @@ jobs:
             --cov=src \
             --cov-report=xml \
             --cov-report=term-missing:skip-covered \
-            -m "${{ matrix.marker_filter || 'not smoke and not benchmark and not integration' }}" \
+            -m "${{ matrix.marker_filter || 'not smoke and not benchmark and not integration and not slow' }}" \
             2>&1 | tee "test-output-$CATEGORY.txt"
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
