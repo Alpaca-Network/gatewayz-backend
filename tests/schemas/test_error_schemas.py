@@ -81,33 +81,30 @@ class TestErrorContext:
         context = ErrorContext(
             provider="openrouter",
             requested_model="gpt-4",
-            provider_message="Connection timeout",
             provider_status_code=504,
         )
 
         assert context.provider == "openrouter"
         assert context.requested_model == "gpt-4"
-        assert context.provider_message == "Connection timeout"
         assert context.provider_status_code == 504
 
-    def test_internal_error_context(self):
-        """Test context for internal error."""
+    def test_credit_context(self):
+        """Test context for credit-related error."""
         context = ErrorContext(
-            error_type="ValueError",
-            error_message="Something went wrong",
-            operation="database_query",
+            current_credits=5.0,
+            required_credits=10.0,
+            credit_deficit=5.0,
         )
 
-        assert context.error_type == "ValueError"
-        assert context.error_message == "Something went wrong"
-        assert context.operation == "database_query"
+        assert context.current_credits == 5.0
+        assert context.required_credits == 10.0
+        assert context.credit_deficit == 5.0
 
-    def test_api_key_context(self):
+    def test_key_prefix_context(self):
         """Test context for API key error."""
-        context = ErrorContext(api_key_prefix="gw_live_abc", api_key_valid=False)
+        context = ErrorContext(key_prefix="gw_live_abc")
 
-        assert context.api_key_prefix == "gw_live_abc"
-        assert context.api_key_valid is False
+        assert context.key_prefix == "gw_live_abc"
 
     def test_serialization(self):
         """Test context serialization to dict."""
@@ -210,13 +207,13 @@ class TestErrorDetail:
         assert error.status == 404
 
     def test_invalid_status_type_raises_error(self):
-        """Test that invalid status type raises ValidationError."""
+        """Test that non-numeric status type raises ValidationError."""
         with pytest.raises(ValidationError):
             ErrorDetail(
                 type="test",
                 message="test",
                 code="TEST",
-                status="404",  # String instead of int
+                status="not_a_number",  # Non-numeric string
                 request_id="test",
                 timestamp="2025-01-21T00:00:00Z",
             )

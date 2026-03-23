@@ -16,6 +16,7 @@ paths-ignore:
   # Specific files with example keys (not broad patterns)
   - "scripts/validation/validate_openrouter_auto_access.py"
   - "tests/integration/test_openrouter_auto_live.py"
+  - "tests/integration/test_model_transform.py"
   - "test_openrouter_auto_curl.sh"
   - "docs/deployment/VERCEL_DEPLOYMENT.md"
   - "docs/OPENROUTER_AUTH_FIX.md"
@@ -35,6 +36,10 @@ allowlist:
   - "gjrxRyE-JjXwj8vR2HRTCwJ33fc5FmoDbJfRD_52UhQ"
   # Resend API key example in VERCEL_DEPLOYMENT.md (documentation only - replaced)
   - "re_8nSfCD6U_B5AqufQerhUJMi2ckUtXRefs"
+  # Fake test API key in test_api_keys.py (mock data, not a real credential)
+  - "gw_live_newkey123"
+  # Temp test key in test_model_transform.py (rotated, replaced with env var)
+  - "gw_temp_lw1xmCuEfLkKn6tsaDF3vw"
 
 # Stricter scanning for specific paths
 paths-strict:

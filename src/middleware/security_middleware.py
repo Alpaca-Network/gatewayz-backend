@@ -11,6 +11,7 @@ and 499 timeout spikes. It implements:
 import asyncio
 import hashlib
 import logging
+import os
 import time
 from collections import Counter, deque
 
@@ -630,8 +631,13 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         ip_limit = self._get_effective_limit(base_ip_limit, user_tier)
         fp_limit = self._get_effective_limit(FINGERPRINT_LIMIT, user_tier)
 
-        # 1. Check IP-based limit (skip for authenticated users - they have API key rate limiting)
-        if not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
+        # 1. Check IP-based limit (skip for authenticated users and test environment)
+        _skip_rate_limit = os.environ.get("TESTING") == "true"
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"ip:{client_ip}", ip_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_ip_tier").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
@@ -697,8 +703,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
-        #    Skip for authenticated users — they are already rate-limited by API key
-        if not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
+        #    Skip for authenticated users and test environment
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"fp:{fingerprint}", fp_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(

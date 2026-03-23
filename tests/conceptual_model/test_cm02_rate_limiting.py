@@ -10,6 +10,7 @@ Tests the three-layer rate limiting system:
 
 import asyncio
 import hashlib
+import os
 from collections import defaultdict, deque
 from datetime import UTC, timedelta
 from unittest.mock import MagicMock, patch
@@ -162,15 +163,21 @@ class TestLayer1IPRateLimiting:
             resp.status_code = 200
             return resp
 
-        # Patch async helpers to avoid real I/O in dispatch
-        with (
-            patch.object(mw, "_is_datacenter_ip", return_value=False),
-            patch.object(mw, "_get_user_tier_from_request", return_value="basic"),
-            patch("src.db.ip_whitelist.is_ip_whitelisted", return_value=False),
-        ):
-            response = asyncio.get_event_loop().run_until_complete(
-                mw.dispatch(request, mock_call_next)
-            )
+        # Temporarily disable TESTING bypass so rate limiting is active
+        old_testing = os.environ.pop("TESTING", None)
+        try:
+            # Patch async helpers to avoid real I/O in dispatch
+            with (
+                patch.object(mw, "_is_datacenter_ip", return_value=False),
+                patch.object(mw, "_get_user_tier_from_request", return_value="basic"),
+                patch("src.db.ip_whitelist.is_ip_whitelisted", return_value=False),
+            ):
+                response = asyncio.get_event_loop().run_until_complete(
+                    mw.dispatch(request, mock_call_next)
+                )
+        finally:
+            if old_testing is not None:
+                os.environ["TESTING"] = old_testing
         assert response.status_code == 429, "Over-limit IP should get 429"
         assert call_next_invoked is False, "call_next (auth) should not be reached"
 
