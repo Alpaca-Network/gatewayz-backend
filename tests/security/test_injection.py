@@ -195,6 +195,7 @@ class TestCommandInjection:
 
         assert response.status_code in [200, 400, 422]
 
+    @pytest.mark.slow
     def test_command_injection_pipe(self, client):
         """Command injection using pipe operator"""
         cmd_payload = "test | cat /etc/passwd"
