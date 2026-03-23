@@ -139,7 +139,6 @@ jobs:
             paths: "tests/db/"
           - category: integration
             paths: "tests/integration/ tests/e2e/"
-            marker_filter: "not smoke and not benchmark"
           - category: billing
             paths: "tests/billing/ tests/schemas/"
           - category: infrastructure
