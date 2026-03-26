@@ -2911,6 +2911,15 @@ async def chat_completions(
                             )
                             continue
 
+                        # Record 402 for provider credit monitoring (proxy signal)
+                        if http_exc.status_code == 402:
+                            try:
+                                from src.services.provider_credit_monitor import record_provider_402
+
+                                record_provider_402(attempt_provider)
+                            except Exception:
+                                pass  # Never let monitoring break the main flow
+
                         # If this is a 402 (Payment Required) error and we've exhausted the chain,
                         # rebuild the chain allowing payment failover to try alternative providers
                         if http_exc.status_code == 402 and idx == len(provider_chain) - 1:
@@ -3189,6 +3198,15 @@ async def chat_completions(
                             next_provider,
                         )
                         continue
+
+                    # Record 402 for provider credit monitoring (proxy signal)
+                    if http_exc.status_code == 402:
+                        try:
+                            from src.services.provider_credit_monitor import record_provider_402
+
+                            record_provider_402(attempt_provider)
+                        except Exception:
+                            pass
 
                     # If this is a 402 (Payment Required) error and we've exhausted the chain,
                     # rebuild the chain allowing payment failover to try alternative providers
@@ -4346,6 +4364,15 @@ async def unified_responses(
                         next_provider,
                     )
                     continue
+
+                # Record 402 for provider credit monitoring (proxy signal)
+                if http_exc.status_code == 402:
+                    try:
+                        from src.services.provider_credit_monitor import record_provider_402
+
+                        record_provider_402(attempt_provider)
+                    except Exception:
+                        pass
 
                 # If this is a 402 (Payment Required) error and we've exhausted the chain,
                 # rebuild the chain allowing payment failover to try alternative providers

@@ -98,11 +98,18 @@ async def get_provider_credit_balance(
     Returns:
         ProviderCreditBalance with balance information
     """
-    from src.services.provider_credit_monitor import check_openrouter_credits
+    from src.services.provider_credit_monitor import (
+        MONITORED_402_PROVIDERS,
+        check_openrouter_credits,
+        check_provider_402_status,
+    )
 
     try:
-        if provider.lower() == "openrouter":
+        provider_lower = provider.lower()
+        if provider_lower == "openrouter":
             info = await check_openrouter_credits()
+        elif provider_lower in MONITORED_402_PROVIDERS:
+            info = check_provider_402_status(provider_lower)
         else:
             raise HTTPException(
                 status_code=400, detail=f"Provider '{provider}' not supported for credit monitoring"

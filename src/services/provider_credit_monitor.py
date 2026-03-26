@@ -29,6 +29,16 @@ CACHE_DURATION_MINUTES = 15
 # In-memory cache for credit balance
 _credit_balance_cache: dict[str, dict[str, Any]] = {}
 
+# Sliding-window 402 frequency tracker per provider
+# Key: provider name, Value: list of 402 timestamps
+_402_tracker: dict[str, list[datetime]] = {}
+_402_WINDOW_MINUTES = 15  # Sliding window for 402 tracking
+_402_CRITICAL_THRESHOLD = 10  # Critical if >=10 402s in window
+_402_WARNING_THRESHOLD = 3  # Warning if >=3 402s in window
+
+# Providers monitored via 402-frequency (no public balance API)
+MONITORED_402_PROVIDERS = {"together", "deepinfra", "fireworks", "groq"}
+
 
 async def check_openrouter_credits() -> dict[str, Any]:
     """
@@ -150,21 +160,85 @@ def _determine_credit_status(balance: float) -> str:
         return "healthy"
 
 
+_402_MAX_ENTRIES_PER_PROVIDER = 100  # Hard cap to bound memory
+
+def record_provider_402(provider: str) -> None:
+    """Record a 402 Payment Required response from a provider.
+
+    Call this from provider clients when they receive HTTP 402.
+    The credit monitor uses 402 frequency as a proxy signal for
+    credit exhaustion on providers without a public balance API.
+
+    Only records for providers in ``MONITORED_402_PROVIDERS`` to
+    prevent unbounded key creation.
+    """
+    provider = provider.lower()
+    if provider not in MONITORED_402_PROVIDERS:
+        return  # Ignore providers we don't monitor via 402 frequency
+    if provider not in _402_tracker:
+        _402_tracker[provider] = []
+    _402_tracker[provider].append(datetime.now(UTC))
+    # Prune to cap to prevent unbounded memory growth
+    if len(_402_tracker[provider]) > _402_MAX_ENTRIES_PER_PROVIDER:
+        cutoff = datetime.now(UTC) - timedelta(minutes=_402_WINDOW_MINUTES)
+        _402_tracker[provider] = [t for t in _402_tracker[provider] if t > cutoff]
+
+
+def check_provider_402_status(provider: str) -> dict[str, Any]:
+    """Check the 402-frequency status for a provider.
+
+    Returns a result dict compatible with ``check_openrouter_credits()``
+    so it can be merged into ``check_all_provider_credits()``.
+    """
+    provider = provider.lower()
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=_402_WINDOW_MINUTES)
+
+    # Prune old entries
+    timestamps = _402_tracker.get(provider, [])
+    timestamps = [t for t in timestamps if t > cutoff]
+    _402_tracker[provider] = timestamps
+
+    count = len(timestamps)
+    if count >= _402_CRITICAL_THRESHOLD:
+        status = "critical"
+    elif count >= _402_WARNING_THRESHOLD:
+        status = "warning"
+    elif count > 0:
+        status = "info"
+    else:
+        status = "healthy"
+
+    return {
+        "provider": provider,
+        "balance": None,  # Not available for 402-monitored providers
+        "status": status,
+        "checked_at": now,
+        "cached": False,
+        "monitoring_method": "402_frequency",
+        "recent_402_count": count,
+        "window_minutes": _402_WINDOW_MINUTES,
+    }
+
+
 async def check_all_provider_credits() -> dict[str, dict[str, Any]]:
     """
     Check credit balance for all monitored providers.
+
+    Uses direct balance API for OpenRouter and 402-frequency monitoring
+    for Together, DeepInfra, Fireworks, and Groq.
 
     Returns:
         Dictionary mapping provider name to balance information
     """
     results = {}
 
-    # Check OpenRouter
+    # OpenRouter: direct balance API
     results["openrouter"] = await check_openrouter_credits()
 
-    # TODO: Add other providers with credit-based billing
-    # results["portkey"] = await check_portkey_credits()
-    # results["featherless"] = await check_featherless_credits()
+    # Top providers without balance APIs: monitor via 402 frequency
+    for provider in MONITORED_402_PROVIDERS:
+        results[provider] = check_provider_402_status(provider)
 
     return results
 
