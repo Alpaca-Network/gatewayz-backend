@@ -17,6 +17,7 @@ from src.services.anonymous_rate_limiter import (
     _anonymous_usage_cache,
     _hash_ip,
     check_anonymous_rate_limit,
+    get_anonymous_rate_limit_headers,
     get_anonymous_stats,
     get_anonymous_usage_count,
     increment_anonymous_usage,
@@ -331,3 +332,37 @@ class TestRedisIntegration:
             result = get_anonymous_usage_count("fallback-ip")
             # Should return 0 from memory fallback, not raise
             assert result == 0
+
+
+class TestAnonymousRateLimitHeaders:
+    """Tests for anonymous rate limit header generation."""
+
+    def test_returns_standard_headers_when_blocked(self):
+        """Headers should contain IETF and legacy rate limit fields."""
+        headers = get_anonymous_rate_limit_headers(limit=3, remaining=0)
+
+        assert headers["RateLimit-Limit"] == "3"
+        assert headers["RateLimit-Remaining"] == "0"
+        assert "RateLimit-Reset" in headers
+        assert "Retry-After" in headers
+        assert headers["X-RateLimit-Limit-Requests"] == "3"
+        assert headers["X-RateLimit-Remaining-Requests"] == "0"
+        assert headers["X-RateLimit-Reason"] == "anonymous_daily_limit"
+
+    def test_reset_is_seconds_until_midnight(self):
+        """RateLimit-Reset should be seconds until UTC midnight (≤ 86400)."""
+        headers = get_anonymous_rate_limit_headers(limit=3, remaining=0)
+
+        reset_seconds = int(headers["RateLimit-Reset"])
+        assert 0 < reset_seconds <= 86400
+
+    def test_retry_after_matches_reset(self):
+        """Retry-After should equal RateLimit-Reset."""
+        headers = get_anonymous_rate_limit_headers(limit=3, remaining=0)
+        assert headers["Retry-After"] == headers["RateLimit-Reset"]
+
+    def test_remaining_reflects_input(self):
+        """Headers should reflect the remaining count passed in."""
+        headers = get_anonymous_rate_limit_headers(limit=3, remaining=2)
+        assert headers["RateLimit-Remaining"] == "2"
+        assert headers["X-RateLimit-Remaining-Requests"] == "2"

@@ -321,12 +321,13 @@ async def anthropic_messages(
         if rate_limit_mgr:
             rl_pre = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=0)
             if not rl_pre.allowed:
+                rl_headers = get_rate_limit_headers(rl_pre)
+                if rl_pre.retry_after:
+                    rl_headers["Retry-After"] = str(rl_pre.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_pre.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_pre.retry_after)} if rl_pre.retry_after else None
-                    ),
+                    headers=rl_headers or None,
                 )
 
         # === 2) Transform Anthropic format to OpenAI format ===
@@ -846,12 +847,13 @@ async def anthropic_messages(
                         "tokens_requested": total_tokens,
                     },
                 )
+                rl_final_headers = get_rate_limit_headers(rl_final)
+                if rl_final.retry_after:
+                    rl_final_headers["Retry-After"] = str(rl_final.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_final.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
-                    ),
+                    headers=rl_final_headers or None,
                 )
 
             try:

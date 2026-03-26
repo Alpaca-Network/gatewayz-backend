@@ -18,7 +18,7 @@ MAIN_PY = REPO_ROOT / "src" / "main.py"
 # V1 routes get /v1 prefix (extracted from main.py pattern)
 V1_ROUTE_MODULES = {
     "chat", "detailed_status", "messages", "images", "audio",
-    "tools", "catalog", "model_health", "status_page", "butter_analytics",
+    "tools", "catalog", "model_health", "status_page",
 }
 
 

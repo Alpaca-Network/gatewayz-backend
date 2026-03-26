@@ -53,8 +53,7 @@ def save_chat_completion_request_with_cost(
         model_id: Optional model ID if already resolved (avoids lookup)
         api_key_id: Optional API key identifier to track which key was used
         is_anonymous: Whether this request was made anonymously (default: False)
-        metadata: Optional JSONB metadata (e.g., for Butter.dev cache tracking:
-                  {"butter_cache_hit": true, "actual_cost_usd": 0.001})
+        metadata: Optional JSONB metadata for request tracking
 
     Returns:
         Created record or None on error

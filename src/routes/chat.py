@@ -24,6 +24,8 @@ from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_ALLOWED_MODELS,
+    ANONYMOUS_DAILY_LIMIT,
+    get_anonymous_rate_limit_headers,
     record_anonymous_request,
     validate_anonymous_request,
 )
@@ -62,7 +64,6 @@ from src.adapters.chat import OpenAIChatAdapter
 
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.services.connection_pool import get_butter_pooled_async_client
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -564,174 +565,6 @@ PROVIDER_TIMEOUTS = {
     "huggingface": 120,
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
-
-# Butter.dev provider configuration for caching proxy
-# Maps provider names to their API key config attribute and base URL
-BUTTER_PROVIDER_CONFIG = {
-    "openrouter": {
-        "api_key_attr": "OPENROUTER_API_KEY",
-        "base_url": "https://openrouter.ai/api/v1",
-    },
-    "featherless": {
-        "api_key_attr": "FEATHERLESS_API_KEY",
-        "base_url": "https://api.featherless.ai/v1",
-    },
-    "together": {
-        "api_key_attr": "TOGETHER_API_KEY",
-        "base_url": "https://api.together.xyz/v1",
-    },
-    "fireworks": {
-        "api_key_attr": "FIREWORKS_API_KEY",
-        "base_url": "https://api.fireworks.ai/inference/v1",
-    },
-    "groq": {
-        "api_key_attr": "GROQ_API_KEY",
-        "base_url": "https://api.groq.com/openai/v1",
-    },
-    "cerebras": {
-        "api_key_attr": "CEREBRAS_API_KEY",
-        "base_url": "https://api.cerebras.ai/v1",
-    },
-    "deepinfra": {
-        "api_key_attr": "DEEPINFRA_API_KEY",
-        "base_url": "https://api.deepinfra.com/v1/openai",
-    },
-    "xai": {
-        "api_key_attr": "XAI_API_KEY",
-        "base_url": "https://api.x.ai/v1",
-    },
-    "openai": {
-        "api_key_attr": "OPENAI_API_KEY",
-        "base_url": "https://api.openai.com/v1",
-    },
-    "huggingface": {
-        "api_key_attr": "HF_API_KEY",
-        "base_url": "https://api-inference.huggingface.co/v1",
-    },
-    "chutes": {
-        "api_key_attr": "CHUTES_API_KEY",
-        "base_url": "https://llm.chutes.ai/v1",
-    },
-    "onerouter": {
-        "api_key_attr": "ONEROUTER_API_KEY",
-        "base_url": "https://llm.infron.ai/v1",
-    },
-    "aihubmix": {
-        "api_key_attr": "AIHUBMIX_API_KEY",
-        "base_url": "https://aihubmix.com/v1",
-    },
-    "near": {
-        "api_key_attr": "NEAR_API_KEY",
-        "base_url": "https://cloud-api.near.ai/v1",
-    },
-    "morpheus": {
-        "api_key_attr": "MORPHEUS_API_KEY",
-        "base_url": "https://api.mor.org/api/v1",
-    },
-    "simplismart": {
-        "api_key_attr": "SIMPLISMART_API_KEY",
-        "base_url": "https://api.simplismart.live",
-    },
-    "sybil": {
-        "api_key_attr": "SYBIL_API_KEY",
-        "base_url": "https://api.sybil.com/v1",
-    },
-    "nosana": {
-        "api_key_attr": "NOSANA_API_KEY",
-        "base_url": "https://dashboard.k8s.prd.nos.ci/api/v1",
-    },
-    "akash": {
-        "api_key_attr": "AKASH_API_KEY",
-        "base_url": "https://api.akashml.com/v1",
-    },
-    "anannas": {
-        "api_key_attr": "ANANNAS_API_KEY",
-        "base_url": "https://api.anannas.ai/v1",
-    },
-    "helicone": {
-        "api_key_attr": "HELICONE_API_KEY",
-        "base_url": "https://ai-gateway.helicone.ai/v1",
-    },
-    "aimo": {
-        "api_key_attr": "AIMO_API_KEY",
-        "base_url": "https://beta.aimo.network/api/v1",
-    },
-}
-
-
-async def make_butter_proxied_stream(
-    messages: list,
-    model: str,
-    provider: str,
-    **kwargs,
-):
-    """
-    Make a streaming request through Butter.dev caching proxy.
-
-    This routes the request through Butter.dev which can cache responses
-    for identical prompts, reducing costs and latency.
-
-    Args:
-        messages: Chat messages
-        model: Model name
-        provider: Target provider (e.g., 'openrouter', 'together')
-        **kwargs: Additional arguments (temperature, max_tokens, etc.)
-
-    Returns:
-        Async stream iterator
-
-    Raises:
-        ValueError: If provider is not configured for Butter
-    """
-    provider_config = BUTTER_PROVIDER_CONFIG.get(provider)
-    if not provider_config:
-        raise ValueError(f"Provider '{provider}' is not configured for Butter.dev caching")
-
-    api_key = getattr(Config, provider_config["api_key_attr"], None)
-    if not api_key:
-        raise ValueError(f"API key not configured for provider '{provider}'")
-
-    base_url = provider_config["base_url"]
-
-    # Get the Butter-proxied async client
-    client = get_butter_pooled_async_client(
-        target_provider=provider,
-        target_api_key=api_key,
-        target_base_url=base_url,
-    )
-
-    logger.info(f"Butter.dev: Routing {provider}/{model} through cache proxy")
-
-    # Build request parameters
-    request_params = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-    }
-
-    # Add optional parameters
-    if kwargs.get("temperature") is not None:
-        request_params["temperature"] = kwargs["temperature"]
-    if kwargs.get("max_tokens") is not None:
-        request_params["max_tokens"] = kwargs["max_tokens"]
-    if kwargs.get("top_p") is not None:
-        request_params["top_p"] = kwargs["top_p"]
-    if kwargs.get("frequency_penalty") is not None:
-        request_params["frequency_penalty"] = kwargs["frequency_penalty"]
-    if kwargs.get("presence_penalty") is not None:
-        request_params["presence_penalty"] = kwargs["presence_penalty"]
-    if kwargs.get("stop") is not None:
-        request_params["stop"] = kwargs["stop"]
-    if kwargs.get("tools") is not None:
-        request_params["tools"] = kwargs["tools"]
-    if kwargs.get("tool_choice") is not None:
-        request_params["tool_choice"] = kwargs["tool_choice"]
-
-    # Make the streaming request
-    stream = await client.chat.completions.create(**request_params)
-
-    return stream
-
 
 # Auto-routing constants
 # Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
@@ -1887,6 +1720,10 @@ async def chat_completions(
                                     "code": "anonymous_daily_limit",
                                 }
                             },
+                            headers=get_anonymous_rate_limit_headers(
+                                limit=ANONYMOUS_DAILY_LIMIT,
+                                remaining=0,
+                            ),
                         )
 
                 user = None
@@ -2017,7 +1854,9 @@ async def chat_completions(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after,
+                    reason=rl_pre.reason,
+                    rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
 
         # Credit check (only for authenticated non-trial users)
@@ -3271,14 +3110,13 @@ async def chat_completions(
                             "tokens_requested": total_tokens,
                         },
                     )
+                    rl_final_hdrs = get_rate_limit_headers(rl_final)
+                    if rl_final.retry_after:
+                        rl_final_hdrs["Retry-After"] = str(rl_final.retry_after)
                     raise HTTPException(
                         status_code=429,
                         detail=f"Rate limit exceeded: {rl_final.reason}",
-                        headers=(
-                            {"Retry-After": str(rl_final.retry_after)}
-                            if rl_final.retry_after
-                            else None
-                        ),
+                        headers=rl_final_hdrs or None,
                     )
 
         # Credit/usage tracking (only for authenticated users)
@@ -3771,7 +3609,9 @@ async def unified_responses(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after,
+                    reason=rl_pre.reason,
+                    rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
@@ -4467,9 +4307,7 @@ async def unified_responses(
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_final.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
-                    ),
+                    headers=get_rate_limit_headers(rl_final) or None,
                 )
 
         cost = await _handle_credits_and_usage(
