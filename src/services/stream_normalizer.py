@@ -91,12 +91,20 @@ class StreamNormalizer:
                     choices.append(normalized_choice)
 
         if not choices:
-            logger.warning(
-                "[STREAM_DROP] Chunk could not be normalized: provider=%s, model=%s, keys=%s",
-                self.provider,
-                self.model,
-                list(chunk_data.keys())[:5],
-            )
+            # Anthropic control events (message_start, content_block_stop, ping, message_stop)
+            # legitimately produce no choices — don't log these as drops.
+            _ANTHROPIC_NOOP_TYPES = {
+                "message_start", "message_stop", "message_delta",
+                "content_block_start", "content_block_stop", "ping",
+            }
+            event_type = chunk_data.get("type", "")
+            if event_type not in _ANTHROPIC_NOOP_TYPES:
+                logger.warning(
+                    "[STREAM_DROP] Chunk could not be normalized: provider=%s, model=%s, keys=%s",
+                    self.provider,
+                    self.model,
+                    list(chunk_data.keys())[:5],
+                )
             return None
 
         return NormalizedChunk(

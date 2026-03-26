@@ -1331,17 +1331,27 @@ async def stream_generator(
             if normalized_chunk:
                 yield normalized_chunk.to_sse()
             else:
-                dropped_chunks += 1
-                logger.warning(
-                    "[STREAM_DROP] Chunk %d dropped for %s/%s (request_id=%s)",
-                    chunk_count, provider, model, request_id,
-                )
-                try:
-                    from src.services.prometheus_metrics import stream_chunks_dropped
+                # Only count as a real drop if it's not an Anthropic control event
+                # (message_start, content_block_stop, ping, etc. legitimately produce no output)
+                is_anthropic_noop = False
+                if hasattr(chunk, "type") and chunk.type in {
+                    "message_start", "message_stop", "message_delta",
+                    "content_block_start", "content_block_stop", "ping",
+                }:
+                    is_anthropic_noop = True
 
-                    stream_chunks_dropped.labels(provider=provider, model=model).inc()
-                except ImportError:
-                    pass
+                if not is_anthropic_noop:
+                    dropped_chunks += 1
+                    logger.warning(
+                        "[STREAM_DROP] Chunk %d dropped for %s/%s (request_id=%s)",
+                        chunk_count, provider, model, request_id,
+                    )
+                    try:
+                        from src.services.prometheus_metrics import stream_chunks_dropped
+
+                        stream_chunks_dropped.labels(provider=provider, model=model).inc()
+                    except ImportError:
+                        pass
 
         accumulated_content = normalizer.get_accumulated_content()
         logger.info(
@@ -1350,10 +1360,10 @@ async def stream_generator(
         )
 
         # Warn client if significant chunk loss occurred
-        total_received = chunk_count + dropped_chunks
-        if dropped_chunks > 0 and total_received > 0 and dropped_chunks > total_received * 0.5:
+        # Note: chunk_count already includes dropped chunks (incremented for every chunk received)
+        if dropped_chunks > 0 and chunk_count > 0 and dropped_chunks > chunk_count * 0.5:
             yield create_error_sse_chunk(
-                error_message=f"Warning: {dropped_chunks} of {total_received} chunks could not be normalized from provider {provider}",
+                error_message=f"Warning: {dropped_chunks} of {chunk_count} chunks could not be normalized from provider {provider}",
                 error_type="stream_normalization_warning",
                 provider=provider,
                 model=model,
@@ -4332,10 +4342,13 @@ async def unified_responses(
                         "tokens_requested": total_tokens,
                     },
                 )
+                rl_resp_hdrs = get_rate_limit_headers(rl_final)
+                if rl_final.retry_after:
+                    rl_resp_hdrs["Retry-After"] = str(rl_final.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_final.reason}",
-                    headers=get_rate_limit_headers(rl_final) or None,
+                    headers=rl_resp_hdrs or None,
                 )
 
         cost = await _handle_credits_and_usage(
