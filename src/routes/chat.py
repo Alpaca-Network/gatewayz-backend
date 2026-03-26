@@ -2900,6 +2900,17 @@ async def chat_completions(
                         http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                         last_http_exc = http_exc
+
+                        # Record 402 for provider credit monitoring BEFORE failover
+                        # (must run before should_failover/continue skips past it)
+                        if http_exc.status_code == 402:
+                            try:
+                                from src.services.provider_credit_monitor import record_provider_402
+
+                                record_provider_402(attempt_provider)
+                            except Exception:
+                                pass  # Never let monitoring break the main flow
+
                         if idx < len(provider_chain) - 1 and should_failover(http_exc):
                             next_provider = provider_chain[idx + 1]
                             logger.warning(
@@ -2910,15 +2921,6 @@ async def chat_completions(
                                 next_provider,
                             )
                             continue
-
-                        # Record 402 for provider credit monitoring (proxy signal)
-                        if http_exc.status_code == 402:
-                            try:
-                                from src.services.provider_credit_monitor import record_provider_402
-
-                                record_provider_402(attempt_provider)
-                            except Exception:
-                                pass  # Never let monitoring break the main flow
 
                         # If this is a 402 (Payment Required) error and we've exhausted the chain,
                         # rebuild the chain allowing payment failover to try alternative providers
@@ -3188,6 +3190,16 @@ async def chat_completions(
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                     last_http_exc = http_exc
+
+                    # Record 402 for provider credit monitoring BEFORE failover
+                    if http_exc.status_code == 402:
+                        try:
+                            from src.services.provider_credit_monitor import record_provider_402
+
+                            record_provider_402(attempt_provider)
+                        except Exception:
+                            pass
+
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
                         next_provider = provider_chain[idx + 1]
                         logger.warning(
@@ -3198,15 +3210,6 @@ async def chat_completions(
                             next_provider,
                         )
                         continue
-
-                    # Record 402 for provider credit monitoring (proxy signal)
-                    if http_exc.status_code == 402:
-                        try:
-                            from src.services.provider_credit_monitor import record_provider_402
-
-                            record_provider_402(attempt_provider)
-                        except Exception:
-                            pass
 
                     # If this is a 402 (Payment Required) error and we've exhausted the chain,
                     # rebuild the chain allowing payment failover to try alternative providers
@@ -4354,6 +4357,16 @@ async def unified_responses(
                     continue
 
                 last_http_exc = http_exc
+
+                # Record 402 for provider credit monitoring BEFORE failover
+                if http_exc.status_code == 402:
+                    try:
+                        from src.services.provider_credit_monitor import record_provider_402
+
+                        record_provider_402(attempt_provider)
+                    except Exception:
+                        pass
+
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):
                     next_provider = provider_chain[idx + 1]
                     logger.warning(
@@ -4364,15 +4377,6 @@ async def unified_responses(
                         next_provider,
                     )
                     continue
-
-                # Record 402 for provider credit monitoring (proxy signal)
-                if http_exc.status_code == 402:
-                    try:
-                        from src.services.provider_credit_monitor import record_provider_402
-
-                        record_provider_402(attempt_provider)
-                    except Exception:
-                        pass
 
                 # If this is a 402 (Payment Required) error and we've exhausted the chain,
                 # rebuild the chain allowing payment failover to try alternative providers
