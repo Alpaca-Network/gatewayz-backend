@@ -273,6 +273,23 @@ def get_user_chat_sessions(user_id: int, limit: int = 50, offset: int = 0) -> li
         raise RuntimeError(f"Failed to get chat sessions: {e}") from e
 
 
+def get_user_chat_sessions_count(user_id: int) -> int:
+    """Return the total number of active chat sessions for a user (ignoring pagination)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table("chat_sessions")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        return result.count if result.count is not None else len(result.data or [])
+    except Exception as e:
+        logger.error(f"Failed to get chat sessions count: {e}")
+        return 0
+
+
 def get_chat_session(session_id: int, user_id: int) -> dict[str, Any] | None:
     """Get a specific chat session with messages"""
     try:

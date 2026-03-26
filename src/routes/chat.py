@@ -1219,6 +1219,7 @@ async def stream_generator(
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
     chunk_count = 0  # Initialized before try so it's available in except for refund metadata
+    dropped_chunks = 0  # Track chunks that failed normalization
     credit_deduction_success = False  # Track whether credits were actually deducted
 
     # Initialize normalizer
@@ -1330,12 +1331,34 @@ async def stream_generator(
             if normalized_chunk:
                 yield normalized_chunk.to_sse()
             else:
-                logger.debug(f"[STREAM] Chunk {chunk_count} resulted in no normalized output")
+                dropped_chunks += 1
+                logger.warning(
+                    "[STREAM_DROP] Chunk %d dropped for %s/%s (request_id=%s)",
+                    chunk_count, provider, model, request_id,
+                )
+                try:
+                    from src.services.prometheus_metrics import stream_chunks_dropped
+
+                    stream_chunks_dropped.labels(provider=provider, model=model).inc()
+                except ImportError:
+                    pass
 
         accumulated_content = normalizer.get_accumulated_content()
         logger.info(
-            f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
+            "[STREAM] Stream completed: %d chunks, %d dropped, content_len=%d (request_id=%s)",
+            chunk_count, dropped_chunks, len(accumulated_content), request_id,
         )
+
+        # Warn client if significant chunk loss occurred
+        total_received = chunk_count + dropped_chunks
+        if dropped_chunks > 0 and total_received > 0 and dropped_chunks > total_received * 0.5:
+            yield create_error_sse_chunk(
+                error_message=f"Warning: {dropped_chunks} of {total_received} chunks could not be normalized from provider {provider}",
+                error_type="stream_normalization_warning",
+                provider=provider,
+                model=model,
+                request_id=request_id,
+            )
 
         # DEFENSIVE: Detect empty streams and log as error
         if chunk_count == 0:
@@ -1348,6 +1371,8 @@ async def stream_generator(
                 error_type="empty_stream_error",
                 provider=provider,
                 model=model,
+                status=502,
+                request_id=request_id,
             )
             yield create_done_sse()
             return
@@ -1453,6 +1478,8 @@ async def stream_generator(
                 yield create_error_sse_chunk(
                     error_message=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
                     error_type="plan_limit_exceeded",
+                    status=429,
+                    request_id=request_id,
                 )
                 yield create_done_sse()
                 return
@@ -1608,6 +1635,7 @@ async def stream_generator(
             error_type=error_type,
             provider=provider if "provider" in dir() else None,
             model=model if "model" in dir() else None,
+            request_id=request_id if "request_id" in dir() else None,
         )
         yield create_done_sse()
     finally:

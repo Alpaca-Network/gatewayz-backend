@@ -46,6 +46,34 @@ from src.utils.token_estimator import estimate_message_tokens
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+# Anthropic error type mapping — maps HTTP status codes to Anthropic SDK error types
+_ANTHROPIC_ERROR_TYPE_MAP = {
+    400: "invalid_request_error",
+    401: "authentication_error",
+    402: "insufficient_credits",
+    403: "permission_error",
+    404: "not_found_error",
+    429: "rate_limit_error",
+    500: "api_error",
+    502: "api_error",
+    503: "overloaded_error",
+}
+
+
+def _anthropic_error_response(status_code: int, message: str) -> dict:
+    """Build an Anthropic-compatible error response body.
+
+    Anthropic SDKs expect: ``{"type": "error", "error": {"type": "...", "message": "..."}}``
+    """
+    error_type = _ANTHROPIC_ERROR_TYPE_MAP.get(status_code, "api_error")
+    return {
+        "type": "error",
+        "error": {
+            "type": error_type,
+            "message": message,
+        },
+    }
+
 
 # Backwards compatibility wrappers
 def increment_api_key_usage(*args, **kwargs):
@@ -1045,7 +1073,14 @@ async def anthropic_messages(
                 )
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
-        raise
+        # Return Anthropic-compatible error format instead of OpenAI format
+        detail = http_exc.detail
+        message = detail if isinstance(detail, str) else str(detail)
+        return JSONResponse(
+            status_code=http_exc.status_code,
+            content=_anthropic_error_response(http_exc.status_code, message),
+            headers=http_exc.headers or {},
+        )
     except Exception as e:
         logger.exception("Unhandled server error in anthropic_messages")
 
@@ -1073,4 +1108,7 @@ async def anthropic_messages(
             except Exception as save_err:
                 logger.debug(f"Failed to save failed request metadata: {save_err}")
 
-        raise HTTPException(status_code=500, detail="Internal server error")
+        return JSONResponse(
+            status_code=500,
+            content=_anthropic_error_response(500, "Internal server error"),
+        )

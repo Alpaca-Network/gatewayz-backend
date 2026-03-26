@@ -216,6 +216,34 @@ def get_user_feedback(
         raise RuntimeError(f"Failed to get user feedback: {e}") from e
 
 
+def get_user_feedback_count(
+    user_id: int,
+    feedback_type: str | None = None,
+    session_id: int | None = None,
+    model: str | None = None,
+) -> int:
+    """Return the total number of feedback records matching the filters (ignoring pagination)."""
+    try:
+        client = get_supabase_client()
+        query = (
+            client.table("message_feedback")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+        )
+        if feedback_type:
+            query = query.eq("feedback_type", feedback_type)
+        if session_id is not None:
+            query = query.eq("session_id", session_id)
+        if model:
+            query = query.eq("model", model)
+
+        result = query.execute()
+        return result.count if result.count is not None else len(result.data or [])
+    except Exception as e:
+        logger.error(f"Failed to get user feedback count: {e}")
+        return 0
+
+
 def get_feedback_by_message(message_id: int, user_id: int | None = None) -> list[dict[str, Any]]:
     """
     Get all feedback for a specific message.

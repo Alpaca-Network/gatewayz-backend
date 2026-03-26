@@ -558,6 +558,14 @@ cache_misses = get_or_create_metric(
     ["cache_name"],
 )
 
+# ==================== Stream Normalization Metrics ====================
+stream_chunks_dropped = get_or_create_metric(
+    Counter,
+    "stream_chunks_dropped_total",
+    "Total streaming chunks that failed normalization and were dropped",
+    ["provider", "model"],
+)
+
 # ==================== Circuit Breaker Metrics ====================
 # Metrics for tracking circuit breaker state and behavior
 circuit_breaker_state_transitions = get_or_create_metric(
