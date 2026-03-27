@@ -30,8 +30,12 @@ class ProviderCreditBalance(BaseModel):
     checked_at: str = Field(..., description="When the balance was checked (ISO 8601)")
     cached: bool = Field(False, description="Whether this is cached data")
     error: str | None = Field(None, description="Error message if check failed")
-    monitoring_method: str | None = Field(None, description="How this provider is monitored (e.g., 'balance_api', '402_frequency')")
-    recent_402_count: int | None = Field(None, description="Number of 402s in the monitoring window")
+    monitoring_method: str | None = Field(
+        None, description="How this provider is monitored (e.g., 'balance_api', '402_frequency')"
+    )
+    recent_402_count: int | None = Field(
+        None, description="Number of 402s in the monitoring window"
+    )
     window_minutes: int | None = Field(None, description="Monitoring window size in minutes")
 
 

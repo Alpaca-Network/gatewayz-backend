@@ -162,6 +162,7 @@ def _determine_credit_status(balance: float) -> str:
 
 _402_MAX_ENTRIES_PER_PROVIDER = 100  # Hard cap to bound memory
 
+
 def record_provider_402(provider: str) -> None:
     """Record a 402 Payment Required response from a provider.
 
