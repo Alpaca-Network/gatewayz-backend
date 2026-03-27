@@ -175,13 +175,13 @@ def record_provider_402(provider: str) -> None:
     provider = provider.lower()
     if provider not in MONITORED_402_PROVIDERS:
         return  # Ignore providers we don't monitor via 402 frequency
+    now = datetime.now(UTC)
+    cutoff = now - timedelta(minutes=_402_WINDOW_MINUTES)
     if provider not in _402_tracker:
         _402_tracker[provider] = []
-    _402_tracker[provider].append(datetime.now(UTC))
-    # Prune to cap to prevent unbounded memory growth
-    if len(_402_tracker[provider]) > _402_MAX_ENTRIES_PER_PROVIDER:
-        cutoff = datetime.now(UTC) - timedelta(minutes=_402_WINDOW_MINUTES)
-        _402_tracker[provider] = [t for t in _402_tracker[provider] if t > cutoff]
+    # Prune stale entries first, then append
+    _402_tracker[provider] = [t for t in _402_tracker[provider] if t > cutoff]
+    _402_tracker[provider].append(now)
 
 
 def check_provider_402_status(provider: str) -> dict[str, Any]:

@@ -123,6 +123,17 @@ except ImportError:
 _provider_import_errors = {}
 
 
+def _maybe_record_402(provider: str, status_code: int) -> None:
+    """Record a 402 for provider credit monitoring. Never raises."""
+    if status_code == 402:
+        try:
+            from src.services.provider_credit_monitor import record_provider_402
+
+            record_provider_402(provider)
+        except Exception:
+            pass
+
+
 # Helper function to safely import provider clients
 def _safe_import_provider(provider_name, imports_list):
     """Safely import provider functions with error logging
@@ -2903,13 +2914,7 @@ async def chat_completions(
 
                         # Record 402 for provider credit monitoring BEFORE failover
                         # (must run before should_failover/continue skips past it)
-                        if http_exc.status_code == 402:
-                            try:
-                                from src.services.provider_credit_monitor import record_provider_402
-
-                                record_provider_402(attempt_provider)
-                            except Exception:
-                                pass  # Never let monitoring break the main flow
+                        _maybe_record_402(attempt_provider, http_exc.status_code)
 
                         if idx < len(provider_chain) - 1 and should_failover(http_exc):
                             next_provider = provider_chain[idx + 1]
@@ -3192,13 +3197,7 @@ async def chat_completions(
                     last_http_exc = http_exc
 
                     # Record 402 for provider credit monitoring BEFORE failover
-                    if http_exc.status_code == 402:
-                        try:
-                            from src.services.provider_credit_monitor import record_provider_402
-
-                            record_provider_402(attempt_provider)
-                        except Exception:
-                            pass
+                    _maybe_record_402(attempt_provider, http_exc.status_code)
 
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
                         next_provider = provider_chain[idx + 1]
@@ -4359,13 +4358,7 @@ async def unified_responses(
                 last_http_exc = http_exc
 
                 # Record 402 for provider credit monitoring BEFORE failover
-                if http_exc.status_code == 402:
-                    try:
-                        from src.services.provider_credit_monitor import record_provider_402
-
-                        record_provider_402(attempt_provider)
-                    except Exception:
-                        pass
+                _maybe_record_402(attempt_provider, http_exc.status_code)
 
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):
                     next_provider = provider_chain[idx + 1]
