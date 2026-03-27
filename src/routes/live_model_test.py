@@ -91,45 +91,21 @@ class LiveTestReport(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_model_id(model: dict) -> str:
-    """Resolve the canonical model ID that the chat endpoint understands.
+def _get_model_id(model: dict) -> str:
+    """Get the canonical model ID from a catalog model dict.
 
-    The catalog may store display names (e.g. "GPT-4O Mini") instead of
-    canonical IDs (e.g. "openai/gpt-4o-mini").  Try multiple strategies:
-    1. If the id already contains "/" it's likely canonical — use as-is.
-    2. Extract from description pattern "Provider model-slug model."
-    3. Construct from provider_slug + slugified display name.
+    Prefers provider_model_id (DB source of truth) over the display-name id field.
     """
-    raw_id = model.get("id", "unknown")
-
-    # Already canonical (contains provider prefix)
-    if "/" in raw_id:
-        return raw_id
-
-    # Try extracting from description: "OpenAI chatgpt-4o-latest model."
-    desc = model.get("description", "")
-    if desc:
-        import re
-
-        # Pattern: "{Provider} {model-id} model." or "{Provider} {model-id} ..."
-        m = re.match(r"^\w[\w\s]* ([\w./-]+(?:-[\w./-]+)+)", desc)
-        if m:
-            candidate = m.group(1).rstrip(".")
-            gateway = model.get("source_gateway", model.get("provider_slug", ""))
-            if gateway and "/" not in candidate:
-                return f"{gateway}/{candidate}"
-            return candidate
-
-    # Fallback: slugify the display name
-    gateway = model.get("source_gateway", model.get("provider_slug", ""))
-    slug = raw_id.lower().replace(" ", "-")
-    if gateway:
-        return f"{gateway}/{slug}"
-    return slug
+    # DB models have provider_model_id — this is the canonical ID
+    canonical = model.get("provider_model_id") or model.get("model_id") or model.get("modelId")
+    if canonical and isinstance(canonical, str) and canonical.strip():
+        return canonical.strip()
+    # Cached/API models should have id with the canonical slug
+    return model.get("id", "unknown")
 
 
 def _should_skip(model: dict) -> str | None:
-    model_id = _resolve_model_id(model).lower()
+    model_id = _get_model_id(model).lower()
     modality = model.get("modality", "").lower()
     if modality and modality in SKIP_MODALITIES:
         return f"non-chat modality: {modality}"
@@ -143,33 +119,59 @@ async def _fetch_catalog(
     gateway: str | None,
     provider: str | None,
 ) -> list[dict]:
-    """Fetch models from the internal catalog service."""
-    from src.services.models import get_cached_models
+    """Fetch models from the DB (source of truth with provider_model_id)."""
+    models: list[dict] = []
 
+    # Primary: fetch from DB — has provider_model_id (canonical IDs)
     try:
-        gw = gateway or "all"
-        models = (
-            await get_cached_models(gw)
-            if asyncio.iscoroutinefunction(get_cached_models)
-            else get_cached_models(gw)
-        )
-        if not models:
-            models = []
-    except Exception as exc:
-        logger.warning("Failed to fetch catalog via get_cached_models: %s", exc)
-        models = []
+        from src.db.models_catalog_db import get_all_catalog_models
 
-    # Fallback: try DB catalog
+        result = get_all_catalog_models(limit=10000)
+        if asyncio.iscoroutine(result):
+            result = await result
+        raw = result if isinstance(result, list) else result
+        # DB returns joined rows with providers info
+        for row in raw:
+            provider_info = row.get("providers", {}) or {}
+            models.append(
+                {
+                    "provider_model_id": row.get("provider_model_id", ""),
+                    "model_name": row.get("model_name", ""),
+                    "id": row.get("provider_model_id", row.get("model_name", "")),
+                    "source_gateway": provider_info.get("slug", ""),
+                    "provider_slug": provider_info.get("slug", ""),
+                    "modality": row.get("modality", ""),
+                    "description": row.get("description", ""),
+                }
+            )
+    except Exception as exc:
+        logger.warning("Failed to fetch catalog from DB: %s", exc)
+
+    # Fallback: use cached models
     if not models:
         try:
-            from src.db.models_catalog_db import get_all_catalog_models
+            from src.services.models import get_cached_models
 
-            result = await get_all_catalog_models(limit=10000)
-            models = result if isinstance(result, list) else result.get("data", [])
+            gw = gateway or "all"
+            cached = (
+                await get_cached_models(gw)
+                if asyncio.iscoroutinefunction(get_cached_models)
+                else get_cached_models(gw)
+            )
+            models = cached or []
         except Exception as exc:
-            logger.warning("Failed to fetch catalog from DB: %s", exc)
-            models = []
+            logger.warning("Failed to fetch cached models: %s", exc)
 
+    # Filter by gateway
+    if gateway:
+        gw = gateway.lower()
+        models = [
+            m
+            for m in models
+            if m.get("source_gateway", "").lower() == gw or m.get("provider_slug", "").lower() == gw
+        ]
+
+    # Filter by provider
     if provider:
         p = provider.lower()
         models = [
@@ -188,7 +190,7 @@ async def _test_single_model(
     semaphore: asyncio.Semaphore,
 ) -> ModelTestResult:
     """Send a minimal chat completion to one model via the gateway."""
-    model_id = _resolve_model_id(model)
+    model_id = _get_model_id(model)
     gateway = model.get("source_gateway", model.get("provider_slug", "unknown"))
     provider = model.get("provider_slug", gateway)
 
