@@ -574,19 +574,24 @@ def _make_google_vertex_request_sdk(
             logger.error(f"Failed to build generation config: {config_error}", exc_info=True)
             raise
 
-        # Step 5: Extract tools from kwargs (if provided)
+        # Step 5: Extract and transform tools from kwargs (if provided)
+        vertex_tools = None
+        vertex_tool_config = None
         tools = kwargs.get("tools")
         if tools:
             logger.info(
                 f"Tools parameter detected: {len(tools) if isinstance(tools, list) else 0} tools"
             )
-            logger.warning(
-                "Google Vertex AI function calling support requires transformation from OpenAI format to Gemini format. "
-                "Currently, tools are extracted but not yet transformed. Function calling may not work correctly."
-            )
-            # TODO: Transform OpenAI tools format to Gemini function calling format
-            # Gemini uses a different schema: tools need to be converted to FunctionDeclaration format
-            # See: https://cloud.google.com/vertex-ai/docs/generative-ai/model-reference/gemini#function_calling
+            vertex_tools = _translate_openai_tools_to_vertex(tools)
+            if vertex_tools:
+                logger.info(f"Translated {len(tools)} OpenAI tools to Vertex format for SDK path")
+            else:
+                logger.warning("Tool translation returned empty result — proceeding without tools")
+
+        # tool_choice is valid even without tools (e.g., tool_choice="none")
+        tool_choice = kwargs.get("tool_choice")
+        if tool_choice:
+            vertex_tool_config = _translate_tool_choice_to_vertex(tool_choice)
 
         # Step 6: Convert messages to Vertex AI format
         try:
@@ -612,9 +617,14 @@ def _make_google_vertex_request_sdk(
         # Step 7: Make the API call
         try:
             logger.info("Calling GenerativeModel.generate_content()")
-            response = gemini_model.generate_content(
-                prompt, generation_config=generation_config if generation_config else None
-            )
+            generate_kwargs: dict = {}
+            if generation_config:
+                generate_kwargs["generation_config"] = generation_config
+            if vertex_tools:
+                generate_kwargs["tools"] = vertex_tools
+            if vertex_tool_config:
+                generate_kwargs["tool_config"] = vertex_tool_config
+            response = gemini_model.generate_content(prompt, **generate_kwargs)
             logger.info("Received response from Vertex AI")
             logger.debug(f"Response: {response}")
         except Exception as api_error:

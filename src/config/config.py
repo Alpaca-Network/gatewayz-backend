@@ -64,7 +64,7 @@ def _get_data_dir() -> Path:
     """Get data directory, using /tmp in serverless environments."""
     # Check if we're in a serverless environment (read-only /var/task)
     if os.path.exists("/var/task") and not os.access("/var/task", os.W_OK):
-        return Path("/tmp/gatewayz_data")
+        return Path("/tmp/gatewayz_data")  # nosec B108 — serverless read-only fs fallback
     return _src_root / "data"
 
 
@@ -89,7 +89,7 @@ def _ensure_directory(path: Path) -> Path:
 
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to create directory {path}: {e}. Using /tmp fallback.")
-        fallback = Path("/tmp") / path.name
+        fallback = Path("/tmp") / path.name  # nosec B108 — directory creation fallback
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
     return path
