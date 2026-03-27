@@ -104,13 +104,28 @@ def _get_model_id(model: dict) -> str:
     return model.get("id", "unknown")
 
 
+def _is_canonical_id(model_id: str) -> bool:
+    """Check if a model ID looks canonical (e.g. 'openai/gpt-4o-mini') vs display name."""
+    # Canonical IDs contain "/" and no spaces, or are all-lowercase with hyphens
+    if "/" in model_id and " " not in model_id:
+        return True
+    # Some IDs are just slugs without provider prefix (e.g. "gpt-4o-mini")
+    if " " not in model_id and model_id == model_id.lower():
+        return True
+    return False
+
+
 def _should_skip(model: dict) -> str | None:
-    model_id = _get_model_id(model).lower()
+    model_id = _get_model_id(model)
+    # Skip models with display-name IDs (not resolvable by chat endpoint)
+    if not _is_canonical_id(model_id):
+        return f"display name, not canonical ID: {model_id}"
+    model_id_lower = model_id.lower()
     modality = model.get("modality", "").lower()
     if modality and modality in SKIP_MODALITIES:
         return f"non-chat modality: {modality}"
     for prefix in SKIP_MODEL_PREFIXES:
-        if model_id.startswith(prefix) or f"/{prefix}" in model_id:
+        if model_id_lower.startswith(prefix) or f"/{prefix}" in model_id_lower:
             return f"non-chat prefix: {prefix}"
     return None
 
