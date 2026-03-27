@@ -285,3 +285,7 @@ def pytest_configure(config):
     )
     config.addinivalue_line("markers", "integration: marks tests as integration tests")
     config.addinivalue_line("markers", "db: marks tests as database tests")
+    config.addinivalue_line(
+        "markers",
+        "benchmark: marks tests as benchmark tests (deselect with '-m \"not benchmark\"')",
+    )

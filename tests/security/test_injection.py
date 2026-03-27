@@ -71,6 +71,7 @@ class TestSQLInjectionPrevention:
         # Should reject invalid email format
         assert response.status_code in [400, 422]
 
+    @pytest.mark.slow
     def test_sql_injection_in_search(self, client):
         """SQL injection attempt in search parameters"""
         sql_payload = "' OR 1=1 --"
@@ -84,6 +85,7 @@ class TestSQLInjectionPrevention:
             data = response.json()
             assert isinstance(data, (list, dict))
 
+    @pytest.mark.slow
     def test_sql_injection_union_attack(self, client):
         """SQL injection UNION attack attempt"""
         union_payload = "' UNION SELECT * FROM users --"
@@ -184,6 +186,7 @@ class TestCommandInjection:
         # Should reject or sanitize
         assert response.status_code in [400, 401, 403, 422, 404]
 
+    @pytest.mark.slow
     def test_command_injection_backticks(self, client):
         """Command injection using backticks"""
         cmd_payload = "`whoami`"
@@ -192,6 +195,7 @@ class TestCommandInjection:
 
         assert response.status_code in [200, 400, 422]
 
+    @pytest.mark.slow
     def test_command_injection_pipe(self, client):
         """Command injection using pipe operator"""
         cmd_payload = "test | cat /etc/passwd"

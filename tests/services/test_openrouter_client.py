@@ -1,6 +1,7 @@
 # tests/services/test_openrouter_client_unit.py
 import importlib
 import types
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -10,6 +11,15 @@ MODULE_PATH = "src.services.openrouter_client"  # <- change if needed
 @pytest.fixture
 def mod():
     return importlib.import_module(MODULE_PATH)
+
+
+@pytest.fixture(autouse=True)
+def reset_circuit_breaker():
+    """Reset openrouter circuit breaker to CLOSED state before each test."""
+    mock_cb = MagicMock()
+    mock_cb.call = lambda fn, *args, **kwargs: fn(*args, **kwargs)
+    with patch("src.services.openrouter_client.get_circuit_breaker", return_value=mock_cb):
+        yield
 
 
 class FakeCompletions:

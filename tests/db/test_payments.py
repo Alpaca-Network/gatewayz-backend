@@ -76,7 +76,7 @@ def mock_payment_data():
 class TestCreatePayment:
     """Test payment record creation"""
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_create_payment_success(self, mock_get_client, mock_supabase_client, mock_payment_data):
         """Test successful payment creation"""
         client, table_mock = mock_supabase_client
@@ -103,7 +103,7 @@ class TestCreatePayment:
         # Verify insert was called
         table_mock.insert.assert_called_once()
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_create_payment_with_metadata(self, mock_get_client, mock_supabase_client):
         """Test payment creation with metadata"""
         client, table_mock = mock_supabase_client
@@ -128,7 +128,7 @@ class TestCreatePayment:
         assert payment["metadata"]["source"] == "web"
         assert payment["metadata"]["campaign"] == "promo2024"
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_create_payment_no_data_returned(self, mock_get_client, mock_supabase_client):
         """Test handling when no data returned"""
         client, table_mock = mock_supabase_client
@@ -142,7 +142,7 @@ class TestCreatePayment:
 
         assert payment is None
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_create_payment_exception(self, mock_get_client):
         """Test exception handling during creation"""
         mock_get_client.side_effect = Exception("Database error")
@@ -160,7 +160,7 @@ class TestCreatePayment:
 class TestRetrievePayments:
     """Test payment retrieval operations"""
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_get_payment_success(self, mock_get_client, mock_supabase_client, mock_payment_data):
         """Test retrieving payment by ID"""
         client, table_mock = mock_supabase_client
@@ -176,7 +176,7 @@ class TestRetrievePayments:
         assert payment["id"] == 1
         assert payment["user_id"] == 123
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_get_payment_not_found(self, mock_get_client, mock_supabase_client):
         """Test getting non-existent payment"""
         client, table_mock = mock_supabase_client
@@ -329,7 +329,7 @@ class TestRetrievePayments:
 class TestUpdatePayments:
     """Test payment update operations"""
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_update_payment_status_to_completed(self, mock_get_client, mock_supabase_client):
         """Test updating payment status to completed"""
         client, table_mock = mock_supabase_client
@@ -356,7 +356,7 @@ class TestUpdatePayments:
         update_call_args = table_mock.update.call_args[0][0]
         assert "completed_at" in update_call_args
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     def test_update_payment_status_sets_checkout_session_id(
         self, mock_get_client, mock_supabase_client
     ):
@@ -380,7 +380,7 @@ class TestUpdatePayments:
         update_call_args = table_mock.update.call_args[0][0]
         assert update_call_args["stripe_checkout_session_id"] == "cs_new_session"
 
-    @patch("src.db.payments.get_supabase_client")
+    @patch("src.config.supabase_config.get_supabase_client")
     @patch("src.db.payments.get_payment")
     def test_update_payment_status_to_failed_with_error(
         self, mock_get_payment, mock_get_client, mock_supabase_client

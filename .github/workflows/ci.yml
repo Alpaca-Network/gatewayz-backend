@@ -120,16 +120,33 @@ jobs:
           safety check --json || true
         continue-on-error: true
 
-  # Job 3: Run Tests (Parallelized with Sharding)
+  # Job 3: Run Tests by Category
+  # Each category runs as a separate job for clear visual pass/fail per area
   test:
-    name: Run Tests (Shard ${{ matrix.shard }})
+    name: "Tests (${{ matrix.category }})"
     runs-on: blacksmith-4vcpu-ubuntu-2404
     needs: lint
 
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]  # 4-way parallel execution
+        include:
+          - category: core-services
+            paths: "tests/services/"
+          - category: routes
+            paths: "tests/routes/"
+          - category: database
+            paths: "tests/db/"
+          - category: integration
+            paths: "tests/integration/ tests/e2e/"
+          - category: billing
+            paths: "tests/billing/ tests/schemas/"
+          - category: infrastructure
+            paths: "tests/config/ tests/middleware/ tests/health/"
+          - category: security
+            paths: "tests/security/ tests/utils/"
+          - category: conceptual
+            paths: "tests/conceptual_model/ tests/unit/"
 
     steps:
       - name: Checkout code
@@ -158,92 +175,88 @@ jobs:
       - name: Install from wheelhouse
         run: |
           pip install --no-index --find-links=.cache/wheels -r requirements.txt
-          pip install --no-index --find-links=.cache/wheels pytest pytest-cov pytest-xdist pytest-split
-
-      # Pull down prior test timing data to split by duration
-      - name: Restore pytest timings
-        uses: actions/download-artifact@v4
-        with:
-          name: pytest-durations
-        continue-on-error: true
+          pip install --no-index --find-links=.cache/wheels pytest pytest-cov pytest-xdist pytest-timeout
 
       # Restore pytest cache
       - name: Cache pytest
         uses: actions/cache@v4
         with:
           path: .pytest_cache
-          key: ${{ runner.os }}-pytest-${{ github.sha }}-${{ matrix.shard }}
+          key: ${{ runner.os }}-pytest-${{ github.sha }}-${{ matrix.category }}
           restore-keys: |
             ${{ runner.os }}-pytest-
 
-      - name: Run tests shard ${{ matrix.shard }}
+      - name: Run tests
         id: test_run
         env:
-          PYTEST_SPLIT_DURATION_FILE: .pytest-split-durations
+          CATEGORY: ${{ matrix.category }}
           # Test environment variables
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test.supabase.co' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://test-placeholder.invalid' }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY || 'test-key' }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY || 'test-key' }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY || 'test-encryption-key-32-bytes!' }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY || 'test-admin-key' }}
         run: |
-          set +e  # Don't exit on failure - we need to capture output
-          # Run tests with pytest-xdist (use all cores) and pytest-split (shard across runners)
-          # Target: 25% coverage (current baseline)
-          # Exclude smoke tests (they require a running server)
-          pytest tests/ -v --tb=short \
+          # Build test path array from space-separated paths
+          IFS=' ' read -ra PATHS <<< "${{ matrix.paths }}"
+          TEST_PATH=()
+          for p in "${PATHS[@]}"; do
+            if [ -d "$p" ]; then
+              # Only include directories that have test files
+              if find "$p" -name "test_*.py" -type f | grep -q .; then
+                TEST_PATH+=("$p")
+              fi
+            fi
+          done
+
+          # Also include root-level test files for the conceptual category
+          if [ "$CATEGORY" = "conceptual" ]; then
+            mapfile -t ROOT_FILES < <(find tests/ -maxdepth 1 -name "test_*.py" -type f | sort)
+            TEST_PATH+=("${ROOT_FILES[@]}")
+          fi
+
+          if [ "${#TEST_PATH[@]}" -eq 0 ]; then
+            echo "::warning::No test files found for $CATEGORY — skipping"
+            exit 0
+          fi
+
+          echo "=========================================="
+          echo "  Category: $CATEGORY"
+          echo "  Path:     ${TEST_PATH[*]}"
+          echo "=========================================="
+
+          set +e  # Capture exit code manually
+          pytest "${TEST_PATH[@]}" -v --tb=short \
             -n auto \
-            --dist=loadfile \
-            --splits 4 --group ${{ matrix.shard }} \
+            --timeout=30 \
             --cov=src \
             --cov-report=xml \
-            --cov-report=term \
-            -m "not smoke" 2>&1 | tee test-output-shard-${{ matrix.shard }}.txt
+            --cov-report=term-missing:skip-covered \
+            -m "${{ matrix.marker_filter || 'not smoke and not benchmark and not integration and not slow' }}" \
+            2>&1 | tee "test-output-$CATEGORY.txt"
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
 
-          TEST_EXIT_CODE=$?
-
-          # Check if tests failed
-          if [ $TEST_EXIT_CODE -eq 0 ]; then
-            echo "✅ Tests passed for shard ${{ matrix.shard }}"
-            echo "tests_failed=false" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Tests failed for shard ${{ matrix.shard }}"
-            echo "tests_failed=true" >> $GITHUB_OUTPUT
+          # Exit code 5 = no tests collected (e.g., all deselected by markers)
+          if [ "$EXIT_CODE" -eq 5 ]; then
+            echo "::notice::No tests collected for $CATEGORY (all excluded by markers)"
+            exit 0
           fi
+          exit "$EXIT_CODE"
 
-          exit $TEST_EXIT_CODE
-
-      - name: Save timings for next run
-        if: always()
-        run: |
-          if [ -f .pytest-split-durations ]; then
-            echo "Timings saved"
-          else
-            echo "No timing file generated yet"
-          fi
-        shell: bash
-
-      - name: Upload timings artifact
+      - name: Upload test output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pytest-durations-${{ matrix.shard }}
-          path: .pytest-split-durations
+          name: "test-output-${{ matrix.category }}"
+          path: "test-output-${{ matrix.category }}.txt"
           if-no-files-found: ignore
 
-      - name: Upload test output for Codex
+      - name: Upload coverage
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-output-shard-${{ matrix.shard }}
-          path: test-output-shard-${{ matrix.shard }}.txt
-          if-no-files-found: ignore
-
-      - name: Upload coverage for shard ${{ matrix.shard }}
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ matrix.shard }}
+          name: "coverage-${{ matrix.category }}"
           path: .coverage
           if-no-files-found: ignore
 
@@ -277,55 +290,73 @@ jobs:
           pattern: coverage-*
           path: coverage-artifacts
 
-      - name: Merge test output files
-        if: always()
-        run: |
-          # Consolidate all test output from shards
-          if ls test-output-shard-*.txt 2>/dev/null; then
-            cat test-output-shard-*.txt > all-test-output.txt
-            echo "Test outputs merged successfully"
-          fi
-
       - name: Download test outputs
         if: always()
         uses: actions/download-artifact@v4
         with:
-          pattern: test-output-shard-*
+          pattern: test-output-*
           merge-multiple: true
 
-      - name: Check for test failures and consolidate
+      - name: Summarize test results by category
         id: check_tests
         if: always()
         run: |
-          set +e
-          # Consolidate all test outputs
-          cat test-output-shard-*.txt > all-test-output.txt 2>/dev/null || echo "No test outputs to merge"
+          echo "=========================================="
+          echo "  Test Results by Category"
+          echo "=========================================="
+          echo ""
 
-          # Check if any tests failed
-          if grep -q "FAILED\|ERROR" all-test-output.txt 2>/dev/null; then
+          HAS_FAILURES=false
+
+          for f in test-output-*.txt; do
+            [ -f "$f" ] || continue
+            CATEGORY=$(echo "$f" | sed 's/test-output-//;s/\.txt//')
+
+            PASSED=$(grep -cE '^tests/\S+.*PASSED' "$f" 2>/dev/null || echo "0")
+            FAILED=$(grep -cE '^tests/\S+.*FAILED' "$f" 2>/dev/null || echo "0")
+            SKIPPED=$(grep -cE '^tests/\S+.*SKIPPED' "$f" 2>/dev/null || echo "0")
+            ERRORS=$(grep -cE '^tests/\S+.*ERROR' "$f" 2>/dev/null || echo "0")
+
+            if [ "$FAILED" -gt 0 ] || [ "$ERRORS" -gt 0 ]; then
+              STATUS="FAIL"
+              HAS_FAILURES=true
+            else
+              STATUS="PASS"
+            fi
+
+            printf "  %-15s %s  (passed: %s, failed: %s, skipped: %s, errors: %s)\n" \
+              "$CATEGORY" "$STATUS" "$PASSED" "$FAILED" "$SKIPPED" "$ERRORS"
+          done
+
+          echo ""
+          echo "=========================================="
+
+          # Consolidate all outputs
+          cat test-output-*.txt > all-test-output.txt 2>/dev/null || echo "No test outputs to merge"
+
+          if [ "$HAS_FAILURES" = "true" ]; then
             echo "has_failures=true" >> $GITHUB_OUTPUT
-            echo "❌ Test failures detected - Codex will attempt fixes"
+            echo "Test failures detected in one or more categories"
           else
             echo "has_failures=false" >> $GITHUB_OUTPUT
-            echo "✅ No test failures detected"
+            echo "All test categories passed"
           fi
 
       - name: Merge coverage reports
         run: |
           # Each artifact is downloaded to coverage-artifacts/<artifact-name>/.coverage
           # We need to rename them to avoid conflicts during combine
-          echo "📊 Merging coverage from all shards..."
+          echo "Merging coverage from all categories..."
 
           # Create a directory for all coverage files
           mkdir -p coverage-data
 
           # Copy and rename each .coverage file from the downloaded artifacts
-          count=1
           for artifact_dir in coverage-artifacts/coverage-*; do
             if [ -d "$artifact_dir" ] && [ -f "$artifact_dir/.coverage" ]; then
-              echo "Found coverage file in $artifact_dir"
-              cp "$artifact_dir/.coverage" "coverage-data/.coverage.shard-$count"
-              count=$((count + 1))
+              CATEGORY=$(basename "$artifact_dir" | sed 's/coverage-//')
+              echo "Found coverage for: $CATEGORY"
+              cp "$artifact_dir/.coverage" "coverage-data/.coverage.$CATEGORY"
             fi
           done
 
@@ -390,27 +421,12 @@ jobs:
           fail_ci_if_error: false
         continue-on-error: true
 
-      # Merge pytest timing data for next run
-      - name: Download all timing artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: pytest-durations-*
-          merge-multiple: true
-        continue-on-error: true
-
-      - name: Upload merged timings
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-durations
-          path: .pytest-split-durations
-          if-no-files-found: ignore
 
   # Job 4: Build Check
   build:
     name: Build Verification
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, coverage]  # Only run if lint and tests pass
+    needs: [lint, test, coverage]  # Build blocked by lint and test failures; coverage always runs
 
     steps:
       - name: Checkout code
