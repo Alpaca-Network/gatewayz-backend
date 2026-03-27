@@ -2795,8 +2795,10 @@ async def chat_completions(
                         else:
                             # Default to OpenRouter with async streaming for performance
                             try:
-                                stream = await make_openrouter_request_openai_stream_async(  # noqa: F821
-                                    messages, request_model, **optional
+                                stream = (
+                                    await make_openrouter_request_openai_stream_async(  # noqa: F821
+                                        messages, request_model, **optional
+                                    )
                                 )
                                 is_async_stream = True
                                 logger.debug(
@@ -3609,9 +3611,7 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -3650,9 +3650,7 @@ async def chat_completions(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -4806,9 +4804,7 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
@@ -4844,9 +4840,7 @@ async def unified_responses(
                     model_name=(
                         model
                         if "model" in dir()
-                        else original_model
-                        if "original_model" in dir()
-                        else "unknown"
+                        else original_model if "original_model" in dir() else "unknown"
                     ),
                     input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
                     output_tokens=0,  # No output on error
