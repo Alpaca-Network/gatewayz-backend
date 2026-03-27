@@ -293,6 +293,8 @@ async def run_live_model_test(
     **Warning**: This makes real inference calls. With 1000+ models at concurrency=5,
     expect ~10-30 minutes and a small credit cost (~$0.01-0.05).
     """
+    import os
+
     from src.config.config import Config
 
     # Use the admin's own API key (already authenticated)
@@ -300,10 +302,13 @@ async def run_live_model_test(
     if not admin_api_key:
         raise HTTPException(status_code=400, detail="Admin user has no API key")
 
-    base_url = Config.BASE_URL if hasattr(Config, "BASE_URL") else "http://localhost:8000"
-    # For self-calls, prefer localhost to avoid NAT hairpin
-    if "gatewayz.ai" not in base_url:
-        base_url = "http://localhost:8000"
+    # Determine base URL for self-calls
+    # Railway sets PORT; Vercel has its own routing
+    port = os.environ.get("PORT", "8000")
+    base_url = os.environ.get(
+        "BASE_URL",
+        getattr(Config, "BASE_URL", None) or f"http://localhost:{port}",
+    )
 
     logger.info(
         "Admin %s triggered live model test (gateway=%s, provider=%s, limit=%s)",
@@ -344,6 +349,14 @@ async def run_live_model_test(
     skipped = sum(1 for r in results if r.status == "skip")
     tested = passed + failed + timed_out + errored
 
+    # Log status distribution for debugging
+    status_dist = {}
+    for r in results:
+        status_dist[r.status] = status_dist.get(r.status, 0) + 1
+    logger.info("Live test status distribution: %s", status_dist)
+
+    failures = [r for r in results if r.status in ("fail", "timeout", "error")]
+
     report = LiveTestReport(
         timestamp=datetime.now(UTC).isoformat(),
         duration_s=duration,
@@ -356,8 +369,8 @@ async def run_live_model_test(
         skipped=skipped,
         pass_rate=round(passed / tested * 100, 1) if tested else 0.0,
         by_provider=_build_provider_summaries(results),
-        failures=[r for r in results if r.status in ("fail", "timeout", "error")],
-        results=list(results),
+        failures=failures[:200],  # Cap to avoid huge payloads
+        results=list(results)[:500],  # Cap detailed results
     )
 
     logger.info(
