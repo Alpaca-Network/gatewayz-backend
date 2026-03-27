@@ -279,9 +279,9 @@ def _build_provider_summaries(results: list[ModelTestResult]) -> list[ProviderSu
 async def run_live_model_test(
     gateway: str | None = Query(None, description="Filter by gateway"),
     provider: str | None = Query(None, description="Filter by provider slug"),
-    limit: int = Query(0, ge=0, description="Max models to test (0 = all)"),
-    concurrency: int = Query(5, ge=1, le=20, description="Parallel requests"),
-    timeout: float = Query(30.0, ge=5, le=120, description="Per-model timeout (s)"),
+    limit: int = Query(50, ge=0, le=5000, description="Max models to test (default 50, max 5000)"),
+    concurrency: int = Query(10, ge=1, le=20, description="Parallel requests"),
+    timeout: float = Query(15.0, ge=5, le=60, description="Per-model timeout (s)"),
     admin_user: dict = Depends(require_admin),
 ) -> LiveTestReport:
     """
