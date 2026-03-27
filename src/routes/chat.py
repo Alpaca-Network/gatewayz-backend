@@ -1335,8 +1335,12 @@ async def stream_generator(
                 # (message_start, content_block_stop, ping, etc. legitimately produce no output)
                 is_anthropic_noop = False
                 if hasattr(chunk, "type") and chunk.type in {
-                    "message_start", "message_stop", "message_delta",
-                    "content_block_start", "content_block_stop", "ping",
+                    "message_start",
+                    "message_stop",
+                    "message_delta",
+                    "content_block_start",
+                    "content_block_stop",
+                    "ping",
                 }:
                     is_anthropic_noop = True
 
@@ -1344,7 +1348,10 @@ async def stream_generator(
                     dropped_chunks += 1
                     logger.warning(
                         "[STREAM_DROP] Chunk %d dropped for %s/%s (request_id=%s)",
-                        chunk_count, provider, model, request_id,
+                        chunk_count,
+                        provider,
+                        model,
+                        request_id,
                     )
                     try:
                         from src.services.prometheus_metrics import stream_chunks_dropped
@@ -1356,7 +1363,10 @@ async def stream_generator(
         accumulated_content = normalizer.get_accumulated_content()
         logger.info(
             "[STREAM] Stream completed: %d chunks, %d dropped, content_len=%d (request_id=%s)",
-            chunk_count, dropped_chunks, len(accumulated_content), request_id,
+            chunk_count,
+            dropped_chunks,
+            len(accumulated_content),
+            request_id,
         )
 
         # Warn client if significant chunk loss occurred

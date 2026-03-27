@@ -135,7 +135,9 @@ async def get_sessions(
         sessions = get_user_chat_sessions(user_id=user["id"], limit=limit, offset=offset)
         total = get_user_chat_sessions_count(user_id=user["id"])
 
-        logger.info(f"Retrieved {len(sessions)} chat sessions for user {user['id']} (total: {total})")
+        logger.info(
+            f"Retrieved {len(sessions)} chat sessions for user {user['id']} (total: {total})"
+        )
 
         return ChatSessionsListResponse(
             success=True,
@@ -548,7 +550,9 @@ async def get_my_feedback(
             model=model,
         )
 
-        logger.info(f"Retrieved {len(feedback_list)} feedback records for user {user['id']} (total: {total})")
+        logger.info(
+            f"Retrieved {len(feedback_list)} feedback records for user {user['id']} (total: {total})"
+        )
 
         return MessageFeedbackListResponse(
             success=True,

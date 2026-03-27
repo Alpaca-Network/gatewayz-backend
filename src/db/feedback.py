@@ -225,11 +225,7 @@ def get_user_feedback_count(
     """Return the total number of feedback records matching the filters (ignoring pagination)."""
     try:
         client = get_supabase_client()
-        query = (
-            client.table("message_feedback")
-            .select("id", count="exact")
-            .eq("user_id", user_id)
-        )
+        query = client.table("message_feedback").select("id", count="exact").eq("user_id", user_id)
         if feedback_type:
             query = query.eq("feedback_type", feedback_type)
         if session_id is not None:

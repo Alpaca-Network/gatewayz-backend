@@ -8,7 +8,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.db.activity import get_user_activity_log, get_user_activity_log_count, get_user_activity_stats
+from src.db.activity import (
+    get_user_activity_log,
+    get_user_activity_log_count,
+    get_user_activity_stats,
+)
 from src.security.deps import get_current_user
 
 logger = logging.getLogger(__name__)
@@ -162,7 +166,9 @@ async def get_activity_log(
             provider_filter=provider,
         )
 
-        logger.info(f"Retrieved {len(activities)} activity records for user {user_id} (total: {total})")
+        logger.info(
+            f"Retrieved {len(activities)} activity records for user {user_id} (total: {total})"
+        )
 
         # Frontend expects 'logs' not 'activities'
         return {
