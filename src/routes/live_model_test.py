@@ -92,40 +92,21 @@ class LiveTestReport(BaseModel):
 
 
 def _get_model_id(model: dict) -> str:
-    """Get the canonical model ID from a catalog model dict.
+    """Get the model ID to send to the chat endpoint.
 
-    Prefers provider_model_id (DB source of truth) over the display-name id field.
+    Uses the same ID the catalog displays to users — the chat endpoint
+    resolves it internally via model_transformations.
     """
-    # DB models have provider_model_id — this is the canonical ID
-    canonical = model.get("provider_model_id") or model.get("model_id") or model.get("modelId")
-    if canonical and isinstance(canonical, str) and canonical.strip():
-        return canonical.strip()
-    # Cached/API models should have id with the canonical slug
-    return model.get("id", "unknown")
-
-
-def _is_canonical_id(model_id: str) -> bool:
-    """Check if a model ID looks canonical (e.g. 'openai/gpt-4o-mini') vs display name."""
-    # Canonical IDs contain "/" and no spaces, or are all-lowercase with hyphens
-    if "/" in model_id and " " not in model_id:
-        return True
-    # Some IDs are just slugs without provider prefix (e.g. "gpt-4o-mini")
-    if " " not in model_id and model_id == model_id.lower():
-        return True
-    return False
+    return model.get("id", model.get("provider_model_id", "unknown"))
 
 
 def _should_skip(model: dict) -> str | None:
-    model_id = _get_model_id(model)
-    # Skip models with display-name IDs (not resolvable by chat endpoint)
-    if not _is_canonical_id(model_id):
-        return f"display name, not canonical ID: {model_id}"
-    model_id_lower = model_id.lower()
+    model_id = _get_model_id(model).lower()
     modality = model.get("modality", "").lower()
     if modality and modality in SKIP_MODALITIES:
         return f"non-chat modality: {modality}"
     for prefix in SKIP_MODEL_PREFIXES:
-        if model_id_lower.startswith(prefix) or f"/{prefix}" in model_id_lower:
+        if model_id.startswith(prefix) or f"/{prefix}" in model_id:
             return f"non-chat prefix: {prefix}"
     return None
 
@@ -137,56 +118,18 @@ async def _fetch_catalog(
     """Fetch models from the DB (source of truth with provider_model_id)."""
     models: list[dict] = []
 
-    # Primary: fetch from DB — has provider_model_id (canonical IDs)
+    # Use the same source as the /models API endpoint
     try:
-        from src.db.models_catalog_db import get_all_catalog_models
+        from src.services.models import get_cached_models
 
-        result = get_all_catalog_models(limit=10000)
+        gw = gateway or "all"
+        result = get_cached_models(gw)
         if asyncio.iscoroutine(result):
             result = await result
-        raw = result if isinstance(result, list) else result
-        # DB returns joined rows with providers info
-        for row in raw:
-            provider_info = row.get("providers", {}) or {}
-            models.append(
-                {
-                    "provider_model_id": row.get("provider_model_id", ""),
-                    "model_name": row.get("model_name", ""),
-                    "id": row.get("provider_model_id", row.get("model_name", "")),
-                    "source_gateway": provider_info.get("slug", ""),
-                    "provider_slug": provider_info.get("slug", ""),
-                    "modality": row.get("modality", ""),
-                    "description": row.get("description", ""),
-                }
-            )
+        models = result or []
     except Exception as exc:
-        logger.warning("Failed to fetch catalog from DB: %s", exc)
+        logger.warning("Failed to fetch catalog: %s", exc)
 
-    # Fallback: use cached models
-    if not models:
-        try:
-            from src.services.models import get_cached_models
-
-            gw = gateway or "all"
-            cached = (
-                await get_cached_models(gw)
-                if asyncio.iscoroutinefunction(get_cached_models)
-                else get_cached_models(gw)
-            )
-            models = cached or []
-        except Exception as exc:
-            logger.warning("Failed to fetch cached models: %s", exc)
-
-    # Filter by gateway
-    if gateway:
-        gw = gateway.lower()
-        models = [
-            m
-            for m in models
-            if m.get("source_gateway", "").lower() == gw or m.get("provider_slug", "").lower() == gw
-        ]
-
-    # Filter by provider
     if provider:
         p = provider.lower()
         models = [
