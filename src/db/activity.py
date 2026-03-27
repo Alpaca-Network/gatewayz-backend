@@ -298,6 +298,40 @@ def get_user_activity_log(
         return []
 
 
+def get_user_activity_log_count(
+    user_id: int,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    model_filter: str | None = None,
+    provider_filter: str | None = None,
+) -> int:
+    """Return the total number of activity records matching the filters (ignoring pagination)."""
+    try:
+        client = get_supabase_client()
+        query = client.table("activity_log").select("id", count="exact").eq("user_id", user_id)
+
+        if from_date:
+            start_date = datetime.fromisoformat(from_date).replace(tzinfo=UTC).isoformat()
+            query = query.gte("timestamp", start_date)
+        if to_date:
+            end_date = (
+                datetime.fromisoformat(to_date)
+                .replace(hour=23, minute=59, second=59, tzinfo=UTC)
+                .isoformat()
+            )
+            query = query.lte("timestamp", end_date)
+        if model_filter:
+            query = query.eq("model", model_filter)
+        if provider_filter:
+            query = query.eq("provider", provider_filter)
+
+        result = query.execute()
+        return result.count if result.count is not None else len(result.data or [])
+    except Exception as e:
+        logger.error(f"Failed to get activity log count: {e}")
+        return 0
+
+
 def log_security_event(
     event_type: str,
     ip_address: str | None = None,

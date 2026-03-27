@@ -21,7 +21,7 @@ Security Design:
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -285,6 +285,37 @@ def record_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]:
     )
 
     return {"count": new_count, "remaining": remaining, "limit": ANONYMOUS_DAILY_LIMIT}
+
+
+def get_anonymous_rate_limit_headers(limit: int, remaining: int) -> dict[str, str]:
+    """
+    Build standard rate limit headers for anonymous 429 responses.
+
+    Returns both IETF draft standard (RateLimit-*) and legacy (X-RateLimit-*)
+    headers, consistent with Layer 1 middleware headers.
+
+    Args:
+        limit: The daily request limit
+        remaining: Remaining requests (usually 0 when blocking)
+
+    Returns:
+        Dict of HTTP header name → value
+    """
+    now = datetime.now(UTC)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight = midnight + timedelta(days=1)
+    seconds_until_reset = int((next_midnight - now).total_seconds())
+
+    return {
+        "RateLimit-Limit": str(limit),
+        "RateLimit-Remaining": str(remaining),
+        "RateLimit-Reset": str(seconds_until_reset),
+        "Retry-After": str(seconds_until_reset),
+        "X-RateLimit-Limit-Requests": str(limit),
+        "X-RateLimit-Remaining-Requests": str(remaining),
+        "X-RateLimit-Reset-Requests": str(int(next_midnight.timestamp())),
+        "X-RateLimit-Reason": "anonymous_daily_limit",
+    }
 
 
 def get_anonymous_stats() -> dict[str, Any]:

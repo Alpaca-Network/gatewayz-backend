@@ -10,6 +10,7 @@ from src.db.chat_history import (
     get_chat_session,
     get_chat_session_stats,
     get_user_chat_sessions,
+    get_user_chat_sessions_count,
     save_chat_message,
     search_chat_sessions,
     update_chat_session,
@@ -20,6 +21,7 @@ from src.db.feedback import (
     get_feedback_by_session,
     get_feedback_stats,
     get_user_feedback,
+    get_user_feedback_count,
     save_message_feedback,
     update_feedback,
 )
@@ -131,14 +133,17 @@ async def get_sessions(
             raise HTTPException(status_code=401, detail="Invalid API key")
 
         sessions = get_user_chat_sessions(user_id=user["id"], limit=limit, offset=offset)
+        total = get_user_chat_sessions_count(user_id=user["id"])
 
-        logger.info(f"Retrieved {len(sessions)} chat sessions for user {user['id']}")
+        logger.info(
+            f"Retrieved {len(sessions)} chat sessions for user {user['id']} (total: {total})"
+        )
 
         return ChatSessionsListResponse(
             success=True,
             data=sessions,
-            count=len(sessions),
-            message=f"Retrieved {len(sessions)} chat sessions",
+            count=total,
+            message=f"Retrieved {len(sessions)} chat sessions (total: {total})",
         )
 
     except Exception as e:
@@ -538,14 +543,22 @@ async def get_my_feedback(
             limit=limit,
             offset=offset,
         )
+        total = get_user_feedback_count(
+            user_id=user["id"],
+            feedback_type=feedback_type,
+            session_id=session_id,
+            model=model,
+        )
 
-        logger.info(f"Retrieved {len(feedback_list)} feedback records for user {user['id']}")
+        logger.info(
+            f"Retrieved {len(feedback_list)} feedback records for user {user['id']} (total: {total})"
+        )
 
         return MessageFeedbackListResponse(
             success=True,
             data=feedback_list,
-            count=len(feedback_list),
-            message=f"Retrieved {len(feedback_list)} feedback records",
+            count=total,
+            message=f"Retrieved {len(feedback_list)} feedback records (total: {total})",
         )
 
     except HTTPException:

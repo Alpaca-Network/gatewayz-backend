@@ -110,6 +110,7 @@ class APIExceptions:
         retry_after: int | None = None,
         detail: str = "Rate limit exceeded",
         reason: str | None = None,
+        rate_limit_headers: dict[str, str] | None = None,
     ) -> HTTPException:
         """
         429 Too Many Requests - Rate limit exceeded.
@@ -118,15 +119,21 @@ class APIExceptions:
             retry_after: Seconds until retry is allowed
             detail: Custom error message
             reason: Optional reason for rate limit (e.g., "token_limit", "request_limit")
+            rate_limit_headers: Optional dict of rate limit headers from
+                get_rate_limit_headers() or get_anonymous_rate_limit_headers()
 
         Returns:
-            HTTPException with status 429 and optional Retry-After header
+            HTTPException with status 429, Retry-After, and rate limit headers
         """
         if reason:
             detail = f"{detail}: {reason}"
 
-        headers = {"Retry-After": str(retry_after)} if retry_after else None
-        return HTTPException(status_code=429, detail=detail, headers=headers)
+        headers: dict[str, str] = {}
+        if rate_limit_headers:
+            headers.update(rate_limit_headers)
+        if retry_after:
+            headers["Retry-After"] = str(retry_after)
+        return HTTPException(status_code=429, detail=detail, headers=headers or None)
 
     @staticmethod
     def plan_limit_exceeded(reason: str = "unknown") -> HTTPException:
