@@ -311,6 +311,31 @@ PROVIDER_FUNCTIONS = {
         "process_zai_response",
         "make_zai_request_openai_stream",
     ],
+    "openai": [
+        "make_openai_request",
+        "process_openai_response",
+        "make_openai_request_stream",
+    ],
+    "anthropic": [
+        "make_anthropic_request",
+        "process_anthropic_response",
+        "make_anthropic_request_stream",
+    ],
+    "deepinfra": [
+        "make_deepinfra_request_openai",
+        "process_deepinfra_response",
+        "make_deepinfra_request_openai_stream",
+    ],
+    "nebius": [
+        "make_nebius_request_openai",
+        "process_nebius_response",
+        "make_nebius_request_openai_stream",
+    ],
+    "canopywave": [
+        "make_canopywave_request_openai",
+        "process_canopywave_response",
+        "make_canopywave_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -447,6 +472,31 @@ PROVIDER_ROUTING = {
         "request": make_zai_request_openai,  # noqa: F821
         "process": process_zai_response,  # noqa: F821
         "stream": make_zai_request_openai_stream,  # noqa: F821
+    },
+    "openai": {
+        "request": make_openai_request,  # noqa: F821
+        "process": process_openai_response,  # noqa: F821
+        "stream": make_openai_request_stream,  # noqa: F821
+    },
+    "anthropic": {
+        "request": make_anthropic_request,  # noqa: F821
+        "process": process_anthropic_response,  # noqa: F821
+        "stream": make_anthropic_request_stream,  # noqa: F821
+    },
+    "deepinfra": {
+        "request": make_deepinfra_request_openai,  # noqa: F821
+        "process": process_deepinfra_response,  # noqa: F821
+        "stream": make_deepinfra_request_openai_stream,  # noqa: F821
+    },
+    "nebius": {
+        "request": make_nebius_request_openai,  # noqa: F821
+        "process": process_nebius_response,  # noqa: F821
+        "stream": make_nebius_request_openai_stream,  # noqa: F821
+    },
+    "canopywave": {
+        "request": make_canopywave_request_openai,  # noqa: F821
+        "process": process_canopywave_response,  # noqa: F821
+        "stream": make_canopywave_request_openai_stream,  # noqa: F821
     },
 }
 
