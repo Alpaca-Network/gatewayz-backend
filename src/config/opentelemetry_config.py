@@ -318,39 +318,66 @@ class OpenTelemetryConfig:
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
 
-                # BotFilterSpanProcessor: registered FIRST so bot/scanner spans
-                # are dropped before they reach ProviderSpanEnricher or Tempo.
-                # This prevents the Tempo OOM caused by attacker key-scanning traffic.
-                try:
-                    from src.utils.bot_filter_span_processor import BotFilterSpanProcessor
+                # ── Chained processor pipeline ──────────────────────────────
+                # IMPORTANT: All processors must be chained through
+                # BotFilterSpanProcessor, NOT registered independently.
+                #
+                # The OTel SDK's SynchronousMultiSpanProcessor calls every
+                # independently-registered processor on every span. Using
+                # independent add_span_processor() calls makes the bot filter
+                # completely ineffective — bot spans still reach Tempo.
+                #
+                # Solution: register BotFilterSpanProcessor as the SOLE
+                # processor. It receives downstream processors as constructor
+                # args and is the exclusive gate for on_end() forwarding.
+                #
+                # Order for legitimate spans:
+                #   BotFilterSpanProcessor
+                #     → ProviderSpanEnricher  (adds peer.service)
+                #     → ResilientSpanProcessor → BatchSpanProcessor → Tempo
+                #
+                # Bot spans: dropped in BotFilterSpanProcessor; nothing below
+                # ever sees them.
 
-                    cls._tracer_provider.add_span_processor(BotFilterSpanProcessor())
-                    logger.info(
-                        "   BotFilterSpanProcessor registered "
-                        "(scanner/bot traces will be silently dropped before Tempo)"
-                    )
-                except Exception as bot_filter_e:
-                    logger.warning(f"   BotFilterSpanProcessor unavailable (non-fatal): {bot_filter_e}")
+                downstream = []
 
-                # ProviderSpanEnricher: runs BEFORE the batch exporter so that
-                # peer.service is present on spans when Tempo indexes them.
-                # This is what makes the Service Graph & Topology section draw
-                # edges between gatewayz-backend and each AI provider.
                 try:
                     from src.services.provider_span_enricher import ProviderSpanEnricher
 
-                    cls._tracer_provider.add_span_processor(ProviderSpanEnricher())
+                    downstream.append(ProviderSpanEnricher())
                     logger.info(
-                        "   ProviderSpanEnricher registered "
+                        "   ProviderSpanEnricher queued "
                         "(peer.service will be added to AI provider HTTP spans)"
                     )
                 except Exception as enricher_e:
                     logger.warning(f"   ProviderSpanEnricher unavailable (non-fatal): {enricher_e}")
 
-                cls._tracer_provider.add_span_processor(resilient_processor)
+                downstream.append(resilient_processor)
                 logger.info(
-                    "   Resilient batch span processor configured (queue: 2048, batch: 512)"
+                    "   Resilient batch span processor queued (queue: 2048, batch: 512)"
                 )
+
+                try:
+                    from src.utils.bot_filter_span_processor import BotFilterSpanProcessor
+
+                    cls._tracer_provider.add_span_processor(
+                        BotFilterSpanProcessor(*downstream)
+                    )
+                    logger.info(
+                        "   BotFilterSpanProcessor registered as sole processor "
+                        "(chained → %d downstream processors, bot traces dropped before Tempo)",
+                        len(downstream),
+                    )
+                except Exception as bot_filter_e:
+                    # Fallback: register downstream processors individually (no bot filtering).
+                    logger.warning(
+                        "   ⚠️  BotFilterSpanProcessor unavailable — "
+                        "falling back to unfiltered registration: %s",
+                        bot_filter_e,
+                    )
+                    for proc in downstream:
+                        cls._tracer_provider.add_span_processor(proc)
+
                 logger.info("   Circuit breaker enabled to handle connection failures")
             except Exception as e:
                 logger.error(
