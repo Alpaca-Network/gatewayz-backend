@@ -243,6 +243,39 @@ async def require_admin(user: dict[str, Any] = Depends(get_current_user)) -> dic
     return user
 
 
+async def require_admin_or_env_key(
+    credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer()),
+) -> dict[str, Any]:
+    """
+    Accept either a user admin API key OR the ADMIN_API_KEY env var.
+
+    Tries user-key auth first (require_admin path). If that fails with 401
+    (key not found in DB), falls back to env-var comparison (get_admin_key path).
+
+    Returns:
+        User dict if user-key auth, or {"role": "admin", "auth": "env_key"} for env-key.
+
+    Raises:
+        HTTPException: 401/403 if neither auth method succeeds.
+    """
+    token = credentials.credentials
+
+    # 1. Try env-var admin key (fast, no DB)
+    expected_env_key = os.environ.get("ADMIN_API_KEY")
+    if expected_env_key and secrets.compare_digest(token, expected_env_key):
+        return {"role": "admin", "auth": "env_key", "is_admin": True}
+
+    # 2. Try user API key auth
+    try:
+        user = await get_current_user(credentials)
+        is_admin = user.get("is_admin", False) or user.get("role") == "admin"
+        if not is_admin:
+            raise HTTPException(status_code=403, detail="Administrator privileges required")
+        return user
+    except HTTPException:
+        raise
+
+
 async def get_optional_api_key(
     credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
     request: Request = None,
