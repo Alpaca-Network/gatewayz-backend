@@ -697,12 +697,19 @@ class ChatInferenceHandler:
                 provider_used = result["provider"]
                 provider_model_id = result.get("provider_model_id", request.model)
             else:
-                # Fallback to OpenRouter for models not in multi-provider registry
-                logger.info(
-                    f"[ChatHandler] Model {request.model} not in registry, using OpenRouter fallback"
+                # Detect native provider from model ID (e.g. "openai/gpt-4o" -> "openai")
+                from src.services.model_transformations import (
+                    detect_provider_from_model_id,
+                    transform_model_id,
                 )
-                provider_used = "openrouter"
-                provider_model_id = request.model
+
+                detected = detect_provider_from_model_id(request.model)
+                provider_used = detected or "openrouter"
+                provider_model_id = transform_model_id(request.model, provider_used)
+                logger.info(
+                    f"[ChatHandler] Model {request.model} not in registry, "
+                    f"detected provider='{provider_used}', model_id='{provider_model_id}'"
+                )
                 provider_response = self._call_provider(
                     provider_used, provider_model_id, messages, **kwargs
                 )
@@ -893,12 +900,19 @@ class ChatInferenceHandler:
                 provider_used = primary_provider.name
                 provider_model_id = primary_provider.model_id
             else:
-                # Fallback to OpenRouter for models not in registry
-                logger.info(
-                    f"[ChatHandler] Model {request.model} not in registry, using OpenRouter fallback (streaming)"
+                # Detect native provider from model ID (e.g. "openai/gpt-4o" -> "openai")
+                from src.services.model_transformations import (
+                    detect_provider_from_model_id,
+                    transform_model_id,
                 )
-                provider_used = "openrouter"
-                provider_model_id = request.model
+
+                detected = detect_provider_from_model_id(request.model)
+                provider_used = detected or "openrouter"
+                provider_model_id = transform_model_id(request.model, provider_used)
+                logger.info(
+                    f"[ChatHandler] Model {request.model} not in registry, "
+                    f"detected provider='{provider_used}', model_id='{provider_model_id}' (streaming)"
+                )
 
             logger.info(
                 f"[ChatHandler] Streaming from provider={provider_used}, model={provider_model_id}"
