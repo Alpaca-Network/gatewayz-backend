@@ -1402,8 +1402,9 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
 
         # Build API format model
         api_model = {
-            # Use model_name as the API-facing id (not the DB primary key)
-            "id": db_model.get("model_name", ""),
+            # Use provider_model_id as the API-facing id (canonical slug like "openai/gpt-4o")
+            # Falls back to model_name only if provider_model_id is missing
+            "id": db_model.get("provider_model_id") or db_model.get("model_name", ""),
             "name": db_model.get("model_name", ""),
             "source_gateway": provider_slug,
             "provider_slug": provider_slug,
@@ -1434,7 +1435,7 @@ def transform_db_model_to_api_format(db_model: dict[str, Any]) -> dict[str, Any]
         logger.error(f"Error transforming DB model to API format: {e}")
         # Return a minimal model on error to avoid breaking the catalog
         return {
-            "id": db_model.get("model_name", "unknown"),
+            "id": db_model.get("provider_model_id") or db_model.get("model_name", "unknown"),
             "name": db_model.get("model_name", "Unknown Model"),
             "source_gateway": "unknown",
             "provider_slug": "unknown",
