@@ -38,7 +38,7 @@ def _has_router_level_auth(source: str) -> bool:
     """Check if router has global auth dependency."""
     return bool(
         re.search(
-            r"dependencies\s*=\s*\[.*?Depends\((require_admin|get_admin_key)\)",
+            r"dependencies\s*=\s*\[.*?Depends\((require_admin|require_admin_or_env_key|get_admin_key)\)",
             source,
             re.DOTALL,
         )
@@ -81,7 +81,11 @@ def _route_has_auth_in_signature(source: str, method: str, path: str) -> bool:
         return True  # Can't parse signature, assume OK
 
     func_params = func_match.group(2)
-    return "require_admin" in func_params or "get_admin_key" in func_params
+    return (
+        "require_admin" in func_params
+        or "require_admin_or_env_key" in func_params
+        or "get_admin_key" in func_params
+    )
 
 
 def test_model_sync_router_has_auth_dependency():
@@ -92,12 +96,12 @@ def test_model_sync_router_has_auth_dependency():
     """
     project_root = Path(__file__).parent.parent.parent
     source = (project_root / "src" / "routes" / "model_sync.py").read_text()
-    assert "require_admin" in source, "model_sync.py must import require_admin"
+    assert "require_admin" in source, "model_sync.py must import an admin auth dependency"
     assert re.search(
-        r"dependencies\s*=\s*\[.*?Depends\(require_admin\)",
+        r"dependencies\s*=\s*\[.*?Depends\((require_admin|require_admin_or_env_key)\)",
         source,
         re.DOTALL,
-    ), "model_sync.py router must have dependencies=[Depends(require_admin)]"
+    ), "model_sync.py router must have dependencies=[Depends(require_admin)] or require_admin_or_env_key"
 
 
 def test_no_admin_route_without_auth():
