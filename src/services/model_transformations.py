@@ -408,6 +408,22 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     if original_model_id != model_id:
         logger.debug(f"Normalized model ID to lowercase: '{original_model_id}' -> '{model_id}'")
 
+    # Native providers: strip the provider prefix (e.g. "openai/gpt-4o" -> "gpt-4o")
+    # These providers expect bare model IDs, not prefixed ones
+    _STRIP_PREFIX_PROVIDERS = {
+        "openai": "openai/",
+        "anthropic": "anthropic/",
+        "groq": "groq/",
+        "cerebras": "cerebras/",
+        "xai": "xai/",
+        "nebius": "nebius/",
+    }
+    strip_prefix = _STRIP_PREFIX_PROVIDERS.get(provider_lower)
+    if strip_prefix and model_id.startswith(strip_prefix):
+        stripped = model_id[len(strip_prefix) :]
+        logger.debug(f"Stripped provider prefix for {provider_lower}: '{model_id}' -> '{stripped}'")
+        return stripped
+
     # If already in full Fireworks path format, return as-is (already lowercase)
     if model_id.startswith("accounts/fireworks/models/"):
         logger.debug(f"Model ID already in Fireworks format: {model_id}")
