@@ -72,9 +72,9 @@ _SCANNER_ROUTE_PREFIXES: tuple[str, ...] = (
     "/phpmyadmin",
     "/mysqladmin",
     "/actuator",
-    "/api/v1/pods",       # k8s probing
-    "/console",           # jboss / spring boot console
-    "/manager/html",      # tomcat
+    "/api/v1/pods",  # k8s probing
+    "/console",  # jboss / spring boot console
+    "/manager/html",  # tomcat
     "/cgi-bin",
     "/shell",
     "/cmd",
@@ -107,7 +107,7 @@ _BOT_UA_SUBSTRINGS: tuple[str, ...] = (
     "medusa",
     "burpsuite",
     "burp suite",
-    "zap/",         # OWASP ZAP
+    "zap/",  # OWASP ZAP
     "python-requests/2",  # raw requests lib without a custom UA
     "go-http-client",
     "curl/",
@@ -255,9 +255,8 @@ class BotFilterSpanProcessor(SpanProcessor):
         route = _get_str_attr(span, "http.route")
         url = _get_str_attr(span, "http.target") or _get_str_attr(span, "url.path") or ""
         ua = _get_str_attr(span, "http.user_agent") or _get_str_attr(span, "user_agent.original")
-        status = (
-            _get_str_attr(span, "http.status_code")
-            or _get_str_attr(span, "http.response.status_code")
+        status = _get_str_attr(span, "http.status_code") or _get_str_attr(
+            span, "http.response.status_code"
         )
         has_customer = bool(
             _get_str_attr(span, "customer.id")

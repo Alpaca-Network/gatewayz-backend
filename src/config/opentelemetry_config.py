@@ -353,16 +353,12 @@ class OpenTelemetryConfig:
                     logger.warning(f"   ProviderSpanEnricher unavailable (non-fatal): {enricher_e}")
 
                 downstream.append(resilient_processor)
-                logger.info(
-                    "   Resilient batch span processor queued (queue: 2048, batch: 512)"
-                )
+                logger.info("   Resilient batch span processor queued (queue: 2048, batch: 512)")
 
                 try:
                     from src.utils.bot_filter_span_processor import BotFilterSpanProcessor
 
-                    cls._tracer_provider.add_span_processor(
-                        BotFilterSpanProcessor(*downstream)
-                    )
+                    cls._tracer_provider.add_span_processor(BotFilterSpanProcessor(*downstream))
                     logger.info(
                         "   BotFilterSpanProcessor registered as sole processor "
                         "(chained → %d downstream processors, bot traces dropped before Tempo)",

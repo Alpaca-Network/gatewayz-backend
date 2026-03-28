@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 # Minimal ReadableSpan stub (avoids requiring opentelemetry-sdk in CI)
 # ---------------------------------------------------------------------------
 
+
 class _FakeSpan:
     """Lightweight stand-in for opentelemetry.sdk.trace.ReadableSpan."""
 
@@ -25,6 +26,7 @@ class _FakeSpan:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_processor():
     """Import and instantiate BotFilterSpanProcessor with OTel mocked."""
@@ -43,6 +45,7 @@ def _make_processor():
         {"opentelemetry.sdk.trace": fake_sdk},
     ):
         from src.utils.bot_filter_span_processor import BotFilterSpanProcessor
+
         return BotFilterSpanProcessor()
 
 
@@ -56,8 +59,8 @@ def _classify(processor, **attrs):
 # Tests — should DROP
 # ---------------------------------------------------------------------------
 
-class TestBotFilterSpanProcessorDrops:
 
+class TestBotFilterSpanProcessorDrops:
     def setup_method(self):
         self.proc = _make_processor()
 
@@ -74,7 +77,9 @@ class TestBotFilterSpanProcessorDrops:
         assert reason == "scanner_route"
 
     def test_drop_scanner_route_actuator(self):
-        reason = _classify(self.proc, **{"http.route": "/actuator/health", "http.status_code": "200"})
+        reason = _classify(
+            self.proc, **{"http.route": "/actuator/health", "http.status_code": "200"}
+        )
         assert reason == "scanner_route"
 
     def test_drop_scanner_route_phpmyadmin(self):
@@ -112,7 +117,9 @@ class TestBotFilterSpanProcessorDrops:
 
     def test_drop_unauth_401_flood(self):
         # 401 with no customer/user attributes → unauth 4xx flood
-        reason = _classify(self.proc, **{"http.route": "/v1/chat/completions", "http.status_code": "401"})
+        reason = _classify(
+            self.proc, **{"http.route": "/v1/chat/completions", "http.status_code": "401"}
+        )
         assert reason == "unauth_4xx_flood"
 
     def test_drop_unauth_403_flood(self):
@@ -121,7 +128,9 @@ class TestBotFilterSpanProcessorDrops:
 
     def test_drop_unauth_429_spam(self):
         # 429 with no customer.id / user.id → key-scanning pattern
-        reason = _classify(self.proc, **{"http.route": "/v1/chat/completions", "http.status_code": "429"})
+        reason = _classify(
+            self.proc, **{"http.route": "/v1/chat/completions", "http.status_code": "429"}
+        )
         assert reason == "unauth_429_spam"
 
 
@@ -129,8 +138,8 @@ class TestBotFilterSpanProcessorDrops:
 # Tests — should NOT DROP (legitimate traffic)
 # ---------------------------------------------------------------------------
 
-class TestBotFilterSpanProcessorAllows:
 
+class TestBotFilterSpanProcessorAllows:
     def setup_method(self):
         self.proc = _make_processor()
 
@@ -198,8 +207,8 @@ class TestBotFilterSpanProcessorAllows:
 # Tests — dropped_count increments
 # ---------------------------------------------------------------------------
 
-class TestBotFilterSpanProcessorCounter:
 
+class TestBotFilterSpanProcessorCounter:
     def setup_method(self):
         self.proc = _make_processor()
 
@@ -207,9 +216,7 @@ class TestBotFilterSpanProcessorCounter:
         initial = self.proc.dropped_count
 
         # Simulate on_end with a bot span (no downstream to call)
-        with patch(
-            "src.utils.bot_filter_span_processor._increment_dropped_counter"
-        ):
+        with patch("src.utils.bot_filter_span_processor._increment_dropped_counter"):
             span = _FakeSpan({"http.route": "/.env", "http.status_code": "200"})
             self.proc.on_end(span)
 
@@ -218,11 +225,13 @@ class TestBotFilterSpanProcessorCounter:
     def test_dropped_count_unchanged_for_legit_span(self):
         initial = self.proc.dropped_count
 
-        span = _FakeSpan({
-            "http.route": "/v1/chat/completions",
-            "http.status_code": "200",
-            "customer.id": "cust_abc123",
-        })
+        span = _FakeSpan(
+            {
+                "http.route": "/v1/chat/completions",
+                "http.status_code": "200",
+                "customer.id": "cust_abc123",
+            }
+        )
         self.proc.on_end(span)
 
         assert self.proc.dropped_count == initial
