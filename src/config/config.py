@@ -146,10 +146,12 @@ class Config:
     FEATHERLESS_API_KEY = os.environ.get("FEATHERLESS_API_KEY")
 
     # OpenAI Direct API Configuration
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or os.environ.get("PROVIDER_OPENAI_API_KEY")
 
     # Anthropic Direct API / Autonomous Monitoring
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
+        "PROVIDER_ANTHROPIC_API_KEY"
+    )
     # Model to use for Anthropic API calls (bug fix generator, autonomous monitoring)
     # Valid models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
