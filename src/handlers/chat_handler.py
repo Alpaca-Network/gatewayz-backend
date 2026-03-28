@@ -22,21 +22,12 @@ from src.schemas.internal.chat import (
     InternalStreamChunk,
     InternalUsage,
 )
-from src.services.cerebras_client import (
-    make_cerebras_request_openai,
-    make_cerebras_request_openai_stream,
-)
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
-from src.services.groq_client import (
-    make_groq_request_openai,
-    make_groq_request_openai_stream,
-)
-from src.services.onerouter_client import (
-    make_onerouter_request_openai_stream,
-)
 
-# Provider client imports
+# OpenRouter is the only provider with native async streaming — import directly.
+# All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
+# circular deps with chat.py which imports this module).
 from src.services.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
@@ -268,16 +259,21 @@ class ChatInferenceHandler:
                 # Route to appropriate provider
                 if provider_name == "openrouter":
                     return make_openrouter_request_openai(messages, model_id, **kwargs)
-                elif provider_name == "cerebras":
-                    return make_cerebras_request_openai(messages, model_id, **kwargs)
-                elif provider_name == "groq":
-                    return make_groq_request_openai(messages, model_id, **kwargs)
-                else:
-                    # Fallback to OpenRouter for unknown providers
-                    logger.warning(
-                        f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
-                    )
-                    return make_openrouter_request_openai(messages, model_id, **kwargs)
+
+                # Registry-based dispatch for all other providers
+                # Lazy import to avoid circular dependency (chat.py imports this module)
+                from src.routes.chat import PROVIDER_ROUTING
+
+                routing = PROVIDER_ROUTING.get(provider_name)
+                if routing and routing.get("request"):
+                    return routing["request"](messages, model_id, **kwargs)
+
+                # Fallback to OpenRouter for unknown providers
+                logger.warning(
+                    f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
+                    f"falling back to OpenRouter"
+                )
+                return make_openrouter_request_openai(messages, model_id, **kwargs)
             except HTTPException:
                 # Re-raise HTTP exceptions (already formatted)
                 raise
@@ -390,36 +386,34 @@ class ChatInferenceHandler:
         try:
             with tag_wrapper({"provider": provider_name, "model": model_id}):
                 if provider_name == "openrouter":
+                    # OpenRouter is the only provider with native async streaming
                     stream = await make_openrouter_request_openai_stream_async(
                         messages, model_id, **kwargs
                     )
                     async for chunk in stream:
-                        yield chunk
-                elif provider_name == "onerouter":
-                    # OneRouter/Infron.ai uses sync client - use non-blocking iteration
-                    stream = make_onerouter_request_openai_stream(messages, model_id, **kwargs)
-                    async for chunk in _iterate_sync_stream(stream):
-                        yield chunk
-                elif provider_name == "cerebras":
-                    # Cerebras uses sync client - use non-blocking iteration
-                    stream = make_cerebras_request_openai_stream(messages, model_id, **kwargs)
-                    async for chunk in _iterate_sync_stream(stream):
-                        yield chunk
-                elif provider_name == "groq":
-                    # Groq uses sync client - use non-blocking iteration
-                    stream = make_groq_request_openai_stream(messages, model_id, **kwargs)
-                    async for chunk in _iterate_sync_stream(stream):
                         yield chunk
                 else:
-                    # Fallback to OpenRouter
-                    logger.warning(
-                        f"[ChatHandler] Unknown provider {provider_name}, falling back to OpenRouter"
-                    )
-                    stream = await make_openrouter_request_openai_stream_async(
-                        messages, model_id, **kwargs
-                    )
-                    async for chunk in stream:
-                        yield chunk
+                    # Registry-based dispatch for all other providers
+                    # Lazy import to avoid circular dependency (chat.py imports this module)
+                    from src.routes.chat import PROVIDER_ROUTING
+
+                    routing = PROVIDER_ROUTING.get(provider_name)
+                    if routing and routing.get("stream"):
+                        # All non-OpenRouter providers use sync streaming clients
+                        stream = routing["stream"](messages, model_id, **kwargs)
+                        async for chunk in _iterate_sync_stream(stream):
+                            yield chunk
+                    else:
+                        # Fallback to OpenRouter for unknown providers
+                        logger.warning(
+                            f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
+                            f"falling back to OpenRouter (streaming)"
+                        )
+                        stream = await make_openrouter_request_openai_stream_async(
+                            messages, model_id, **kwargs
+                        )
+                        async for chunk in stream:
+                            yield chunk
         except CircuitBreakerError as e:
             # Circuit breaker is open - provider temporarily unavailable
             logger.warning(
