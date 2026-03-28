@@ -318,6 +318,20 @@ class OpenTelemetryConfig:
                 # Wrap with resilient processor to handle connection errors gracefully
                 resilient_processor = ResilientSpanProcessor(batch_processor)
 
+                # BotFilterSpanProcessor: registered FIRST so bot/scanner spans
+                # are dropped before they reach ProviderSpanEnricher or Tempo.
+                # This prevents the Tempo OOM caused by attacker key-scanning traffic.
+                try:
+                    from src.utils.bot_filter_span_processor import BotFilterSpanProcessor
+
+                    cls._tracer_provider.add_span_processor(BotFilterSpanProcessor())
+                    logger.info(
+                        "   BotFilterSpanProcessor registered "
+                        "(scanner/bot traces will be silently dropped before Tempo)"
+                    )
+                except Exception as bot_filter_e:
+                    logger.warning(f"   BotFilterSpanProcessor unavailable (non-fatal): {bot_filter_e}")
+
                 # ProviderSpanEnricher: runs BEFORE the batch exporter so that
                 # peer.service is present on spans when Tempo indexes them.
                 # This is what makes the Service Graph & Topology section draw

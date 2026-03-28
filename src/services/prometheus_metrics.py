@@ -625,6 +625,16 @@ current_rate_limit = get_or_create_metric(
     ["limit_type"],
 )
 
+# ==================== Bot Trace Filter Metrics ====================
+# Counts spans silently dropped by BotFilterSpanProcessor before reaching Tempo.
+# reason labels: scanner_route | bot_user_agent | unauth_4xx_flood | unauth_429_spam
+bot_traces_dropped_total = get_or_create_metric(
+    Counter,
+    "bot_traces_dropped_total",
+    "Total OTel spans dropped by BotFilterSpanProcessor (bot/scanner traffic suppressed from Tempo)",
+    ["reason"],
+)
+
 # ==================== Velocity Mode Metrics ====================
 # Metrics for tracking velocity mode activations and system protection
 velocity_mode_active = get_or_create_metric(
