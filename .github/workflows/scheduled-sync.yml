@@ -24,7 +24,7 @@ env:
   # Use direct Railway URL to bypass Cloudflare timeout (524 error)
   # Cloudflare has ~100s timeout, but sync takes 2-5 minutes
   API_URL: ${{ secrets.RAILWAY_API_URL || secrets.API_URL || 'https://api.gatewayz.ai' }}
-  ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
+  ADMIN_KEY: ${{ secrets.ADMIN_API_KEY }}
 
 jobs:
   sync-models:
@@ -46,6 +46,14 @@ jobs:
         run: |
           pip install requests jq
 
+      - name: Verify secrets
+        run: |
+          if [ -z "$ADMIN_KEY" ]; then
+            echo "❌ ADMIN_KEY secret is not set. Add it in Settings > Secrets > Actions."
+            exit 1
+          fi
+          echo "✅ ADMIN_KEY is configured"
+
       - name: Check API health
         id: health_check
         run: |
@@ -66,7 +74,7 @@ jobs:
           echo "📊 Getting current database status..."
           echo "   Endpoint: $API_URL/admin/model-sync/status"
 
-          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/status.json "$API_URL/admin/model-sync/status")
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/status.json -H "Authorization: Bearer $ADMIN_KEY" "$API_URL/admin/model-sync/status")
           STATUS=$(cat /tmp/status.json)
 
           echo "   HTTP Status: $HTTP_CODE"
@@ -96,7 +104,7 @@ jobs:
           START_TIME=$(date +%s)
 
           # Make request with verbose output
-          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/response.json -X POST "$API_URL/admin/model-sync/all")
+          HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/response.json -X POST -H "Authorization: Bearer $ADMIN_KEY" "$API_URL/admin/model-sync/all")
           RESPONSE=$(cat /tmp/response.json)
 
           END_TIME=$(date +%s)
