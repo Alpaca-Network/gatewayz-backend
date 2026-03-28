@@ -74,6 +74,9 @@ class InternalChatRequest(BaseModel):
     # Metadata
     user: str | None = Field(None, description="End-user identifier for abuse monitoring")
 
+    # Provider hint (set by chat.py when provider is detected from model ID or catalog)
+    provider: str | None = Field(None, description="Pre-detected provider name")
+
     # Anthropic-specific (mapped from system parameter)
     system_message: str | None = Field(
         None, description="System message (Anthropic formats use separate field)"

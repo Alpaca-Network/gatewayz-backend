@@ -2639,6 +2639,8 @@ async def chat_completions(
                     internal_request = adapter.to_internal_request(
                         {"messages": messages, "model": original_model, "stream": True, **optional}
                     )
+                    # Pass the detected provider so the handler doesn't have to re-detect
+                    internal_request.provider = provider
 
                     # Create unified handler with user context (pass request for disconnect detection)
                     handler = ChatInferenceHandler(api_key, background_tasks, request=request)
@@ -2907,6 +2909,8 @@ async def chat_completions(
                 internal_request = adapter.to_internal_request(
                     {"messages": messages, "model": original_model, "stream": False, **optional}
                 )
+                # Pass the detected provider so the handler doesn't have to re-detect
+                internal_request.provider = provider
 
                 # Create unified handler with user context (pass request for disconnect detection)
                 handler = ChatInferenceHandler(api_key, background_tasks, request=request)
