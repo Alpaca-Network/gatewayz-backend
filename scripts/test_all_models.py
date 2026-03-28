@@ -102,17 +102,29 @@ async def fetch_catalog(
     gateway: str | None,
     provider: str | None,
 ) -> list[dict]:
-    """Fetch models from the catalog endpoint."""
-    params: dict = {"limit": 10000}
-    if gateway:
-        params["gateway"] = gateway
+    """Fetch models from the catalog endpoint with pagination."""
+    models: list[dict] = []
+    offset = 0
+    page_size = 1000
 
-    resp = await client.get(f"{base_url}/models", params=params, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    while True:
+        params: dict = {"limit": page_size, "offset": offset}
+        if gateway:
+            params["gateway"] = gateway
 
-    # The endpoint returns {"data": [...]} or a list directly
-    models = data.get("data", data) if isinstance(data, dict) else data
+        resp = await client.get(f"{base_url}/models", params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        page = data.get("data", data) if isinstance(data, dict) else data
+        if not page:
+            break
+        models.extend(page)
+
+        has_more = data.get("has_more", False) if isinstance(data, dict) else False
+        if not has_more or len(page) < page_size:
+            break
+        offset += page_size
 
     # Filter by provider if specified
     if provider:
