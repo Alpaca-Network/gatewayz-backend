@@ -267,7 +267,8 @@ async def require_admin_or_env_key(
 
     # 2. Try user API key auth
     try:
-        user = await get_current_user(credentials)
+        api_key = await get_api_key(credentials)
+        user = await get_current_user(api_key)
         is_admin = user.get("is_admin", False) or user.get("role") == "admin"
         if not is_admin:
             raise HTTPException(status_code=403, detail="Administrator privileges required")
