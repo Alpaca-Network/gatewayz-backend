@@ -596,7 +596,6 @@ async def get_catalog_models(
     provider: str | None = Query(None, description="Filter by specific provider"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of models to return"),
     offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
-    api_key: str = Depends(get_api_key),
 ):
     """
     Get ALL models from the model catalog (not just health-tracked ones)
@@ -713,7 +712,6 @@ async def get_catalog_models(
 @router.get("/health/catalog/providers", tags=["health", "catalog"])
 async def get_catalog_providers(
     priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),
-    api_key: str = Depends(get_api_key),
 ):
     """
     Get ALL providers/gateways from the gateway registry (not just health-tracked ones)
