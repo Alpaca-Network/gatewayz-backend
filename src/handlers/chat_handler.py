@@ -723,12 +723,12 @@ class ChatInferenceHandler:
 
             # Step 4: Extract token usage from response
             usage = getattr(provider_response, "usage", None)
-            if not usage:
-                raise ValueError("Provider response missing usage data")
-
-            prompt_tokens = getattr(usage, "prompt_tokens", 0)
-            completion_tokens = getattr(usage, "completion_tokens", 0)
-            total_tokens = prompt_tokens + completion_tokens
+            if usage:
+                prompt_tokens = getattr(usage, "prompt_tokens", 0)
+                completion_tokens = getattr(usage, "completion_tokens", 0)
+            else:
+                prompt_tokens = 0
+                completion_tokens = 0
 
             # Extract response content
             if hasattr(provider_response, "choices") and provider_response.choices:
@@ -742,6 +742,21 @@ class ChatInferenceHandler:
                 tool_calls = getattr(message, "tool_calls", None)
             else:
                 raise ValueError("Provider response missing choices")
+
+            # Token estimation fallback if provider didn't provide usage
+            if prompt_tokens == 0 and completion_tokens == 0:
+                completion_tokens = max(1, len(content) // 4) if content else 1
+                prompt_chars = sum(
+                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
+                    for m in messages
+                )
+                prompt_tokens = max(1, prompt_chars // 4)
+                logger.warning(
+                    f"[ChatHandler] No usage data from provider {provider_used}, estimated "
+                    f"{prompt_tokens} prompt + {completion_tokens} completion tokens"
+                )
+
+            total_tokens = prompt_tokens + completion_tokens
 
             # Step 5: Calculate cost
             cost = await asyncio.to_thread(
