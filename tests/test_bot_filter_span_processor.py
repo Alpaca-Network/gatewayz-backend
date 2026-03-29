@@ -10,7 +10,6 @@ Verifies that:
 import sys
 from unittest.mock import MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Minimal ReadableSpan stub (avoids requiring opentelemetry-sdk in CI)
 # ---------------------------------------------------------------------------
