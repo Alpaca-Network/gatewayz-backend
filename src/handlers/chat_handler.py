@@ -744,14 +744,7 @@ class ChatInferenceHandler:
                 raise ValueError("Provider response missing choices")
 
             # Token estimation fallback if provider didn't provide usage
-            if prompt_tokens == 0 and completion_tokens == 0:
-                completion_tokens = max(1, len(content) // 4) if content else 1
-                prompt_chars = sum(
-                    len(m.get("content", "")) if isinstance(m.get("content"), str) else 0
-                    for m in messages
-                )
-                prompt_tokens = max(1, prompt_chars // 4)
-                logger.warning(
+                logger.info(
                     f"[ChatHandler] No usage data from provider {provider_used}, estimated "
                     f"{prompt_tokens} prompt + {completion_tokens} completion tokens"
                 )
