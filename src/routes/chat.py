@@ -2665,11 +2665,7 @@ async def chat_completions(
                             return  # Stream completed successfully
 
                         except HTTPException as _http_exc:
-                            if (
-                                not _content_started
-                                and not _is_last
-                                and should_failover(_http_exc)
-                            ):
+                            if not _content_started and not _is_last and should_failover(_http_exc):
                                 logger.warning(
                                     f"[Unified Handler] Provider '{_attempt_provider}' failed "
                                     f"(HTTP {_http_exc.status_code}) for model {original_model}, "
