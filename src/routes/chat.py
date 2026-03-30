@@ -3028,9 +3028,7 @@ async def chat_completions(
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
                 if isinstance(exc, HTTPException):
                     raise
-                # Map provider-specific errors
-                from src.services.provider_failover import map_provider_error
-
+                # Map provider-specific errors (map_provider_error imported at module level)
                 http_exc = map_provider_error(error_provider, error_model, exc)
                 raise http_exc
         else:
