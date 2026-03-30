@@ -2629,73 +2629,98 @@ async def chat_completions(
             # Streaming path
             # Use unified handler for authenticated streaming requests
             if not is_anonymous:
-                try:
-                    logger.info(
-                        f"[Unified Handler] Processing authenticated streaming request for model {original_model}"
-                    )
+                # Authenticated streaming with provider failover.
+                # We wrap consumption inside an async generator so that errors during
+                # iteration (not just setup) can be caught and the next provider tried,
+                # but only before the first content chunk has been sent to the client.
+                async def _auth_stream_with_failover():
+                    _adapter = OpenAIChatAdapter()
+                    last_exc = None
 
-                    # Convert external OpenAI format to internal format
-                    adapter = OpenAIChatAdapter()
-                    internal_request = adapter.to_internal_request(
-                        {"messages": messages, "model": original_model, "stream": True, **optional}
-                    )
-                    # Pass the detected provider so the handler doesn't have to re-detect
-                    internal_request.provider = provider
+                    for _idx, _attempt_provider in enumerate(provider_chain):
+                        _is_last = _idx == len(provider_chain) - 1
+                        _content_started = False
+                        try:
+                            _internal_req = _adapter.to_internal_request(
+                                {
+                                    "messages": messages,
+                                    "model": original_model,
+                                    "stream": True,
+                                    **optional,
+                                }
+                            )
+                            # Set the provider for this attempt
+                            _internal_req.provider = _attempt_provider
 
-                    # Create unified handler with user context (pass request for disconnect detection)
-                    handler = ChatInferenceHandler(api_key, background_tasks, request=request)
+                            _handler = ChatInferenceHandler(
+                                api_key, background_tasks, request=request
+                            )
+                            _internal_stream = _handler.process_stream(_internal_req)
+                            _sse_stream = _adapter.from_internal_stream(_internal_stream)
 
-                    # Process stream through unified pipeline
-                    internal_stream = handler.process_stream(internal_request)
+                            async for _chunk in _sse_stream:
+                                _content_started = True
+                                yield _chunk
 
-                    # Convert internal stream to SSE format
-                    sse_stream = adapter.from_internal_stream(internal_stream)
+                            return  # Stream completed successfully
 
-                    # Prepare response headers
-                    stream_headers = {}
-                    if rl_pre is not None:
-                        stream_headers.update(get_rate_limit_headers(rl_pre))
+                        except HTTPException as _http_exc:
+                            if not _content_started and not _is_last and should_failover(_http_exc):
+                                logger.warning(
+                                    f"[Unified Handler] Provider '{_attempt_provider}' failed "
+                                    f"(HTTP {_http_exc.status_code}) for model {original_model}, "
+                                    f"failing over ({_idx + 1}/{len(provider_chain)})"
+                                )
+                                last_exc = _http_exc
+                                continue
+                            raise
 
-                    # PERF: Add timing headers
-                    if tracker:
-                        prep_time_ms = tracker.get_total_duration() * 1000
-                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
-                    stream_headers["X-Provider"] = "unified"
-                    stream_headers["X-Model"] = original_model
-                    stream_headers["X-Requested-Model"] = original_model
+                        except Exception as _exc:
+                            if not _content_started and not _is_last:
+                                logger.warning(
+                                    f"[Unified Handler] Provider '{_attempt_provider}' error "
+                                    f"({type(_exc).__name__}: {_exc}) for model {original_model}, "
+                                    f"failing over ({_idx + 1}/{len(provider_chain)})"
+                                )
+                                last_exc = map_provider_error(
+                                    _attempt_provider, original_model, _exc
+                                )
+                                continue
+                            if isinstance(_exc, HTTPException):
+                                raise
+                            raise map_provider_error(
+                                _attempt_provider, original_model, _exc
+                            ) from _exc
 
-                    # SSE streaming headers to prevent buffering by proxies/nginx
-                    stream_headers["X-Accel-Buffering"] = "no"
-                    stream_headers["Cache-Control"] = "no-cache, no-transform"
-                    stream_headers["Connection"] = "keep-alive"
+                    # All providers exhausted
+                    if last_exc:
+                        raise last_exc
 
-                    logger.info(
-                        f"[Unified Handler] Returning SSE streaming response for model {original_model}"
-                    )
+                # Prepare response headers
+                stream_headers = {}
+                if rl_pre is not None:
+                    stream_headers.update(get_rate_limit_headers(rl_pre))
+                if tracker:
+                    prep_time_ms = tracker.get_total_duration() * 1000
+                    stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                stream_headers["X-Provider"] = "unified"
+                stream_headers["X-Model"] = original_model
+                stream_headers["X-Requested-Model"] = original_model
+                # SSE streaming headers to prevent buffering by proxies/nginx
+                stream_headers["X-Accel-Buffering"] = "no"
+                stream_headers["Cache-Control"] = "no-cache, no-transform"
+                stream_headers["Connection"] = "keep-alive"
 
-                    return StreamingResponse(
-                        sse_stream,
-                        media_type="text/event-stream",
-                        headers=stream_headers,
-                    )
+                logger.info(
+                    f"[Unified Handler] Returning SSE streaming response for model {original_model} "
+                    f"(provider_chain={provider_chain})"
+                )
 
-                except Exception as exc:
-                    # Map any errors to HTTPException
-                    logger.error(
-                        f"[Unified Handler] Streaming error: {type(exc).__name__}: {exc}",
-                        exc_info=True,
-                    )
-                    if isinstance(exc, HTTPException):
-                        raise
-                    # Map provider-specific errors
-                    from src.services.provider_failover import map_provider_error
-
-                    http_exc = map_provider_error(
-                        "onerouter",  # Default provider for error mapping
-                        original_model,
-                        exc,
-                    )
-                    raise http_exc
+                return StreamingResponse(
+                    _auth_stream_with_failover(),
+                    media_type="text/event-stream",
+                    headers=stream_headers,
+                )
             else:
                 # Anonymous users: keep existing provider routing logic
                 last_http_exc = None
@@ -2999,9 +3024,7 @@ async def chat_completions(
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
                 if isinstance(exc, HTTPException):
                     raise
-                # Map provider-specific errors
-                from src.services.provider_failover import map_provider_error
-
+                # Map provider-specific errors (map_provider_error imported at module level)
                 http_exc = map_provider_error(error_provider, error_model, exc)
                 raise http_exc
         else:

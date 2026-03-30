@@ -424,6 +424,13 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         logger.debug(f"Stripped provider prefix for {provider_lower}: '{model_id}' -> '{stripped}'")
         return stripped
 
+    # xAI models use "x-ai/" prefix in the catalog but the xAI API expects bare model names
+    # (e.g., "x-ai/grok-2-1212" -> "grok-2-1212")
+    if provider_lower == "xai" and model_id.startswith("x-ai/"):
+        stripped = model_id[5:]  # len("x-ai/") == 5
+        logger.debug(f"Stripped x-ai/ prefix for xai: '{model_id}' -> '{stripped}'")
+        return stripped
+
     # If already in full Fireworks path format, return as-is (already lowercase)
     if model_id.startswith("accounts/fireworks/models/"):
         logger.debug(f"Model ID already in Fireworks format: {model_id}")
@@ -1684,8 +1691,8 @@ def detect_provider_from_model_id(
         ]:
             return "fal"
 
-        # XAI models (e.g., "xai/grok-2")
-        if org == "xai":
+        # XAI models (e.g., "xai/grok-2" or "x-ai/grok-2-1212")
+        if org in ("xai", "x-ai"):
             return "xai"
 
         # Groq models (e.g., "groq/llama-3.3-70b-versatile", "groq/mixtral-8x7b-32768")
