@@ -69,6 +69,8 @@ _NATIVE_PROVIDER_PREFIXES = {
         "anthropic",
         "openrouter",
     ),  # Anthropic models: try anthropic first, then openrouter
+    "x-ai/": ("xai",),  # xAI models: xai only (no cross-provider support)
+    "xai/": ("xai",),  # also handle xai/ prefix variant
 }
 
 
