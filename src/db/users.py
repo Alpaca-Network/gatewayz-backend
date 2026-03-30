@@ -352,6 +352,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     user["environment_tag"] = key_data.get("environment_tag", "live")
                     user["scope_permissions"] = key_data.get("scope_permissions")
                     user["is_primary"] = key_data.get("is_primary", False)
+                    user["api_key"] = api_key  # ensure api_key is always in user dict
                     return user
             except (DatabaseResultError, KeyError) as e:
                 logger.warning(

@@ -332,6 +332,11 @@ async def run_live_model_test(
 
     start_time = time.monotonic()
 
+    # Tag self-calls so the security middleware skips velocity-mode recording for them.
+    # The header is validated in the middleware by comparing the Bearer token against
+    # ADMIN_API_KEY, so it cannot be forged by external clients.
+    headers["X-Internal-Source"] = "live-test"
+
     async with httpx.AsyncClient(base_url=base_url, headers=headers) as client:
         tasks = [_test_single_model(client, m, timeout, semaphore) for m in models]
         results = await asyncio.gather(*tasks)

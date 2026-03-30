@@ -12,6 +12,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import secrets
 import time
 from collections import Counter, deque
 
@@ -785,15 +786,29 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._is_streaming_request(request):
             return await call_next(request)
 
+        # Detect internal live-test self-calls so their failures don't pollute the
+        # velocity-mode window.  Requires BOTH the marker header AND a Bearer token
+        # that matches ADMIN_API_KEY — external clients cannot forge this without the key.
+        _admin_key_env = os.environ.get("ADMIN_API_KEY", "")
+        _incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        _is_internal_live_test = bool(
+            _admin_key_env
+            and _incoming_key
+            and request.headers.get("X-Internal-Source") == "live-test"
+            and secrets.compare_digest(_incoming_key, _admin_key_env)
+        )
+
         # Proceed to next middleware/app logic
         start_time = time.time()
         response = await call_next(request)
         request_duration = time.time() - start_time
 
         # Track response for Global Velocity Mode
-        # Record outcome and check if we should activate velocity mode
-        self._record_request_outcome(response.status_code, request_duration)
-        self._check_and_activate_velocity_mode()
+        # Skip for internal live-test calls — their provider failures should not
+        # inflate the system error rate and risk triggering velocity mode for other users.
+        if not _is_internal_live_test:
+            self._record_request_outcome(response.status_code, request_duration)
+            self._check_and_activate_velocity_mode()
 
         # Check if velocity mode should be deactivated and logged
         self._check_velocity_mode_deactivation()
