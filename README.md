@@ -706,6 +706,97 @@ Proprietary - All rights reserved
 
 ---
 
+## 🔄 Model Routing Hotfixes & Rollback Guide
+
+Documents four model routing fixes in commit `c09165c4`. Each section explains what changed and how to revert it individually. Silent redirects (aliases to newer model IDs) are intentional — deprecated upstream models are mapped to their current equivalents so existing integrations keep working without client changes.
+
+### Quick Rollback (revert all four at once)
+
+```bash
+git revert c09165c4 --no-edit
+```
+
+---
+
+### Fix 1 — Cerebras qwen-3: disable reasoning tokens by default
+
+**Problem**: `cerebras-cloud-sdk >=1.64.x` enables hybrid thinking for qwen-3 models by default. The gateway doesn't handle reasoning tokens in the stream, so Cerebras returned a 400 — which the error handler translated to the misleading _"Invalid value for parameter 'request'"_ message.
+
+**Change**: `src/services/cerebras_client.py` — added `_apply_cerebras_reasoning_defaults()` which injects `disable_reasoning=True` for any model whose name contains `qwen-3` or `qwen3`, unless the caller already set `disable_reasoning` or `reasoning_effort`.
+
+**Manual rollback**:
+1. Remove the constant and helper (lines ~111–126):
+   ```python
+   _CEREBRAS_REASONING_MODELS = ("qwen-3", "qwen3")
+
+   def _apply_cerebras_reasoning_defaults(model: str, kwargs: dict) -> dict: ...
+   ```
+2. Remove the two call sites in `make_cerebras_request_openai()` and `make_cerebras_request_openai_stream()`:
+   ```python
+   kwargs = _apply_cerebras_reasoning_defaults(model, kwargs)  # remove this line
+   ```
+
+---
+
+### Fix 2 — DeepSeek: pin to stable versioned model ID
+
+**Problem**: The generic `deepseek/deepseek-chat` alias on OpenRouter pointed to overloaded capacity, causing Bad Gateway (502) after 3 retries.
+
+**Change**: `src/services/model_transformations.py` — `deepseek-chat`, `deepseek-chat-v3`, and `deepseek-chat-v3.1` entries in the OpenRouter model mapping table now resolve to `deepseek/deepseek-chat-v3-0324` (stable versioned endpoint).
+
+**Manual rollback**: In `model_transformations.py`, find the OpenRouter model mapping dict and revert the deepseek-chat entries:
+```python
+# Revert to generic alias:
+"deepseek/deepseek-chat": "deepseek/deepseek-chat",
+"deepseek-chat": "deepseek/deepseek-chat",
+"deepseek/deepseek-chat-v3": "deepseek/deepseek-chat",
+"deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
+```
+
+---
+
+### Fix 3 — Mistral: explicit OpenRouter routing for mistralai org prefix
+
+**Problem**: `detect_provider_from_model_id()` had no case for the `mistralai` org prefix. It fell through to the default (`onerouter` / Infron AI), which accepted the request but returned an empty stream.
+
+**Change**: `src/services/model_transformations.py` — added an explicit `if org == "mistralai": return "openrouter"` check inside `detect_provider_from_model_id()`.
+
+**Manual rollback**: Remove the block added to `detect_provider_from_model_id()`:
+```python
+# Remove this block:
+if org == "mistralai":
+    logger.info(f"Routing '{model_id}' to openrouter (mistralai org prefix)")
+    return "openrouter"
+```
+
+---
+
+### Fix 4 — xAI grok-2 / grok-2-1212: redirect deprecated models to grok-3
+
+**Problem**: xAI deprecated `grok-2-1212`. The 404 response body wasn't parseable by the error handler's model extractor, so it surfaced as _"Model 'unknown' not found"_ with no actionable detail.
+
+**Change**: `src/services/model_transformations.py` — added `grok-2`, `grok-2-1212`, and their prefixed variants to both `MODEL_ID_ALIASES` (→ `x-ai/grok-3`) and the xai provider mapping table (→ `grok-3`).
+
+**Manual rollback**:
+1. Remove from `MODEL_ID_ALIASES`:
+   ```python
+   "grok-2": "x-ai/grok-3",
+   "grok-2-1212": "x-ai/grok-3",
+   "xai/grok-2": "x-ai/grok-3",
+   "xai/grok-2-1212": "x-ai/grok-3",
+   "x-ai/grok-2": "x-ai/grok-3",
+   "x-ai/grok-2-1212": "x-ai/grok-3",
+   ```
+2. Remove from the xai provider mapping table:
+   ```python
+   "grok-2": "grok-3",
+   "grok-2-1212": "grok-3",
+   "xai/grok-2": "grok-3",
+   "xai/grok-2-1212": "grok-3",
+   ```
+
+---
+
 ## 🙏 Acknowledgments
 
 Built with:
