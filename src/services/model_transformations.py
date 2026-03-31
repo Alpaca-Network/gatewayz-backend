@@ -230,12 +230,18 @@ MODEL_ID_ALIASES = {
     "grok-4.1-fast": "x-ai/grok-4.1-fast",
     # XAI Grok specialized models
     "grok-code-fast-1": "x-ai/grok-code-fast-1",
-    # XAI Grok deprecated models (grok-beta was deprecated 2025-09-15, use grok-3)
-    # Note: Map directly to canonical x-ai/ prefix (apply_model_alias now resolves one chain level)
+    # XAI Grok deprecated models — redirect to grok-3 (current equivalent)
+    # grok-beta deprecated 2025-09-15; grok-2/grok-2-1212 deprecated, use grok-3
     "grok-beta": "x-ai/grok-3",
     "xai/grok-beta": "x-ai/grok-3",
     "grok-vision-beta": "x-ai/grok-3",
     "xai/grok-vision-beta": "x-ai/grok-3",
+    "grok-2": "x-ai/grok-3",
+    "grok-2-1212": "x-ai/grok-3",
+    "xai/grok-2": "x-ai/grok-3",
+    "xai/grok-2-1212": "x-ai/grok-3",
+    "x-ai/grok-2": "x-ai/grok-3",
+    "x-ai/grok-2-1212": "x-ai/grok-3",
     # Zhipu AI GLM models - z-ai/ prefix aliases (OpenRouter format)
     # GLM-4.7 doesn't exist, map to closest available version GLM-4-flash
     "z-ai/glm-4.7": "z-ai/glm-4-flash",
@@ -665,20 +671,21 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "deepseek/deepseek-coder": "deepseek/deepseek-coder",
         "deepseek-ai/deepseek-coder": "deepseek/deepseek-coder",
         "deepseek-coder": "deepseek/deepseek-coder",
-        # DeepSeek Chat (default chat model)
-        "deepseek/deepseek-chat": "deepseek/deepseek-chat",
-        "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat",
-        "deepseek-chat": "deepseek/deepseek-chat",
-        # DeepSeek Chat V3 variants - map to the canonical deepseek/deepseek-chat on OpenRouter
-        "deepseek/deepseek-chat-v3": "deepseek/deepseek-chat",
-        "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat",
-        "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
-        "deepseek-ai/deepseek-chat-v3": "deepseek/deepseek-chat",
-        "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat",
-        "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat",
-        "deepseek-chat-v3": "deepseek/deepseek-chat",
-        "deepseek-chat-v3.1": "deepseek/deepseek-chat",
-        "deepseek-chat-v3-0324": "deepseek/deepseek-chat",
+        # DeepSeek Chat (default chat model) — use stable versioned ID to avoid
+        # OpenRouter alias routing instability with the generic deepseek/deepseek-chat slug
+        "deepseek/deepseek-chat": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-ai/deepseek-chat": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-chat": "deepseek/deepseek-chat-v3-0324",
+        # DeepSeek Chat V3 variants - map to the stable versioned ID on OpenRouter
+        "deepseek/deepseek-chat-v3": "deepseek/deepseek-chat-v3-0324",
+        "deepseek/deepseek-chat-v3.1": "deepseek/deepseek-chat-v3-0324",
+        "deepseek/deepseek-chat-v3-0324": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-ai/deepseek-chat-v3": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-ai/deepseek-chat-v3.1": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-ai/deepseek-chat-v3-0324": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-chat-v3": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-chat-v3.1": "deepseek/deepseek-chat-v3-0324",
+        "deepseek-chat-v3-0324": "deepseek/deepseek-chat-v3-0324",
         # Cerebras models explicitly routed through OpenRouter
         # (for users who request provider="openrouter" explicitly or failover scenarios)
         "cerebras/llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
@@ -1049,20 +1056,18 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "mixtral-8x7b": "mistralai/completion/models/mixtral-8x7b-instruct",
     },
     "xai": {
-        # XAI Grok models - pass-through format
-        # Models are referenced by their simple names (e.g., "grok-2", "grok-3")
-        # Can also use xai/grok-* format
-        # Note: grok-beta was deprecated on 2025-09-15, now redirected to grok-3
+        # XAI Grok models — bare model names expected by the xAI API
+        # grok-beta, grok-2, grok-2-1212 are deprecated; redirect to grok-3
         "grok-beta": "grok-3",
-        "grok-2": "grok-2",
-        "grok-2-1212": "grok-2-1212",
+        "grok-vision-beta": "grok-3",
+        "grok-2": "grok-3",
+        "grok-2-1212": "grok-3",
         "grok-3": "grok-3",
-        "grok-vision-beta": "grok-3",  # grok-vision-beta also deprecated
         "xai/grok-beta": "grok-3",
-        "xai/grok-2": "grok-2",
-        "xai/grok-2-1212": "grok-2-1212",
-        "xai/grok-3": "grok-3",
         "xai/grok-vision-beta": "grok-3",
+        "xai/grok-2": "grok-3",
+        "xai/grok-2-1212": "grok-3",
+        "xai/grok-3": "grok-3",
     },
     "cerebras": {
         # Cerebras API expects model IDs without the "cerebras/" prefix
@@ -1664,6 +1669,11 @@ def detect_provider_from_model_id(
                 )
                 return "cerebras"
             return "alibaba-cloud"
+
+        # Mistral models — route to OpenRouter which carries the full mistralai catalog
+        if org == "mistralai":
+            logger.info(f"Routing '{model_id}' to openrouter (mistralai org prefix)")
+            return "openrouter"
 
         # DeepSeek models are primarily on Fireworks in this system
         # Support both "deepseek-ai/" and "deepseek/" org prefixes

@@ -108,6 +108,24 @@ def get_cerebras_client():
         raise
 
 
+_CEREBRAS_REASONING_MODELS = ("qwen-3", "qwen3")
+
+
+def _apply_cerebras_reasoning_defaults(model: str, kwargs: dict) -> dict:
+    """Disable reasoning by default for Cerebras models that support it.
+
+    qwen-3 models have hybrid thinking enabled by default in cerebras-cloud-sdk
+    >=1.64.x. Without explicitly disabling it the API returns a 400 because the
+    gateway doesn't handle reasoning tokens in the stream. Pass
+    disable_reasoning=True unless the caller already set it.
+    """
+    model_lower = model.lower()
+    if any(tag in model_lower for tag in _CEREBRAS_REASONING_MODELS):
+        if "disable_reasoning" not in kwargs and "reasoning_effort" not in kwargs:
+            kwargs = {**kwargs, "disable_reasoning": True}
+    return kwargs
+
+
 def make_cerebras_request_openai(messages, model, **kwargs):
     """Make request to Cerebras using official SDK or OpenAI-compatible client
 
@@ -123,6 +141,7 @@ def make_cerebras_request_openai(messages, model, **kwargs):
         from src.utils.provider_timing import ProviderTimingContext
 
         client = get_cerebras_client()
+        kwargs = _apply_cerebras_reasoning_defaults(model, kwargs)
 
         # Log request for debugging
         logger.debug(f"Cerebras request - model: {model}, messages: {len(messages)}")
@@ -151,6 +170,7 @@ def make_cerebras_request_openai_stream(messages, model, **kwargs):
         from src.utils.provider_timing import ProviderTimingContext
 
         client = get_cerebras_client()
+        kwargs = _apply_cerebras_reasoning_defaults(model, kwargs)
 
         # Log request for debugging
         logger.debug(f"Cerebras streaming request - model: {model}, messages: {len(messages)}")
