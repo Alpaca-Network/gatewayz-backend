@@ -62,13 +62,15 @@ FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
 _OPENROUTER_SUFFIX_LOCKS = {"exacto", "free", "extended"}
 _OPENROUTER_ONLY_PREFIX_LOCKS = ("openrouter/",)  # Models that can ONLY use OpenRouter
-# Models that should try native provider first, then OpenRouter as fallback
+# Models that should try native provider first, then OpenRouter as fallback.
+# Bare-name prefixes ("gpt-", "claude-") are listed alongside org-prefixed variants so
+# routing works correctly even when the alias cache is empty (e.g. DB unavailable at
+# startup) and apply_model_alias cannot expand "gpt-4" → "openai/gpt-4".
 _NATIVE_PROVIDER_PREFIXES = {
     "openai/": ("openai", "openrouter"),  # OpenAI models: try openai first, then openrouter
-    "anthropic/": (
-        "anthropic",
-        "openrouter",
-    ),  # Anthropic models: try anthropic first, then openrouter
+    "gpt-": ("openai", "openrouter"),  # bare OpenAI names (gpt-4, gpt-4o, gpt-3.5-turbo, …)
+    "anthropic/": ("anthropic", "openrouter"),  # Anthropic models: try anthropic first
+    "claude-": ("anthropic", "openrouter"),  # bare Anthropic names (claude-3-opus, …)
     "x-ai/": ("xai",),  # xAI models: xai only (no cross-provider support)
     "xai/": ("xai",),  # also handle xai/ prefix variant
 }
