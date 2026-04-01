@@ -35,7 +35,7 @@ LOW_LATENCY_MODELS: set[str] = {
     "groq/llama-3.3-70b-versatile",  # 492ms
     "groq/llama-3.1-70b-versatile",
     "groq/llama-3.1-8b-instant",
-    "groq/mixtral-8x7b-32768",
+    # groq/mixtral-8x7b-32768 REMOVED — Groq retired this model May 2025
     "groq/gemma2-9b-it",
     # OpenRouter fast models
     "arcee-ai/trinity-mini:free",  # 214ms
@@ -449,7 +449,9 @@ def suggest_low_latency_alternative(model_id: str) -> str | None:
         "o3": "groq/llama-3.3-70b-versatile",
         # For general chat
         "llama": "groq/llama-3.3-70b-versatile",
-        "mistral": "groq/mixtral-8x7b-32768",
+        # groq/mixtral-8x7b-32768 was retired from Groq May 2025; route Mistral
+        # requests to groq/llama-3.3-70b-versatile as the fastest available fallback
+        "mistral": "groq/llama-3.3-70b-versatile",
         "gemini": "google/gemini-2.0-flash-001",
         "gemma": "groq/gemma2-9b-it",
     }

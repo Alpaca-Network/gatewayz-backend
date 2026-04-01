@@ -53,7 +53,8 @@ FALLBACK_HUGGINGFACE_MODELS = [
     "Qwen/Qwen2.5-72B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct",
     "mistralai/Mistral-7B-Instruct-v0.3",
-    "mistralai/Mixtral-8x7B-Instruct-v0.1",
+    # mistralai/Mixtral-8x7B-Instruct-v0.1 removed — NOT available on HF Inference API,
+    # causes failures when used as fallback during HF outages
     "google/gemma-2-9b-it",
     "google/gemma-2-2b-it",
 ]

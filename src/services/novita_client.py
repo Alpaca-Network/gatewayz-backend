@@ -58,7 +58,7 @@ DEFAULT_NOVITA_MODELS: list[dict[str, Any]] = [
         "id": "llama-3.3-70b",
         "name": "Llama 3.3 70B",
         "owned_by": "meta",
-        "context_length": 8192,
+        "context_length": 131072,
     },
     {
         "id": "mistral-nemo",

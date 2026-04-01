@@ -24,10 +24,8 @@ XAI_REASONING_MODELS = {
 XAI_NON_REASONING_MODELS = {
     "grok-4-1-fast-non-reasoning",
     "grok-4.1-fast-non-reasoning",
-    "grok-2",
-    "grok-2-1212",
-    "grok-beta",
-    "grok-vision-beta",
+    # grok-2, grok-2-1212, grok-beta, grok-vision-beta removed — all deprecated Sep 2025;
+    # MODEL_ID_ALIASES in model_transformations.py already redirects them to grok-3
 }
 
 
@@ -111,7 +109,7 @@ def make_xai_request_openai(messages, model, **kwargs):
 
     Args:
         messages: List of message objects
-        model: Model name (e.g., "grok-4", "grok-3", "grok-2", "grok-beta")
+        model: Model name (e.g., "grok-4", "grok-4-fast", "grok-3", "grok-3-mini")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
             - enable_reasoning: Optional bool to explicitly enable/disable reasoning
     """
@@ -139,7 +137,7 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
 
     Args:
         messages: List of message objects
-        model: Model name (e.g., "grok-4", "grok-3", "grok-2", "grok-beta")
+        model: Model name (e.g., "grok-4", "grok-4-fast", "grok-3", "grok-3-mini")
         **kwargs: Additional parameters like max_tokens, temperature, etc.
             - enable_reasoning: Optional bool to explicitly enable/disable reasoning
     """
@@ -262,15 +260,18 @@ def fetch_models_from_xai():
     # Static fallback as last resort
     logger.warning("Database fallback empty, using static fallback for xAI")
 
-    # Hardcoded list of known xAI Grok models
-    # These are the models available through xAI's API
+    # Hardcoded list of current xAI Grok models (as of Q1 2026).
+    # NOTE: grok-beta, grok-2, grok-2-1212, grok-vision-beta were all deprecated
+    # September 2025 and removed from this list. Alias redirects in
+    # model_transformations.py (MODEL_ID_ALIASES) already route any legacy
+    # requests for those IDs to grok-3 transparently.
     return [
         {
-            "id": "grok-beta",
-            "slug": "grok-beta",
-            "canonical_slug": "grok-beta",
-            "name": "Grok Beta",
-            "description": "xAI's Grok model (beta version) - A conversational AI assistant",
+            "id": "grok-3",
+            "slug": "grok-3",
+            "canonical_slug": "grok-3",
+            "name": "Grok 3",
+            "description": "xAI's flagship Grok 3 model — advanced reasoning and conversational AI",
             "context_length": 131072,
             "architecture": {
                 "modality": "text->text",
@@ -278,7 +279,7 @@ def fetch_models_from_xai():
                 "output_modalities": ["text"],
             },
             "pricing": {
-                "prompt": "5",
+                "prompt": "3",
                 "completion": "15",
                 "request": "0",
                 "image": "0",
@@ -287,11 +288,11 @@ def fetch_models_from_xai():
             "source_gateway": "xai",
         },
         {
-            "id": "grok-2",
-            "slug": "grok-2",
-            "canonical_slug": "grok-2",
-            "name": "Grok 2",
-            "description": "xAI's Grok 2 model - Advanced conversational AI",
+            "id": "grok-3-mini",
+            "slug": "grok-3-mini",
+            "canonical_slug": "grok-3-mini",
+            "name": "Grok 3 Mini",
+            "description": "xAI's compact Grok 3 model with reasoning capabilities",
             "context_length": 131072,
             "architecture": {
                 "modality": "text->text",
@@ -299,7 +300,49 @@ def fetch_models_from_xai():
                 "output_modalities": ["text"],
             },
             "pricing": {
-                "prompt": "5",
+                "prompt": "0.3",
+                "completion": "0.5",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-3-mini-beta",
+            "slug": "grok-3-mini-beta",
+            "canonical_slug": "grok-3-mini-beta",
+            "name": "Grok 3 Mini Beta",
+            "description": "xAI's Grok 3 Mini (beta channel) with extended reasoning",
+            "context_length": 131072,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "0.3",
+                "completion": "0.5",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-4",
+            "slug": "grok-4",
+            "canonical_slug": "grok-4",
+            "name": "Grok 4",
+            "description": "xAI's most powerful Grok 4 model with advanced reasoning",
+            "context_length": 256000,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "3",
                 "completion": "15",
                 "request": "0",
                 "image": "0",
@@ -308,19 +351,19 @@ def fetch_models_from_xai():
             "source_gateway": "xai",
         },
         {
-            "id": "grok-2-1212",
-            "slug": "grok-2-1212",
-            "canonical_slug": "grok-2-1212",
-            "name": "Grok 2 1212",
-            "description": "xAI's Grok 2 model from December 2024",
-            "context_length": 131072,
+            "id": "grok-4-fast",
+            "slug": "grok-4-fast",
+            "canonical_slug": "grok-4-fast",
+            "name": "Grok 4 Fast",
+            "description": "xAI's Grok 4 optimized for speed",
+            "context_length": 256000,
             "architecture": {
                 "modality": "text->text",
                 "input_modalities": ["text"],
                 "output_modalities": ["text"],
             },
             "pricing": {
-                "prompt": "5",
+                "prompt": "3",
                 "completion": "15",
                 "request": "0",
                 "image": "0",
@@ -329,19 +372,40 @@ def fetch_models_from_xai():
             "source_gateway": "xai",
         },
         {
-            "id": "grok-vision-beta",
-            "slug": "grok-vision-beta",
-            "canonical_slug": "grok-vision-beta",
-            "name": "Grok Vision Beta",
-            "description": "xAI's Grok model with vision capabilities (beta)",
-            "context_length": 8192,
+            "id": "grok-4.1-fast",
+            "slug": "grok-4.1-fast",
+            "canonical_slug": "grok-4.1-fast",
+            "name": "Grok 4.1 Fast",
+            "description": "xAI's Grok 4.1 with optimized speed",
+            "context_length": 256000,
             "architecture": {
-                "modality": "text+image->text",
-                "input_modalities": ["text", "image"],
+                "modality": "text->text",
+                "input_modalities": ["text"],
                 "output_modalities": ["text"],
             },
             "pricing": {
-                "prompt": "5",
+                "prompt": "3",
+                "completion": "15",
+                "request": "0",
+                "image": "0",
+            },
+            "provider_slug": "xai",
+            "source_gateway": "xai",
+        },
+        {
+            "id": "grok-code-fast-1",
+            "slug": "grok-code-fast-1",
+            "canonical_slug": "grok-code-fast-1",
+            "name": "Grok Code Fast 1",
+            "description": "xAI's Grok model optimized for coding tasks",
+            "context_length": 131072,
+            "architecture": {
+                "modality": "text->text",
+                "input_modalities": ["text"],
+                "output_modalities": ["text"],
+            },
+            "pricing": {
+                "prompt": "3",
                 "completion": "15",
                 "request": "0",
                 "image": "0",

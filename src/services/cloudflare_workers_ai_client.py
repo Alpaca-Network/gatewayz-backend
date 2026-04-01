@@ -267,33 +267,10 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
-    # ==========================================================================
-    # Meta Llama 2 Models (Legacy)
-    # ==========================================================================
-    {
-        "id": "@cf/meta/llama-2-7b-chat-fp16",
-        "name": "Llama 2 7B Chat FP16",
-        "description": "Meta's Llama 2 7B chat model in FP16 precision",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
-    {
-        "id": "@cf/meta/llama-2-7b-chat-int8",
-        "name": "Llama 2 7B Chat INT8",
-        "description": "Meta's Llama 2 7B chat model quantized to INT8",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
-    {
-        "id": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
-        "name": "Llama 2 7B Chat HF LoRA",
-        "description": "Meta's Llama 2 7B with LoRA fine-tuning support",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
+    # Meta Llama 2 Models — REMOVED (EOL)
+    # @cf/meta/llama-2-7b-chat-fp16, @cf/meta/llama-2-7b-chat-int8,
+    # and @cf/meta-llama/llama-2-7b-chat-hf-lora were all sunset by Cloudflare
+    # Workers AI when Meta deprecated the entire Llama 2 family. No longer served.
     # ==========================================================================
     # Meta Llama Guard (Safety)
     # ==========================================================================

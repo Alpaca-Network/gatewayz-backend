@@ -34,6 +34,8 @@ DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
         "name": "Llama 3.1 405B",
         "owned_by": "meta",
         "context_length": 131072,
+        # NOTE: Verify availability — Cerebras 405B support may vary; confirm against
+        # https://inference-docs.cerebras.ai/introduction before relying on this model.
     },
     {
         "id": "llama-3.3-70b",
@@ -41,12 +43,8 @@ DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
         "owned_by": "meta",
         "context_length": 131072,
     },
-    {
-        "id": "llama-3.3-405b",
-        "name": "Llama 3.3 405B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
+    # llama-3.3-405b REMOVED — Meta never released a Llama 3.3 405B model.
+    # The 3.3 generation only shipped at 70B. This entry was phantom/invalid.
     {
         "id": "qwen-3-32b",
         "name": "Qwen 3 32B",
