@@ -426,10 +426,9 @@ async def trigger_full_provider_and_model_sync(
     Trigger a complete sync of providers and models
 
     This endpoint performs a full synchronization in two phases:
-    1. **Provider Sync**: Syncs all providers from GATEWAY_REGISTRY to database
-       - Ensures providers table matches the code configuration
-       - Creates/updates provider records
-       - Sets metadata like colors, priority, site URLs
+    1. **Provider Sync**: Verifies providers exist in database
+       - DB is the source of truth for provider configuration (Phase 2A)
+       - Provider metadata managed via migrations and admin APIs
 
     2. **Model Sync**: Syncs models from all configured providers
        - Fetches latest model catalogs from each provider's API
@@ -495,14 +494,10 @@ async def trigger_full_provider_and_model_sync(
 @router.post("/providers-only", response_model=SyncResponse)
 async def sync_providers_only():
     """
-    Sync only providers from GATEWAY_REGISTRY to database
+    Refresh provider registry cache from database.
 
-    This endpoint syncs providers without syncing models, useful when:
-    - You only need to update provider metadata
-    - You want to add new providers to the database first
-    - You're testing provider configuration changes
-
-    This operation is fast (< 1 second) as it only updates provider records.
+    The DB providers table is the source of truth (Phase 2A). This endpoint
+    refreshes the in-memory gateway registry cache and returns current status.
 
     Returns:
         Provider sync results
@@ -515,12 +510,11 @@ async def sync_providers_only():
 
         result = await sync_providers_to_database()
 
-        synced_count = result.get("synced_count", 0)
         success = result.get("success", False)
 
         message = (
             f"Provider sync completed. "
-            f"Synced {synced_count} providers from GATEWAY_REGISTRY. "
+            f"Provider registry refreshed (DB is source of truth). "
             f"Status: {'✓ Success' if success else '✗ Failed'}"
         )
 
@@ -711,7 +705,7 @@ async def reset_and_resync():
 
     **What happens:**
     1. Deletes all models from database
-    2. Syncs providers from GATEWAY_REGISTRY
+    2. Verifies providers exist in DB (source of truth)
     3. Syncs models from all provider APIs
     4. Returns combined results
 

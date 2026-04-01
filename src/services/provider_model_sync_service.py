@@ -2,7 +2,7 @@
 Provider & Model Synchronization Service
 
 Manages automatic syncing of:
-1. Providers: Synced on startup from GATEWAY_REGISTRY (always current)
+1. Providers: DB is source of truth (Phase 2A) — sync_providers_to_database() is a no-op
 2. Models: Synced periodically from provider APIs (fetches latest)
 
 Usage:
@@ -21,7 +21,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from src.routes.catalog import GATEWAY_REGISTRY
 from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS, sync_provider_models
 
 logger = logging.getLogger(__name__)
@@ -65,58 +64,14 @@ PROVIDER_ENV_VAR_MAP = {
 
 
 async def sync_providers_to_database() -> dict[str, Any]:
+    """No-op: DB is now the source of truth for provider data (Phase 2A).
+
+    Previously this function read from GATEWAY_REGISTRY in catalog.py and
+    upserted to the providers table. Now the DB providers table is maintained
+    directly via migrations and admin APIs.
     """
-    Sync all providers from GATEWAY_REGISTRY to database
-
-    This ensures providers table is always up-to-date with code changes.
-    Runs on startup to ensure database matches GATEWAY_REGISTRY.
-
-    Returns:
-        Sync result dictionary
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-
-        client = get_supabase_client()
-
-        logger.info(f"🔄 Syncing {len(GATEWAY_REGISTRY)} providers from GATEWAY_REGISTRY")
-
-        providers_to_upsert = []
-        for gateway_id, gateway_config in GATEWAY_REGISTRY.items():
-            provider = {
-                "name": gateway_config["name"],
-                "slug": gateway_id,
-                "description": f"{gateway_config['name']} - {gateway_config.get('priority', 'standard')} priority gateway",
-                "api_key_env_var": PROVIDER_ENV_VAR_MAP.get(
-                    gateway_id, f"{gateway_id.upper().replace('-', '_')}_API_KEY"
-                ),
-                "supports_streaming": True,
-                "is_active": True,
-                "site_url": gateway_config.get("site_url"),
-                "metadata": {
-                    "color": gateway_config.get("color", "bg-gray-500"),
-                    "priority": gateway_config.get("priority", "slow"),
-                    "icon": gateway_config.get("icon"),
-                    "aliases": gateway_config.get("aliases", []),
-                },
-            }
-            providers_to_upsert.append(provider)
-
-        # Upsert all providers (insert or update on conflict)
-        result = client.table("providers").upsert(providers_to_upsert, on_conflict="slug").execute()
-
-        synced_count = len(result.data) if result.data else 0
-        logger.info(f"✅ Synced {synced_count} providers to database")
-
-        return {
-            "success": True,
-            "providers_synced": synced_count,
-            "providers": [p["slug"] for p in providers_to_upsert],
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Failed to sync providers: {e}", exc_info=True)
-        return {"success": False, "error": str(e), "providers_synced": 0}
+    logger.info("Provider sync skipped: DB is source of truth (Phase 2A)")
+    return {"success": True, "providers_synced": 0, "note": "DB is source of truth"}
 
 
 async def sync_models_from_providers(
@@ -202,7 +157,7 @@ async def sync_providers_on_startup() -> dict[str, Any]:
     Sync providers on application startup
 
     This is called during lifespan startup to ensure providers
-    are always up-to-date with GATEWAY_REGISTRY.
+    are always up-to-date with the DB providers table.
 
     Returns:
         Sync result dictionary

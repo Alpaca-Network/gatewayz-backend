@@ -33,6 +33,12 @@ from src.db.gateway_analytics import (
     get_top_models_by_provider,
     get_trending_models,
 )
+from src.services.gateway_registry import (
+    get_gateway_registry,
+    get_gateway_slug_resolution,
+    get_provider_slugs,
+    validate_gateway,
+)
 from src.services.models import (
     enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
@@ -60,17 +66,9 @@ router = APIRouter()
 # Constants for query parameter descriptions (to avoid duplication)
 DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
-    "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
-    "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'sybil', 'morpheus', or auto-detect if not specified"
+    "Gateway to use (e.g., 'openrouter', 'groq'), or auto-detect if not specified"
 )
-DESC_GATEWAY_WITH_ALL = (
-    "Gateway to use: 'openrouter', 'onerouter', 'featherless', 'deepinfra', 'chutes', "
-    "'groq', 'fireworks', 'together', 'cerebras', 'nebius', 'xai', 'novita', "
-    "'huggingface' (or 'hug'), 'aimo', 'near', 'fal', 'helicone', 'anannas', 'aihubmix', "
-    "'vercel-ai-gateway', 'google-vertex', 'simplismart', 'sybil', 'morpheus', or 'all'"
-)
+DESC_GATEWAY_WITH_ALL = "Gateway to use (e.g., 'openrouter', 'groq'), or 'all' for all gateways"
 ERROR_MODELS_DATA_UNAVAILABLE = "Models data unavailable"
 ERROR_PROVIDER_DATA_UNAVAILABLE = "Provider data unavailable"
 
@@ -85,354 +83,6 @@ DESC_NUMBER_OF_MODELS_TO_RETURN = "Number of models to return"
 DESC_ALL_MODELS = "All models"
 DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
-
-# Gateway configuration - centralized source of truth for all gateways.
-# This is used by /gateways endpoint for frontend auto-discovery.
-#
-# Required fields for every entry:
-#   name      (str)  – human-readable display name
-#   color     (str)  – Tailwind CSS background class used by the frontend
-#   priority  (str)  – "fast" (eager load) or "slow" (deferred load)
-#   site_url  (str)  – canonical homepage URL for logo/link generation
-#
-# Optional fields:
-#   timeout   (int)  – model-list fetch timeout in seconds (default: 30)
-#   icon      (str)  – override icon name shown in the UI (e.g. "zap")
-#   aliases   (list) – alternative slug strings that map to this entry
-GATEWAY_REGISTRY = {
-    # Fast gateways (priority loading)
-    # timeout: seconds allowed for a provider model-list fetch (default 30s)
-    "openai": {
-        "name": "OpenAI",
-        "color": "bg-emerald-600",
-        "priority": "fast",
-        "site_url": "https://openai.com",
-        "timeout": 30,
-    },
-    "anthropic": {
-        "name": "Anthropic",
-        "color": "bg-amber-700",
-        "priority": "fast",
-        "site_url": "https://anthropic.com",
-        "timeout": 30,
-    },
-    "openrouter": {
-        "name": "OpenRouter",
-        "color": "bg-blue-500",
-        "priority": "fast",
-        "site_url": "https://openrouter.ai",
-        "timeout": 30,
-    },
-    "groq": {
-        "name": "Groq",
-        "color": "bg-orange-500",
-        "priority": "fast",
-        "icon": "zap",
-        "site_url": "https://groq.com",
-        "timeout": 30,
-    },
-    "together": {
-        "name": "Together",
-        "color": "bg-indigo-500",
-        "priority": "fast",
-        "site_url": "https://together.ai",
-        "timeout": 30,
-    },
-    "fireworks": {
-        "name": "Fireworks",
-        "color": "bg-red-500",
-        "priority": "fast",
-        "site_url": "https://fireworks.ai",
-        "timeout": 30,
-    },
-    "vercel-ai-gateway": {
-        "name": "Vercel AI",
-        "color": "bg-slate-900",
-        "priority": "fast",
-        "site_url": "https://vercel.com/ai",
-        "timeout": 30,
-    },
-    # Slow gateways (deferred loading)
-    "featherless": {
-        "name": "Featherless",
-        "color": "bg-green-500",
-        "priority": "slow",
-        "site_url": "https://featherless.ai",
-        "timeout": 60,
-    },
-    "chutes": {
-        "name": "Chutes",
-        "color": "bg-yellow-500",
-        "priority": "slow",
-        "site_url": "https://chutes.ai",
-        "timeout": 60,
-    },
-    "deepinfra": {
-        "name": "DeepInfra",
-        "color": "bg-cyan-500",
-        "priority": "slow",
-        "site_url": "https://deepinfra.com",
-        "timeout": 30,
-    },
-    "google-vertex": {
-        "name": "Google",
-        "color": "bg-blue-600",
-        "priority": "fast",
-        "site_url": "https://cloud.google.com/vertex-ai",
-        "aliases": ["google"],
-        "timeout": 30,
-    },
-    "cerebras": {
-        "name": "Cerebras",
-        "color": "bg-amber-600",
-        "priority": "slow",
-        "site_url": "https://cerebras.ai",
-        "timeout": 30,
-    },
-    "nebius": {
-        "name": "Nebius",
-        "color": "bg-slate-600",
-        "priority": "slow",
-        "site_url": "https://nebius.ai",
-        "timeout": 30,
-    },
-    "xai": {
-        "name": "xAI",
-        "color": "bg-black",
-        "priority": "slow",
-        "site_url": "https://x.ai",
-        "timeout": 30,
-    },
-    "novita": {
-        "name": "Novita",
-        "color": "bg-violet-600",
-        "priority": "slow",
-        "site_url": "https://novita.ai",
-        "timeout": 30,
-    },
-    "huggingface": {
-        "name": "Hugging Face",
-        "color": "bg-yellow-600",
-        "priority": "slow",
-        "site_url": "https://huggingface.co",
-        "aliases": ["hug"],
-        "timeout": 60,  # HF API is significantly slower than other providers
-    },
-    "aimo": {
-        "name": "AiMo",
-        "color": "bg-pink-600",
-        "priority": "slow",
-        "site_url": "https://aimo.network",
-        "timeout": 60,
-    },
-    "near": {
-        "name": "NEAR",
-        "color": "bg-teal-600",
-        "priority": "slow",
-        "site_url": "https://near.ai",
-        "timeout": 60,
-    },
-    "fal": {
-        "name": "Fal",
-        "color": "bg-emerald-600",
-        "priority": "slow",
-        "site_url": "https://fal.ai",
-        "timeout": 30,
-    },
-    "helicone": {
-        "name": "Helicone",
-        "color": "bg-indigo-600",
-        "priority": "slow",
-        "site_url": "https://helicone.ai",
-        "timeout": 30,
-    },
-    "alpaca": {
-        "name": "Alpaca Network",
-        "color": "bg-green-700",
-        "priority": "slow",
-        "site_url": "https://alpaca.network",
-        "timeout": 30,
-    },
-    "alibaba": {
-        "name": "Alibaba",
-        "color": "bg-orange-700",
-        "priority": "slow",
-        "site_url": "https://dashscope.aliyun.com",
-        "timeout": 30,
-    },
-    "clarifai": {
-        "name": "Clarifai",
-        "color": "bg-purple-600",
-        "priority": "slow",
-        "site_url": "https://clarifai.com",
-        "timeout": 30,
-    },
-    "onerouter": {
-        "name": "Infron AI",
-        "color": "bg-emerald-500",
-        "priority": "slow",
-        "site_url": "https://infron.ai",
-        "timeout": 30,
-    },
-    "zai": {
-        "name": "Z.AI",
-        "color": "bg-purple-700",
-        "priority": "slow",
-        "site_url": "https://z.ai",
-        "timeout": 30,
-    },
-    "simplismart": {
-        "name": "SimpliSmart",
-        "color": "bg-sky-500",
-        "priority": "slow",
-        "site_url": "https://simplismart.ai",
-        "timeout": 30,
-    },
-    "sybil": {
-        "name": "Sybil",
-        "color": "bg-purple-500",
-        "priority": "slow",
-        "site_url": "https://sybil.com",
-        "timeout": 30,
-    },
-    "aihubmix": {
-        "name": "AiHubMix",
-        "color": "bg-rose-500",
-        "priority": "slow",
-        "site_url": "https://aihubmix.com",
-        "timeout": 30,
-    },
-    "anannas": {
-        "name": "Anannas",
-        "color": "bg-lime-600",
-        "priority": "slow",
-        "site_url": "https://anannas.ai",
-        "timeout": 30,
-    },
-    "cloudflare-workers-ai": {
-        "name": "Cloudflare Workers AI",
-        "color": "bg-orange-500",
-        "priority": "slow",
-        "site_url": "https://developers.cloudflare.com/workers-ai",
-        "timeout": 30,
-    },
-    "morpheus": {
-        "name": "Morpheus",
-        "color": "bg-cyan-600",
-        "priority": "slow",
-        "site_url": "https://mor.org",
-        "timeout": 30,
-    },
-    "canopywave": {
-        "name": "Canopy Wave",
-        "color": "bg-teal-500",
-        "priority": "slow",
-        "site_url": "https://canopywave.io",
-        "timeout": 60,
-    },
-    "notdiamond": {
-        "name": "NotDiamond",
-        "color": "bg-violet-500",
-        "priority": "fast",
-        "site_url": "https://notdiamond.ai",
-        "icon": "zap",
-        "timeout": 30,
-    },
-}
-
-# Default fetch timeout (seconds) used when a provider has no explicit "timeout" entry.
-_DEFAULT_FETCH_TIMEOUT: int = 30
-
-
-def get_provider_fetch_timeout(provider_slug: str) -> int:
-    """Return the configured model-fetch timeout (in seconds) for *provider_slug*.
-
-    Falls back to ``_DEFAULT_FETCH_TIMEOUT`` (30 s) when the slug is not found
-    in ``GATEWAY_REGISTRY`` or has no explicit ``"timeout"`` value.  Also
-    resolves alias slugs (e.g. ``"hug"`` → ``"huggingface"``) transparently.
-
-    Args:
-        provider_slug: Gateway/provider key or alias (e.g. ``"huggingface"``, ``"hug"``).
-
-    Returns:
-        Timeout in seconds as an integer.
-    """
-    slug = (provider_slug or "").lower()
-
-    # Direct registry lookup
-    if slug in GATEWAY_REGISTRY:
-        return GATEWAY_REGISTRY[slug].get("timeout", _DEFAULT_FETCH_TIMEOUT)
-
-    # Resolve alias → canonical key
-    for key, config in GATEWAY_REGISTRY.items():
-        if slug in config.get("aliases", []):
-            return config.get("timeout", _DEFAULT_FETCH_TIMEOUT)
-
-    return _DEFAULT_FETCH_TIMEOUT
-
-
-# Pre-computed set of all valid gateway values (registry keys + aliases + "all").
-# Used for input validation in query parameters across multiple endpoints.
-_GATEWAY_REGISTRY_KEYS: set[str] = set(GATEWAY_REGISTRY.keys())
-_GATEWAY_ALIASES: set[str] = {
-    alias for config in GATEWAY_REGISTRY.values() for alias in config.get("aliases", [])
-}
-VALID_GATEWAY_VALUES: set[str] = _GATEWAY_REGISTRY_KEYS | _GATEWAY_ALIASES | {"all"}
-
-# Maps a GATEWAY_REGISTRY key to the fetch slug passed to get_cached_models() when the two
-# differ.  Currently only "huggingface" uses the legacy alias "hug".
-GATEWAY_FETCH_SLUG_OVERRIDES: dict[str, str] = {
-    "huggingface": "hug",
-}
-
-# Pre-computed map: any alias or registry key → its canonical fetch slug.
-# e.g. "google" → "google-vertex", "hug" → "hug", "huggingface" → "hug"
-_GATEWAY_SLUG_RESOLUTION: dict[str, str] = {}
-for _key, _cfg in GATEWAY_REGISTRY.items():
-    _fetch_slug = GATEWAY_FETCH_SLUG_OVERRIDES.get(_key, _key)
-    _GATEWAY_SLUG_RESOLUTION[_key] = _fetch_slug
-    for _alias in _cfg.get("aliases", []):
-        _GATEWAY_SLUG_RESOLUTION[_alias] = _fetch_slug
-
-# Entries in GATEWAY_REGISTRY that do not yet have a fetch function in
-# PROVIDER_FETCH_FUNCTIONS (model_catalog_sync.py) are excluded so the
-# generic fetch loop does not attempt to call them.
-_REGISTRY_KEYS_WITHOUT_FETCH: frozenset[str] = frozenset(
-    {
-        "notdiamond",
-        "alpaca",
-    }
-)
-
-# Ordered list of provider fetch slugs derived from GATEWAY_REGISTRY.
-# This replaces the previous pattern of hardcoding each provider slug individually.
-PROVIDER_SLUGS: list[str] = [
-    GATEWAY_FETCH_SLUG_OVERRIDES.get(key, key)
-    for key in GATEWAY_REGISTRY
-    if key not in _REGISTRY_KEYS_WITHOUT_FETCH
-]
-
-
-def _validate_gateway(gateway: str | None) -> None:
-    """Raise HTTP 400 if the gateway value is not a known gateway identifier.
-
-    Args:
-        gateway: The raw gateway query parameter value (may be None).
-
-    Raises:
-        HTTPException: 400 with a message listing valid gateway identifiers.
-    """
-    if gateway is None:
-        return
-    if gateway.lower() not in VALID_GATEWAY_VALUES:
-        sorted_valid = sorted(VALID_GATEWAY_VALUES - {"all"})
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Invalid gateway '{gateway}'. "
-                f"Must be 'all' or one of: {', '.join(sorted_valid)}"
-            ),
-        )
 
 
 @router.get("/routers", tags=["routers"])
@@ -587,11 +237,11 @@ async def get_gateways():
     """
     try:
         gateways = []
-        for gateway_id, config in GATEWAY_REGISTRY.items():
+        for gateway_id, config in get_gateway_registry().items():
             site_url = config.get("site_url", "")
-            # Generate logo URL from site_url
-            logo_url = None
-            if site_url:
+            logo_url = config.get("logo_url")
+            # Fallback: generate logo URL from site_url if not stored in registry
+            if not logo_url and site_url:
                 try:
                     from urllib.parse import urlparse
 
@@ -713,7 +363,7 @@ async def get_gateways_status():
 
     try:
         status_list = []
-        for gateway_id, config in GATEWAY_REGISTRY.items():
+        for gateway_id, config in get_gateway_registry().items():
             # Get error state
             in_error_state = is_gateway_in_error_state(gateway_id)
             error_message = get_gateway_error_message(gateway_id) if in_error_state else None
@@ -937,7 +587,7 @@ async def get_providers(
     try:
         gateway_value = (gateway or "all").lower()
         # Resolve any alias to its canonical fetch slug (e.g. "google" → "google-vertex")
-        gateway_value = _GATEWAY_SLUG_RESOLUTION.get(gateway_value, gateway_value)
+        gateway_value = get_gateway_slug_resolution().get(gateway_value, gateway_value)
 
         openrouter_models = []
         provider_groups: list[list[dict]] = []
@@ -1077,14 +727,14 @@ async def get_models(
     """Get all metric data of available models with optional filtering, pagination, Hugging Face integration, and provider logos"""
 
     try:
-        _validate_gateway(gateway)
+        validate_gateway(gateway)
         provider = normalize_developer_segment(provider)
         logger.debug(
             f"/models endpoint called with gateway parameter: {repr(gateway)}, unique_models={unique_models}"
         )
         gateway_value = (gateway or "all").lower()
         # Resolve any alias to its canonical fetch slug (e.g. "google" → "google-vertex")
-        gateway_value = _GATEWAY_SLUG_RESOLUTION.get(gateway_value, gateway_value)
+        gateway_value = get_gateway_slug_resolution().get(gateway_value, gateway_value)
         logger.debug(
             f"Getting models with provider={provider}, limit={limit}, offset={offset}, gateway={gateway_value}"
         )
@@ -1203,13 +853,13 @@ async def get_models(
             else:
                 logger.info("Skipping openrouter (circuit breaker open)")
 
-        # Fetch models for all providers in PROVIDER_SLUGS using the registry-derived list.
+        # Fetch models for all providers using the registry-derived slug list.
         # "openrouter" is handled separately above (circuit breaker); include its result here
         # so that provider_models is the single source of truth for all downstream code.
         provider_models: dict[str, list[dict]] = {"openrouter": openrouter_models}
 
         if not skip_individual_fetches:
-            for _slug in PROVIDER_SLUGS:
+            for _slug in get_provider_slugs():
                 if _slug == "openrouter":
                     # Already fetched above with circuit-breaker logic; skip here.
                     continue
@@ -1269,7 +919,7 @@ async def get_models(
             provider_groups.append(enhanced_providers)
 
         # Derive provider groups for all other fetched slugs using provider_models.
-        for _slug in PROVIDER_SLUGS:
+        for _slug in get_provider_slugs():
             if _slug == "openrouter":
                 continue  # handled above with special OpenRouter provider list logic
             if gateway_value not in (_slug, "all"):
@@ -1865,7 +1515,7 @@ async def get_trending_models_endpoint(
         GET /catalog/models/trending?limit=10&offset=10
     """
     try:
-        _validate_gateway(gateway)
+        validate_gateway(gateway)
         logger.info(
             "Fetching trending models: gateway=%s, time_range=%s, sort_by=%s, offset=%d",
             sanitize_for_logging(gateway),
@@ -2729,7 +2379,7 @@ async def search_models(
     - Applied filters
     """
     try:
-        _validate_gateway(gateway)
+        validate_gateway(gateway)
 
         # Validate sort_by; silently fall back to default for backwards compatibility
         valid_search_sort = {"price", "context", "popularity", "name"}

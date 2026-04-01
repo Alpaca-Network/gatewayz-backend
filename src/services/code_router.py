@@ -29,6 +29,13 @@ _QUALITY_PRIORS_PATH = Path(__file__).parent / "code_quality_priors.json"
 _quality_priors: dict[str, Any] | None = None
 
 
+def _build_fallback_model_dict(model_id: str) -> dict[str, Any]:
+    """Build a fallback model config dict from a model ID."""
+    model_id = model_id or "zai/glm-4.7"
+    provider = model_id.split("/")[0] if "/" in model_id else "zai"
+    return {"id": model_id, "provider": provider or "zai"}
+
+
 def _load_quality_priors() -> dict[str, Any]:
     """Load quality priors from JSON file with caching."""
     global _quality_priors
@@ -55,9 +62,12 @@ def _load_quality_priors() -> dict[str, Any]:
                 )
             except ImportError:
                 pass  # Sentry not available
+            from src.db.system_config import get_config
+
+            fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
             _quality_priors = {
                 "model_tiers": {},
-                "fallback_model": {"id": "zai/glm-4.7", "provider": "zai"},
+                "fallback_model": _build_fallback_model_dict(fallback_id),
                 "baselines": {},
             }
     return _quality_priors
@@ -70,7 +80,13 @@ def get_model_tiers() -> dict[str, Any]:
 
 def get_fallback_model() -> dict[str, Any]:
     """Get fallback model configuration."""
-    return _load_quality_priors().get("fallback_model", {"id": "zai/glm-4.7", "provider": "zai"})
+    from src.db.system_config import get_config
+
+    fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
+    return _load_quality_priors().get(
+        "fallback_model",
+        _build_fallback_model_dict(fallback_id),
+    )
 
 
 def get_baselines() -> dict[str, Any]:

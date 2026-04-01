@@ -29,6 +29,7 @@ import httpx
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_cloudflare_workers_ai_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -607,12 +608,40 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
                 "fetch_models_from_cloudflare_workers_ai called from async context, "
                 "returning static list. Use fetch_models_from_cloudflare_workers_ai_async() instead."
             )
+            # Try database fallback first (from last successful sync)
+            try:
+                from src.services.models import get_fallback_models_from_db
+
+                db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
+                if db_fallback:
+                    logger.info(
+                        f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                    )
+                    cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+                    return db_fallback
+            except Exception as e:
+                logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {e}")
+            # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
             return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
         except RuntimeError:
             # No event loop running, we can use asyncio.run()
             return asyncio.run(fetch_models_from_cloudflare_workers_ai_async())
     except Exception as e:
         logger.error(f"Error in fetch_models_from_cloudflare_workers_ai: {e}")
+        # Try database fallback first (from last successful sync)
+        try:
+            from src.services.models import get_fallback_models_from_db
+
+            db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
+            if db_fallback:
+                logger.info(
+                    f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                )
+                cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+                return db_fallback
+        except Exception as db_e:
+            logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {db_e}")
+        # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
         return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
 
 
@@ -637,6 +666,23 @@ async def fetch_models_from_cloudflare_workers_ai_async() -> list[dict[str, Any]
             logger.info(f"Using {len(text_models)} models from Cloudflare API")
             return text_models
 
+    # Try database fallback first (from last successful sync)
+    try:
+        import asyncio
+
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = await asyncio.to_thread(get_fallback_models_from_db, "cloudflare-workers-ai")
+        if db_fallback:
+            logger.info(
+                f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+            )
+            cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+            return db_fallback
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {e}")
+
+    # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
     # Fall back to static list
     logger.info("Falling back to static Cloudflare Workers AI model list")
     return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS

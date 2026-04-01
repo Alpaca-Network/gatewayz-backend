@@ -43,7 +43,7 @@ MANUAL_LOGO_DB = {
     "alpaca-network": "https://console.anyscale.com/favicon.ico",
     "onerouter": "https://infron.ai/favicon.ico",
     "simplismart": "https://simplismart.ai/favicon.ico",
-    # Gateway-slug entries (matching GATEWAY_REGISTRY keys in catalog.py)
+    # Gateway-slug entries (matching provider slugs in DB providers table)
     "openrouter": "https://openrouter.ai/favicon.ico",
     "groq": "https://groq.com/favicon.ico",
     "together": "https://together.ai/favicon.ico",

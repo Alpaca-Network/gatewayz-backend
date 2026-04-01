@@ -630,11 +630,21 @@ PROVIDER_TIMEOUTS = {
 # Auto-routing constants
 # Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
 AUTO_ROUTE_MODEL_PREFIX = "router"
-AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 # Code router constants
 CODE_ROUTER_PREFIX = "router:code"
-CODE_ROUTER_DEFAULT_MODEL = "zai/glm-4.7"  # Fallback model
+
+
+def _get_auto_route_default_model() -> str:
+    from src.db.system_config import get_config
+
+    return get_config("auto_route_default_model", "openai/gpt-4o-mini")
+
+
+def _get_code_router_default_model() -> str:
+    from src.db.system_config import get_config
+
+    return get_config("code_router_default_model", "zai/glm-4.7")
 
 
 def mask_key(k: str) -> str:
@@ -2215,7 +2225,7 @@ async def chat_completions(
                         str(e),
                     )
                     # Use default model since original was an auto-route request
-                    req.model = AUTO_ROUTE_DEFAULT_MODEL
+                    req.model = _get_auto_route_default_model()
 
         # === 2.4) General Router (if model="router:general" or "gatewayz-general") ===
         # NotDiamond-powered intelligent routing for general-purpose prompts
@@ -2278,7 +2288,9 @@ async def chat_completions(
                         logger.debug(
                             "Prometheus metrics not available for general router fallback tracking"
                         )
-                    req.model = "anthropic/claude-sonnet-4"
+                    from src.db.system_config import get_config
+
+                    req.model = get_config("default_fallback_model", "anthropic/claude-sonnet-4")
 
         # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
         # Specialized router for code-related tasks with 2026 benchmark-optimized model selection
@@ -2330,7 +2342,7 @@ async def chat_completions(
                             except ImportError:
                                 # Prometheus metrics are optional - silently skip if not available
                                 pass
-                            req.model = CODE_ROUTER_DEFAULT_MODEL
+                            req.model = _get_code_router_default_model()
                         else:
                             # Extract context from messages
                             from src.services.code_classifier import get_classifier
@@ -2373,7 +2385,7 @@ async def chat_completions(
                         # Prometheus metrics are optional - silently skip if not available
                         pass
                     # Use default code model since original was a code-route request
-                    req.model = CODE_ROUTER_DEFAULT_MODEL
+                    req.model = _get_code_router_default_model()
 
         with tracker.stage("request_preparation"):
             optional = {}
