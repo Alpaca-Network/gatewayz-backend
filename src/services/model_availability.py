@@ -190,19 +190,16 @@ class ModelAvailabilityService:
     def __init__(self):
         self.availability_cache: dict[str, ModelAvailability] = {}
         self.circuit_breakers: dict[str, CircuitBreaker] = {}
-        self.fallback_mappings: dict[str, list[str]] = {}
         self.config = AvailabilityConfig()
         self.monitoring_active = False
         self._monitoring_task: asyncio.Task | None = None
 
-        # Load fallback mappings
-        self._load_fallback_mappings()
-
-    def _load_fallback_mappings(self):
-        """Load fallback model mappings"""
+    @property
+    def fallback_mappings(self) -> dict[str, list[str]]:
+        """Get fallback model mappings, re-reading from config on each access."""
         from src.db.system_config import get_config
 
-        self.fallback_mappings = get_config("model_fallback_mappings", _DEFAULT_FALLBACK_MAPPINGS)
+        return get_config("model_fallback_mappings", _DEFAULT_FALLBACK_MAPPINGS)
 
     async def start_monitoring(self):
         """Start availability monitoring"""
