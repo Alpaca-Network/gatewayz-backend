@@ -14,15 +14,8 @@ logger = logging.getLogger(__name__)
 MODEL_PROVIDER_OVERRIDES = {
     "katanemo/arch-router-1.5b": "huggingface",
     "zai-org/glm-4.6-fp8": "near",
-    # Z.AI GLM models - route to Z.AI gateway
-    "zai/glm-4.7": "zai",
-    "zai/glm-4.6v": "zai",
-    "zai/glm-4.5-air": "zai",
-    "zai/glm-4.5": "zai",
-    "glm-4.7": "zai",
-    "glm-4.6v": "zai",
-    "glm-4.5-air": "zai",
-    "glm-4.5": "zai",
+    # Z.AI GLM models — removed "zai" (non-existent provider).
+    # MODEL_ID_ALIASES now redirects these to z-ai/glm-4-flash → openrouter.
     # Featherless-only models - not available on OpenRouter
     "c10x/longwriter-qwen2.5-7b-instruct": "featherless",
     # Meta Llama model ID aliases (support both meta/ and meta-llama/)
@@ -250,6 +243,17 @@ MODEL_ID_ALIASES = {
     # Map z-ai/ prefixed GLM models to canonical OpenRouter IDs
     "z-ai/glm-4.5": "z-ai/glm-4-flash",
     "z-ai/glm-4.6": "z-ai/glm-4-flash",
+    # Z.AI GLM models with zai/ prefix (vs z-ai/) and bare names — route via OpenRouter.
+    # Previously pointed to non-existent "zai" provider; aliased here so natural z-ai→openrouter
+    # routing takes over after alias resolution.
+    "zai/glm-4.7": "z-ai/glm-4-flash",
+    "zai/glm-4.6v": "z-ai/glm-4-flash",
+    "zai/glm-4.5-air": "z-ai/glm-4-flash",
+    "zai/glm-4.5": "z-ai/glm-4-flash",
+    "glm-4.7": "z-ai/glm-4-flash",
+    "glm-4.6v": "z-ai/glm-4-flash",
+    "glm-4.5-air": "z-ai/glm-4-flash",
+    "glm-4.5": "z-ai/glm-4-flash",
     # Black Forest Labs FLUX model aliases - ensure consistent pricing lookup
     # Map dot variant to dash variant for pricing database consistency
     "bfl/flux-1.1-pro": "bfl/flux-1-1-pro",
@@ -311,9 +315,9 @@ GEMINI_2_5_FLASH_PREVIEW = "gemini-2.5-flash-preview-09-2025"
 GEMINI_2_5_PRO_PREVIEW = "gemini-2.5-pro-preview-09-2025"
 GEMINI_2_0_FLASH = "gemini-2.0-flash"
 GEMINI_2_0_PRO = "gemini-2.0-pro"
-GEMINI_1_5_PRO = "gemini-1.5-pro"
-GEMINI_1_5_FLASH = "gemini-1.5-flash"
-GEMINI_1_0_PRO = "gemini-1.0-pro"
+# GEMINI_1_5_PRO and GEMINI_1_5_FLASH removed — Gemini 1.5 retired on Vertex AI
+# Sep 2025; requests are now redirected to 2.5-flash/2.5-flash-lite in the mapping.
+GEMINI_1_0_PRO = "gemini-1.0-pro"  # Kept for reference only; retired Sep 2025 on Vertex
 
 # Claude model name constants to reduce duplication
 CLAUDE_SONNET_4_5 = "anthropic/claude-sonnet-4.5"
@@ -692,6 +696,14 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "cerebras/llama-3.3-70b-instruct": "meta-llama/llama-3.3-70b-instruct",
         "cerebras/llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
         "cerebras/llama-3.1-70b-instruct": "meta-llama/llama-3.1-70b-instruct",
+        # Bare Cerebras model IDs — needed when Cerebras fails over to OpenRouter.
+        # Cerebras strips the provider prefix internally (e.g. "cerebras/llama-3.3-70b" → "llama-3.3-70b"),
+        # so if failover re-routes with the bare ID, OpenRouter must be able to resolve it.
+        "llama-3.3-70b": "meta-llama/llama-3.3-70b-instruct",
+        "llama-3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+        "llama-3.1-8b": "meta-llama/llama-3.1-8b-instruct",
+        "llama3.1-70b": "meta-llama/llama-3.1-70b-instruct",
+        "llama3.1-8b": "meta-llama/llama-3.1-8b-instruct",
     },
     "featherless": {
         # Featherless uses direct provider/model format
@@ -775,14 +787,14 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "llama-3.1-8b-instant": "llama-3.1-8b-instant",
         "llama3-70b-8192": "llama3-70b-8192",
         "llama3-8b-8192": "llama3-8b-8192",
-        "mixtral-8x7b-32768": "mixtral-8x7b-32768",
+        # mixtral-8x7b-32768 REMOVED — Groq retired this model May 2025
+        # gemma-7b-it REMOVED — Groq deprecated the original Gemma 7B
         "gemma2-9b-it": "gemma2-9b-it",
-        "gemma-7b-it": "gemma-7b-it",
         # With groq/ prefix (stripped automatically)
         "groq/llama-3.3-70b-versatile": "llama-3.3-70b-versatile",
         "groq/llama-3.1-70b-versatile": "llama-3.1-70b-versatile",
         "groq/llama-3.1-8b-instant": "llama-3.1-8b-instant",
-        "groq/mixtral-8x7b-32768": "mixtral-8x7b-32768",
+        # groq/mixtral-8x7b-32768 REMOVED — model retired from Groq
         "groq/gemma2-9b-it": "gemma2-9b-it",
     },
     "google-vertex": {
@@ -846,18 +858,27 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "gemini-2.0-pro-001": "gemini-2.0-pro-001",
         "google/gemini-2.0-pro": GEMINI_2_0_PRO,
         "@google/models/gemini-2.0-pro": GEMINI_2_0_PRO,
-        # Gemini 1.5 models - RETIRED (April-September 2025)
-        # These models are NO LONGER AVAILABLE on Google Vertex AI
-        # Removed all google-vertex mappings to prevent 404 errors
-        # Users must use OpenRouter provider directly for legacy Gemini 1.5 models
-        # Gemini 1.0 models
-        "gemini-1.0-pro": GEMINI_1_0_PRO,
-        "gemini-1.0-pro-vision": "gemini-1.0-pro-vision",
-        "google/gemini-1.0-pro": GEMINI_1_0_PRO,
-        "@google/models/gemini-1.0-pro": GEMINI_1_0_PRO,
+        # Gemini 1.5 — RETIRED on Google Vertex AI (April–September 2025)
+        # Redirect transparently to the nearest current equivalent so callers
+        # get a working response instead of a 404.
+        "gemini-1.5-pro": "gemini-2.5-flash",
+        "gemini-1.5-flash": "gemini-2.5-flash-lite",
+        "gemini-1.5-flash-8b": "gemini-2.5-flash-lite",
+        "google/gemini-1.5-pro": "gemini-2.5-flash",
+        "google/gemini-1.5-flash": "gemini-2.5-flash-lite",
+        "google/gemini-1.5-flash-8b": "gemini-2.5-flash-lite",
+        "@google/models/gemini-1.5-pro": "gemini-2.5-flash",
+        "@google/models/gemini-1.5-flash": "gemini-2.5-flash-lite",
+        # Gemini 1.0 — RETIRED on Google Vertex AI (September 2025)
+        # Redirect to gemini-2.0-flash as the closest stable successor.
+        "gemini-1.0-pro": "gemini-2.0-flash",
+        "gemini-1.0-pro-vision": "gemini-2.0-flash",
+        "google/gemini-1.0-pro": "gemini-2.0-flash",
+        "@google/models/gemini-1.0-pro": "gemini-2.0-flash",
         # Aliases for convenience
         "gemini-2.0": GEMINI_2_0_FLASH,
-        # Note: gemini-1.5 alias removed - model is retired on Vertex AI
+        # gemini-1.5 generic alias — redirected to 2.5-flash (1.5 retired on Vertex)
+        "gemini-1.5": "gemini-2.5-flash",
         # Gemma models (open source models from Google)
         "google/gemma-2-9b": "gemma-2-9b-it",
         "google/gemma-2-9b-it": "gemma-2-9b-it",
@@ -1074,7 +1095,7 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         # Transform: "cerebras/llama-3.3-70b" → "llama-3.3-70b"
         "cerebras/llama-3.3-70b": "llama-3.3-70b",
         "cerebras/llama-3.3-70b-instruct": "llama-3.3-70b",
-        "cerebras/llama-3.3-405b": "llama-3.3-405b",
+        # cerebras/llama-3.3-405b REMOVED — Meta never released Llama 3.3 at 405B
         "cerebras/llama-3.1-70b": "llama3.1-70b",
         "cerebras/llama-3.1-70b-instruct": "llama3.1-70b",
         "cerebras/llama-3.1-8b": "llama3.1-8b",
@@ -1096,7 +1117,7 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "zai/glm-4.6": "zai-glm-4.6",
         # Support direct model names (passthrough)
         "llama-3.3-70b": "llama-3.3-70b",
-        "llama-3.3-405b": "llama-3.3-405b",
+        # llama-3.3-405b REMOVED — phantom model; Meta only released Llama 3.3 at 70B
         "llama3.1-70b": "llama3.1-70b",
         "llama3.1-8b": "llama3.1-8b",
         "llama3.1-405b": "llama3.1-405b",
@@ -1146,10 +1167,8 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "meta-llama/llama-3-8b": "@cf/meta/llama-3-8b-instruct",
         "llama-3-8b": "@cf/meta/llama-3-8b-instruct",
         #
-        # ======== Meta Llama 2 models (Legacy) ========
-        "meta-llama/llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
-        "llama-2-7b-chat": "@cf/meta/llama-2-7b-chat-fp16",
-        "llama-2-7b": "@cf/meta/llama-2-7b-chat-fp16",
+        # Meta Llama 2 models — REMOVED (Cloudflare sunset entire Llama 2 family)
+        # meta-llama/llama-2-7b-chat, llama-2-7b-chat, llama-2-7b entries removed
         #
         # ======== Meta Llama Guard ========
         "meta-llama/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
@@ -1217,9 +1236,8 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
         "@cf/meta/meta-llama-3-8b-instruct": "@cf/meta/meta-llama-3-8b-instruct",
         "@cf/meta/llama-3-8b-instruct": "@cf/meta/llama-3-8b-instruct",
         "@cf/meta/llama-3-8b-instruct-awq": "@cf/meta/llama-3-8b-instruct-awq",
-        "@cf/meta/llama-2-7b-chat-fp16": "@cf/meta/llama-2-7b-chat-fp16",
-        "@cf/meta/llama-2-7b-chat-int8": "@cf/meta/llama-2-7b-chat-int8",
-        "@cf/meta-llama/llama-2-7b-chat-hf-lora": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
+        # @cf/meta/llama-2-7b-chat-fp16, @cf/meta/llama-2-7b-chat-int8,
+        # @cf/meta-llama/llama-2-7b-chat-hf-lora — REMOVED (Cloudflare sunset Llama 2)
         "@cf/meta/llama-guard-3-8b": "@cf/meta/llama-guard-3-8b",
         "@cf/qwen/qwen3-30b-a3b-fp8": "@cf/qwen/qwen3-30b-a3b-fp8",
         "@cf/qwen/qwq-32b": "@cf/qwen/qwq-32b",
@@ -1255,23 +1273,28 @@ _MODEL_ID_MAPPINGS: dict[str, dict[str, str]] = {
     },
     "onerouter": {
         # Infron AI uses OpenAI-compatible model identifiers with @ versioning
-        # Format: model-name@version (e.g., "claude-3-5-sonnet@20240620")
+        # Format: model-name@version (e.g., "claude-3-5-sonnet@20241022")
         # Models are dynamically fetched from Infron AI's /v1/models endpoint
         # Strip onerouter/ prefix for actual API calls
-        "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+        "onerouter/claude-3-5-sonnet": "claude-3-5-sonnet@20241022",
         "onerouter/gpt-4": "gpt-4@latest",
         "onerouter/gpt-4o": "gpt-4o@latest",
-        "onerouter/gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+        # gpt-3.5-turbo deprecated by OpenAI Jul 2024; redirect to gpt-4o-mini
+        "onerouter/gpt-3.5-turbo": "gpt-4o-mini@latest",
         # Direct model names (passthrough with @ version suffix)
-        "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20240620",
+        "claude-3-5-sonnet@20241022": "claude-3-5-sonnet@20241022",
+        # Legacy @20240620 version passthrough — kept for backward compat, resolves to current
+        "claude-3-5-sonnet@20240620": "claude-3-5-sonnet@20241022",
         "gpt-4@latest": "gpt-4@latest",
         "gpt-4o@latest": "gpt-4o@latest",
-        "gpt-3.5-turbo@latest": "gpt-3.5-turbo@latest",
+        "gpt-4o-mini@latest": "gpt-4o-mini@latest",
         # Models can also use simpler names - Infron AI handles routing
-        "claude-3-5-sonnet": "claude-3-5-sonnet@20240620",
+        "claude-3-5-sonnet": "claude-3-5-sonnet@20241022",
         "gpt-4": "gpt-4@latest",
         "gpt-4o": "gpt-4o@latest",
-        "gpt-3.5-turbo": "gpt-3.5-turbo@latest",
+        # gpt-3.5-turbo deprecated Jul 2024 — redirect legacy requests to gpt-4o-mini
+        "gpt-3.5-turbo": "gpt-4o-mini@latest",
+        "gpt-3.5-turbo@latest": "gpt-4o-mini@latest",
     },
     "simplismart": {
         # Simplismart uses org/model format, supports various LLM models

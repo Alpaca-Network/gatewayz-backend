@@ -80,7 +80,7 @@ def make_groq_request_openai(messages, model, **kwargs):
 
     Args:
         messages: List of message objects
-        model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768')
+        model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'gemma2-9b-it')
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     circuit_breaker = get_circuit_breaker("groq", GROQ_CIRCUIT_CONFIG)
@@ -135,7 +135,7 @@ def make_groq_request_openai_stream(messages, model, **kwargs):
 
     Args:
         messages: List of message objects
-        model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768')
+        model: Model name to use (e.g., 'llama-3.3-70b-versatile', 'gemma2-9b-it')
         **kwargs: Additional parameters like max_tokens, temperature, etc.
     """
     circuit_breaker = get_circuit_breaker("groq", GROQ_CIRCUIT_CONFIG)

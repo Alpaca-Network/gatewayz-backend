@@ -483,8 +483,10 @@ class TestGoogleVertexTransformations:
         assert "gemini" in result
 
     def test_gemini_1_5_pro(self):
+        # gemini-1.5-pro was retired on Google Vertex AI (Sep 2025).
+        # Requests are transparently redirected to gemini-2.5-flash.
         result = transform_model_id("gemini-1.5-pro", "google-vertex")
-        assert "gemini-1.5-pro" in result
+        assert "gemini-2.5-flash" in result
 
     def test_gemini_2_0_flash(self):
         result = transform_model_id("gemini-2.0-flash", "google-vertex")
@@ -530,18 +532,22 @@ class TestOneRouterTransformations:
     """Test OneRouter model transformations"""
 
     def test_strips_prefix(self):
+        # claude-3-5-sonnet updated from @20240620 (Jun 2024) to @20241022 (Oct 2024 — current stable).
+        # gpt-3.5-turbo deprecated by OpenAI Jul 2024; redirected to gpt-4o-mini@latest.
         test_cases = [
-            ("onerouter/claude-3-5-sonnet", "claude-3-5-sonnet@20240620"),
+            ("onerouter/claude-3-5-sonnet", "claude-3-5-sonnet@20241022"),
             ("onerouter/gpt-4", "gpt-4@latest"),
             ("onerouter/gpt-4o", "gpt-4o@latest"),
-            ("onerouter/gpt-3.5-turbo", "gpt-3.5-turbo@latest"),
+            ("onerouter/gpt-3.5-turbo", "gpt-4o-mini@latest"),
         ]
         for model_id, expected in test_cases:
             assert transform_model_id(model_id, "onerouter") == expected
 
     def test_passthrough_versioned(self):
+        # @20240620 is now an alias that resolves to @20241022 (current stable).
         test_cases = [
-            ("claude-3-5-sonnet@20240620", "claude-3-5-sonnet@20240620"),
+            ("claude-3-5-sonnet@20241022", "claude-3-5-sonnet@20241022"),
+            ("claude-3-5-sonnet@20240620", "claude-3-5-sonnet@20241022"),  # legacy → current
             ("gpt-4@latest", "gpt-4@latest"),
             ("gpt-4o@latest", "gpt-4o@latest"),
         ]
@@ -549,11 +555,12 @@ class TestOneRouterTransformations:
             assert transform_model_id(model_id, "onerouter") == expected
 
     def test_simple_names_get_version_suffix(self):
+        # claude-3-5-sonnet updated to @20241022; gpt-3.5-turbo redirected to gpt-4o-mini.
         test_cases = [
-            ("claude-3-5-sonnet", "claude-3-5-sonnet@20240620"),
+            ("claude-3-5-sonnet", "claude-3-5-sonnet@20241022"),
             ("gpt-4", "gpt-4@latest"),
             ("gpt-4o", "gpt-4o@latest"),
-            ("gpt-3.5-turbo", "gpt-3.5-turbo@latest"),
+            ("gpt-3.5-turbo", "gpt-4o-mini@latest"),
         ]
         for model_id, expected in test_cases:
             assert transform_model_id(model_id, "onerouter") == expected
