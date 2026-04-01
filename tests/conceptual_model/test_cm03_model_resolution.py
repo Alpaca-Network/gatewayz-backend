@@ -8,7 +8,11 @@ in the Conceptual Model.
 
 import pytest
 
-from src.services.model_mappings_cache import get_aliases, get_routing_rules, load_model_mappings_cache
+from src.services.model_mappings_cache import (
+    get_aliases,
+    get_routing_rules,
+    load_model_mappings_cache,
+)
 from src.services.model_transformations import (
     apply_model_alias,
     detect_provider_from_model_id,
@@ -20,6 +24,8 @@ from src.services.model_transformations import (
 def _ensure_mappings_loaded():
     """Ensure the model mappings cache is populated before any test in this module runs."""
     load_model_mappings_cache(force=True)
+    if not get_aliases() and not get_routing_rules():
+        pytest.skip("Model mappings DB unavailable — skipping CM-3 alias/routing tests")
 
 
 # ---------------------------------------------------------------------------

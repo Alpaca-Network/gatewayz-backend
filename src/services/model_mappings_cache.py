@@ -70,7 +70,9 @@ def load_model_mappings_cache(force: bool = False) -> None:
 
     now = time.monotonic()
     if not force and _cache_loaded and (now - _cache_loaded_at) < _CACHE_TTL:
-        logger.debug("Model mappings cache is fresh (%.0fs old), skipping reload", now - _cache_loaded_at)
+        logger.debug(
+            "Model mappings cache is fresh (%.0fs old), skipping reload", now - _cache_loaded_at
+        )
         return
 
     logger.info("Loading model mappings cache from database...")
@@ -114,8 +116,7 @@ def load_model_mappings_cache(force: bool = False) -> None:
 
         # Build reverse lookup: provider → set of native model IDs
         new_native_values: dict[str, set[str]] = {
-            provider: set(mapping.values())
-            for provider, mapping in new_provider_mappings.items()
+            provider: set(mapping.values()) for provider, mapping in new_provider_mappings.items()
         }
 
         # Atomic swap — replace all caches at once

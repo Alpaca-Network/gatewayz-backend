@@ -355,7 +355,9 @@ async def lifespan(app):
                 # This must complete before any inference requests are served so that
                 # transform_model_id() and detect_provider_from_model_id() have valid data.
                 try:
-                    logger.info("🔥 [1b] Loading model mappings cache (aliases / provider mappings / routing rules)...")
+                    logger.info(
+                        "🔥 [1b] Loading model mappings cache (aliases / provider mappings / routing rules)..."
+                    )
                     from src.services.model_mappings_cache import load_model_mappings_cache
 
                     await asyncio.to_thread(load_model_mappings_cache)

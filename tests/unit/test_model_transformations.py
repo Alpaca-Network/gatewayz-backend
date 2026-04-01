@@ -20,12 +20,15 @@ from src.services.model_transformations import get_model_id_mapping
 def _ensure_mappings_loaded():
     """Ensure the model mappings cache is populated before any test in this module runs."""
     load_model_mappings_cache(force=True)
+    if not get_all_provider_mappings():
+        pytest.skip("Model mappings DB unavailable — skipping data-dependent tests")
 
 
 # Module-level snapshot used for parametrize (evaluated after cache is loaded via conftest).
 # Falls back to empty dict if the DB is unavailable in CI.
 def _get_mappings():
     return get_all_provider_mappings()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,16 +84,12 @@ class TestModelIdMappingsTopLevel:
     def test_expected_provider_count(self):
         # There should be at least 20 providers registered.
         mappings = get_all_provider_mappings()
-        assert (
-            len(mappings) >= 20
-        ), f"Expected at least 20 providers, found {len(mappings)}"
+        assert len(mappings) >= 20, f"Expected at least 20 providers, found {len(mappings)}"
 
     def test_all_known_providers_present(self):
         mappings = get_all_provider_mappings()
         for provider in _KNOWN_PROVIDERS:
-            assert (
-                provider in mappings
-            ), f"Provider '{provider}' missing from provider mappings"
+            assert provider in mappings, f"Provider '{provider}' missing from provider mappings"
 
 
 # ---------------------------------------------------------------------------

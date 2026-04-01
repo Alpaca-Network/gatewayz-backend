@@ -18,7 +18,11 @@ import pytest
 os.environ.setdefault("APP_ENV", "testing")
 os.environ.setdefault("TESTING", "true")
 
-from src.services.model_mappings_cache import get_all_provider_mappings, get_routing_rules, load_model_mappings_cache
+from src.services.model_mappings_cache import (
+    get_all_provider_mappings,
+    get_routing_rules,
+    load_model_mappings_cache,
+)
 from src.services.model_transformations import (
     OPENROUTER_AUTO_FALLBACKS,
     apply_model_alias,
@@ -33,6 +37,9 @@ from src.services.model_transformations import (
 def _ensure_mappings_loaded():
     """Ensure the model mappings cache is populated before any test in this module runs."""
     load_model_mappings_cache(force=True)
+    if not get_all_provider_mappings():
+        pytest.skip("Model mappings DB unavailable — skipping data-dependent tests")
+
 
 # ===========================================================================
 # Model Alias Resolution
