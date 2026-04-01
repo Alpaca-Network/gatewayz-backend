@@ -8,8 +8,10 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 def _get_default_fallback() -> str:
     from src.db.system_config import get_config
+
     return get_config("default_fallback_model", "anthropic/claude-sonnet-4")
 
 
@@ -21,6 +23,7 @@ def get_fallback_models() -> dict[str, str]:
         Dict mapping mode names to fallback model IDs
     """
     from src.db.system_config import get_config
+
     return {
         "quality": get_config("general_router_fallback_quality", "openai/gpt-4o"),
         "cost": get_config("general_router_fallback_cost", "openai/gpt-4o-mini"),

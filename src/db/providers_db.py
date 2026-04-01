@@ -20,11 +20,35 @@ _PROVIDER_SLUGS_CACHE_TTL = 300  # 5 minutes
 # Last-resort fallback when DB has never been reached (cold start with DB down).
 # Matches the gateway list that was previously hardcoded in models.py.
 _FALLBACK_PROVIDER_SLUGS: list[str] = [
-    "openrouter", "featherless", "deepinfra", "cerebras", "nebius",
-    "xai", "novita", "hug", "chutes", "groq", "fireworks", "together",
-    "aimo", "near", "fal", "helicone", "anannas", "aihubmix", "alibaba",
-    "onerouter", "google-vertex", "cloudflare-workers-ai", "clarifai",
-    "openai", "anthropic", "simplismart", "sybil", "canopywave", "morpheus",
+    "openrouter",
+    "featherless",
+    "deepinfra",
+    "cerebras",
+    "nebius",
+    "xai",
+    "novita",
+    "hug",
+    "chutes",
+    "groq",
+    "fireworks",
+    "together",
+    "aimo",
+    "near",
+    "fal",
+    "helicone",
+    "anannas",
+    "aihubmix",
+    "alibaba",
+    "onerouter",
+    "google-vertex",
+    "cloudflare-workers-ai",
+    "clarifai",
+    "openai",
+    "anthropic",
+    "simplismart",
+    "sybil",
+    "canopywave",
+    "morpheus",
     "vercel-ai-gateway",
 ]
 
@@ -40,17 +64,15 @@ def get_active_provider_slugs() -> list[str]:
     global _provider_slugs_cache, _provider_slugs_cache_timestamp
 
     now = time.monotonic()
-    if _provider_slugs_cache and (now - _provider_slugs_cache_timestamp) < _PROVIDER_SLUGS_CACHE_TTL:
+    if (
+        _provider_slugs_cache
+        and (now - _provider_slugs_cache_timestamp) < _PROVIDER_SLUGS_CACHE_TTL
+    ):
         return _provider_slugs_cache
 
     try:
         supabase = get_supabase_client()
-        response = (
-            supabase.table("providers")
-            .select("slug")
-            .eq("is_active", True)
-            .execute()
-        )
+        response = supabase.table("providers").select("slug").eq("is_active", True).execute()
         slugs = [row["slug"] for row in (response.data or [])]
         if slugs:
             _provider_slugs_cache = slugs

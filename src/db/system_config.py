@@ -21,12 +21,7 @@ def load_all_config() -> dict[str, Any]:
 
     try:
         client = get_supabase_client()
-        result = (
-            client.table("system_config")
-            .select("key, value")
-            .eq("is_active", True)
-            .execute()
-        )
+        result = client.table("system_config").select("key, value").eq("is_active", True).execute()
 
         new_cache: dict[str, Any] = {}
         for row in result.data or []:

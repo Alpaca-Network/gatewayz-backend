@@ -618,6 +618,7 @@ def get_all_models_parallel():
     # Slow path: per-gateway parallel fetching (original implementation)
     try:
         from src.db.providers_db import get_active_provider_slugs
+
         gateways = get_active_provider_slugs()
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
@@ -695,6 +696,7 @@ def get_all_models_parallel():
 def get_all_models_sequential():
     """Fallback sequential fetching (original implementation)"""
     from src.db.providers_db import get_active_provider_slugs
+
     all_models = []
     for slug in get_active_provider_slugs():
         models = get_cached_models(slug) or []
@@ -2319,6 +2321,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
 
         # Check each gateway's cache
         from src.db.providers_db import get_active_provider_slugs
+
         gateways = get_active_provider_slugs()
 
         for gateway in gateways:

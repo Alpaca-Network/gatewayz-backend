@@ -611,9 +611,12 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
             # Try database fallback first (from last successful sync)
             try:
                 from src.services.models import get_fallback_models_from_db
+
                 db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
                 if db_fallback:
-                    logger.info(f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback")
+                    logger.info(
+                        f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                    )
                     cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
                     return db_fallback
             except Exception as e:
@@ -628,9 +631,12 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
         # Try database fallback first (from last successful sync)
         try:
             from src.services.models import get_fallback_models_from_db
+
             db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
             if db_fallback:
-                logger.info(f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback")
+                logger.info(
+                    f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                )
                 cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
                 return db_fallback
         except Exception as db_e:
@@ -663,9 +669,12 @@ async def fetch_models_from_cloudflare_workers_ai_async() -> list[dict[str, Any]
     # Try database fallback first (from last successful sync)
     try:
         from src.services.models import get_fallback_models_from_db
+
         db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
         if db_fallback:
-            logger.info(f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback")
+            logger.info(
+                f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+            )
             cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
             return db_fallback
     except Exception as e:

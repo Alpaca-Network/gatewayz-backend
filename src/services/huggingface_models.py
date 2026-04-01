@@ -44,7 +44,6 @@ ESSENTIAL_MODELS = {
 }
 
 
-
 def fetch_models_from_huggingface_api(
     search: str = None,
     task: str = "text-generation",

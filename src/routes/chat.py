@@ -637,11 +637,13 @@ CODE_ROUTER_PREFIX = "router:code"
 
 def _get_auto_route_default_model() -> str:
     from src.db.system_config import get_config
+
     return get_config("auto_route_default_model", "openai/gpt-4o-mini")
 
 
 def _get_code_router_default_model() -> str:
     from src.db.system_config import get_config
+
     return get_config("code_router_default_model", "zai/glm-4.7")
 
 
@@ -2287,6 +2289,7 @@ async def chat_completions(
                             "Prometheus metrics not available for general router fallback tracking"
                         )
                     from src.db.system_config import get_config
+
                     req.model = get_config("default_fallback_model", "anthropic/claude-sonnet-4")
 
         # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===

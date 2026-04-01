@@ -36,7 +36,6 @@ except ImportError:
     NovitaClient = None
 
 
-
 def get_novita_sdk_client():
     """Get an instance of the Novita SDK client for image/video generation.
 

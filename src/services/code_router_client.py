@@ -118,6 +118,7 @@ def get_router_model_string(config: CodeRouterConfig | None = None) -> str:
         if config.fallback_model:
             return config.fallback_model
         from src.db.system_config import get_config
+
         return get_config("code_router_fallback_model", "anthropic/claude-sonnet-4")
 
     mode = config.mode
