@@ -286,7 +286,7 @@ class TestCatalogInclusionRules:
 
         # The model is not a known gateway provider, but it also won't appear in the
         # catalog fetch loop because its slug is absent from PROVIDER_SLUGS.
-        assert unregistered_slug not in PROVIDER_SLUGS
+        assert unregistered_slug not in get_provider_slugs()
 
     @pytest.mark.cm_verified
     def test_deduplicated_view_no_duplicate_ids(self):
