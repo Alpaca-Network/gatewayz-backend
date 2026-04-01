@@ -25,6 +25,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -48,6 +49,7 @@ _provider_native_values: dict[str, set[str]] = {}
 _cache_loaded: bool = False
 _cache_loaded_at: float = 0.0
 _CACHE_TTL: float = 900.0  # 15 minutes
+_refresh_in_progress: bool = False  # prevents concurrent background refreshes
 
 
 # ── Public loaders ────────────────────────────────────────────────────────────
@@ -151,10 +153,44 @@ def invalidate_model_mappings_cache() -> None:
 
 
 def _ensure_loaded() -> None:
-    """Refresh cache if stale. Called by every accessor."""
+    """
+    Ensure the cache has been loaded at least once (blocking).
+
+    On first startup this may block briefly. On TTL expiry it triggers a
+    non-blocking background refresh and returns immediately with stale data,
+    so the event loop is never stalled by a cache refresh mid-request.
+    """
+    global _refresh_in_progress
+
     now = time.monotonic()
-    if not _cache_loaded or (now - _cache_loaded_at) >= _CACHE_TTL:
+    if not _cache_loaded:
+        # First load — must block so callers have valid data before serving.
         load_model_mappings_cache()
+        return
+
+    if (now - _cache_loaded_at) >= _CACHE_TTL:
+        # Cache is stale. Fire a background refresh so we don't block the
+        # event loop; callers get slightly stale data for this one cycle.
+        if not _refresh_in_progress:
+            _refresh_in_progress = True
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_refresh_cache_background())
+            except RuntimeError:
+                # No running event loop (e.g. tests / CLI context) — fall back to sync.
+                _refresh_in_progress = False
+                load_model_mappings_cache()
+
+
+async def _refresh_cache_background() -> None:
+    """Run load_model_mappings_cache() in a thread pool, then clear the in-progress flag."""
+    global _refresh_in_progress
+    try:
+        await asyncio.to_thread(load_model_mappings_cache)
+    except Exception as e:
+        logger.error("Background model mappings cache refresh failed: %s", e)
+    finally:
+        _refresh_in_progress = False
 
 
 def get_aliases() -> dict[str, str]:

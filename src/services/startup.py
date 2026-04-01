@@ -361,7 +361,11 @@ async def lifespan(app):
                     await asyncio.to_thread(load_model_mappings_cache)
                     logger.info("✅ [1b] Model mappings cache loaded")
                 except Exception as e:
-                    logger.warning(f"Model mappings cache load warning: {e}")
+                    logger.error(
+                        f"❌ [1b] Model mappings cache failed to load: {e}. "
+                        "Model routing rules and provider mappings will be empty until next retry. "
+                        "DB-specific routing (e.g., Gemini → google-vertex) will not work."
+                    )
 
                 # Phase 2: Preload full model catalog (heavy - 17k+ models)
                 # Build bottom-up from per-provider catalogs to avoid the single-
