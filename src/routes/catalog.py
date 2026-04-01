@@ -33,6 +33,12 @@ from src.db.gateway_analytics import (
     get_top_models_by_provider,
     get_trending_models,
 )
+from src.services.gateway_registry import (
+    get_gateway_registry,
+    get_gateway_slug_resolution,
+    get_provider_slugs,
+    validate_gateway,
+)
 from src.services.models import (
     enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
@@ -46,12 +52,6 @@ from src.services.modelz_client import (
     fetch_modelz_tokens,
     get_modelz_model_details,
     get_modelz_model_ids,
-)
-from src.services.gateway_registry import (
-    get_gateway_registry,
-    get_gateway_slug_resolution,
-    get_provider_slugs,
-    validate_gateway,
 )
 from src.services.prometheus_metrics import set_gateway_model_count
 from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
