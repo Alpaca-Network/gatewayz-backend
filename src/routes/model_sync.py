@@ -510,7 +510,6 @@ async def sync_providers_only():
 
         result = await sync_providers_to_database()
 
-        synced_count = result.get("synced_count", 0)
         success = result.get("success", False)
 
         message = (

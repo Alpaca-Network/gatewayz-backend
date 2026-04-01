@@ -19,11 +19,12 @@ class TestCM1801AtLeast30ProvidersRegistered:
     def test_at_least_30_providers_registered(self):
         """GATEWAY_REGISTRY must contain at least 30 provider entries,
         matching the CM claim of 30+ provider integrations."""
-        from src.routes.catalog import GATEWAY_REGISTRY
+        from src.services.gateway_registry import get_gateway_registry
 
-        assert len(GATEWAY_REGISTRY) >= 30, (
-            f"Expected >= 30 providers in GATEWAY_REGISTRY, found {len(GATEWAY_REGISTRY)}: "
-            f"{sorted(GATEWAY_REGISTRY.keys())}"
+        registry = get_gateway_registry()
+        assert len(registry) >= 30, (
+            f"Expected >= 30 providers in GATEWAY_REGISTRY, found {len(registry)}: "
+            f"{sorted(registry.keys())}"
         )
 
 

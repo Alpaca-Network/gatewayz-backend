@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.routes.catalog import GATEWAY_REGISTRY, merge_models_by_slug
+from src.routes.catalog import merge_models_by_slug
+from src.services.gateway_registry import get_gateway_registry
+
+GATEWAY_REGISTRY = get_gateway_registry()
 from src.services.models import (
     MODALITY_TEXT_TO_AUDIO,
     MODALITY_TEXT_TO_IMAGE,
@@ -266,12 +269,12 @@ class TestCatalogInclusionRules:
         ), "Test requires an unregistered provider slug"
 
         # When a provider is not in GATEWAY_REGISTRY, its models are never fetched
-        # by the catalog building process (PROVIDER_SLUGS is derived from GATEWAY_REGISTRY).
-        from src.routes.catalog import PROVIDER_SLUGS
+        # by the catalog building process (provider slugs are derived from GATEWAY_REGISTRY).
+        from src.services.gateway_registry import get_provider_slugs
 
         assert (
-            unregistered_slug not in PROVIDER_SLUGS
-        ), "Unregistered provider must not appear in PROVIDER_SLUGS"
+            unregistered_slug not in get_provider_slugs()
+        ), "Unregistered provider must not appear in provider slugs"
 
         # Additionally, if such a model somehow appears and is in GATEWAY_PROVIDERS,
         # it would be filtered out due to missing pricing.

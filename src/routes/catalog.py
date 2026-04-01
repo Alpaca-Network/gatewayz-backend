@@ -50,9 +50,7 @@ from src.services.modelz_client import (
 from src.services.gateway_registry import (
     get_gateway_registry,
     get_gateway_slug_resolution,
-    get_provider_fetch_timeout,
     get_provider_slugs,
-    get_valid_gateway_values,
     validate_gateway,
 )
 from src.services.prometheus_metrics import set_gateway_model_count
