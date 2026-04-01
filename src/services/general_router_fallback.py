@@ -8,16 +8,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Mode-specific fallback models
-FALLBACK_MODELS = {
-    "quality": "openai/gpt-4o",
-    "cost": "openai/gpt-4o-mini",
-    "latency": "groq/llama-3.3-70b-versatile",
-    "balanced": "anthropic/claude-sonnet-4",
-}
 
-# System-wide default fallback
-DEFAULT_FALLBACK = "anthropic/claude-sonnet-4"
+def _get_default_fallback() -> str:
+    from src.db.system_config import get_config
+
+    return get_config("default_fallback_model", "anthropic/claude-sonnet-4")
 
 
 def get_fallback_models() -> dict[str, str]:
@@ -27,7 +22,14 @@ def get_fallback_models() -> dict[str, str]:
     Returns:
         Dict mapping mode names to fallback model IDs
     """
-    return FALLBACK_MODELS.copy()
+    from src.db.system_config import get_config
+
+    return {
+        "quality": get_config("general_router_fallback_quality", "openai/gpt-4o"),
+        "cost": get_config("general_router_fallback_cost", "openai/gpt-4o-mini"),
+        "latency": get_config("general_router_fallback_latency", "groq/llama-3.3-70b-versatile"),
+        "balanced": get_config("general_router_fallback_balanced", "anthropic/claude-sonnet-4"),
+    }
 
 
 def get_fallback_model(
@@ -50,8 +52,9 @@ def get_fallback_model(
         Gatewayz model ID to use as fallback
     """
     # Try mode-specific fallback
-    if mode in FALLBACK_MODELS:
-        model = FALLBACK_MODELS[mode]
+    fallback_models = get_fallback_models()
+    if mode in fallback_models:
+        model = fallback_models[mode]
         logger.info(f"Using mode-specific fallback for {mode}: {model}")
         return model
 
@@ -61,8 +64,9 @@ def get_fallback_model(
         return user_default
 
     # System default
-    logger.info(f"Using system default as fallback: {DEFAULT_FALLBACK}")
-    return DEFAULT_FALLBACK
+    default_fallback = _get_default_fallback()
+    logger.info(f"Using system default as fallback: {default_fallback}")
+    return default_fallback
 
 
 def get_fallback_provider(model_id: str) -> str:

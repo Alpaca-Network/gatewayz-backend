@@ -192,7 +192,7 @@ class TestRebuildFullCatalogFromProviders:
             patch(
                 "src.config.supabase_config.get_client_for_query", side_effect=Exception("DB down")
             ),
-            patch("src.routes.catalog.GATEWAY_REGISTRY", mock_registry),
+            patch("src.services.gateway_registry.get_gateway_registry", return_value=mock_registry),
             patch(
                 "src.services.model_catalog_cache.get_cached_provider_catalog",
                 side_effect=_provider_catalog_side_effect,
@@ -247,7 +247,7 @@ class TestRebuildFullCatalogFromProviders:
             patch(
                 "src.config.supabase_config.get_client_for_query", side_effect=Exception("DB down")
             ),
-            patch("src.routes.catalog.GATEWAY_REGISTRY", mock_registry),
+            patch("src.services.gateway_registry.get_gateway_registry", return_value=mock_registry),
             patch(
                 "src.services.model_catalog_cache.get_cached_provider_catalog",
                 return_value=_make_models("huggingface", 3),

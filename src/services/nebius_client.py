@@ -17,40 +17,6 @@ from src.utils.model_name_validator import clean_model_name
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-# Default models to use as fallback when API is unavailable
-DEFAULT_NEBIUS_MODELS: list[dict[str, Any]] = [
-    {
-        "id": "deepseek-ai/DeepSeek-R1-0528",
-        "name": "DeepSeek R1 0528",
-        "owned_by": "deepseek-ai",
-        "context_length": 65536,
-    },
-    {
-        "id": "deepseek-ai/DeepSeek-V3-0324",
-        "name": "DeepSeek V3 0324",
-        "owned_by": "deepseek-ai",
-        "context_length": 65536,
-    },
-    {
-        "id": "meta-llama/Llama-3.3-70B-Instruct",
-        "name": "Llama 3.3 70B Instruct",
-        "owned_by": "meta-llama",
-        "context_length": 131072,
-    },
-    {
-        "id": "Qwen/Qwen3-235B-A22B",
-        "name": "Qwen3 235B A22B",
-        "owned_by": "Qwen",
-        "context_length": 131072,
-    },
-    {
-        "id": "mistralai/Mistral-Small-24B-Instruct-2501",
-        "name": "Mistral Small 24B Instruct",
-        "owned_by": "mistralai",
-        "context_length": 32768,
-    },
-]
-
 DEFAULT_SUPPORTED_PARAMETERS = [
     "max_tokens",
     "temperature",
@@ -247,14 +213,7 @@ def _fallback_nebius_models(reason: str) -> list[dict[str, Any]] | None:
     except Exception as e:
         logger.warning(f"Failed to get database fallback for Nebius: {e}")
 
-    # Static fallback as last resort
-    logger.warning("Database fallback empty, using static fallback for Nebius")
-    normalized = [
-        model
-        for model in (_normalize_nebius_model(entry) for entry in DEFAULT_NEBIUS_MODELS)
-        if model
-    ]
-    return normalized or None
+    return None
 
 
 def _extract_models_from_response(response: Any) -> list[Any]:

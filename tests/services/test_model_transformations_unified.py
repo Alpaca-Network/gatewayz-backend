@@ -18,9 +18,12 @@ import pytest
 os.environ.setdefault("APP_ENV", "testing")
 os.environ.setdefault("TESTING", "true")
 
+from src.services.model_mappings_cache import (
+    get_all_provider_mappings,
+    get_routing_rules,
+    load_model_mappings_cache,
+)
 from src.services.model_transformations import (
-    _MODEL_ID_MAPPINGS,
-    MODEL_PROVIDER_OVERRIDES,
     OPENROUTER_AUTO_FALLBACKS,
     apply_model_alias,
     detect_provider_from_model_id,
@@ -28,6 +31,15 @@ from src.services.model_transformations import (
     normalize_model_name,
     transform_model_id,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_mappings_loaded():
+    """Ensure the model mappings cache is populated before any test in this module runs."""
+    load_model_mappings_cache(force=True)
+    if not get_all_provider_mappings():
+        pytest.skip("Model mappings DB unavailable — skipping data-dependent tests")
+
 
 # ===========================================================================
 # Model Alias Resolution
@@ -640,12 +652,14 @@ class TestModelProviderOverrides:
     """Test model provider overrides"""
 
     def test_katanemo_override(self):
-        assert "katanemo/arch-router-1.5b" in MODEL_PROVIDER_OVERRIDES
-        assert MODEL_PROVIDER_OVERRIDES["katanemo/arch-router-1.5b"] == "huggingface"
+        routing_rules = get_routing_rules()
+        assert "katanemo/arch-router-1.5b" in routing_rules
+        assert routing_rules["katanemo/arch-router-1.5b"] == "huggingface"
 
     def test_zai_override(self):
-        assert "zai-org/glm-4.6-fp8" in MODEL_PROVIDER_OVERRIDES
-        assert MODEL_PROVIDER_OVERRIDES["zai-org/glm-4.6-fp8"] == "near"
+        routing_rules = get_routing_rules()
+        assert "zai-org/glm-4.6-fp8" in routing_rules
+        assert routing_rules["zai-org/glm-4.6-fp8"] == "near"
 
 
 # ===========================================================================
@@ -706,12 +720,13 @@ class TestGetModelIdMapping:
             "onerouter",
             "alpaca-network",
         ]
+        mappings = get_all_provider_mappings()
         for provider in _KNOWN_PROVIDERS:
-            assert get_model_id_mapping(provider) == _MODEL_ID_MAPPINGS.get(provider, {})
+            assert get_model_id_mapping(provider) == mappings.get(provider, {})
 
 
 # ===========================================================================
-# _MODEL_ID_MAPPINGS structural tests (from tests/unit/test_model_transformations.py)
+# Provider mappings structural tests (from tests/unit/test_model_transformations.py)
 # ===========================================================================
 
 _TRANSFORM_ONLY_PROVIDERS = {
@@ -747,34 +762,35 @@ _KNOWN_PROVIDERS = [
 
 class TestModelIdMappingsTopLevel:
     def test_mappings_is_dict(self):
-        assert isinstance(_MODEL_ID_MAPPINGS, dict)
+        assert isinstance(get_all_provider_mappings(), dict)
 
     def test_mappings_is_non_empty(self):
-        assert len(_MODEL_ID_MAPPINGS) > 0
+        assert len(get_all_provider_mappings()) > 0
 
     def test_expected_provider_count(self):
-        assert len(_MODEL_ID_MAPPINGS) >= 20
+        assert len(get_all_provider_mappings()) >= 20
 
     def test_all_known_providers_present(self):
+        mappings = get_all_provider_mappings()
         for provider in _KNOWN_PROVIDERS:
-            assert provider in _MODEL_ID_MAPPINGS, f"Provider '{provider}' missing"
+            assert provider in mappings, f"Provider '{provider}' missing"
 
 
 class TestPerProviderMappingType:
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_provider_mapping_is_dict(self, provider):
-        assert isinstance(_MODEL_ID_MAPPINGS[provider], dict)
+        assert isinstance(get_all_provider_mappings()[provider], dict)
 
 
 class TestMappingKeyValueTypes:
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_all_keys_are_non_empty_strings(self, provider):
-        for key in _MODEL_ID_MAPPINGS[provider]:
+        for key in get_all_provider_mappings()[provider]:
             assert isinstance(key, str) and key, f"Provider '{provider}': key {key!r} invalid"
 
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_all_values_are_non_empty_strings(self, provider):
-        for key, value in _MODEL_ID_MAPPINGS[provider].items():
+        for key, value in get_all_provider_mappings()[provider].items():
             assert (
                 isinstance(value, str) and value
             ), f"Provider '{provider}': value {value!r} for key {key!r} invalid"
@@ -783,10 +799,10 @@ class TestMappingKeyValueTypes:
 class TestNoSelfMappings:
     @pytest.mark.parametrize(
         "provider",
-        sorted(_TRANSFORM_ONLY_PROVIDERS & _MODEL_ID_MAPPINGS.keys()),
+        sorted(_TRANSFORM_ONLY_PROVIDERS & get_all_provider_mappings().keys()),
     )
     def test_no_self_mapping_entries(self, provider):
-        mapping = _MODEL_ID_MAPPINGS[provider]
+        mapping = get_all_provider_mappings()[provider]
         self_maps = [k for k, v in mapping.items() if k == v]
         assert not self_maps, f"Provider '{provider}' has self-mapping(s): {self_maps[:5]}"
 

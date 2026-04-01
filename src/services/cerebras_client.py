@@ -16,55 +16,6 @@ from src.utils.model_name_validator import clean_model_name
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
-    {
-        "id": "llama3.1-8b",
-        "name": "Llama 3.1 8B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama3.1-70b",
-        "name": "Llama 3.1 70B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama3.1-405b",
-        "name": "Llama 3.1 405B",
-        "owned_by": "meta",
-        "context_length": 131072,
-        # NOTE: Verify availability — Cerebras 405B support may vary; confirm against
-        # https://inference-docs.cerebras.ai/introduction before relying on this model.
-    },
-    {
-        "id": "llama-3.3-70b",
-        "name": "Llama 3.3 70B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    # llama-3.3-405b REMOVED — Meta never released a Llama 3.3 405B model.
-    # The 3.3 generation only shipped at 70B. This entry was phantom/invalid.
-    {
-        "id": "qwen-3-32b",
-        "name": "Qwen 3 32B",
-        "owned_by": "qwen",
-        "context_length": 131072,
-    },
-    {
-        "id": "qwen-3-235b-a22b-instruct-2507",
-        "name": "Qwen 3 235B Instruct (Preview)",
-        "owned_by": "qwen",
-        "context_length": 131072,
-    },
-    {
-        "id": "zai-glm-4.6",
-        "name": "Z.ai GLM 4.6 (Preview)",
-        "owned_by": "zai",
-        "context_length": 131072,
-    },
-]
-
 DEFAULT_SUPPORTED_PARAMETERS = [
     "max_tokens",
     "temperature",
@@ -290,14 +241,7 @@ def _fallback_cerebras_models(reason: str) -> list[dict[str, Any]] | None:
     except Exception as e:
         logger.warning(f"Failed to get database fallback for Cerebras: {e}")
 
-    # Static fallback as last resort
-    logger.warning("Database fallback empty, using static fallback for Cerebras")
-    normalized = [
-        model
-        for model in (_normalize_cerebras_model(entry) for entry in DEFAULT_CEREBRAS_MODELS)
-        if model
-    ]
-    return normalized or None
+    return None
 
 
 def _extract_models_from_response(response: Any) -> list[Any]:
