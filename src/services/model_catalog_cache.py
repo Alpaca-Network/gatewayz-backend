@@ -1246,15 +1246,14 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
     except Exception as e:
         logger.warning(
             f"rebuild_full_catalog_from_providers: failed to fetch provider slugs "
-            f"from database ({e}), falling back to GATEWAY_REGISTRY keys"
+            f"from database ({e}), falling back to gateway registry keys"
         )
-        # Fallback: derive slugs from GATEWAY_REGISTRY directly (not PROVIDER_SLUGS
-        # which applies GATEWAY_FETCH_SLUG_OVERRIDES like huggingface→hug, but the
-        # DB stores models under the original slug "huggingface").
+        # Fallback: derive slugs from gateway registry (uses original slugs,
+        # not fetch-slug overrides like huggingface→hug).
         try:
-            from src.routes.catalog import GATEWAY_REGISTRY
+            from src.services.gateway_registry import get_gateway_registry
 
-            provider_slugs = list(GATEWAY_REGISTRY.keys())
+            provider_slugs = list(get_gateway_registry().keys())
         except Exception:
             logger.error(
                 "rebuild_full_catalog_from_providers: cannot determine provider slugs, "

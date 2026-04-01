@@ -731,7 +731,7 @@ async def get_catalog_providers(
     For health metrics, use /health/providers instead.
     """
     try:
-        from src.routes.catalog import GATEWAY_REGISTRY
+        from src.services.gateway_registry import get_gateway_registry
         from src.services.gateway_health_service import GATEWAY_CONFIG
 
         # Get health data from cache to merge with catalog data
@@ -740,7 +740,7 @@ async def get_catalog_providers(
         logger.debug(f"Loaded {len(health_lookup)} provider health records for catalog enrichment")
 
         providers = []
-        for gateway_id, registry_config in GATEWAY_REGISTRY.items():
+        for gateway_id, registry_config in get_gateway_registry().items():
             # Get additional config from GATEWAY_CONFIG if available
             gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
             cache = gateway_config.get("cache", {})

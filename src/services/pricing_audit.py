@@ -395,13 +395,12 @@ def _guess_unmatched_reason(model_id: str, source: str, other_ids: set[str]) -> 
 
 def _get_all_gateways() -> dict[str, str]:
     """Get all auditable gateway slugs and display names."""
-    from src.routes.catalog import GATEWAY_REGISTRY
+    from src.services.gateway_registry import get_gateway_registry
     from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
 
+    registry = get_gateway_registry()
     return {
-        slug: info["name"]
-        for slug, info in GATEWAY_REGISTRY.items()
-        if slug in PROVIDER_FETCH_FUNCTIONS
+        slug: info["name"] for slug, info in registry.items() if slug in PROVIDER_FETCH_FUNCTIONS
     }
 
 
@@ -924,9 +923,9 @@ def run_pricing_audit(
 
         # Check aliases (e.g., "hug" -> "huggingface")
         if not db_models:
-            from src.routes.catalog import GATEWAY_REGISTRY
+            from src.services.gateway_registry import get_gateway_registry
 
-            registry_entry = GATEWAY_REGISTRY.get(gw, {})
+            registry_entry = get_gateway_registry().get(gw, {})
             for alias in registry_entry.get("aliases", []):
                 db_models = db_models_by_gateway.get(alias, [])
                 if db_models:

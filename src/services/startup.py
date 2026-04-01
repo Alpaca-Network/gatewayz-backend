@@ -221,6 +221,15 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Failed to pre-load system config (will use defaults): {e}")
 
+        # Warm gateway registry cache from DB
+        try:
+            from src.services.gateway_registry import refresh_registry_cache
+
+            refresh_registry_cache()
+            logger.info("  gateway_registry  cache warmed from DB")
+        except Exception as e:
+            logger.warning(f"Failed to warm gateway registry cache (will use fallback): {e}")
+
         # NOTE: Fal.ai cache now uses Redis and initializes automatically on first access
         # No manual initialization needed - removed legacy initialize_fal_cache_from_catalog() call
         logger.debug("Fal.ai cache will initialize on-demand via Redis")
@@ -481,24 +490,19 @@ async def lifespan(app):
 
         _create_background_task(init_google_models_background(), name="init_google_models")
 
-        # Sync providers from GATEWAY_REGISTRY on startup (ensures DB matches code)
-        # Delayed to avoid overwhelming Supabase during startup
-        async def sync_providers_background():
+        # Refresh gateway registry cache after catalog preload completes
+        # DB providers table is the source of truth (Phase 2A)
+        async def refresh_registry_background():
             try:
                 await asyncio.sleep(45)  # Wait for catalog preload to finish
-                from src.services.provider_model_sync_service import sync_providers_on_startup
+                from src.services.gateway_registry import refresh_registry_cache
 
-                result = await sync_providers_on_startup()
-                if result["success"]:
-                    logger.info(
-                        f"✓ Synced {result['providers_synced']} providers from GATEWAY_REGISTRY"
-                    )
-                else:
-                    logger.warning(f"Provider sync warning: {result.get('error')}")
+                refresh_registry_cache()
+                logger.info("✓ Gateway registry cache refreshed from DB")
             except Exception as e:
-                logger.warning(f"Provider sync warning: {e}")
+                logger.warning(f"Gateway registry refresh warning: {e}")
 
-        _create_background_task(sync_providers_background(), name="sync_providers")
+        _create_background_task(refresh_registry_background(), name="refresh_registry")
 
         # Optionally sync high-priority models on startup (can be disabled for faster startup)
         sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"

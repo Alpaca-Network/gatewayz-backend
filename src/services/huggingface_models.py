@@ -65,8 +65,8 @@ def fetch_models_from_huggingface_api(
         sort: Sort field (downloads, likes, created_at, etc.)
         use_cache: Whether to use and update cache
         timeout: Per-request HTTP timeout in seconds.  When *None* the value
-                 from ``GATEWAY_REGISTRY["huggingface"]["timeout"]`` is used
-                 (currently 60 s).  Pass an explicit value to override.
+                 from the gateway registry (currently 60 s for HuggingFace).
+                 Pass an explicit value to override.
 
     Returns:
         List of normalized model dictionaries or None on error
@@ -75,7 +75,7 @@ def fetch_models_from_huggingface_api(
         # Resolve the per-request HTTP timeout.  Prefer the caller-supplied value;
         # fall back to the registry-configured timeout for huggingface (default 60 s).
         if timeout is None:
-            from src.routes.catalog import get_provider_fetch_timeout
+            from src.services.gateway_registry import get_provider_fetch_timeout
 
             timeout = float(get_provider_fetch_timeout("huggingface"))
 
@@ -133,7 +133,7 @@ def fetch_models_from_huggingface_api(
 
             for attempt in range(max_retries):
                 try:
-                    # Use per-provider timeout from GATEWAY_REGISTRY (default 60 s for HuggingFace).
+                    # Use per-provider timeout from gateway registry (default 60 s for HuggingFace).
                     # connect is capped at 10 s; the full read window uses the registry value.
                     response = httpx.get(
                         url,
