@@ -351,6 +351,18 @@ async def lifespan(app):
                     except Exception as e:
                         logger.warning(f"Database connection warmup warning: {e}")
 
+                # Phase 1b: Load model mappings cache (aliases, provider mappings, routing rules)
+                # This must complete before any inference requests are served so that
+                # transform_model_id() and detect_provider_from_model_id() have valid data.
+                try:
+                    logger.info("🔥 [1b] Loading model mappings cache (aliases / provider mappings / routing rules)...")
+                    from src.services.model_mappings_cache import load_model_mappings_cache
+
+                    await asyncio.to_thread(load_model_mappings_cache)
+                    logger.info("✅ [1b] Model mappings cache loaded")
+                except Exception as e:
+                    logger.warning(f"Model mappings cache load warning: {e}")
+
                 # Phase 2: Preload full model catalog (heavy - 17k+ models)
                 # Build bottom-up from per-provider catalogs to avoid the single-
                 # giant-query timeout that truncates at ~3600 of 17k+ models.

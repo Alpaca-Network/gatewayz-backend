@@ -8,13 +8,18 @@ in the Conceptual Model.
 
 import pytest
 
+from src.services.model_mappings_cache import get_aliases, get_routing_rules, load_model_mappings_cache
 from src.services.model_transformations import (
-    MODEL_ID_ALIASES,
-    MODEL_PROVIDER_OVERRIDES,
     apply_model_alias,
     detect_provider_from_model_id,
     transform_model_id,
 )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_mappings_loaded():
+    """Ensure the model mappings cache is populated before any test in this module runs."""
+    load_model_mappings_cache(force=True)
 
 
 # ---------------------------------------------------------------------------
@@ -47,20 +52,22 @@ def test_at_least_120_aliases_defined():
     """
     import random
 
-    total = len(MODEL_ID_ALIASES) + len(MODEL_PROVIDER_OVERRIDES)
+    aliases = get_aliases()
+    routing_rules = get_routing_rules()
+    total = len(aliases) + len(routing_rules)
     assert total >= 120, (
         f"Expected at least 120 alias/override entries, found {total} "
-        f"(aliases={len(MODEL_ID_ALIASES)}, overrides={len(MODEL_PROVIDER_OVERRIDES)})"
+        f"(aliases={len(aliases)}, overrides={len(routing_rules)})"
     )
 
     # Sample up to 20 aliases and verify each one resolves via apply_model_alias
-    alias_keys = list(MODEL_ID_ALIASES.keys())
+    alias_keys = list(aliases.keys())
     sample_size = min(20, len(alias_keys))
     sample = random.sample(alias_keys, sample_size)
 
     for alias in sample:
         result = apply_model_alias(alias)
-        expected = MODEL_ID_ALIASES[alias]
+        expected = aliases[alias]
         assert (
             result == expected
         ), f"apply_model_alias('{alias}') returned '{result}', expected '{expected}'"
@@ -83,7 +90,7 @@ def test_canonical_id_passes_through_unchanged():
 def test_provider_detection_explicit_override_highest_priority():
     # Pick a model that has an explicit override entry
     # "deepseek/deepseek-chat" -> "openrouter" per MODEL_PROVIDER_OVERRIDES
-    assert MODEL_PROVIDER_OVERRIDES.get("deepseek/deepseek-chat") == "openrouter"
+    assert get_routing_rules().get("deepseek/deepseek-chat") == "openrouter"
 
     # detect_provider_from_model_id should honour the override
     # Mock the multi-provider registry import to isolate legacy detection
