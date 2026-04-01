@@ -55,9 +55,11 @@ def _load_quality_priors() -> dict[str, Any]:
                 )
             except ImportError:
                 pass  # Sentry not available
+            from src.db.system_config import get_config
+            fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
             _quality_priors = {
                 "model_tiers": {},
-                "fallback_model": {"id": "zai/glm-4.7", "provider": "zai"},
+                "fallback_model": {"id": fallback_id, "provider": fallback_id.split("/")[0] if "/" in fallback_id else "zai"},
                 "baselines": {},
             }
     return _quality_priors
@@ -70,7 +72,9 @@ def get_model_tiers() -> dict[str, Any]:
 
 def get_fallback_model() -> dict[str, Any]:
     """Get fallback model configuration."""
-    return _load_quality_priors().get("fallback_model", {"id": "zai/glm-4.7", "provider": "zai"})
+    from src.db.system_config import get_config
+    fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
+    return _load_quality_priors().get("fallback_model", {"id": fallback_id, "provider": fallback_id.split("/")[0] if "/" in fallback_id else "zai"})
 
 
 def get_baselines() -> dict[str, Any]:

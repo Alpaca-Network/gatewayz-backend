@@ -4,12 +4,63 @@ Handles CRUD operations for AI model providers
 """
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
+
+# Cache for active provider slugs
+_provider_slugs_cache: list[str] = []
+_provider_slugs_cache_timestamp: float = 0
+_PROVIDER_SLUGS_CACHE_TTL = 300  # 5 minutes
+
+# Last-resort fallback when DB has never been reached (cold start with DB down).
+# Matches the gateway list that was previously hardcoded in models.py.
+_FALLBACK_PROVIDER_SLUGS: list[str] = [
+    "openrouter", "featherless", "deepinfra", "cerebras", "nebius",
+    "xai", "novita", "hug", "chutes", "groq", "fireworks", "together",
+    "aimo", "near", "fal", "helicone", "anannas", "aihubmix", "alibaba",
+    "onerouter", "google-vertex", "cloudflare-workers-ai", "clarifai",
+    "openai", "anthropic", "simplismart", "sybil", "canopywave", "morpheus",
+    "vercel-ai-gateway",
+]
+
+
+def get_active_provider_slugs() -> list[str]:
+    """Get list of active provider slugs from database with 5-min in-memory cache.
+
+    Falls back to stale cache, then to a hardcoded list if the DB has never been reached.
+
+    Returns:
+        List of provider slugs (e.g., ['openrouter', 'deepinfra', ...])
+    """
+    global _provider_slugs_cache, _provider_slugs_cache_timestamp
+
+    now = time.monotonic()
+    if _provider_slugs_cache and (now - _provider_slugs_cache_timestamp) < _PROVIDER_SLUGS_CACHE_TTL:
+        return _provider_slugs_cache
+
+    try:
+        supabase = get_supabase_client()
+        response = (
+            supabase.table("providers")
+            .select("slug")
+            .eq("is_active", True)
+            .execute()
+        )
+        slugs = [row["slug"] for row in (response.data or [])]
+        if slugs:
+            _provider_slugs_cache = slugs
+            _provider_slugs_cache_timestamp = now
+            return slugs
+    except Exception as e:
+        logger.error(f"Error fetching active provider slugs: {e}")
+
+    # Return stale cache, or hardcoded fallback if DB has never been reached
+    return _provider_slugs_cache or _FALLBACK_PROVIDER_SLUGS
 
 
 def get_all_providers(

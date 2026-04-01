@@ -35,38 +35,6 @@ except ImportError:
     NOVITA_SDK_AVAILABLE = False
     NovitaClient = None
 
-DEFAULT_NOVITA_MODELS: list[dict[str, Any]] = [
-    {
-        "id": "qwen3-235b-thinking",
-        "name": "Qwen3 235B Thinking",
-        "owned_by": "alibaba",
-        "context_length": 32768,
-    },
-    {
-        "id": "qwen3-max",
-        "name": "Qwen3 Max",
-        "owned_by": "alibaba",
-        "context_length": 32768,
-    },
-    {
-        "id": "deepseek-v3",
-        "name": "DeepSeek V3",
-        "owned_by": "deepseek",
-        "context_length": 64000,
-    },
-    {
-        "id": "llama-3.3-70b",
-        "name": "Llama 3.3 70B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "mistral-nemo",
-        "name": "Mistral Nemo",
-        "owned_by": "mistral",
-        "context_length": 8192,
-    },
-]
 
 
 def get_novita_sdk_client():
@@ -170,14 +138,7 @@ def _fallback_novita_models(reason: str) -> list[dict[str, Any]] | None:
     except Exception as e:
         logger.warning(f"Failed to get database fallback for Novita: {e}")
 
-    # Static fallback as last resort
-    logger.warning("Database fallback empty, using static fallback for Novita")
-    normalized = [
-        model
-        for model in (_normalize_novita_model(entry) for entry in DEFAULT_NOVITA_MODELS)
-        if model
-    ]
-    return normalized or None
+    return None
 
 
 def _extract_models_from_response(response: Any) -> list[Any]:

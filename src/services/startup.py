@@ -212,6 +212,15 @@ async def lifespan(app):
         # The lazy proxy will retry connection on first actual database access
 
     try:
+        # Pre-load system config into memory cache
+        try:
+            from src.db.system_config import load_all_config
+
+            config_count = len(load_all_config())
+            logger.info(f"  system_config    {config_count} values loaded")
+        except Exception as e:
+            logger.warning(f"Failed to pre-load system config (will use defaults): {e}")
+
         # NOTE: Fal.ai cache now uses Redis and initializes automatically on first access
         # No manual initialization needed - removed legacy initialize_fal_cache_from_catalog() call
         logger.debug("Fal.ai cache will initialize on-demand via Redis")

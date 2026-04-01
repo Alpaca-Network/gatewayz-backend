@@ -86,7 +86,7 @@ PRESETS: dict[str, CodeRouterConfig] = {
     ),
     "disabled": CodeRouterConfig(
         enabled=False,
-        fallback_model="anthropic/claude-sonnet-4",
+        fallback_model=None,  # resolved at runtime via get_config
     ),
 }
 
@@ -115,7 +115,10 @@ def get_router_model_string(config: CodeRouterConfig | None = None) -> str:
         config = PRESETS["default"]
 
     if not config.enabled:
-        return config.fallback_model or "anthropic/claude-sonnet-4"
+        if config.fallback_model:
+            return config.fallback_model
+        from src.db.system_config import get_config
+        return get_config("code_router_fallback_model", "anthropic/claude-sonnet-4")
 
     mode = config.mode
     if isinstance(mode, CodeRouterMode):

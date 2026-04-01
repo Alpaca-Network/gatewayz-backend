@@ -326,60 +326,7 @@ def fetch_models_from_near():
                 logger.info(f"Using {len(normalized_models)} Near AI models from database fallback")
                 return normalized_models
 
-        # Static fallback as last resort (if database is empty)
-        # Reference: https://cloud.near.ai/models for current available models
-        # Pricing from https://cloud-api.near.ai/v1/model/list (as of 2026-01)
-        logger.warning("Database fallback empty, using static fallback for Near AI")
-        fallback_models = [
-            {
-                "id": "deepseek-ai/DeepSeek-V3.1",
-                "modelId": "deepseek-ai/DeepSeek-V3.1",
-                "owned_by": "DeepSeek",
-                "inputCostPerToken": {"amount": 1.05, "scale": -6},  # $1.05 per million tokens
-                "outputCostPerToken": {"amount": 3.10, "scale": -6},  # $3.10 per million tokens
-                "metadata": {"contextLength": 128000},
-            },
-            {
-                "id": "openai/gpt-oss-120b",
-                "modelId": "openai/gpt-oss-120b",
-                "owned_by": "OpenAI",
-                "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
-                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
-                "metadata": {"contextLength": 131000},
-            },
-            {
-                "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-                "modelId": "Qwen/Qwen3-30B-A3B-Instruct-2507",
-                "owned_by": "Qwen",
-                "inputCostPerToken": {"amount": 0.15, "scale": -6},  # $0.15 per million tokens
-                "outputCostPerToken": {"amount": 0.55, "scale": -6},  # $0.55 per million tokens
-                "metadata": {"contextLength": 262144},
-            },
-            {
-                "id": "zai-org/GLM-4.6",
-                "modelId": "zai-org/GLM-4.6",
-                "owned_by": "Zhipu AI",
-                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
-                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
-                "metadata": {"contextLength": 200000},
-            },
-            {
-                "id": "zai-org/GLM-4.7",
-                "modelId": "zai-org/GLM-4.7",
-                "owned_by": "Zhipu AI",
-                "inputCostPerToken": {"amount": 0.85, "scale": -6},  # $0.85 per million tokens
-                "outputCostPerToken": {"amount": 3.30, "scale": -6},  # $3.30 per million tokens
-                "metadata": {"contextLength": 131072},
-            },
-        ]
-
-        normalized_models = [normalize_near_model(model) for model in fallback_models if model]
-
-        # Cache models in Redis with automatic TTL and error tracking
-        cache_gateway_catalog("near", normalized_models)
-
-        logger.info(f"Using {len(normalized_models)} static fallback Near AI models")
-        return normalized_models
+        return []
     except Exception as e:
         logger.error(f"Failed to fetch models from Near AI: {e}")
         return []

@@ -43,21 +43,6 @@ ESSENTIAL_MODELS = {
     "katanemo/Arch-Router-1.5B",
 }
 
-# Fallback models - used when HuggingFace API is unavailable
-# This ensures that HuggingFace models are always available even during API outages
-FALLBACK_HUGGINGFACE_MODELS = [
-    "meta-llama/Llama-3.3-70B-Instruct",
-    "meta-llama/Llama-3.2-3B-Instruct",
-    "meta-llama/Llama-3.1-8B-Instruct",
-    "microsoft/Phi-3.5-mini-instruct",
-    "Qwen/Qwen2.5-72B-Instruct",
-    "Qwen/Qwen2.5-7B-Instruct",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    # mistralai/Mixtral-8x7B-Instruct-v0.1 removed — NOT available on HF Inference API,
-    # causes failures when used as fallback during HF outages
-    "google/gemma-2-9b-it",
-    "google/gemma-2-2b-it",
-]
 
 
 def fetch_models_from_huggingface_api(
@@ -619,66 +604,7 @@ def create_fallback_models() -> list:
     except Exception as e:
         logger.warning(f"Failed to get database fallback for HuggingFace: {e}")
 
-    # Static fallback as last resort
-    logger.warning("Database fallback empty, using static fallback for HuggingFace")
-    fallback_models = []
-
-    for model_id in FALLBACK_HUGGINGFACE_MODELS:
-        # Extract display name from model ID
-        display_name = model_id.split("/")[-1].replace("-", " ").replace("_", " ").title()
-
-        # Create minimal model entry
-        model = {
-            "id": model_id,
-            "slug": model_id,
-            "canonical_slug": model_id,
-            "hugging_face_id": model_id,
-            "name": display_name,
-            "description": f"HuggingFace model: {model_id}",
-            "context_length": 8192,  # Common default
-            "architecture": {
-                "modality": "text->text",
-                "input_modalities": ["text"],
-                "output_modalities": ["text"],
-                "tokenizer": None,
-                "instruct_type": None,
-            },
-            "pricing": {
-                "prompt": None,
-                "completion": None,
-                "request": None,
-                "image": None,
-                "web_search": None,
-                "internal_reasoning": None,
-            },
-            "per_request_limits": None,
-            "supported_parameters": [],
-            "default_parameters": {},
-            "provider_slug": model_id.split("/")[0] if "/" in model_id else "Unknown",
-            "provider_site_url": f"https://huggingface.co/{model_id}",
-            "model_logo_url": None,
-            "source_gateway": "hug",
-            "huggingface_metrics": {
-                "downloads": 0,
-                "likes": 0,
-                "pipeline_tag": "text-generation",
-                "num_parameters": None,
-                "gated": False,
-                "private": False,
-                "last_modified": None,
-                "author": model_id.split("/")[0] if "/" in model_id else "Unknown",
-                "url": f"https://huggingface.co/{model_id}",
-            },
-        }
-
-        # Enrich with pricing if available
-        from src.services.pricing_lookup import enrich_model_with_pricing
-
-        enriched = enrich_model_with_pricing(model, "huggingface")
-        fallback_models.append(enriched)
-
-    logger.info(f"Created {len(fallback_models)} fallback HuggingFace models")
-    return fallback_models
+    return []
 
 
 def fetch_models_from_hug():
