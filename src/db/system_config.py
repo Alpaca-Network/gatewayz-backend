@@ -7,7 +7,8 @@ from src.config.supabase_config import get_supabase_client
 logger = logging.getLogger(__name__)
 
 # In-memory cache for system config values
-_config_cache: dict[str, Any] = {}
+# Use None sentinel so an empty dict {} (valid result) is still truthy for cache checks
+_config_cache: dict[str, Any] | None = None
 _config_cache_timestamp: float = 0.0
 _CONFIG_CACHE_TTL = 300  # 5 minutes
 
@@ -35,7 +36,7 @@ def load_all_config() -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Failed to load system config: {e}")
         # Return existing cache on failure
-        return dict(_config_cache)
+        return dict(_config_cache or {})
 
 
 def get_config(key: str, default: Any = None) -> Any:
@@ -48,16 +49,13 @@ def get_config(key: str, default: Any = None) -> Any:
 
     # Check if cache is still valid
     now = time.monotonic()
-    if _config_cache and (now - _config_cache_timestamp) < _CONFIG_CACHE_TTL:
-        return _config_cache.get(key, default)
+    if _config_cache is not None and (now - _config_cache_timestamp) < _CONFIG_CACHE_TTL:
+        return (_config_cache or {}).get(key, default)
 
-    # Cache expired or empty — refresh
-    try:
-        load_all_config()
-    except Exception as e:
-        logger.warning(f"Config cache refresh failed, using stale cache: {e}")
+    # Cache expired or not yet loaded — refresh
+    load_all_config()
 
-    return _config_cache.get(key, default)
+    return (_config_cache or {}).get(key, default)
 
 
 def refresh_config_cache() -> None:

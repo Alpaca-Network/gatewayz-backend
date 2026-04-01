@@ -173,6 +173,17 @@ class CircuitBreaker:
             self.state = CircuitBreakerState.OPEN
 
 
+_DEFAULT_FALLBACK_MAPPINGS = {
+    "gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo", "claude-3-opus", "claude-3-sonnet"],
+    "gpt-4-turbo": ["gpt-4", "gpt-3.5-turbo", "claude-3-opus"],
+    "gpt-3.5-turbo": ["gpt-4", "gpt-4-turbo", "claude-3-sonnet"],
+    "claude-3-opus": ["gpt-4", "claude-3-sonnet", "gpt-4-turbo"],
+    "claude-3-sonnet": ["claude-3-opus", "gpt-3.5-turbo", "gpt-4"],
+    "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
+    "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
+}
+
+
 class ModelAvailabilityService:
     """Enhanced model availability service"""
 
@@ -191,19 +202,7 @@ class ModelAvailabilityService:
         """Load fallback model mappings"""
         from src.db.system_config import get_config
 
-        # Define fallback mappings for common models
-        self.fallback_mappings = get_config(
-            "model_fallback_mappings",
-            {
-                "gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo", "claude-3-opus", "claude-3-sonnet"],
-                "gpt-4-turbo": ["gpt-4", "gpt-3.5-turbo", "claude-3-opus"],
-                "gpt-3.5-turbo": ["gpt-4", "gpt-4-turbo", "claude-3-sonnet"],
-                "claude-3-opus": ["gpt-4", "claude-3-sonnet", "gpt-4-turbo"],
-                "claude-3-sonnet": ["claude-3-opus", "gpt-3.5-turbo", "gpt-4"],
-                "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
-                "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
-            },
-        )
+        self.fallback_mappings = get_config("model_fallback_mappings", _DEFAULT_FALLBACK_MAPPINGS)
 
     async def start_monitoring(self):
         """Start availability monitoring"""

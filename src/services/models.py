@@ -2387,11 +2387,13 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             if fallback_detected and fallback_detected not in candidate_gateways:
                 candidate_gateways.append(fallback_detected)
 
-        # Always include openrouter and huggingface as last-resort search targets
-        if "openrouter" not in candidate_gateways:
-            candidate_gateways.append("openrouter")
-        if "huggingface" not in candidate_gateways:
-            candidate_gateways.append("huggingface")
+        # Add last-resort search targets only when no explicit gateway was requested
+        if not explicit_gateway:
+            if "openrouter" not in candidate_gateways and "onerouter" not in candidate_gateways:
+                candidate_gateways.append("openrouter")
+            # "huggingface" is the fetch-function key (not the normalized slug "hug")
+            if "huggingface" not in candidate_gateways:
+                candidate_gateways.append("huggingface")
 
         fetchers = {
             "openrouter": fetch_specific_model_from_openrouter,

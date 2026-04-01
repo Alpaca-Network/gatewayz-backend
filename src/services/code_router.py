@@ -29,6 +29,13 @@ _QUALITY_PRIORS_PATH = Path(__file__).parent / "code_quality_priors.json"
 _quality_priors: dict[str, Any] | None = None
 
 
+def _build_fallback_model_dict(model_id: str) -> dict[str, Any]:
+    """Build a fallback model config dict from a model ID."""
+    model_id = model_id or "zai/glm-4.7"
+    provider = model_id.split("/")[0] if "/" in model_id else "zai"
+    return {"id": model_id, "provider": provider or "zai"}
+
+
 def _load_quality_priors() -> dict[str, Any]:
     """Load quality priors from JSON file with caching."""
     global _quality_priors
@@ -60,10 +67,7 @@ def _load_quality_priors() -> dict[str, Any]:
             fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
             _quality_priors = {
                 "model_tiers": {},
-                "fallback_model": {
-                    "id": fallback_id,
-                    "provider": fallback_id.split("/")[0] if "/" in fallback_id else "zai",
-                },
+                "fallback_model": _build_fallback_model_dict(fallback_id),
                 "baselines": {},
             }
     return _quality_priors
@@ -81,7 +85,7 @@ def get_fallback_model() -> dict[str, Any]:
     fallback_id = get_config("code_router_default_model", "zai/glm-4.7")
     return _load_quality_priors().get(
         "fallback_model",
-        {"id": fallback_id, "provider": fallback_id.split("/")[0] if "/" in fallback_id else "zai"},
+        _build_fallback_model_dict(fallback_id),
     )
 
 

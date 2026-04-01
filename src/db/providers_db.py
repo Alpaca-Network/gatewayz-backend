@@ -12,8 +12,8 @@ from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
-# Cache for active provider slugs
-_provider_slugs_cache: list[str] = []
+# Cache for active provider slugs (None = never loaded, [] = valid empty result)
+_provider_slugs_cache: list[str] | None = None
 _provider_slugs_cache_timestamp: float = 0
 _PROVIDER_SLUGS_CACHE_TTL = 300  # 5 minutes
 
@@ -27,7 +27,7 @@ _FALLBACK_PROVIDER_SLUGS: list[str] = [
     "nebius",
     "xai",
     "novita",
-    "hug",
+    "huggingface",
     "chutes",
     "groq",
     "fireworks",
@@ -65,24 +65,26 @@ def get_active_provider_slugs() -> list[str]:
 
     now = time.monotonic()
     if (
-        _provider_slugs_cache
+        _provider_slugs_cache is not None
         and (now - _provider_slugs_cache_timestamp) < _PROVIDER_SLUGS_CACHE_TTL
     ):
-        return _provider_slugs_cache
+        return _provider_slugs_cache or _FALLBACK_PROVIDER_SLUGS
 
     try:
         supabase = get_supabase_client()
         response = supabase.table("providers").select("slug").eq("is_active", True).execute()
         slugs = [row["slug"] for row in (response.data or [])]
+        _provider_slugs_cache = slugs
+        _provider_slugs_cache_timestamp = now
         if slugs:
-            _provider_slugs_cache = slugs
-            _provider_slugs_cache_timestamp = now
             return slugs
     except Exception as e:
         logger.error(f"Error fetching active provider slugs: {e}")
 
-    # Return stale cache, or hardcoded fallback if DB has never been reached
-    return _provider_slugs_cache or _FALLBACK_PROVIDER_SLUGS
+    # Return stale cache (if non-empty), or hardcoded fallback
+    if _provider_slugs_cache:
+        return _provider_slugs_cache
+    return _FALLBACK_PROVIDER_SLUGS
 
 
 def get_all_providers(

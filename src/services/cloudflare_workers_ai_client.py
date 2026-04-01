@@ -668,9 +668,11 @@ async def fetch_models_from_cloudflare_workers_ai_async() -> list[dict[str, Any]
 
     # Try database fallback first (from last successful sync)
     try:
+        import asyncio
+
         from src.services.models import get_fallback_models_from_db
 
-        db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
+        db_fallback = await asyncio.to_thread(get_fallback_models_from_db, "cloudflare-workers-ai")
         if db_fallback:
             logger.info(
                 f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"

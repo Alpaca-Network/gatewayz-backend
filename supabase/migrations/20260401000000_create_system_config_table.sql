@@ -17,6 +17,20 @@ CREATE INDEX IF NOT EXISTS "idx_system_config_is_active" ON "public"."system_con
 
 COMMENT ON TABLE "public"."system_config" IS 'System-wide configuration values (default models, fallback chains, feature flags). Replaces hardcoded constants.';
 
+-- Auto-update updated_at on row modification
+CREATE OR REPLACE FUNCTION update_system_config_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_system_config_updated_at
+    BEFORE UPDATE ON "public"."system_config"
+    FOR EACH ROW
+    EXECUTE FUNCTION update_system_config_updated_at();
+
 -- Seed initial config values (current hardcoded defaults)
 INSERT INTO "public"."system_config" ("key", "value", "description") VALUES
     ('auto_route_default_model', '"openai/gpt-4o-mini"', 'Default model for auto-routing when no preference specified'),
