@@ -17,7 +17,6 @@ import logging
 
 from src.services.model_mappings_cache import (
     get_aliases,
-    get_all_provider_mappings,
     get_provider_mappings,
     get_provider_native_values,
     get_routing_rules,
