@@ -252,7 +252,18 @@ def _ensure_loaded() -> None:
 
     now = time.monotonic()
     if not _cache_loaded:
-        load_model_capabilities_cache()
+        # Initial load: if we're on the event loop (e.g., called from a background
+        # task constructor during startup), schedule non-blocking to avoid stalling
+        # all async work during the critical startup window.
+        # If we're in a thread (e.g., startup's asyncio.to_thread call), block fine.
+        try:
+            loop = asyncio.get_running_loop()
+            if not _refresh_in_progress:
+                _refresh_in_progress = True
+                loop.create_task(_refresh_cache_background())
+        except RuntimeError:
+            # No event loop — safe to block (called from a worker thread)
+            load_model_capabilities_cache()
         return
 
     if (now - _cache_loaded_at) >= _CACHE_TTL:
@@ -377,13 +388,13 @@ def get_stable_models() -> list[str]:
 
 def get_quality_priors() -> dict[str, dict[str, float]]:
     """
-    Return quality priors dict: {model_id: {task_type: score}}.
+    Return a snapshot copy of quality priors: {model_id: {task_type: score}}.
 
     Falls back to an empty dict if DB has no scores yet (select_model
     handles the empty-dict case gracefully via .get()).
     """
     _ensure_loaded()
-    return _quality_priors
+    return {model: dict(tasks) for model, tasks in _quality_priors.items()}
 
 
 def has_json_mode(model_id: str) -> bool:
