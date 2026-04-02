@@ -366,20 +366,13 @@ def is_ultra_low_latency_model(model_id: str) -> bool:
     """
     Check if a model is classified as ultra-low-latency (<100ms).
 
-    Args:
-        model_id: The model identifier
-
-    Returns:
-        True if the model is in the ultra-low-latency set (tier 1)
+    Uses the curated ULTRA_LOW_LATENCY_MODELS set (measured p50 latency).
+    This is distinct from latency_tier=1 in the DB, which is provider-granularity
+    (all groq/cerebras models) and may include models with 200-500ms latency.
     """
     if not model_id:
         return False
-    try:
-        from src.services.model_capabilities_cache import get_latency_tier
-
-        return get_latency_tier(model_id) == 1
-    except Exception:
-        return model_id.lower() in {m.lower() for m in ULTRA_LOW_LATENCY_MODELS}
+    return model_id.lower() in {m.lower() for m in ULTRA_LOW_LATENCY_MODELS}
 
 
 def get_provider_latency_tier(provider: str) -> int:
