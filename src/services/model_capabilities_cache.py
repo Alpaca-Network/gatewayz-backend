@@ -223,10 +223,12 @@ def load_model_capabilities_cache(force: bool = False) -> None:
 
     except Exception as e:
         logger.error("Failed to load model capabilities cache: %s", e)
-        # Use fallbacks so the service remains functional
+        # Mark as loaded so _ensure_loaded() doesn't cascade blocking DB calls, but
+        # set _cache_loaded_at=0 so TTL is immediately expired — the next access will
+        # fire a non-blocking background retry via stale-while-revalidate logic.
         _free_models = _FREE_MODELS_FALLBACK.copy()
         _cache_loaded = True
-        _cache_loaded_at = time.monotonic()
+        _cache_loaded_at = 0.0
 
 
 def invalidate_model_capabilities_cache() -> None:
@@ -293,23 +295,32 @@ def get_max_output_tokens(model_id: str, default: int = _DEFAULT_MAX_TOKENS) -> 
     if key in _max_tokens:
         return _max_tokens[key]
 
-    # Partial match from DB (e.g. "openai/gpt-4o-mini" → "gpt-4o-mini")
+    # Suffix match from DB: "gpt-4o-mini" key matches "openai/gpt-4o-mini" query.
+    # Use "/" as segment boundary to avoid "gpt-4" matching "gpt-4o".
     for db_key, tokens in _max_tokens.items():
-        if db_key in key or key in db_key:
+        if key.endswith(f"/{db_key}") or db_key.endswith(f"/{key}"):
             return tokens
 
-    # Hardcoded fallback — partial match
-    for pattern, tokens in _MAX_TOKENS_FALLBACK.items():
-        if pattern.lower() in key:
+    # Hardcoded fallback — word-boundary-aware segment match.
+    # Strip the provider prefix first ("openai/gpt-4o-mini" → "gpt-4o-mini").
+    # Sort longest-first so "gpt-4o" wins over "gpt-4" for input "gpt-4o-mini".
+    model_suffix = key.split("/")[-1]
+    for pattern, tokens in sorted(_MAX_TOKENS_FALLBACK.items(), key=lambda x: -len(x[0])):
+        pat = pattern.lower()
+        if model_suffix == pat or (
+            model_suffix.startswith(pat)
+            and len(model_suffix) > len(pat)
+            and not model_suffix[len(pat)].isalnum()
+        ):
             return tokens
 
     return default
 
 
 def get_free_models() -> set[str]:
-    """Return the set of model IDs that are free (is_free=true)."""
+    """Return a snapshot copy of model IDs that are free (is_free=true)."""
     _ensure_loaded()
-    return _free_models if _free_models else _FREE_MODELS_FALLBACK.copy()
+    return _free_models.copy() if _free_models else _FREE_MODELS_FALLBACK.copy()
 
 
 def is_free_model(model_id: str) -> bool:

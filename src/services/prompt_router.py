@@ -62,7 +62,6 @@ def _get_stable_fallback_models() -> list[str]:
     return STABLE_FALLBACK_MODELS
 
 
-
 class PromptRouter:
     """
     Main prompt router with fail-open behavior.

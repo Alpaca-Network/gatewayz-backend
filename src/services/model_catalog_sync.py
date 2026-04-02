@@ -252,9 +252,11 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
     # --- is_reasoning ---
     model_id_lower = (model.get("id") or model.get("slug") or "").lower()
     raw_features = model.get("features") or []
-    is_reasoning = bool(model.get("is_reasoning")) or any(
-        x in model_id_lower for x in ("o1-", "o3-", "o4-", "-r1", "reasoner", "-thinking")
-    ) or "thinking" in raw_features
+    is_reasoning = (
+        bool(model.get("is_reasoning"))
+        or any(x in model_id_lower for x in ("o1-", "o3-", "o4-", "-r1", "reasoner", "-thinking"))
+        or "thinking" in raw_features
+    )
 
     # --- is_free ---
     is_free = bool(model.get("is_free")) or model_id_lower.endswith(":free")
