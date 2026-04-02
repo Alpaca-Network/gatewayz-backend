@@ -36,6 +36,9 @@ import time
 
 logger = logging.getLogger(__name__)
 
+# Global flag to prevent concurrent background cache refreshes.
+_refresh_in_progress: bool = False
+
 # ── Hardcoded fallback for max_output_tokens ──────────────────────────────────
 # Used ONLY when the DB has no record for a model_id.
 # Kept here (not in credit_precheck.py) so there's one place to maintain it.
