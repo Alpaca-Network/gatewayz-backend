@@ -36,8 +36,26 @@ _402_WINDOW_MINUTES = 15  # Sliding window for 402 tracking
 _402_CRITICAL_THRESHOLD = 10  # Critical if >=10 402s in window
 _402_WARNING_THRESHOLD = 3  # Warning if >=3 402s in window
 
+# Fallback set (used when registry is unavailable)
+_FALLBACK_402_PROVIDERS = {"together", "deepinfra", "fireworks", "groq"}
+
+
+def _get_monitored_402_providers() -> set[str]:
+    """Return providers monitored via 402-frequency (DB-driven, with fallback)."""
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        dynamic = {
+            slug for slug, entry in registry.items() if entry.get("monitor_402_frequency", False)
+        }
+        return dynamic if dynamic else _FALLBACK_402_PROVIDERS
+    except Exception:
+        return _FALLBACK_402_PROVIDERS
+
+
 # Providers monitored via 402-frequency (no public balance API)
-MONITORED_402_PROVIDERS = {"together", "deepinfra", "fireworks", "groq"}
+MONITORED_402_PROVIDERS = _FALLBACK_402_PROVIDERS
 
 
 async def check_openrouter_credits() -> dict[str, Any]:
@@ -170,11 +188,11 @@ def record_provider_402(provider: str) -> None:
     The credit monitor uses 402 frequency as a proxy signal for
     credit exhaustion on providers without a public balance API.
 
-    Only records for providers in ``MONITORED_402_PROVIDERS`` to
+    Only records for providers in the monitored 402 set to
     prevent unbounded key creation.
     """
     provider = provider.lower()
-    if provider not in MONITORED_402_PROVIDERS:
+    if provider not in _get_monitored_402_providers():
         return  # Ignore providers we don't monitor via 402 frequency
     now = datetime.now(UTC)
     cutoff = now - timedelta(minutes=_402_WINDOW_MINUTES)
@@ -238,7 +256,7 @@ async def check_all_provider_credits() -> dict[str, dict[str, Any]]:
     results["openrouter"] = await check_openrouter_credits()
 
     # Top providers without balance APIs: monitor via 402 frequency
-    for provider in MONITORED_402_PROVIDERS:
+    for provider in _get_monitored_402_providers():
         results[provider] = check_provider_402_status(provider)
 
     return results

@@ -359,7 +359,26 @@ def _extract_context_data(
 
 
 def _extract_provider_from_module(module_name: str) -> str:
-    """Extract provider name from module path."""
+    """Extract provider name from module path (DB-driven, with fallback).
+
+    Iterates registry slugs sorted longest-first to avoid false matches
+    from short slugs like ``"fal"`` matching ``"fallback"``.
+    """
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        # Sort slugs longest-first to prevent short-slug false positives
+        slugs = sorted(registry.keys(), key=len, reverse=True)
+        for slug in slugs:
+            # Also check underscore variant (e.g. "google_vertex" in module paths)
+            if slug in module_name or slug.replace("-", "_") in module_name:
+                return slug
+        return "unknown"
+    except Exception:
+        pass
+
+    # Fallback to hardcoded chain
     if "openrouter" in module_name:
         return "openrouter"
     elif "portkey" in module_name:

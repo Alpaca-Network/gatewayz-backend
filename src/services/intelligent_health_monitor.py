@@ -434,8 +434,22 @@ class IntelligentHealthMonitor:
         )
 
     def _get_gateway_endpoint(self, gateway: str) -> str | None:
-        """Get the API endpoint URL for a gateway"""
-        endpoints = {
+        """Get the API endpoint URL for a gateway (DB-driven, with fallback)."""
+        # DB-first: check gateway registry for chat_completions_endpoint
+        try:
+            from src.services.gateway_registry import get_gateway_registry
+
+            registry = get_gateway_registry()
+            entry = registry.get(gateway)
+            if entry:
+                endpoint = entry.get("chat_completions_endpoint")
+                if endpoint:
+                    return endpoint
+        except Exception:
+            pass
+
+        # Fallback to hardcoded endpoints
+        _fallback_endpoints = {
             "openrouter": "https://openrouter.ai/api/v1/chat/completions",
             "featherless": "https://api.featherless.ai/v1/chat/completions",
             "deepinfra": "https://api.deepinfra.com/v1/openai/chat/completions",
@@ -448,16 +462,27 @@ class IntelligentHealthMonitor:
             "huggingface": None,  # Different per model
             "portkey": "https://api.portkey.ai/v1/chat/completions",
         }
-        return endpoints.get(gateway)
+        return _fallback_endpoints.get(gateway)
 
     async def _get_auth_headers(self, gateway: str) -> dict[str, str]:
-        """Get authentication headers for a gateway"""
-        from src.config import Config
-
+        """Get authentication headers for a gateway (DB-driven, with fallback)."""
         headers = {}
 
-        # Map gateways to their API keys (using getattr for safety)
-        key_mapping = {
+        # DB-first: resolve API key from registry
+        try:
+            from src.services.gateway_registry import get_provider_api_key
+
+            api_key = get_provider_api_key(gateway)
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+                return headers
+        except Exception:
+            pass
+
+        # Fallback to hardcoded key mapping
+        from src.config import Config
+
+        _fallback_key_mapping = {
             "openrouter": getattr(Config, "OPENROUTER_API_KEY", None),
             "featherless": getattr(Config, "FEATHERLESS_API_KEY", None),
             "deepinfra": getattr(Config, "DEEPINFRA_API_KEY", None),
@@ -468,7 +493,7 @@ class IntelligentHealthMonitor:
             "cerebras": getattr(Config, "CEREBRAS_API_KEY", None),
         }
 
-        api_key = key_mapping.get(gateway)
+        api_key = _fallback_key_mapping.get(gateway)
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 

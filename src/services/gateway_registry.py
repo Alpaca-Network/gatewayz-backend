@@ -7,6 +7,7 @@ a hardcoded registry on cold start when the database is unreachable.
 """
 
 import logging
+import os
 import time
 from typing import Any
 
@@ -466,6 +467,7 @@ def _load_registry_from_db() -> dict[str, dict]:
                 "api_key_env_var": row.get("api_key_env_var"),
                 "fetch_module_path": row.get("fetch_module_path"),
                 "fetch_function_name": row.get("fetch_function_name"),
+                # Phase 1/2 fields
                 "color": meta.get("color", "bg-gray-500"),
                 "priority": meta.get("priority", "slow"),
                 "icon": meta.get("icon"),
@@ -476,6 +478,17 @@ def _load_registry_from_db() -> dict[str, dict]:
                 "latency_tier": meta.get("latency_tier"),
                 "pricing_format": meta.get("pricing_format"),
                 "failover_priority": meta.get("failover_priority"),
+                # Phase 3 infrastructure fields
+                "base_url": row.get("base_url") or meta.get("pool_base_url"),
+                "models_endpoint": meta.get("models_endpoint"),
+                "chat_completions_endpoint": meta.get("chat_completions_endpoint"),
+                "min_expected_models": meta.get("min_expected_models", 1),
+                "header_type": meta.get("header_type", "bearer"),
+                "default_headers": meta.get("default_headers", {}),
+                "custom_timeout_ms": meta.get("custom_timeout_ms"),
+                "hostnames": meta.get("hostnames", []),
+                "monitor_402_frequency": meta.get("monitor_402_frequency", False),
+                "async_streaming": meta.get("async_streaming", False),
             }
 
         _registry_cache = new_registry
@@ -576,6 +589,32 @@ def get_provider_fetch_timeout(slug: str) -> int:
             return cfg.get("timeout", _DEFAULT_FETCH_TIMEOUT)
 
     return _DEFAULT_FETCH_TIMEOUT
+
+
+def get_provider_api_key(slug: str) -> str | None:
+    """Resolve the actual API key value for *slug*.
+
+    Reads ``api_key_env_var`` from the registry, then resolves it via
+    ``Config`` (which mirrors ``os.environ`` for known vars) with a
+    fallback to ``os.environ.get()``.
+    """
+    registry = _get_registry()
+    entry = registry.get(slug)
+    if not entry:
+        return None
+    env_var = entry.get("api_key_env_var")
+    if not env_var:
+        return None
+    # Prefer Config (supports .env files and test overrides)
+    try:
+        from src.config import Config
+
+        val = getattr(Config, env_var, None)
+        if val:
+            return val
+    except Exception:
+        pass
+    return os.environ.get(env_var)
 
 
 def validate_gateway(gateway: str | None) -> None:
