@@ -60,7 +60,11 @@ def _get_tier_pool(max_tier: int) -> list[str]:
         if result:
             return result
     except Exception:
-        pass
+        logger.exception(
+            "Failed to get models by latency tier from cache for max_tier=%s, "
+            "falling back to static pool.",
+            max_tier,
+        )
     return SMALL_TIER_POOL if max_tier <= 2 else MEDIUM_TIER_POOL
 
 
