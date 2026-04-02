@@ -69,8 +69,9 @@ _PROVIDER_TIERS: dict[str, int] = {
 }
 
 
-# Map provider slugs to their fetch functions
-PROVIDER_FETCH_FUNCTIONS = {
+# FALLBACK — dynamic loader reads from DB first (Phase 2D).
+# Kept as documented fallback for when DB / importlib lookup fails.
+PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "openrouter": fetch_models_from_openrouter,
     "deepinfra": fetch_models_from_deepinfra,
     "featherless": fetch_models_from_featherless,
@@ -731,8 +732,10 @@ def sync_provider_models(
                 "models_synced": 0,
             }
 
-        # Get fetch function for this provider
-        fetch_func = PROVIDER_FETCH_FUNCTIONS.get(provider_slug)
+        # Get fetch function for this provider (DB-first, fallback to hardcoded)
+        from src.services.dynamic_provider_loader import get_fetch_models_function
+
+        fetch_func = get_fetch_models_function(provider_slug)
         if not fetch_func:
             return {
                 "success": False,
@@ -984,9 +987,25 @@ def sync_all_providers(
         if provider_slugs:
             providers_to_sync = provider_slugs
         else:
-            # Use all providers that have fetch functions, minus skipped ones
+            # Use all active providers with fetch functions, minus skipped ones
             skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
-            all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            try:
+                from src.db.providers_db import get_active_provider_slugs
+                from src.services.gateway_registry import get_gateway_registry
+
+                all_providers = get_active_provider_slugs()
+                registry = get_gateway_registry()
+                all_providers = [
+                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", True)
+                ]
+                if not all_providers:
+                    logger.warning(
+                        "DB returned zero fetchable providers; falling back to hardcoded list"
+                    )
+                    all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            except Exception:
+                logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
             providers_to_sync = [p for p in all_providers if p not in skip_set]
             if skip_set:
                 logger.info(

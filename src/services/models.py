@@ -2395,6 +2395,8 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             if "huggingface" not in candidate_gateways:
                 candidate_gateways.append("huggingface")
 
+        # fetch_specific_model_from_* functions live in this file (models.py),
+        # not in individual client modules, so dynamic import doesn't apply here.
         fetchers = {
             "openrouter": fetch_specific_model_from_openrouter,
             "featherless": fetch_specific_model_from_featherless,

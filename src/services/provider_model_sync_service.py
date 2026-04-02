@@ -21,7 +21,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS, sync_provider_models
+from src.services.model_catalog_sync import sync_provider_models
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,8 @@ _background_sync_task: asyncio.Task | None = None
 _last_model_sync: datetime | None = None
 
 
-# Provider configuration mapping
+# FALLBACK — api_key_env_var now reads from DB providers table (Phase 2D).
+# Kept as documented fallback for seed_providers.py and cold-start scenarios.
 PROVIDER_ENV_VAR_MAP = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
@@ -91,8 +92,28 @@ async def sync_models_from_providers(
 
     try:
         if provider_slugs is None:
-            # Sync all providers that have fetch functions
-            provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            # Sync all active providers with fetch functions (DB-first)
+            try:
+                from src.db.providers_db import get_active_provider_slugs
+                from src.services.gateway_registry import get_gateway_registry
+
+                provider_slugs = get_active_provider_slugs()
+                registry = get_gateway_registry()
+                provider_slugs = [
+                    s for s in provider_slugs if registry.get(s, {}).get("has_fetch_function", True)
+                ]
+                if not provider_slugs:
+                    logger.warning(
+                        "DB returned zero fetchable providers; falling back to hardcoded list"
+                    )
+                    from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
+
+                    provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            except Exception:
+                logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
+
+                provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
 
         logger.info(f"🔄 Starting model sync for {len(provider_slugs)} providers")
 
