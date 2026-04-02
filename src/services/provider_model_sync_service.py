@@ -97,18 +97,15 @@ async def sync_models_from_providers(
                 from src.db.providers_db import get_active_provider_slugs
                 from src.services.gateway_registry import get_gateway_registry
 
-                provider_slugs = get_active_provider_slugs()
-                registry = get_gateway_registry()
+                provider_slugs = await asyncio.to_thread(get_active_provider_slugs)
+                registry = await asyncio.to_thread(get_gateway_registry)
                 provider_slugs = [
-                    s for s in provider_slugs if registry.get(s, {}).get("has_fetch_function", True)
+                    s
+                    for s in provider_slugs
+                    if registry.get(s, {}).get("has_fetch_function", False)
                 ]
                 if not provider_slugs:
-                    logger.warning(
-                        "DB returned zero fetchable providers; falling back to hardcoded list"
-                    )
-                    from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
-
-                    provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
+                    logger.info("DB returned zero fetchable providers; nothing to sync")
             except Exception:
                 logger.warning("Failed to load providers from DB; using hardcoded fallback")
                 from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS

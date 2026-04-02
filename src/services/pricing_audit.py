@@ -401,7 +401,7 @@ def _get_all_gateways() -> dict[str, str]:
     return {
         slug: info["name"]
         for slug, info in registry.items()
-        if info.get("has_fetch_function", True)
+        if info.get("has_fetch_function", False)
     }
 
 

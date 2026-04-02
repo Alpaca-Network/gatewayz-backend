@@ -996,13 +996,10 @@ def sync_all_providers(
                 all_providers = get_active_provider_slugs()
                 registry = get_gateway_registry()
                 all_providers = [
-                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", True)
+                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", False)
                 ]
                 if not all_providers:
-                    logger.warning(
-                        "DB returned zero fetchable providers; falling back to hardcoded list"
-                    )
-                    all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+                    logger.info("DB returned zero fetchable providers; nothing to sync")
             except Exception:
                 logger.warning("Failed to load providers from DB; using hardcoded fallback")
                 all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())

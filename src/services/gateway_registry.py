@@ -601,4 +601,10 @@ def refresh_registry_cache() -> None:
     global _cache_timestamp
     _cache_timestamp = 0.0
     _load_registry_from_db()
+    try:
+        from src.services.dynamic_provider_loader import invalidate_loader_cache
+
+        invalidate_loader_cache()
+    except ImportError:
+        pass
     logger.info("Gateway registry cache force-refreshed")

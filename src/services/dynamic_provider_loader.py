@@ -12,10 +12,12 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
+_ALLOWED_MODULE_PREFIX = "src.services."
+
 # Module-level cache: slug -> loaded function (avoids repeated importlib calls)
 # Uses a (function, timestamp) tuple so entries can expire.
 _fetch_models_cache: dict[str, tuple[Callable | None, float]] = {}
-_LOADER_CACHE_TTL = 300  # 5 minutes — matches gateway registry TTL
+_LOADER_CACHE_TTL = 300  # 5 minutes — also cleared by refresh_registry_cache()
 
 
 def _derive_function_name(slug: str, prefix: str = "fetch_models_from_") -> str:
@@ -28,10 +30,25 @@ def _derive_function_name(slug: str, prefix: str = "fetch_models_from_") -> str:
 
 def _load_function(module_path: str, function_name: str) -> Callable | None:
     """Import *module_path* and return *function_name* from it."""
+    if not module_path.startswith(_ALLOWED_MODULE_PREFIX):
+        logger.error(
+            "Rejecting dynamic import: module path %r is outside allowed prefix %r",
+            module_path,
+            _ALLOWED_MODULE_PREFIX,
+        )
+        return None
     try:
         module = importlib.import_module(module_path)
-        return getattr(module, function_name, None)
-    except (ImportError, AttributeError) as exc:
+        candidate = getattr(module, function_name, None)
+        if candidate is not None and not callable(candidate):
+            logger.warning(
+                "Dynamic import resolved non-callable: %s.%s",
+                module_path,
+                function_name,
+            )
+            return None
+        return candidate
+    except ImportError as exc:
         logger.warning("Dynamic import failed: %s.%s — %s", module_path, function_name, exc)
         return None
 
