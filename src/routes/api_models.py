@@ -125,28 +125,10 @@ async def get_model_detail(
             provider_groups.append(enhanced_openrouter)
 
         # Add providers from other gateways based on detected gateway
-        if detected_gateway in [
-            "featherless",
-            "deepinfra",
-            "chutes",
-            "groq",
-            "fireworks",
-            "together",
-            "cerebras",
-            "nebius",
-            "xai",
-            "novita",
-            "hug",
-            "aimo",
-            "near",
-            "fal",
-            "anannas",
-            "aihubmix",
-            "vercel-ai-gateway",
-            "onerouter",
-            "helicone",
-        ]:
-            # Get models from the detected gateway to derive providers
+        from src.db.providers_db import get_active_provider_slugs
+
+        active_slugs = await asyncio.to_thread(get_active_provider_slugs)
+        if detected_gateway in active_slugs:
             # Get models from the detected gateway to derive providers
             gateway_models = await asyncio.to_thread(get_cached_models, detected_gateway)
             if gateway_models:

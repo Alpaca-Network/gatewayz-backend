@@ -84,7 +84,7 @@ class TestFailoverChain:
             "vercel-ai-gateway",
             "aihubmix",
             "anannas",
-            "alibaba-cloud",
+            "alibaba",
             "fireworks",
             "together",
         )
