@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 # Updated: 2025-12-12
 # =============================================================================
 
-# Models with sub-100ms average response time (ultra-fast)
+# Hardcoded fallback — used only when DB cache is unavailable.
+# The authoritative source is the models table (latency_tier=1 column).
 ULTRA_LOW_LATENCY_MODELS: set[str] = {
     "groq/moonshotai/kimi-k2-instruct-0905",  # 29ms
     "groq/openai/gpt-oss-120b",  # 74ms
@@ -369,11 +370,16 @@ def is_ultra_low_latency_model(model_id: str) -> bool:
         model_id: The model identifier
 
     Returns:
-        True if the model is in the ULTRA_LOW_LATENCY_MODELS set
+        True if the model is in the ultra-low-latency set (tier 1)
     """
     if not model_id:
         return False
-    return model_id.lower() in {m.lower() for m in ULTRA_LOW_LATENCY_MODELS}
+    try:
+        from src.services.model_capabilities_cache import get_latency_tier
+
+        return get_latency_tier(model_id) == 1
+    except Exception:
+        return model_id.lower() in {m.lower() for m in ULTRA_LOW_LATENCY_MODELS}
 
 
 def get_provider_latency_tier(provider: str) -> int:
@@ -406,6 +412,14 @@ def get_ultra_low_latency_models() -> list[str]:
     Returns:
         List of model IDs with sub-100ms response times
     """
+    try:
+        from src.services.model_capabilities_cache import get_models_by_latency_tier
+
+        result = get_models_by_latency_tier(1)
+        if result:
+            return sorted(result)
+    except Exception:
+        pass
     return sorted(ULTRA_LOW_LATENCY_MODELS)
 
 

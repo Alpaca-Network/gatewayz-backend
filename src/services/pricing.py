@@ -1089,8 +1089,11 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
         _track_default_pricing_usage(model_id, error=str(e))
 
-        # Check if this is a high-value model even in error case
-        HIGH_VALUE_MODEL_PATTERNS = [
+        # Check if this is a high-value model even in error case.
+        # Block the request to prevent under-billing when pricing data is missing.
+        # Pattern list is a hardcoded guard — the DB is the authoritative source
+        # (models with high pricing should be rejected when pricing lookup fails).
+        _HIGH_VALUE_MODEL_PATTERNS = [
             "gpt-4",
             "gpt-5",
             "o1-",
@@ -1105,7 +1108,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             "command-r-plus",
             "mixtral-8x22b",
         ]
-        if any(pattern in model_id.lower() for pattern in HIGH_VALUE_MODEL_PATTERNS):
+        if any(pattern in model_id.lower() for pattern in _HIGH_VALUE_MODEL_PATTERNS):
             raise ValueError(
                 f"Pricing data not available for high-value model '{model_id}'. "
                 f"Request blocked to prevent under-billing."

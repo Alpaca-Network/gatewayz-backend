@@ -387,6 +387,22 @@ async def lifespan(app):
                         "DB-specific routing (e.g., Gemini → google-vertex) will not work."
                     )
 
+                # Phase 1c: Load model capability flags + quality scores
+                try:
+                    logger.info(
+                        "🔥 [1c] Loading model capabilities cache "
+                        "(max_tokens / is_free / latency_tier / quality scores)..."
+                    )
+                    from src.services.model_capabilities_cache import load_model_capabilities_cache
+
+                    await asyncio.to_thread(load_model_capabilities_cache)
+                    logger.info("✅ [1c] Model capabilities cache loaded")
+                except Exception as e:
+                    logger.error(
+                        f"❌ [1c] Model capabilities cache failed to load: {e}. "
+                        "Hardcoded fallbacks will be used for max_tokens, free models, and tier pools."
+                    )
+
                 # Phase 2: Preload full model catalog (heavy - 17k+ models)
                 # Build bottom-up from per-provider catalogs to avoid the single-
                 # giant-query timeout that truncates at ~3600 of 17k+ models.

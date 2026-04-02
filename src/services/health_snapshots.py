@@ -25,23 +25,21 @@ ROUTER_HEALTH_TIMESTAMP_KEY = "router:health_timestamp"
 # TTL for health snapshots (60 seconds, refreshed every 30 seconds)
 HEALTH_SNAPSHOT_TTL = 60
 
-# Model pools for each tier (cheap models for small tier)
+# Model pools for each tier — hardcoded fallbacks used when DB cache is unavailable.
+# The authoritative source is the models table (latency_tier column).
+# New models should be added to the DB with the appropriate latency_tier value.
 SMALL_TIER_POOL = [
-    # Primary cheap-fast options
     "openai/gpt-4o-mini",
     "anthropic/claude-3-haiku",
     "google/gemini-flash-1.5",
     "deepseek/deepseek-chat",
     "mistral/mistral-small",
     "meta-llama/llama-3.1-8b-instant",
-    # ONE quality escape hatch (only selected if cheap options fail capability gate)
     "openai/gpt-4o",
 ]
 
 MEDIUM_TIER_POOL = [
-    # All small tier models
     *SMALL_TIER_POOL,
-    # Additional balanced models
     "anthropic/claude-3.5-sonnet",
     "anthropic/claude-3-sonnet",
     "google/gemini-pro-1.5",
@@ -51,6 +49,20 @@ MEDIUM_TIER_POOL = [
     "cohere/command-r-plus",
     "deepseek/deepseek-coder",
 ]
+
+
+def _get_tier_pool(max_tier: int) -> list[str]:
+    """Return model IDs with latency_tier <= max_tier from DB cache, with fallback."""
+    try:
+        from src.services.model_capabilities_cache import get_models_by_latency_tier
+
+        result = get_models_by_latency_tier(max_tier)
+        if result:
+            return result
+    except Exception:
+        pass
+    return SMALL_TIER_POOL if max_tier <= 2 else MEDIUM_TIER_POOL
+
 
 # Cooldown period after failure (seconds)
 FAILURE_COOLDOWN_SECONDS = 60
@@ -66,11 +78,14 @@ class HealthSnapshotService:
 
     def __init__(self):
         self._redis = get_redis_client()
-        # In-memory fallback if Redis unavailable
+        # In-memory fallback if Redis unavailable.
+        # Bootstrap from the DB-backed tier cache so newly-added models are
+        # reflected even when Redis is down. Falls through to the hardcoded
+        # constants if the cache hasn't loaded yet.
         self._fallback_cache: dict[str, list[str]] = {
-            "small": SMALL_TIER_POOL.copy(),
-            "medium": MEDIUM_TIER_POOL.copy(),
-            "all": MEDIUM_TIER_POOL.copy(),
+            "small": _get_tier_pool(2),
+            "medium": _get_tier_pool(3),
+            "all": _get_tier_pool(3),
         }
         self._fallback_timestamp: datetime | None = None
 
@@ -155,9 +170,11 @@ class HealthSnapshotService:
             if self._is_model_healthy(model_id, health, now):
                 all_healthy.append(model_id)
 
-        # Compute tier-specific lists
-        small_healthy = [m for m in all_healthy if m in SMALL_TIER_POOL]
-        medium_healthy = [m for m in all_healthy if m in MEDIUM_TIER_POOL]
+        # Compute tier-specific lists (prefer DB-driven tier membership)
+        small_pool = set(_get_tier_pool(2))
+        medium_pool = set(_get_tier_pool(3))
+        small_healthy = [m for m in all_healthy if m in small_pool]
+        medium_healthy = [m for m in all_healthy if m in medium_pool]
 
         # Write to Redis (single pipeline for atomicity)
         try:
