@@ -57,6 +57,17 @@ from src.services.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
+# Provider latency tier baseline — defined once at module level so it isn't
+# re-created on every call to extract_capabilities() (called ~17k times per sync).
+# Tier 1 = ultra (<100ms), 2 = fast (<500ms), 3 = standard (default).
+_PROVIDER_TIERS: dict[str, int] = {
+    "groq": 1,
+    "cerebras": 1,
+    "fireworks": 2,
+    "together": 2,
+    "cloudflare-workers-ai": 2,
+}
+
 
 # Map provider slugs to their fetch functions
 PROVIDER_FETCH_FUNCTIONS = {
@@ -231,10 +242,54 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
         model_id = (model.get("id") or model.get("slug") or "").lower()
         supports_vision = "vision" in model_id or "vl" in model_id
 
+    # --- has_json_mode ---
+    if model.get("has_json_mode") is not None:
+        has_json_mode = bool(model["has_json_mode"])
+    else:
+        supported_params = model.get("supported_parameters") or []
+        has_json_mode = isinstance(supported_params, list) and "response_format" in supported_params
+
+    # --- is_reasoning ---
+    model_id_lower = (model.get("id") or model.get("slug") or "").lower()
+    raw_features = model.get("features") or []
+    is_reasoning = (
+        bool(model.get("is_reasoning"))
+        or any(x in model_id_lower for x in ("o1-", "o3-", "o4-", "-r1", "reasoner", "-thinking"))
+        or "thinking" in raw_features
+    )
+
+    # --- is_free ---
+    is_free = bool(model.get("is_free")) or model_id_lower.endswith(":free")
+
+    # --- max_output_tokens ---
+    max_output_tokens = (
+        model.get("max_output_tokens")
+        or model.get("context_length_output")
+        or (metadata.get("max_output_tokens") if isinstance(metadata, dict) else None)
+    )
+    if max_output_tokens is not None:
+        try:
+            max_output_tokens = int(max_output_tokens)
+        except (TypeError, ValueError):
+            max_output_tokens = None
+
+    # --- latency_tier ---
+    # Use provider slug to assign a baseline tier; individual model p50 data
+    # will be updated later by the health monitoring system.
+    # _PROVIDER_TIERS is defined at module level (not inside this function)
+    # to avoid re-allocating the dict for every model during bulk sync.
+    raw_provider = model.get("provider_slug") or model.get("source_gateway") or ""
+    latency_tier = _PROVIDER_TIERS.get(raw_provider.lower(), 3)
+
     return {
         "supports_streaming": supports_streaming,
         "supports_function_calling": supports_function_calling,
         "supports_vision": supports_vision,
+        "has_json_mode": has_json_mode,
+        "is_reasoning": is_reasoning,
+        "is_free": is_free,
+        "max_output_tokens": max_output_tokens,
+        "latency_tier": latency_tier,
     }
 
 
@@ -367,21 +422,30 @@ def transform_normalized_model_to_db_schema(
         #   Used for display purposes only
 
         # Build model data - pricing is stored separately in model_pricing table
-        model_data = {
+        model_data: dict[str, Any] = {
             "provider_id": provider_id,
             "model_name": str(model_name),
             "provider_model_id": str(provider_model_id),
             "description": description,
             "context_length": context_length,
             "modality": modality,
-            # Capabilities
+            # Core capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
             "supports_vision": capabilities["supports_vision"],
+            # Extended capabilities (new columns)
+            "has_json_mode": capabilities["has_json_mode"],
+            "is_reasoning": capabilities["is_reasoning"],
+            "is_free": capabilities["is_free"],
+            "latency_tier": capabilities["latency_tier"],
             # Status
             "is_active": True,
             "metadata": metadata,
         }
+        # Only set max_output_tokens when the provider returned a value;
+        # null means "unknown" and the seed migration value should not be overwritten.
+        if capabilities["max_output_tokens"] is not None:
+            model_data["max_output_tokens"] = capabilities["max_output_tokens"]
 
         # Store pricing info in metadata for later sync to model_pricing table
         if any(pricing.values()):

@@ -28,8 +28,10 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 ANONYMOUS_DAILY_LIMIT = 3  # Maximum requests per day per IP
+# Hardcoded fallback free model list — used only when DB cache is unavailable.
+# The authoritative source is the models table (is_free=true column).
+# New free models should be added to the DB, not to this list.
 ANONYMOUS_ALLOWED_MODELS = [
-    # Verified free models from OpenRouter (end with :free)
     "google/gemini-2.0-flash-exp:free",
     "google/gemma-2-9b-it:free",
     "meta-llama/llama-3.2-3b-instruct:free",
@@ -109,8 +111,13 @@ def is_model_allowed_for_anonymous(model_id: str) -> bool:
     if not model_id.endswith(":free"):
         return False
 
-    # Must be in whitelist
-    return model_id.lower() in [m.lower() for m in ANONYMOUS_ALLOWED_MODELS]
+    # Check DB-backed free model list first, then fall back to hardcoded whitelist
+    try:
+        from src.services.model_capabilities_cache import is_free_model
+
+        return is_free_model(model_id)
+    except Exception:
+        return model_id.lower() in [m.lower() for m in ANONYMOUS_ALLOWED_MODELS]
 
 
 def get_anonymous_usage_count(ip_address: str) -> int:

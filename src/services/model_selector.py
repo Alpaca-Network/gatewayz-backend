@@ -35,6 +35,9 @@ SUCCESS_RATE_BASELINE = 0.9  # Expected baseline success rate
 
 # Quality priors from benchmarks (treated as priors, not truth)
 # Values are 0-100, will be blended with realtime metrics
+# NOTE: This dict is the hardcoded fallback. At runtime, get_quality_priors()
+# from model_capabilities_cache returns DB-loaded scores (refreshed every 15 min).
+# New model scores should be added to the model_quality_scores DB table, not here.
 QUALITY_PRIORS: dict[str, dict[str, float]] = {
     # OpenAI models
     "openai/gpt-4o": {
@@ -357,8 +360,16 @@ def _compute_model_score(
 
     Returns score 0-100.
     """
-    # Get quality prior
-    model_priors = QUALITY_PRIORS.get(model_id, {})
+    # Get quality prior — prefer DB-loaded scores, fall back to hardcoded dict.
+    # NOTE: use explicit None check, not `or`, because an empty dict {} is falsy
+    # and would incorrectly bypass a legitimate empty-scores DB result.
+    try:
+        from src.services.model_capabilities_cache import get_quality_priors
+
+        _db_priors = get_quality_priors().get(model_id)
+        model_priors = _db_priors if _db_priors is not None else QUALITY_PRIORS.get(model_id, {})
+    except Exception:
+        model_priors = QUALITY_PRIORS.get(model_id, {})
     quality = model_priors.get(category, 50.0)  # Default to 50 if unknown
 
     # Get cost score (higher = cheaper)

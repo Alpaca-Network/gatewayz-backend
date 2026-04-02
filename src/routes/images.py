@@ -32,9 +32,9 @@ router = APIRouter()
 # DEPRECATED: Hardcoded image pricing fallback.
 # Canonical image pricing now lives in src/data/manual_pricing.json under the
 # "image_pricing" key.  This dict is kept only as a last-resort fallback during
-# the transition period.  It will be removed once all pricing is confirmed to be
-# served from manual_pricing.json.  Do NOT add new entries here -- update
-# manual_pricing.json instead.
+# Emergency fallback only — all entries here should also exist in manual_pricing.json.
+# Do NOT add new entries here; update manual_pricing.json (or the DB) instead.
+# This dict is the last resort when pricing_lookup returns nothing.
 _HARDCODED_IMAGE_COST_PER_IMAGE = {
     "deepinfra": {
         "stable-diffusion-3.5-large": 0.035,

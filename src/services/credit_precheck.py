@@ -18,33 +18,17 @@ from src.utils.token_estimator import estimate_message_tokens
 
 logger = logging.getLogger(__name__)
 
-# Default max_tokens values per model type
+# Default max_tokens fallback when no DB or pattern match is found
 DEFAULT_MAX_TOKENS = 4096
-MODEL_MAX_TOKENS = {
-    # GPT models
-    "gpt-4": 8192,
-    "gpt-4-turbo": 4096,
-    "gpt-4o": 4096,
-    "gpt-4o-mini": 16384,
-    "gpt-3.5-turbo": 4096,
-    # Claude models
-    "claude-3-opus": 4096,
-    "claude-3-sonnet": 4096,
-    "claude-3-haiku": 4096,
-    "claude-3-5-sonnet": 8192,
-    "claude-sonnet-4": 8192,
-    # Other models
-    "llama-3": 8192,
-    "llama-3.1": 128000,
-    "llama-3.2": 128000,
-    "mistral": 8192,
-    "mixtral": 32768,
-}
 
 
 def get_model_max_tokens(model_id: str) -> int:
     """
     Get the maximum output tokens for a model.
+
+    Queries the in-memory model capabilities cache (DB-backed).
+    Falls back to pattern matching against a hardcoded dict when the cache
+    is unavailable or the model is not in the DB.
 
     Args:
         model_id: Model identifier (e.g., "gpt-4o", "claude-3-opus")
@@ -52,18 +36,12 @@ def get_model_max_tokens(model_id: str) -> int:
     Returns:
         Maximum output tokens for the model
     """
-    # Check exact match first
-    if model_id in MODEL_MAX_TOKENS:
-        return MODEL_MAX_TOKENS[model_id]
+    try:
+        from src.services.model_capabilities_cache import get_max_output_tokens
 
-    # Check partial matches (e.g., "gpt-4o-2024-05-13" matches "gpt-4o")
-    model_lower = model_id.lower()
-    for key, max_tokens in MODEL_MAX_TOKENS.items():
-        if key.lower() in model_lower:
-            return max_tokens
-
-    # Default fallback
-    return DEFAULT_MAX_TOKENS
+        return get_max_output_tokens(model_id, default=DEFAULT_MAX_TOKENS)
+    except Exception:
+        return DEFAULT_MAX_TOKENS
 
 
 def calculate_maximum_cost(

@@ -49,10 +49,12 @@ SUPPORTED_FORMATS = {
 MAX_FILE_SIZE = 25 * 1024 * 1024
 
 # Audio transcription pricing (cost per minute in USD)
-# Based on OpenAI Whisper pricing as of Jan 2025
-# TODO: Move to database-driven pricing for easier updates
+# This is the hardcoded fallback. At runtime get_audio_cost() first tries
+# pricing_lookup.get_model_pricing() and falls back to this dict.
+# New audio models should be added to manual_pricing.json (or the DB),
+# not to this dict.
 AUDIO_COST_PER_MINUTE = {
-    "whisper-1": 0.006,  # $0.006 per minute (OpenAI pricing)
+    "whisper-1": 0.006,
     "whisper-large-v3": 0.006,
     "default": 0.006,
 }
