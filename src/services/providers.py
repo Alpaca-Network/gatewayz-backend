@@ -136,7 +136,7 @@ def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> s
             from src.services.gateway_registry import get_gateway_registry
 
             registry = get_gateway_registry()
-            entry = registry.get(provider_id)
+            entry = registry.get(provider_id.lower())
             if entry and entry.get("logo_url"):
                 return entry["logo_url"]
         except Exception:

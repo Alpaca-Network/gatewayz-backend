@@ -105,7 +105,8 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     """
     provider = (initial_provider or "").lower()
 
-    if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
+    eligible = set(_get_failover_priority())
+    if provider not in eligible:
         return [provider] if provider else ["onerouter"]
 
     chain: list[str] = []

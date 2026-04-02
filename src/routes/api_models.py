@@ -127,7 +127,7 @@ async def get_model_detail(
         # Add providers from other gateways based on detected gateway
         from src.db.providers_db import get_active_provider_slugs
 
-        active_slugs = get_active_provider_slugs()
+        active_slugs = await asyncio.to_thread(get_active_provider_slugs)
         if detected_gateway in active_slugs:
             # Get models from the detected gateway to derive providers
             # Get models from the detected gateway to derive providers

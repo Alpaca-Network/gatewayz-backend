@@ -22,9 +22,6 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config.supabase_config import get_supabase_client
-from src.services.gateway_registry import get_gateway_registry
-
-GATEWAY_REGISTRY = get_gateway_registry()
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -97,6 +94,9 @@ def seed_providers(dry_run: bool = False) -> dict:
         Dictionary with sync results
     """
     try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        GATEWAY_REGISTRY = get_gateway_registry()
         client = get_supabase_client()
 
         logger.info(f"🔄 Syncing {len(GATEWAY_REGISTRY)} providers from GATEWAY_REGISTRY")
