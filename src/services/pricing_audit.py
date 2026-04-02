@@ -396,11 +396,12 @@ def _guess_unmatched_reason(model_id: str, source: str, other_ids: set[str]) -> 
 def _get_all_gateways() -> dict[str, str]:
     """Get all auditable gateway slugs and display names."""
     from src.services.gateway_registry import get_gateway_registry
-    from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
 
     registry = get_gateway_registry()
     return {
-        slug: info["name"] for slug, info in registry.items() if slug in PROVIDER_FETCH_FUNCTIONS
+        slug: info["name"]
+        for slug, info in registry.items()
+        if info.get("has_fetch_function", False)
     }
 
 

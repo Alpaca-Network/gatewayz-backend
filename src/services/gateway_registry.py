@@ -463,6 +463,9 @@ def _load_registry_from_db() -> dict[str, dict]:
                 "name": row.get("name", slug),
                 "site_url": row.get("site_url"),
                 "logo_url": row.get("logo_url"),
+                "api_key_env_var": row.get("api_key_env_var"),
+                "fetch_module_path": row.get("fetch_module_path"),
+                "fetch_function_name": row.get("fetch_function_name"),
                 "color": meta.get("color", "bg-gray-500"),
                 "priority": meta.get("priority", "slow"),
                 "icon": meta.get("icon"),
@@ -601,4 +604,10 @@ def refresh_registry_cache() -> None:
     global _cache_timestamp
     _cache_timestamp = 0.0
     _load_registry_from_db()
+    try:
+        from src.services.dynamic_provider_loader import invalidate_loader_cache
+
+        invalidate_loader_cache()
+    except ImportError:
+        pass
     logger.info("Gateway registry cache force-refreshed")
