@@ -131,7 +131,18 @@ def fetch_providers_from_openrouter():
 def get_provider_logo_from_services(provider_id: str, site_url: str = None) -> str:
     """Get provider logo using third-party services and manual mapping"""
     try:
-        # Try manual mapping first
+        # Try DB first (logo_url column on providers table)
+        try:
+            from src.services.gateway_registry import get_gateway_registry
+
+            registry = get_gateway_registry()
+            entry = registry.get(provider_id)
+            if entry and entry.get("logo_url"):
+                return entry["logo_url"]
+        except Exception:
+            pass  # Fall through to manual mapping
+
+        # Try manual mapping as fallback
         if provider_id in MANUAL_LOGO_DB:
             logger.info(f"Found manual logo for {provider_id}")
             return MANUAL_LOGO_DB[provider_id]

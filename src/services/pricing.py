@@ -44,8 +44,8 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
     """
     Build a reverse lookup from provider-native model IDs back to canonical IDs.
 
-    Uses _MODEL_ID_MAPPINGS from model_transformations.py.  For each provider
-    mapping (canonical -> native), we store native -> canonical so that when a
+    Uses the DB-backed model mappings cache.  For each provider mapping
+    (canonical -> native), we store native -> canonical so that when a
     pricing lookup receives a transformed ID we can recover the original.
 
     Priority rules when multiple canonical IDs map to the same native ID:
@@ -55,14 +55,16 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
       - Among entries with the same prefix status, the first one wins (stable).
     """
     try:
-        from src.services.model_transformations import _MODEL_ID_MAPPINGS
-    except ImportError:
-        logger.warning("Could not import _MODEL_ID_MAPPINGS for reverse transform lookup")
+        from src.services.model_mappings_cache import get_all_provider_mappings
+
+        all_mappings = get_all_provider_mappings()
+    except Exception:
+        logger.warning("Could not load model mappings cache for reverse transform lookup")
         return {}
 
     reverse: dict[str, str] = {}
 
-    for _provider, mapping in _MODEL_ID_MAPPINGS.items():
+    for _provider, mapping in all_mappings.items():
         for canonical, native in mapping.items():
             native_lower = native.lower()
             # Skip identity mappings (canonical == native) -- they don't help
@@ -82,7 +84,7 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
     logger.info(
         "[PRICING] Built reverse-transform lookup with %d entries from %d providers",
         len(reverse),
-        len(_MODEL_ID_MAPPINGS),
+        len(all_mappings),
     )
     return reverse
 

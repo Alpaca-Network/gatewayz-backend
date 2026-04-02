@@ -470,6 +470,9 @@ def _load_registry_from_db() -> dict[str, dict]:
                 "timeout": meta.get("timeout", _DEFAULT_FETCH_TIMEOUT),
                 "has_fetch_function": meta.get("has_fetch_function", True),
                 "fetch_slug_override": meta.get("fetch_slug_override"),
+                "latency_tier": meta.get("latency_tier"),
+                "pricing_format": meta.get("pricing_format"),
+                "failover_priority": meta.get("failover_priority"),
             }
 
         _registry_cache = new_registry

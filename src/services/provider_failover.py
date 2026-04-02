@@ -57,6 +57,27 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "fireworks",
     "together",
 )
+
+
+def _get_failover_priority() -> tuple[str, ...]:
+    """Get failover priority from DB, falling back to hardcoded tuple."""
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        prioritized = [
+            (entry["failover_priority"], slug)
+            for slug, entry in registry.items()
+            if entry.get("failover_priority") is not None
+        ]
+        if prioritized:
+            prioritized.sort()
+            return tuple(slug for _, slug in prioritized)
+    except Exception:
+        pass
+    return FALLBACK_PROVIDER_PRIORITY
+
+
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 # Include 402 (Payment Required) to allow failover when provider credits are exhausted
 FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
@@ -91,7 +112,7 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     if provider:
         chain.append(provider)
 
-    for candidate in FALLBACK_PROVIDER_PRIORITY:
+    for candidate in _get_failover_priority():
         if candidate not in chain:
             chain.append(candidate)
 

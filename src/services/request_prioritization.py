@@ -75,6 +75,20 @@ PROVIDER_LATENCY_TIERS: dict[str, int] = {
 DEFAULT_PROVIDER_TIER = 3
 
 
+def _get_provider_latency_tier(provider_slug: str) -> int:
+    """Get latency tier for a provider, checking DB first then hardcoded fallback."""
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        entry = registry.get(provider_slug.lower())
+        if entry and entry.get("latency_tier") is not None:
+            return entry["latency_tier"]
+    except Exception:
+        pass
+    return PROVIDER_LATENCY_TIERS.get(provider_slug.lower(), DEFAULT_PROVIDER_TIER)
+
+
 class RequestPriority(IntEnum):
     """Priority levels for requests (lower number = higher priority)"""
 
@@ -310,7 +324,7 @@ def get_preferred_providers_for_priority(
 
     # Sort providers by their latency tier
     def get_tier(provider: str) -> int:
-        return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+        return _get_provider_latency_tier(provider)
 
     # Group providers by tier
     tier_1 = [p for p in available_providers if get_tier(p) == 1]  # Ultra-fast
@@ -385,7 +399,7 @@ def get_provider_latency_tier(provider: str) -> int:
     Returns:
         Tier number (1=fastest, 4=variable)
     """
-    return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+    return _get_provider_latency_tier(provider)
 
 
 def get_low_latency_models() -> list[str]:
@@ -423,8 +437,20 @@ def get_fastest_providers() -> list[str]:
     Returns:
         List of provider names sorted by speed
     """
-    sorted_providers = sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])
-    return [provider for provider, _ in sorted_providers]
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        db_tiers = {
+            slug: entry["latency_tier"]
+            for slug, entry in registry.items()
+            if entry.get("latency_tier") is not None
+        }
+        if db_tiers:
+            return [p for p, _ in sorted(db_tiers.items(), key=lambda x: x[1])]
+    except Exception:
+        pass
+    return [p for p, _ in sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])]
 
 
 def suggest_low_latency_alternative(model_id: str) -> str | None:
