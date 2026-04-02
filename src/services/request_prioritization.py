@@ -68,7 +68,7 @@ PROVIDER_LATENCY_TIERS: dict[str, int] = {
     "huggingface": 4,
     "featherless": 4,
     "near": 4,
-    "alibaba-cloud": 4,
+    "alibaba": 4,
 }
 
 # Default tier for unknown providers
@@ -84,8 +84,8 @@ def _get_provider_latency_tier(provider_slug: str) -> int:
         entry = registry.get(provider_slug.lower())
         if entry and entry.get("latency_tier") is not None:
             return entry["latency_tier"]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to load latency tier from DB for %s: %s", provider_slug, exc)
     return PROVIDER_LATENCY_TIERS.get(provider_slug.lower(), DEFAULT_PROVIDER_TIER)
 
 
@@ -425,8 +425,8 @@ def get_ultra_low_latency_models() -> list[str]:
         result = get_models_by_latency_tier(1)
         if result:
             return sorted(result)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to load ultra-low-latency models from DB: %s", exc)
     return sorted(ULTRA_LOW_LATENCY_MODELS)
 
 
@@ -448,8 +448,8 @@ def get_fastest_providers() -> list[str]:
         }
         if db_tiers:
             return [p for p, _ in sorted(db_tiers.items(), key=lambda x: x[1])]
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to load fastest providers from DB: %s", exc)
     return [p for p, _ in sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])]
 
 

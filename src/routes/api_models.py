@@ -130,7 +130,6 @@ async def get_model_detail(
         active_slugs = await asyncio.to_thread(get_active_provider_slugs)
         if detected_gateway in active_slugs:
             # Get models from the detected gateway to derive providers
-            # Get models from the detected gateway to derive providers
             gateway_models = await asyncio.to_thread(get_cached_models, detected_gateway)
             if gateway_models:
                 derived_providers = derive_providers_from_models(gateway_models, detected_gateway)

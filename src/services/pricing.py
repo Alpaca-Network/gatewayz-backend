@@ -25,7 +25,7 @@ _pricing_cache_lock = threading.RLock()  # Reentrant lock to prevent race condit
 # Reverse-transform lookup: maps provider-specific (transformed) model IDs
 # back to their canonical/base form so pricing lookups succeed.
 #
-# Built lazily from model_transformations._MODEL_ID_MAPPINGS on first call.
+# Built lazily from the DB-backed model mappings cache on first call.
 # Key = transformed (native) model ID (lowercased)
 # Value = canonical model ID that the user originally supplied (the mapping *key*
 #         with an org/ prefix, i.e. the one most likely stored in the pricing DB).
@@ -58,8 +58,8 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
         from src.services.model_mappings_cache import get_all_provider_mappings
 
         all_mappings = get_all_provider_mappings()
-    except Exception:
-        logger.warning("Could not load model mappings cache for reverse transform lookup")
+    except Exception as exc:
+        logger.warning("Could not load model mappings cache for reverse transform lookup: %s", exc)
         return {}
 
     reverse: dict[str, str] = {}

@@ -136,7 +136,7 @@ PROVIDER_PRICING_FORMATS = {
     "google-vertex": PricingFormat.PER_1M_TOKENS,
     "novita": PricingFormat.PER_1M_TOKENS,
     "nebius": PricingFormat.PER_1M_TOKENS,
-    "alibaba-cloud": PricingFormat.PER_1M_TOKENS,
+    "alibaba": PricingFormat.PER_1M_TOKENS,
     "morpheus": PricingFormat.PER_1M_TOKENS,
     "helicone": PricingFormat.PER_1M_TOKENS,  # Helicone API returns per-1M pricing
     "vercel-ai-gateway": PricingFormat.PER_1M_TOKENS,  # Vercel API returns per-token, but we convert to per-1M in client
@@ -177,8 +177,8 @@ def get_provider_format(provider_slug: str) -> str:
                 return PricingFormat.PER_1K_TOKENS
             elif fmt == "per_1m":
                 return PricingFormat.PER_1M_TOKENS
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to load pricing format from DB for %s: %s", provider_slug, exc)
     return PROVIDER_PRICING_FORMATS.get(
         provider_slug.lower(),
         PricingFormat.PER_1M_TOKENS,
