@@ -257,7 +257,17 @@ class ChatInferenceHandler:
         with tag_wrapper({"provider": provider_name, "model": model_id}):
             try:
                 # Route to appropriate provider
-                if provider_name == "openrouter":
+                # Check if provider supports native async (DB-driven)
+                _use_async = False
+                try:
+                    from src.services.gateway_registry import get_gateway_registry
+
+                    _reg = get_gateway_registry()
+                    _use_async = _reg.get(provider_name, {}).get("async_streaming", False)
+                except Exception:
+                    _use_async = provider_name == "openrouter"  # fallback
+
+                if _use_async:
                     return make_openrouter_request_openai(messages, model_id, **kwargs)
 
                 # Registry-based dispatch for all other providers
@@ -385,8 +395,18 @@ class ChatInferenceHandler:
 
         try:
             with tag_wrapper({"provider": provider_name, "model": model_id}):
-                if provider_name == "openrouter":
-                    # OpenRouter is the only provider with native async streaming
+                # Check if provider supports native async streaming (DB-driven)
+                _use_async_stream = False
+                try:
+                    from src.services.gateway_registry import get_gateway_registry
+
+                    _reg = get_gateway_registry()
+                    _use_async_stream = _reg.get(provider_name, {}).get("async_streaming", False)
+                except Exception:
+                    _use_async_stream = provider_name == "openrouter"  # fallback
+
+                if _use_async_stream:
+                    # Provider supports native async streaming
                     stream = await make_openrouter_request_openai_stream_async(
                         messages, model_id, **kwargs
                     )
