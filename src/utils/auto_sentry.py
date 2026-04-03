@@ -380,11 +380,12 @@ def _extract_provider_from_module(module_name: str) -> str:
             underscore_pattern = r"(?<![a-z])" + re.escape(underscore_slug) + r"(?![a-z])"
             if re.search(pattern, module_name) or re.search(underscore_pattern, module_name):
                 return slug
-        return "unknown"
+        # No match in registry — fall through to hardcoded chain
+        # (covers providers not in our registry like portkey)
     except Exception:
         pass
 
-    # Fallback to hardcoded chain
+    # Fallback to hardcoded chain (covers non-registry providers)
     if "openrouter" in module_name:
         return "openrouter"
     elif "portkey" in module_name:
