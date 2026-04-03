@@ -78,8 +78,8 @@ _FALLBACK_PROVIDER_HOST_MAP: dict[str, str] = {
     "api.openrouter.ai": "openrouter",
     "api.groq.com": "groq",
     "api.mistral.ai": "mistral",
-    "api.together.ai": "together-ai",
-    "api.together.xyz": "together-ai",
+    "api.together.ai": "together",
+    "api.together.xyz": "together",
     "api.perplexity.ai": "perplexity",
     "api.cohere.com": "cohere",
     "api.cohere.ai": "cohere",
@@ -141,7 +141,8 @@ def _build_provider_host_map() -> dict[str, str]:
     return host_map
 
 
-# Backward-compat alias (read-only access to current map)
+# Backward-compat alias — static fallback only; use _build_provider_host_map()
+# for the live DB-driven map.
 _PROVIDER_HOST_MAP = _FALLBACK_PROVIDER_HOST_MAP
 
 

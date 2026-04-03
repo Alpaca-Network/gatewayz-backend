@@ -29,6 +29,12 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Image provider dispatch table (module-level to avoid per-request allocation)
+IMAGE_PROVIDER_ROUTING = {
+    "deepinfra": make_deepinfra_image_request,
+    "fal": make_fal_image_request,
+}
+
 # DEPRECATED: Hardcoded image pricing fallback.
 # Canonical image pricing now lives in src/data/manual_pricing.json under the
 # "image_pricing" key.  This dict is kept only as a last-resort fallback during
@@ -310,12 +316,6 @@ async def generate_images(
 
             # Start timing inference
             start = time.monotonic()
-
-            # Image provider dispatch table
-            IMAGE_PROVIDER_ROUTING = {
-                "deepinfra": make_deepinfra_image_request,
-                "fal": make_fal_image_request,
-            }
 
             if provider == "google-vertex":
                 # Google Vertex needs extra params from the request object

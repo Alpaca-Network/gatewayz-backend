@@ -328,8 +328,8 @@ def get_provider_pooled_client(slug: str) -> OpenAI:
     """Return a pooled OpenAI-compat client for *slug*, configured from the DB registry.
 
     Resolves base_url, api_key, custom headers, and timeout from the gateway
-    registry (populated by the ``providers`` table).  Falls back to the
-    provider-specific helper functions below when the registry lookup fails.
+    registry (populated by the ``providers`` table).  Raises ``ValueError``
+    when the provider is missing, has no API key, or has no base_url.
     """
     from src.services.gateway_registry import get_gateway_registry, get_provider_api_key
 
@@ -347,11 +347,17 @@ def get_provider_pooled_client(slug: str) -> OpenAI:
         raise ValueError(f"No base_url configured for provider '{slug}'")
 
     # Resolve templated URLs (e.g. Cloudflare {CLOUDFLARE_ACCOUNT_ID})
-    if "{CLOUDFLARE_ACCOUNT_ID}" in base_url:
-        account_id = Config.CLOUDFLARE_ACCOUNT_ID
-        if not account_id:
-            raise ValueError("Cloudflare Account ID not configured")
-        base_url = base_url.replace("{CLOUDFLARE_ACCOUNT_ID}", account_id)
+    import re as _re
+
+    placeholders = _re.findall(r"\{(\w+)\}", base_url)
+    for placeholder in placeholders:
+        value = getattr(Config, placeholder, None) or os.environ.get(placeholder)
+        if not value:
+            raise ValueError(
+                f"Template variable '{{{placeholder}}}' in base_url for '{slug}' "
+                f"is not configured in Config or environment"
+            )
+        base_url = base_url.replace(f"{{{placeholder}}}", value)
 
     # Resolve timeout
     timeout = None

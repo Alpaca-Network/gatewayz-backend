@@ -225,7 +225,11 @@ def get_models_cache(gateway: str):
         slug = "huggingface"
     elif slug == "alibaba":
         return _alibaba_models_cache  # Special dict with quota tracking
-    return _get_or_create_cache(slug)
+    # Only return caches for known providers; return None for unknown slugs
+    # to preserve backward-compat (callers guard with `if cache is None:`)
+    if slug in _cache_instances:
+        return _cache_instances[slug]
+    return None
 
 
 def get_providers_cache():
@@ -259,6 +263,11 @@ def clear_models_cache(gateway: str):
         slug = gateway.lower()
         if slug == "hug":
             slug = "huggingface"
+        elif slug == "alibaba":
+            # Alibaba uses a special dict with quota tracking, not _CacheDict
+            _alibaba_models_cache["data"] = None
+            _alibaba_models_cache["timestamp"] = None
+            return
         cache = _cache_instances.get(slug)
         if cache:
             cache["data"] = None

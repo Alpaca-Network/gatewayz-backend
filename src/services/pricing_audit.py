@@ -501,6 +501,7 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
             config = {
                 "url": entry["models_endpoint"],
                 "key_attr": entry.get("api_key_env_var"),
+                "header_type": entry.get("header_type", "bearer"),
             }
     except Exception:
         pass
