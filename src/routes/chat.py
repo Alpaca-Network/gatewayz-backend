@@ -1943,10 +1943,13 @@ async def chat_completions(
             if not pre_plan.get("allowed", False):
                 raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
-        # Allow disabling rate limiting for testing (DEV ONLY)
+        # Allow disabling rate limiting for testing (DEV ONLY) or internal live-test calls.
+        # is_live_test is set by security_middleware after validating X-Internal-Source + ADMIN_API_KEY.
         import os
 
-        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
+        disable_rate_limiting = os.getenv(
+            "DISABLE_RATE_LIMITING", "false"
+        ).lower() == "true" or bool(request and getattr(request.state, "is_live_test", False))
 
         # Initialize rate limit variables
         rl_pre = None
