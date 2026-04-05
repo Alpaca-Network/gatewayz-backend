@@ -181,13 +181,10 @@ async def _test_single_model(
     async with semaphore:
         start = time.monotonic()
         try:
-            resp = await asyncio.wait_for(
-                client.post(
-                    "/v1/chat/completions",
-                    json=payload,
-                    timeout=per_phase_timeout,
-                ),
-                timeout=timeout_s,
+            resp = await client.post(
+                "/v1/chat/completions",
+                json=payload,
+                timeout=per_phase_timeout,
             )
             latency = (time.monotonic() - start) * 1000
 
@@ -350,7 +347,25 @@ async def run_live_model_test(
 
     async with httpx.AsyncClient(base_url=base_url, headers=headers) as client:
         tasks = [_test_single_model(client, m, timeout, semaphore, skip_unhealthy) for m in models]
-        results = await asyncio.gather(*tasks)
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Convert any unexpected exceptions into error results so one bad model cannot
+    # crash the entire endpoint (return_exceptions=True prevents gather from propagating).
+    results: list[ModelTestResult] = []
+    for item in raw:
+        if isinstance(item, BaseException):
+            logger.error("Unexpected exception in _test_single_model: %s", item)
+            results.append(
+                ModelTestResult(
+                    model_id="unknown",
+                    gateway="unknown",
+                    provider="unknown",
+                    status="error",
+                    error=str(item)[:200],
+                )
+            )
+        else:
+            results.append(item)
 
     duration = round(time.monotonic() - start_time, 1)
 
