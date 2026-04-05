@@ -220,7 +220,7 @@ async def _test_single_model(
                     error=f"HTTP {resp.status_code}: {err[:150]}",
                 )
 
-        except (httpx.TimeoutException, asyncio.TimeoutError):
+        except (httpx.TimeoutException, TimeoutError):
             latency = (time.monotonic() - start) * 1000
             return ModelTestResult(
                 model_id=model_id,
