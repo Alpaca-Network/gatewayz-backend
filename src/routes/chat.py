@@ -1947,10 +1947,9 @@ async def chat_completions(
         # is_live_test is set by security_middleware after validating X-Internal-Source + ADMIN_API_KEY.
         import os
 
-        disable_rate_limiting = (
-            os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
-            or bool(request and getattr(request.state, "is_live_test", False))
-        )
+        disable_rate_limiting = os.getenv(
+            "DISABLE_RATE_LIMITING", "false"
+        ).lower() == "true" or bool(request and getattr(request.state, "is_live_test", False))
 
         # Initialize rate limit variables
         rl_pre = None
