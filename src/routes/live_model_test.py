@@ -174,17 +174,20 @@ async def _test_single_model(
         "temperature": 0,
     }
 
-    # Enforce a hard total timeout. httpx's default is per-phase (connect, read, write
-    # each get their own timeout), which allows a slow server to exceed the intended cap.
-    total_timeout = httpx.Timeout(total=timeout_s, connect=min(10.0, timeout_s))
+    # Cap connect phase independently; read/write/pool all get timeout_s.
+    # httpx.Timeout takes a positional default for all phases, then keyword overrides.
+    per_phase_timeout = httpx.Timeout(timeout_s, connect=min(10.0, timeout_s))
 
     async with semaphore:
         start = time.monotonic()
         try:
-            resp = await client.post(
-                "/v1/chat/completions",
-                json=payload,
-                timeout=total_timeout,
+            resp = await asyncio.wait_for(
+                client.post(
+                    "/v1/chat/completions",
+                    json=payload,
+                    timeout=per_phase_timeout,
+                ),
+                timeout=timeout_s,
             )
             latency = (time.monotonic() - start) * 1000
 
@@ -217,7 +220,7 @@ async def _test_single_model(
                     error=f"HTTP {resp.status_code}: {err[:150]}",
                 )
 
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
             latency = (time.monotonic() - start) * 1000
             return ModelTestResult(
                 model_id=model_id,
@@ -287,7 +290,7 @@ async def run_live_model_test(
     provider: str | None = Query(None, description="Filter by provider slug"),
     limit: int = Query(50, ge=0, le=5000, description="Max models to test (default 50, max 5000)"),
     concurrency: int = Query(10, ge=1, le=20, description="Parallel requests"),
-    timeout: float = Query(15.0, ge=5, le=60, description="Per-model timeout (s)"),
+    timeout: float = Query(60.0, ge=5, le=120, description="Per-model timeout (s)"),
     skip_unhealthy: bool = Query(True, description="Skip models with health_status=down"),
     admin_user: dict = Depends(require_admin),
 ) -> LiveTestReport:
