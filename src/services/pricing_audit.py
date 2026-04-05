@@ -396,11 +396,12 @@ def _guess_unmatched_reason(model_id: str, source: str, other_ids: set[str]) -> 
 def _get_all_gateways() -> dict[str, str]:
     """Get all auditable gateway slugs and display names."""
     from src.services.gateway_registry import get_gateway_registry
-    from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
 
     registry = get_gateway_registry()
     return {
-        slug: info["name"] for slug, info in registry.items() if slug in PROVIDER_FETCH_FUNCTIONS
+        slug: info["name"]
+        for slug, info in registry.items()
+        if info.get("has_fetch_function", False)
     }
 
 
@@ -440,7 +441,7 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
     # ── Provider API configs ──────────────────────────────────────────────
     # Each entry: (url, headers, response_parser, pricing_extractor)
 
-    PROVIDER_CONFIGS: dict[str, dict] = {
+    _FALLBACK_PROVIDER_CONFIGS: dict[str, dict] = {
         "openrouter": {
             "url": "https://openrouter.ai/api/v1/models",
             "headers": {},  # No auth needed for model list
@@ -489,7 +490,25 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
         },
     }
 
-    config = PROVIDER_CONFIGS.get(gateway)
+    # DB-first: try to build config from gateway registry
+    config = None
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        entry = registry.get(gateway)
+        if entry and entry.get("models_endpoint"):
+            config = {
+                "url": entry["models_endpoint"],
+                "key_attr": entry.get("api_key_env_var"),
+                "header_type": entry.get("header_type", "bearer"),
+            }
+    except Exception:
+        pass
+
+    # Fallback to hardcoded config
+    if not config:
+        config = _FALLBACK_PROVIDER_CONFIGS.get(gateway)
     if not config:
         logger.info(f"No raw fetch config for '{gateway}', skipping")
         return []

@@ -53,10 +53,33 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "vercel-ai-gateway",
     "aihubmix",
     "anannas",
-    "alibaba-cloud",
+    "alibaba",
     "fireworks",
     "together",
 )
+
+
+def _get_failover_priority() -> tuple[str, ...]:
+    """Get failover priority from DB, falling back to hardcoded tuple."""
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        prioritized = [
+            (entry["failover_priority"], slug)
+            for slug, entry in registry.items()
+            if entry.get("failover_priority") is not None
+        ]
+        if prioritized:
+            prioritized.sort()
+            return tuple(slug for _, slug in prioritized)
+    except Exception as exc:
+        logger.warning("Failed to load failover priority from DB: %s", exc)
+    return FALLBACK_PROVIDER_PRIORITY
+
+
+# DEPRECATED: production code now uses _get_failover_priority() for eligibility.
+# Kept for backward-compat with existing tests; will be removed in a follow-up.
 FALLBACK_ELIGIBLE_PROVIDERS = set(FALLBACK_PROVIDER_PRIORITY)
 # Include 402 (Payment Required) to allow failover when provider credits are exhausted
 FAILOVER_STATUS_CODES = {401, 402, 403, 404, 502, 503, 504}
@@ -84,14 +107,16 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     """
     provider = (initial_provider or "").lower()
 
-    if provider not in FALLBACK_ELIGIBLE_PROVIDERS:
+    priority = _get_failover_priority()
+    eligible = set(priority)
+    if provider not in eligible:
         return [provider] if provider else ["onerouter"]
 
     chain: list[str] = []
     if provider:
         chain.append(provider)
 
-    for candidate in FALLBACK_PROVIDER_PRIORITY:
+    for candidate in priority:
         if candidate not in chain:
             chain.append(candidate)
 

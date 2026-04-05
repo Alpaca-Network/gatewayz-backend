@@ -25,7 +25,7 @@ from src.schemas.internal.chat import (
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
 
-# OpenRouter is the only provider with native async streaming — import directly.
+# Providers with native async streaming use direct imports (currently OpenRouter).
 # All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
 # circular deps with chat.py which imports this module).
 from src.services.openrouter_client import (
@@ -257,7 +257,19 @@ class ChatInferenceHandler:
         with tag_wrapper({"provider": provider_name, "model": model_id}):
             try:
                 # Route to appropriate provider
-                if provider_name == "openrouter":
+                # OpenRouter has native async — check via DB flag with fallback
+                _is_openrouter_async = False
+                try:
+                    from src.services.gateway_registry import get_gateway_registry
+
+                    _reg = get_gateway_registry()
+                    _is_openrouter_async = provider_name == "openrouter" and _reg.get(
+                        provider_name, {}
+                    ).get("async_streaming", False)
+                except Exception:
+                    _is_openrouter_async = provider_name == "openrouter"
+
+                if _is_openrouter_async:
                     return make_openrouter_request_openai(messages, model_id, **kwargs)
 
                 # Registry-based dispatch for all other providers
@@ -385,8 +397,20 @@ class ChatInferenceHandler:
 
         try:
             with tag_wrapper({"provider": provider_name, "model": model_id}):
-                if provider_name == "openrouter":
-                    # OpenRouter is the only provider with native async streaming
+                # OpenRouter has native async streaming — check via DB flag
+                _is_openrouter_async_stream = False
+                try:
+                    from src.services.gateway_registry import get_gateway_registry
+
+                    _reg = get_gateway_registry()
+                    _is_openrouter_async_stream = provider_name == "openrouter" and _reg.get(
+                        provider_name, {}
+                    ).get("async_streaming", False)
+                except Exception:
+                    _is_openrouter_async_stream = provider_name == "openrouter"
+
+                if _is_openrouter_async_stream:
+                    # OpenRouter supports native async streaming
                     stream = await make_openrouter_request_openai_stream_async(
                         messages, model_id, **kwargs
                     )
