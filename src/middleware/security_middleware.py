@@ -797,6 +797,10 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             and request.headers.get("X-Internal-Source") == "live-test"
             and secrets.compare_digest(_incoming_key, _admin_key_env)
         )
+        # Expose to downstream route handlers so they can skip rate limiting.
+        # Validation already happened above (ADMIN_API_KEY comparison), so
+        # route handlers can trust this flag without re-checking the header.
+        request.state.is_live_test = _is_internal_live_test
 
         # Proceed to next middleware/app logic
         start_time = time.time()

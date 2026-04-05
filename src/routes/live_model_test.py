@@ -100,7 +100,11 @@ def _get_model_id(model: dict) -> str:
     return model.get("id", model.get("provider_model_id", "unknown"))
 
 
-def _should_skip(model: dict) -> str | None:
+def _should_skip(model: dict, skip_unhealthy: bool = True) -> str | None:
+    # Skip known-down models before any network call (cheapest check first)
+    if skip_unhealthy and model.get("health_status", "").lower() == "down":
+        return "health_status: down"
+
     model_id = _get_model_id(model).lower()
     modality = model.get("modality", "").lower()
     if modality and modality in SKIP_MODALITIES:
@@ -146,13 +150,14 @@ async def _test_single_model(
     model: dict,
     timeout_s: float,
     semaphore: asyncio.Semaphore,
+    skip_unhealthy: bool = True,
 ) -> ModelTestResult:
     """Send a minimal chat completion to one model via the gateway."""
     model_id = _get_model_id(model)
     gateway = model.get("source_gateway", model.get("provider_slug", "unknown"))
     provider = model.get("provider_slug", gateway)
 
-    skip_reason = _should_skip(model)
+    skip_reason = _should_skip(model, skip_unhealthy)
     if skip_reason:
         return ModelTestResult(
             model_id=model_id,
@@ -169,13 +174,17 @@ async def _test_single_model(
         "temperature": 0,
     }
 
+    # Enforce a hard total timeout. httpx's default is per-phase (connect, read, write
+    # each get their own timeout), which allows a slow server to exceed the intended cap.
+    total_timeout = httpx.Timeout(total=timeout_s, connect=min(10.0, timeout_s))
+
     async with semaphore:
         start = time.monotonic()
         try:
             resp = await client.post(
                 "/v1/chat/completions",
                 json=payload,
-                timeout=timeout_s,
+                timeout=total_timeout,
             )
             latency = (time.monotonic() - start) * 1000
 
@@ -279,6 +288,7 @@ async def run_live_model_test(
     limit: int = Query(50, ge=0, le=5000, description="Max models to test (default 50, max 5000)"),
     concurrency: int = Query(10, ge=1, le=20, description="Parallel requests"),
     timeout: float = Query(15.0, ge=5, le=60, description="Per-model timeout (s)"),
+    skip_unhealthy: bool = Query(True, description="Skip models with health_status=down"),
     admin_user: dict = Depends(require_admin),
 ) -> LiveTestReport:
     """
@@ -292,20 +302,18 @@ async def run_live_model_test(
     """
     import os
 
-    from src.config.config import Config
-
     # Use the admin's own API key (already authenticated)
     admin_api_key = admin_user.get("api_key", "")
     if not admin_api_key:
         raise HTTPException(status_code=400, detail="Admin user has no API key")
 
-    # Determine base URL for self-calls
-    # Railway sets PORT; Vercel has its own routing
+    # Determine base URL for self-calls.
+    # IMPORTANT: Do NOT use BASE_URL here — that is the external public URL which routes
+    # through Cloudflare, causing circular 502 errors. Self-calls must stay internal.
+    # LIVE_TEST_BASE_URL can be set to a Railway private URL if needed; otherwise
+    # localhost:{PORT} is used, which is always reachable within the same container.
     port = os.environ.get("PORT", "8000")
-    base_url = os.environ.get(
-        "BASE_URL",
-        getattr(Config, "BASE_URL", None) or f"http://localhost:{port}",
-    )
+    base_url = os.environ.get("LIVE_TEST_BASE_URL") or f"http://localhost:{port}"
 
     logger.info(
         "Admin %s triggered live model test (gateway=%s, provider=%s, limit=%s)",
@@ -338,7 +346,7 @@ async def run_live_model_test(
     headers["X-Internal-Source"] = "live-test"
 
     async with httpx.AsyncClient(base_url=base_url, headers=headers) as client:
-        tasks = [_test_single_model(client, m, timeout, semaphore) for m in models]
+        tasks = [_test_single_model(client, m, timeout, semaphore, skip_unhealthy) for m in models]
         results = await asyncio.gather(*tasks)
 
     duration = round(time.monotonic() - start_time, 1)
