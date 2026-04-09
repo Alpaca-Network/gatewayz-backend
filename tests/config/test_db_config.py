@@ -34,7 +34,7 @@ class TestDatabaseConfig:
         assert config.db_user == "gatewayz"
         assert config.db_password == "gatewayz_dev_password"
         assert config.db_min_connections == 1
-        assert config.db_max_connections == 10
+        assert config.db_max_connections == 20
 
     def test_custom_configuration(self, monkeypatch):
         """Test custom database configuration from environment"""

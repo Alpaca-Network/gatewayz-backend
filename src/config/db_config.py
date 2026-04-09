@@ -41,7 +41,9 @@ class DatabaseConfig:
 
         # Connection pool settings
         self.db_min_connections = int(os.environ.get("DB_MIN_CONNECTIONS", "1"))
-        self.db_max_connections = int(os.environ.get("DB_MAX_CONNECTIONS", "10"))
+        # FREEZE FIX: Increased from 10 → 20. psycopg2 ThreadedConnectionPool.getconn()
+        # blocks indefinitely when the pool is exhausted; 10 connections is too low under load.
+        self.db_max_connections = int(os.environ.get("DB_MAX_CONNECTIONS", "20"))
 
         # Connection pool instance (type hint is Optional[Any] when psycopg2 not available)
         self._connection_pool = None

@@ -852,6 +852,26 @@ queue_size = get_or_create_metric(
 
 # ==================== Redis INFO Metrics ====================
 # Scraped from Redis INFO on every Prometheus /metrics request.
+# ---------------------------------------------------------------------------
+# Event Loop Health
+# ---------------------------------------------------------------------------
+# Measures how quickly the asyncio event loop executes a no-op coroutine.
+# High lag (>100ms) indicates the loop is saturated — typically caused by:
+#   - Hung streaming provider connections holding the loop
+#   - Blocking sync code (time.sleep, blocking I/O) called from async context
+#   - Thread pool exhaustion causing run_in_executor() to queue indefinitely
+#
+# noDataState: Alerting on the Grafana alert means a completely frozen server
+# (where the metric stops appearing in Prometheus) still pages on-call.
+event_loop_lag_seconds = get_or_create_metric(
+    Gauge,
+    "gatewayz_event_loop_lag_seconds",
+    "Time (seconds) between scheduling a no-op coroutine and its execution — measures asyncio event loop backpressure",
+)
+
+# ---------------------------------------------------------------------------
+# Redis Health (scraped from Redis INFO on each /metrics request)
+# ---------------------------------------------------------------------------
 # Metric names match the standard redis_exporter convention so
 # the Grafana Redis-Cache dashboard queries work out of the box.
 #

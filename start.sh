@@ -6,22 +6,36 @@ if [ -d "/opt/venv" ]; then
     source /opt/venv/bin/activate
 fi
 
-echo "🔍 Checking dependency versions..."
+# FREEZE FIX: Version-check reinstall is only needed when packages are genuinely
+# out of sync (e.g. after a bad base image layer). We gate it behind a stamp file
+# so subsequent container restarts (Railway keeps the container alive and just
+# re-runs start.sh on crash/deploy) skip the 30-60s pip install entirely.
+# The stamp records the required versions; if requirements change, update REQUIRED_VERSIONS.
+REQUIRED_VERSIONS="httpx==0.27.0,openai==1.44.0"
+STAMP_FILE="/tmp/.dep_versions_ok"
 
-# Check current httpx version
-HTTPX_VERSION=$(python -c "import httpx; print(httpx.__version__)" 2>/dev/null || echo "not found")
-OPENAI_VERSION=$(python -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not found")
+needs_reinstall=false
 
-echo "Current httpx version: $HTTPX_VERSION"
-echo "Current openai version: $OPENAI_VERSION"
+if [ ! -f "$STAMP_FILE" ] || [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$REQUIRED_VERSIONS" ]; then
+    echo "🔍 Checking dependency versions..."
+    HTTPX_VERSION=$(python -c "import httpx; print(httpx.__version__)" 2>/dev/null || echo "not found")
+    OPENAI_VERSION=$(python -c "import openai; print(openai.__version__)" 2>/dev/null || echo "not found")
 
-# If versions are wrong, reinstall correct ones
-if [ "$HTTPX_VERSION" != "0.27.0" ] || [ "$OPENAI_VERSION" != "1.44.0" ]; then
-    echo "⚠️  Wrong versions detected! Fixing..."
-    python -m pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.44.0
-    echo "✅ Dependencies fixed!"
+    echo "Current httpx version: $HTTPX_VERSION"
+    echo "Current openai version: $OPENAI_VERSION"
+
+    if [ "$HTTPX_VERSION" != "0.27.0" ] || [ "$OPENAI_VERSION" != "1.44.0" ]; then
+        echo "⚠️  Wrong versions detected! Fixing..."
+        python -m pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.44.0
+        echo "✅ Dependencies fixed!"
+    else
+        echo "✅ Correct versions already installed"
+    fi
+
+    # Write stamp so next restart skips this check
+    echo "$REQUIRED_VERSIONS" > "$STAMP_FILE"
 else
-    echo "✅ Correct versions already installed"
+    echo "✅ Dependency versions verified (cached)"
 fi
 
 # Set PYTHONPATH to include src directory

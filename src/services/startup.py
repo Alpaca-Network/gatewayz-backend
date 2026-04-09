@@ -624,6 +624,39 @@ async def lifespan(app):
             init_model_catalog_refresh_background(), name="init_model_catalog_refresh"
         )
 
+        # FREEZE FIX: Event loop lag monitor — measures how long the event loop
+        # takes to execute a no-op coroutine. If this value exceeds ~500ms it means
+        # the loop is saturated (stuck streaming request, blocked thread pool, etc.).
+        # The metric `gatewayz_event_loop_lag_seconds` is scraped by Prometheus;
+        # `noDataState: Alerting` on the Grafana alert means a frozen server
+        # (where the metric disappears entirely) still pages on-call.
+        async def event_loop_lag_monitor():
+            import time as _time
+
+            try:
+                from src.services.prometheus_metrics import event_loop_lag_seconds
+            except ImportError:
+                logger.warning("event_loop_lag_seconds metric not found — skipping lag monitor")
+                return
+            try:
+                while True:
+                    t0 = _time.monotonic()
+                    await asyncio.sleep(0)  # Yield to event loop; measure how long until we resume
+                    lag = _time.monotonic() - t0
+                    event_loop_lag_seconds.set(lag)
+                    if lag > 0.1:
+                        logger.warning(
+                            f"[EVENT LOOP LAG] {lag*1000:.1f}ms — event loop is under pressure"
+                        )
+                    await asyncio.sleep(5)  # Check every 5 seconds
+            except Exception as e:
+                # FREEZE FIX: Prevent silent task death — an unhandled exception would kill
+                # the monitor and leave the Grafana alert dark (noDataState: Alerting would
+                # then fire a false positive). Log loudly so it's visible in Loki.
+                logger.error(f"[EVENT LOOP LAG] Monitor task crashed: {e}", exc_info=True)
+
+        _create_background_task(event_loop_lag_monitor(), name="event_loop_lag_monitor")
+
         logger.info("=" * 80)
         logger.info("✅ GATEWAYZ API STARTUP - COMPLETE")
         logger.info("All monitoring and health services started successfully")
