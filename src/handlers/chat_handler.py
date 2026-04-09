@@ -993,7 +993,6 @@ class ChatInferenceHandler:
                         logger.warning(
                             f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})"
                         )
-                        finish_reason = "client_disconnected"
                         break
 
                     # FREEZE FIX: Wall-clock deadline — abort if provider stream exceeds limit.
@@ -1004,7 +1003,6 @@ class ChatInferenceHandler:
                             f"{_MAX_STREAM_DURATION}s ({_elapsed:.1f}s elapsed) for "
                             f"provider={provider_used}, model={provider_model_id}. Terminating."
                         )
-                        finish_reason = "stream_timeout"
                         break
 
                     chunk_count += 1
@@ -1022,9 +1020,6 @@ class ChatInferenceHandler:
 
                             if content:
                                 accumulated_content += content
-
-                            if chunk_finish_reason:
-                                finish_reason = chunk_finish_reason  # noqa: F841
 
                             # Extract usage from final chunk if available
                             if hasattr(provider_chunk, "usage") and provider_chunk.usage:
