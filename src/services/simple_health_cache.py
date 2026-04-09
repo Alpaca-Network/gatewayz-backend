@@ -108,11 +108,13 @@ class SimpleHealthCache:
                     # which can make /metrics and /health unreachable for 100-200ms per retry.
                     try:
                         import asyncio as _asyncio
+
                         _asyncio.get_running_loop()
                         # Running inside async context — skip the delay to avoid blocking.
                     except RuntimeError:
                         # No running event loop — safe to sleep in this thread.
                         import time as _time
+
                         _time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
                     continue
 
@@ -183,9 +185,11 @@ class SimpleHealthCache:
                     # FREEZE FIX: Same as set_cache — skip sleep in async context.
                     try:
                         import asyncio as _asyncio
+
                         _asyncio.get_running_loop()
                     except RuntimeError:
                         import time as _time
+
                         _time.sleep(0.1 * (attempt + 1))
                     continue
 
