@@ -319,7 +319,80 @@ def get_pool_stats() -> dict[str, int]:
         }
 
 
-# Provider-specific helper functions
+# ---------------------------------------------------------------------------
+# Generic DB-driven pooled client (Phase 3)
+# ---------------------------------------------------------------------------
+
+
+def get_provider_pooled_client(slug: str) -> OpenAI:
+    """Return a pooled OpenAI-compat client for *slug*, configured from the DB registry.
+
+    Resolves base_url, api_key, custom headers, and timeout from the gateway
+    registry (populated by the ``providers`` table).  Raises ``ValueError``
+    when the provider is missing, has no API key, or has no base_url.
+    """
+    from src.services.gateway_registry import get_gateway_registry, get_provider_api_key
+
+    registry = get_gateway_registry()
+    entry = registry.get(slug)
+    if not entry:
+        raise ValueError(f"Provider '{slug}' not found in gateway registry")
+
+    api_key = get_provider_api_key(slug)
+    if not api_key:
+        raise ValueError(f"{slug} API key not configured (env var: {entry.get('api_key_env_var')})")
+
+    base_url = entry.get("base_url")
+    if not base_url:
+        raise ValueError(f"No base_url configured for provider '{slug}'")
+
+    # Resolve templated URLs (e.g. Cloudflare {CLOUDFLARE_ACCOUNT_ID})
+    import re as _re
+
+    placeholders = _re.findall(r"\{(\w+)\}", base_url)
+    for placeholder in placeholders:
+        value = getattr(Config, placeholder, None) or os.environ.get(placeholder)
+        if not value:
+            raise ValueError(
+                f"Template variable '{{{placeholder}}}' in base_url for '{slug}' "
+                f"is not configured in Config or environment"
+            )
+        base_url = base_url.replace(f"{{{placeholder}}}", value)
+
+    # Resolve timeout
+    timeout = None
+    timeout_ms = entry.get("custom_timeout_ms")
+    if timeout_ms:
+        timeout = httpx.Timeout(
+            connect=10.0,
+            read=timeout_ms / 1000.0,
+            write=10.0,
+            pool=5.0,
+        )
+
+    # Resolve custom headers
+    raw_headers = entry.get("default_headers") or {}
+    headers = {}
+    for key, value in raw_headers.items():
+        # Resolve sentinel placeholders (e.g. __OPENROUTER_SITE_URL__)
+        if isinstance(value, str) and value.startswith("__") and value.endswith("__"):
+            attr_name = value.strip("_")
+            headers[key] = getattr(Config, attr_name, "") or ""
+        else:
+            headers[key] = value
+
+    return get_pooled_client(
+        provider=slug,
+        base_url=base_url,
+        api_key=api_key,
+        default_headers=headers if headers else None,
+        timeout=timeout,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Provider-specific helper functions (thin wrappers for backward compat)
+# ---------------------------------------------------------------------------
 def get_openrouter_pooled_client() -> OpenAI:
     """Get pooled client for OpenRouter."""
     if not Config.OPENROUTER_API_KEY:
@@ -645,112 +718,6 @@ def get_nosana_pooled_client() -> OpenAI:
     )
 
 
-# Butter.dev timeout (slightly shorter since caching should be fast)
-# Only configure timeout when Butter.dev is enabled
-BUTTER_DEV_TIMEOUT = httpx.Timeout(
-    connect=5.0,
-    read=float(Config.BUTTER_DEV_TIMEOUT) if Config.BUTTER_DEV_ENABLED else 30.0,
-    write=10.0,
-    pool=5.0,
-)
-
-
-def get_butter_pooled_client(
-    target_provider: str,
-    target_api_key: str,
-    target_base_url: str | None = None,
-) -> OpenAI:
-    """
-    Get a pooled client that routes through Butter.dev caching proxy.
-
-    Butter.dev is a caching layer for LLM APIs that identifies patterns in
-    responses and serves cached responses to reduce costs and latency.
-
-    Args:
-        target_provider: The actual provider to route to (e.g., 'openrouter')
-        target_api_key: The API key for the target provider
-        target_base_url: Optional base URL override (Butter.dev needs this to route correctly)
-
-    Returns:
-        OpenAI client configured to route through Butter.dev
-
-    Raises:
-        ValueError: If Butter.dev is not enabled
-
-    See: https://butter.dev
-
-    Note:
-        Butter.dev acts as a transparent proxy. It uses the target provider's
-        API key and routes the request through its caching layer before
-        forwarding to the actual provider.
-    """
-    if not Config.BUTTER_DEV_ENABLED:
-        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
-
-    # Use a unique cache key that includes the target provider
-    # This ensures we don't accidentally share connections between providers
-    cache_provider = f"butter-{target_provider}"
-
-    # Butter.dev headers to help with routing and analytics
-    default_headers = {
-        "X-Butter-Target-Provider": target_provider,
-    }
-
-    # If we have a target base URL, include it so Butter.dev knows where to route
-    if target_base_url:
-        default_headers["X-Butter-Target-Base-URL"] = target_base_url
-
-    return get_pooled_client(
-        provider=cache_provider,
-        base_url=Config.BUTTER_DEV_BASE_URL,
-        api_key=target_api_key,  # Use the target provider's API key
-        default_headers=default_headers,
-        timeout=BUTTER_DEV_TIMEOUT,
-    )
-
-
-def get_butter_pooled_async_client(
-    target_provider: str,
-    target_api_key: str,
-    target_base_url: str | None = None,
-) -> AsyncOpenAI:
-    """
-    Get a pooled async client that routes through Butter.dev caching proxy.
-
-    Async version of get_butter_pooled_client for use with async request handlers.
-
-    Args:
-        target_provider: The actual provider to route to
-        target_api_key: The API key for the target provider
-        target_base_url: Optional base URL override
-
-    Returns:
-        AsyncOpenAI client configured to route through Butter.dev
-
-    Raises:
-        ValueError: If Butter.dev is not enabled
-    """
-    if not Config.BUTTER_DEV_ENABLED:
-        raise ValueError("Butter.dev is not enabled (set BUTTER_DEV_ENABLED=true)")
-
-    cache_provider = f"butter-{target_provider}"
-
-    default_headers = {
-        "X-Butter-Target-Provider": target_provider,
-    }
-
-    if target_base_url:
-        default_headers["X-Butter-Target-Base-URL"] = target_base_url
-
-    return get_pooled_async_client(
-        provider=cache_provider,
-        base_url=Config.BUTTER_DEV_BASE_URL,
-        api_key=target_api_key,
-        default_headers=default_headers,
-        timeout=BUTTER_DEV_TIMEOUT,
-    )
-
-
 # =============================================================================
 # CONNECTION PRE-WARMING
 # =============================================================================
@@ -770,8 +737,8 @@ def warmup_provider_connections() -> dict[str, str]:
     Returns:
         Dict mapping provider names to their warmup status ("ok" or error message)
     """
-    # Providers to pre-warm, ordered by typical traffic volume
-    providers_to_warm = [
+    # Fallback warmup list (used if registry unavailable)
+    _FALLBACK_WARMUP = [
         ("openai", get_openai_pooled_client),
         ("anthropic", get_anthropic_pooled_client),
         ("openrouter", get_openrouter_pooled_client),
@@ -782,23 +749,45 @@ def warmup_provider_connections() -> dict[str, str]:
         ("xai", get_xai_pooled_client),
     ]
 
+    # Try DB-driven warmup: warm all providers that have a base_url
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        slugs_to_warm = [
+            slug
+            for slug, entry in registry.items()
+            if entry.get("base_url") and entry.get("api_key_env_var")
+        ]
+    except Exception:
+        slugs_to_warm = None
+
     results = {}
 
-    for provider_name, get_client_fn in providers_to_warm:
-        try:
-            # Creating the client establishes the connection
-            client = get_client_fn()
-            # The client is now in the pool with an active connection
-            results[provider_name] = "ok"
-            logger.info(f"✅ Warmed up connection to {provider_name}")
-        except ValueError as e:
-            # API key not configured - expected for some providers
-            results[provider_name] = f"skipped: {e}"
-            logger.debug(f"⏭️  Skipping {provider_name} warmup: {e}")
-        except Exception as e:
-            # Connection error - log but don't fail startup
-            results[provider_name] = f"error: {e}"
-            logger.warning(f"⚠️  Failed to warm up {provider_name}: {e}")
+    if slugs_to_warm is not None:
+        for slug in slugs_to_warm:
+            try:
+                get_provider_pooled_client(slug)
+                results[slug] = "ok"
+                logger.info(f"✅ Warmed up connection to {slug}")
+            except ValueError as e:
+                results[slug] = f"skipped: {e}"
+                logger.debug(f"⏭️  Skipping {slug} warmup: {e}")
+            except Exception as e:
+                results[slug] = f"error: {e}"
+                logger.warning(f"⚠️  Failed to warm up {slug}: {e}")
+    else:
+        for provider_name, get_client_fn in _FALLBACK_WARMUP:
+            try:
+                get_client_fn()
+                results[provider_name] = "ok"
+                logger.info(f"✅ Warmed up connection to {provider_name}")
+            except ValueError as e:
+                results[provider_name] = f"skipped: {e}"
+                logger.debug(f"⏭️  Skipping {provider_name} warmup: {e}")
+            except Exception as e:
+                results[provider_name] = f"error: {e}"
+                logger.warning(f"⚠️  Failed to warm up {provider_name}: {e}")
 
     return results
 

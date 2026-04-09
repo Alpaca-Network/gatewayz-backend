@@ -36,38 +36,11 @@ from src.security.security import (
 
 
 class TestAPIKeyHashing:
-    """Test API key hashing"""
+    """Test API key hashing
 
-    def test_hash_api_key_success(self):
-        """Successfully hash an API key"""
-        api_key = "gw_test_key_123456789"
-
-        hashed = hash_api_key(api_key)
-
-        assert hashed is not None
-        assert hashed != api_key
-        assert isinstance(hashed, str)
-        assert len(hashed) == 64  # SHA256 hex digest length
-
-    def test_hash_api_key_deterministic(self):
-        """Same API key should produce same hash"""
-        api_key = "gw_test_key_123456789"
-
-        hash1 = hash_api_key(api_key)
-        hash2 = hash_api_key(api_key)
-
-        # Same input should produce same hash
-        assert hash1 == hash2
-
-    def test_hash_different_keys_different_hashes(self):
-        """Different API keys should produce different hashes"""
-        key1 = "gw_test_key_123"
-        key2 = "gw_test_key_456"
-
-        hash1 = hash_api_key(key1)
-        hash2 = hash_api_key(key2)
-
-        assert hash1 != hash2
+    Note: Basic hashing tests (success, deterministic, different-keys) moved to
+    tests/conceptual_model/test_cm01_auth_api_key_security.py (CM-1.3).
+    """
 
     def test_hash_api_key_requires_salt(self):
         """Hashing should require API_GATEWAY_SALT"""
@@ -143,52 +116,12 @@ class TestAPIKeyGeneration:
 
 
 class TestIPAllowlist:
-    """Test IP allowlist validation"""
+    """Test IP allowlist validation
 
-    def test_validate_ip_exact_match(self):
-        """Validate IP with exact match"""
-        client_ip = "192.168.1.100"
-        allowed_ips = ["192.168.1.100", "10.0.0.1"]
-
-        result = validate_ip_allowlist(client_ip, allowed_ips)
-
-        assert result is True
-
-    def test_validate_ip_not_in_allowlist(self):
-        """Validate IP not in allowlist"""
-        client_ip = "192.168.1.200"
-        allowed_ips = ["192.168.1.100", "10.0.0.1"]
-
-        result = validate_ip_allowlist(client_ip, allowed_ips)
-
-        assert result is False
-
-    def test_validate_ip_cidr_range(self):
-        """Validate IP in CIDR range"""
-        client_ip = "192.168.1.100"
-        allowed_ips = ["192.168.1.0/24"]
-
-        result = validate_ip_allowlist(client_ip, allowed_ips)
-
-        assert result is True
-
-    def test_validate_ip_outside_cidr_range(self):
-        """Validate IP outside CIDR range"""
-        client_ip = "192.168.2.100"
-        allowed_ips = ["192.168.1.0/24"]
-
-        result = validate_ip_allowlist(client_ip, allowed_ips)
-
-        assert result is False
-
-    def test_validate_ip_empty_allowlist(self):
-        """Empty allowlist should allow all IPs"""
-        client_ip = "192.168.1.100"
-        allowed_ips = []
-
-        result = validate_ip_allowlist(client_ip, allowed_ips)
-
-        assert result is True
+    Note: Core IP allowlist tests (exact match, not in list, CIDR, outside CIDR,
+    empty allowlist) moved to tests/conceptual_model/test_cm01_auth_api_key_security.py
+    (CM-1.9 and CM-1.10).
+    """
 
     def test_validate_ip_mixed_formats(self):
         """Validate IP with mixed exact and CIDR formats"""
@@ -198,58 +131,6 @@ class TestIPAllowlist:
         result = validate_ip_allowlist(client_ip, allowed_ips)
 
         assert result is True
-
-
-class TestDomainReferrers:
-    """Test domain referrer validation"""
-
-    def test_validate_domain_exact_match(self):
-        """Validate domain with exact match"""
-        referer = "https://example.com/page"
-        allowed_domains = ["example.com", "test.com"]
-
-        result = validate_domain_referrers(referer, allowed_domains)
-
-        assert result is True
-
-    def test_validate_domain_with_subdomain(self):
-        """Validate subdomain"""
-        referer = "https://api.example.com/endpoint"
-        allowed_domains = ["*.example.com", "test.com"]
-
-        result = validate_domain_referrers(referer, allowed_domains)
-
-        # Result depends on implementation - may need wildcard support
-        # For now, just test it doesn't crash
-        assert isinstance(result, bool)
-
-    def test_validate_domain_not_in_allowlist(self):
-        """Validate domain not in allowlist"""
-        referer = "https://malicious.com/page"
-        allowed_domains = ["example.com", "test.com"]
-
-        result = validate_domain_referrers(referer, allowed_domains)
-
-        assert result is False
-
-    def test_validate_domain_empty_allowlist(self):
-        """Empty allowlist should allow all domains"""
-        referer = "https://example.com/page"
-        allowed_domains = []
-
-        result = validate_domain_referrers(referer, allowed_domains)
-
-        assert result is True
-
-    def test_validate_domain_no_referer(self):
-        """No referer should be handled gracefully"""
-        referer = ""
-        allowed_domains = ["example.com"]
-
-        result = validate_domain_referrers(referer, allowed_domains)
-
-        # Should return False or handle gracefully
-        assert isinstance(result, bool)
 
 
 class TestSecurityConstants:

@@ -193,7 +193,7 @@ def get_model_card(model_id: str) -> str | None:
         logger.info(f"Fetching model card for: {model_id}")
 
         # Download the README file from the model repo
-        readme_path = hf_hub_download(
+        readme_path = hf_hub_download(  # nosec B615 - downloads README.md only, no code execution
             repo_id=model_id,
             filename="README.md",
             repo_type="model",

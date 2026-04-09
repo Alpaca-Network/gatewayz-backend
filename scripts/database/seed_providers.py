@@ -22,11 +22,9 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.config.supabase_config import get_supabase_client
-from src.routes.catalog import GATEWAY_REGISTRY
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -70,7 +68,9 @@ def transform_gateway_to_provider(gateway_id: str, gateway_config: dict) -> dict
         "name": gateway_config["name"],
         "slug": gateway_id,
         "description": f"{gateway_config['name']} - {gateway_config.get('priority', 'standard')} priority gateway",
-        "api_key_env_var": PROVIDER_ENV_VAR_MAP.get(gateway_id, f"{gateway_id.upper().replace('-', '_')}_API_KEY"),
+        "api_key_env_var": PROVIDER_ENV_VAR_MAP.get(
+            gateway_id, f"{gateway_id.upper().replace('-', '_')}_API_KEY"
+        ),
         "supports_streaming": True,  # Most providers support streaming
         "is_active": True,
         "site_url": gateway_config.get("site_url"),
@@ -79,7 +79,7 @@ def transform_gateway_to_provider(gateway_id: str, gateway_config: dict) -> dict
             "priority": gateway_config.get("priority", "slow"),
             "icon": gateway_config.get("icon"),
             "aliases": gateway_config.get("aliases", []),
-        }
+        },
     }
 
 
@@ -94,6 +94,9 @@ def seed_providers(dry_run: bool = False) -> dict:
         Dictionary with sync results
     """
     try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        GATEWAY_REGISTRY = get_gateway_registry()
         client = get_supabase_client()
 
         logger.info(f"🔄 Syncing {len(GATEWAY_REGISTRY)} providers from GATEWAY_REGISTRY")
@@ -112,14 +115,15 @@ def seed_providers(dry_run: bool = False) -> dict:
                 "success": True,
                 "dry_run": True,
                 "providers_synced": len(providers_to_upsert),
-                "providers": [p["slug"] for p in providers_to_upsert]
+                "providers": [p["slug"] for p in providers_to_upsert],
             }
 
         # Upsert all providers (insert or update on conflict)
-        result = client.table("providers").upsert(
-            providers_to_upsert,
-            on_conflict="slug"  # Update if slug already exists
-        ).execute()
+        result = (
+            client.table("providers")
+            .upsert(providers_to_upsert, on_conflict="slug")  # Update if slug already exists
+            .execute()
+        )
 
         synced_count = len(result.data) if result.data else 0
 
@@ -132,16 +136,12 @@ def seed_providers(dry_run: bool = False) -> dict:
         return {
             "success": True,
             "providers_synced": synced_count,
-            "providers": [p["slug"] for p in providers_to_upsert]
+            "providers": [p["slug"] for p in providers_to_upsert],
         }
 
     except Exception as e:
         logger.error(f"❌ Failed to seed providers: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e),
-            "providers_synced": 0
-        }
+        return {"success": False, "error": str(e), "providers_synced": 0}
 
 
 def main():
@@ -149,7 +149,9 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Seed providers from GATEWAY_REGISTRY")
-    parser.add_argument("--dry-run", action="store_true", help="Show what would be done without making changes")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Show what would be done without making changes"
+    )
     args = parser.parse_args()
 
     logger.info("=" * 80)

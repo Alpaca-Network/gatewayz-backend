@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
+from src.config.supabase_config import get_client_for_query
 from src.db.models_catalog_db import bulk_upsert_models
 from src.db.providers_db import (
     create_provider,
@@ -22,7 +23,9 @@ from src.services.canopywave_client import fetch_models_from_canopywave
 from src.services.cerebras_client import fetch_models_from_cerebras
 from src.services.chutes_client import fetch_models_from_chutes
 from src.services.clarifai_client import fetch_models_from_clarifai
-from src.services.cloudflare_workers_ai_client import fetch_models_from_cloudflare_workers_ai
+from src.services.cloudflare_workers_ai_client import (
+    fetch_models_from_cloudflare_workers_ai,
+)
 from src.services.cohere_client import fetch_models_from_cohere
 from src.services.deepinfra_client import fetch_models_from_deepinfra
 from src.services.fal_image_client import fetch_models_from_fal
@@ -40,6 +43,11 @@ from src.services.novita_client import fetch_models_from_novita
 from src.services.onerouter_client import fetch_models_from_onerouter
 from src.services.openai_client import fetch_models_from_openai
 from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.pricing_normalization import (
+    PricingFormat,
+    get_provider_format,
+    normalize_to_per_token,
+)
 from src.services.simplismart_client import fetch_models_from_simplismart
 from src.services.sybil_client import fetch_models_from_sybil
 from src.services.together_client import fetch_models_from_together
@@ -49,9 +57,21 @@ from src.services.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
+# Provider latency tier baseline — defined once at module level so it isn't
+# re-created on every call to extract_capabilities() (called ~17k times per sync).
+# Tier 1 = ultra (<100ms), 2 = fast (<500ms), 3 = standard (default).
+_PROVIDER_TIERS: dict[str, int] = {
+    "groq": 1,
+    "cerebras": 1,
+    "fireworks": 2,
+    "together": 2,
+    "cloudflare-workers-ai": 2,
+}
 
-# Map provider slugs to their fetch functions
-PROVIDER_FETCH_FUNCTIONS = {
+
+# FALLBACK — dynamic loader reads from DB first (Phase 2D).
+# Kept as documented fallback for when DB / importlib lookup fails.
+PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "openrouter": fetch_models_from_openrouter,
     "deepinfra": fetch_models_from_deepinfra,
     "featherless": fetch_models_from_featherless,
@@ -223,10 +243,54 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
         model_id = (model.get("id") or model.get("slug") or "").lower()
         supports_vision = "vision" in model_id or "vl" in model_id
 
+    # --- has_json_mode ---
+    if model.get("has_json_mode") is not None:
+        has_json_mode = bool(model["has_json_mode"])
+    else:
+        supported_params = model.get("supported_parameters") or []
+        has_json_mode = isinstance(supported_params, list) and "response_format" in supported_params
+
+    # --- is_reasoning ---
+    model_id_lower = (model.get("id") or model.get("slug") or "").lower()
+    raw_features = model.get("features") or []
+    is_reasoning = (
+        bool(model.get("is_reasoning"))
+        or any(x in model_id_lower for x in ("o1-", "o3-", "o4-", "-r1", "reasoner", "-thinking"))
+        or "thinking" in raw_features
+    )
+
+    # --- is_free ---
+    is_free = bool(model.get("is_free")) or model_id_lower.endswith(":free")
+
+    # --- max_output_tokens ---
+    max_output_tokens = (
+        model.get("max_output_tokens")
+        or model.get("context_length_output")
+        or (metadata.get("max_output_tokens") if isinstance(metadata, dict) else None)
+    )
+    if max_output_tokens is not None:
+        try:
+            max_output_tokens = int(max_output_tokens)
+        except (TypeError, ValueError):
+            max_output_tokens = None
+
+    # --- latency_tier ---
+    # Use provider slug to assign a baseline tier; individual model p50 data
+    # will be updated later by the health monitoring system.
+    # _PROVIDER_TIERS is defined at module level (not inside this function)
+    # to avoid re-allocating the dict for every model during bulk sync.
+    raw_provider = model.get("provider_slug") or model.get("source_gateway") or ""
+    latency_tier = _PROVIDER_TIERS.get(raw_provider.lower(), 3)
+
     return {
         "supports_streaming": supports_streaming,
         "supports_function_calling": supports_function_calling,
         "supports_vision": supports_vision,
+        "has_json_mode": has_json_mode,
+        "is_reasoning": is_reasoning,
+        "is_free": is_free,
+        "max_output_tokens": max_output_tokens,
+        "latency_tier": latency_tier,
     }
 
 
@@ -308,8 +372,19 @@ def transform_normalized_model_to_db_schema(
             # Store relevant architecture info
             architecture_str = architecture.get("tokenizer") or architecture.get("instruct_type")
 
-        # Extract pricing
+        # Extract pricing and normalize to per-token format
         pricing = extract_pricing(normalized_model)
+
+        # Normalize pricing to per-token if the provider uses a different format
+        # (e.g., per-1M for NEAR, DeepInfra, etc.)
+        # This prevents storing inflated values in metadata.pricing_raw
+        source_gateway = normalized_model.get("source_gateway", provider_slug)
+        provider_format = get_provider_format(source_gateway)
+        if provider_format != PricingFormat.PER_TOKEN:
+            for field in ("prompt", "completion", "image", "request"):
+                if pricing[field] is not None and pricing[field] != Decimal("0"):
+                    normalized_val = normalize_to_per_token(pricing[field], provider_format)
+                    pricing[field] = normalized_val if normalized_val is not None else Decimal("0")
 
         # Extract capabilities
         capabilities = extract_capabilities(normalized_model)
@@ -348,21 +423,30 @@ def transform_normalized_model_to_db_schema(
         #   Used for display purposes only
 
         # Build model data - pricing is stored separately in model_pricing table
-        model_data = {
+        model_data: dict[str, Any] = {
             "provider_id": provider_id,
             "model_name": str(model_name),
             "provider_model_id": str(provider_model_id),
             "description": description,
             "context_length": context_length,
             "modality": modality,
-            # Capabilities
+            # Core capabilities
             "supports_streaming": capabilities["supports_streaming"],
             "supports_function_calling": capabilities["supports_function_calling"],
             "supports_vision": capabilities["supports_vision"],
+            # Extended capabilities (new columns)
+            "has_json_mode": capabilities["has_json_mode"],
+            "is_reasoning": capabilities["is_reasoning"],
+            "is_free": capabilities["is_free"],
+            "latency_tier": capabilities["latency_tier"],
             # Status
             "is_active": True,
             "metadata": metadata,
         }
+        # Only set max_output_tokens when the provider returned a value;
+        # null means "unknown" and the seed migration value should not be overwritten.
+        if capabilities["max_output_tokens"] is not None:
+            model_data["max_output_tokens"] = capabilities["max_output_tokens"]
 
         # Store pricing info in metadata for later sync to model_pricing table
         if any(pricing.values()):
@@ -648,8 +732,10 @@ def sync_provider_models(
                 "models_synced": 0,
             }
 
-        # Get fetch function for this provider
-        fetch_func = PROVIDER_FETCH_FUNCTIONS.get(provider_slug)
+        # Get fetch function for this provider (DB-first, fallback to hardcoded)
+        from src.services.dynamic_provider_loader import get_fetch_models_function
+
+        fetch_func = get_fetch_models_function(provider_slug)
         if not fetch_func:
             return {
                 "success": False,
@@ -735,7 +821,25 @@ def sync_provider_models(
         )
 
         # Sync to database (unless dry run)
+        stale_result: dict[str, Any] = {}
         if not dry_run:
+            # Count existing active models BEFORE upsert for accurate stale detection
+            pre_sync_active_count = 0
+            try:
+                existing_active = (
+                    get_client_for_query(read_only=False)
+                    .table("models")
+                    .select("id", count="exact")
+                    .eq("provider_id", provider["id"])
+                    .eq("is_active", True)
+                    .execute()
+                )
+                pre_sync_active_count = existing_active.count or 0
+            except Exception as count_e:
+                logger.warning(
+                    f"[{provider_slug.upper()}] Failed to count active models: {count_e}"
+                )
+
             logger.info(f"[{provider_slug.upper()}] Starting database sync...")
             db_sync_start = time.time()
             synced_models = bulk_upsert_models(db_models)
@@ -751,6 +855,43 @@ def sync_provider_models(
 
             # Pricing is now synced directly during model sync via metadata.pricing_raw
             # The separate pricing sync service has been deprecated
+
+            # ── Stale model tracking ──────────────────────────────────
+            # Mark models that disappeared from the provider API.
+            # Safety guard: only run if we fetched at least 50% of the
+            # pre-sync active models (avoids mass-deactivation on partial
+            # API failures or rate-limited responses).
+            try:
+                from src.db.models_catalog_db import process_stale_models
+
+                seen_ids = {m["provider_model_id"] for m in db_models if m.get("provider_model_id")}
+
+                if pre_sync_active_count > 0 and len(seen_ids) >= pre_sync_active_count * 0.5:
+                    stale_result = process_stale_models(
+                        provider_id=provider["id"],
+                        seen_provider_model_ids=seen_ids,
+                        deactivation_threshold=3,
+                    )
+                    if stale_result.get("deactivated", 0) > 0:
+                        logger.warning(
+                            f"[{provider_slug.upper()}] Stale model cleanup | "
+                            f"Reset: {stale_result['reset']} | "
+                            f"Incremented: {stale_result['incremented']} | "
+                            f"Deactivated: {stale_result['deactivated']}"
+                        )
+                    else:
+                        logger.info(
+                            f"[{provider_slug.upper()}] Stale tracking | "
+                            f"Reset: {stale_result.get('reset', 0)} | "
+                            f"Incremented: {stale_result.get('incremented', 0)}"
+                        )
+                elif pre_sync_active_count > 0:
+                    logger.warning(
+                        f"[{provider_slug.upper()}] Skipping stale detection: "
+                        f"fetched {len(seen_ids)} < 50% of {pre_sync_active_count} existing active models"
+                    )
+            except Exception as stale_e:
+                logger.error(f"[{provider_slug.upper()}] Stale model tracking failed: {stale_e}")
 
             # Invalidate caches to ensure fresh data is served on next request.
             # In batch_mode, only invalidate provider-specific cache (no cascade
@@ -794,7 +935,7 @@ def sync_provider_models(
             f"Overall Rate: {models_per_sec:.0f} models/sec"
         )
 
-        return {
+        result = {
             "success": True,
             "provider": provider_slug,
             "provider_id": provider["id"],
@@ -807,6 +948,9 @@ def sync_provider_models(
             "total_duration": total_duration,
             "models_per_sec": round(models_per_sec, 2),
         }
+        if stale_result:
+            result["stale_tracking"] = stale_result
+        return result
 
     except Exception as e:
         logger.error(f"Error syncing models for {provider_slug}: {e}", exc_info=True)
@@ -843,9 +987,22 @@ def sync_all_providers(
         if provider_slugs:
             providers_to_sync = provider_slugs
         else:
-            # Use all providers that have fetch functions, minus skipped ones
+            # Use all active providers with fetch functions, minus skipped ones
             skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
-            all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            try:
+                from src.db.providers_db import get_active_provider_slugs
+                from src.services.gateway_registry import get_gateway_registry
+
+                all_providers = get_active_provider_slugs()
+                registry = get_gateway_registry()
+                all_providers = [
+                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", False)
+                ]
+                if not all_providers:
+                    logger.info("DB returned zero fetchable providers; nothing to sync")
+            except Exception:
+                logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
             providers_to_sync = [p for p in all_providers if p not in skip_set]
             if skip_set:
                 logger.info(

@@ -1658,9 +1658,26 @@ async def check_all_gateways():
 
     except Exception as e:
         logger.error(f"Failed to retrieve gateway health from cache: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to retrieve gateway health: {str(e)}"
-        ) from e
+        # Return graceful empty response instead of 500
+        # (matches /health/models pattern — never crash the admin dashboard)
+        return {
+            "success": False,
+            "data": {},
+            "summary": {
+                "total_gateways": 0,
+                "healthy": 0,
+                "degraded": 0,
+                "unhealthy": 0,
+                "unconfigured": 0,
+                "overall_health_percentage": 0,
+            },
+            "timestamp": datetime.now(UTC).isoformat(),
+            "metadata": {
+                "cache_age_seconds": None,
+                "data_source": "error-fallback",
+                "error": str(e),
+            },
+        }
 
 
 @router.get("/health/gateways/dashboard", response_class=HTMLResponse, tags=["health"])

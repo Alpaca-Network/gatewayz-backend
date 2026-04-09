@@ -161,9 +161,19 @@ class GrafanaMetricsService:
         except Exception:
             pass
 
-        # Synthetic model inference metrics
+        # Synthetic model inference metrics — use DB-driven model names when available
+        try:
+            from src.services.model_capabilities_cache import get_models_by_latency_tier
+
+            _db_models = get_models_by_latency_tier(3)[:5]
+        except Exception:
+            _db_models = []
         providers = ["openai", "anthropic", "google", "openrouter", "fireworks"]
-        models = ["gpt-4", "claude-3", "gemini-pro", "llama-3", "mixtral"]
+        models = (
+            _db_models
+            if len(_db_models) > 0
+            else ["gpt-4", "claude-3", "gemini-pro", "llama-3", "mixtral"]
+        )
 
         for provider in providers:
             for model in models:

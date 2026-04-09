@@ -173,32 +173,33 @@ class CircuitBreaker:
             self.state = CircuitBreakerState.OPEN
 
 
+_DEFAULT_FALLBACK_MAPPINGS = {
+    "gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo", "claude-3-opus", "claude-3-sonnet"],
+    "gpt-4-turbo": ["gpt-4", "gpt-3.5-turbo", "claude-3-opus"],
+    "gpt-3.5-turbo": ["gpt-4", "gpt-4-turbo", "claude-3-sonnet"],
+    "claude-3-opus": ["gpt-4", "claude-3-sonnet", "gpt-4-turbo"],
+    "claude-3-sonnet": ["claude-3-opus", "gpt-3.5-turbo", "gpt-4"],
+    "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
+    "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
+}
+
+
 class ModelAvailabilityService:
     """Enhanced model availability service"""
 
     def __init__(self):
         self.availability_cache: dict[str, ModelAvailability] = {}
         self.circuit_breakers: dict[str, CircuitBreaker] = {}
-        self.fallback_mappings: dict[str, list[str]] = {}
         self.config = AvailabilityConfig()
         self.monitoring_active = False
         self._monitoring_task: asyncio.Task | None = None
 
-        # Load fallback mappings
-        self._load_fallback_mappings()
+    @property
+    def fallback_mappings(self) -> dict[str, list[str]]:
+        """Get fallback model mappings, re-reading from config on each access."""
+        from src.db.system_config import get_config
 
-    def _load_fallback_mappings(self):
-        """Load fallback model mappings"""
-        # Define fallback mappings for common models
-        self.fallback_mappings = {
-            "gpt-4": ["gpt-4-turbo", "gpt-3.5-turbo", "claude-3-opus", "claude-3-sonnet"],
-            "gpt-4-turbo": ["gpt-4", "gpt-3.5-turbo", "claude-3-opus"],
-            "gpt-3.5-turbo": ["gpt-4", "gpt-4-turbo", "claude-3-sonnet"],
-            "claude-3-opus": ["gpt-4", "claude-3-sonnet", "gpt-4-turbo"],
-            "claude-3-sonnet": ["claude-3-opus", "gpt-3.5-turbo", "gpt-4"],
-            "llama-3-70b": ["llama-3-8b", "claude-3-sonnet", "gpt-3.5-turbo"],
-            "llama-3-8b": ["llama-3-70b", "gpt-3.5-turbo", "claude-3-sonnet"],
-        }
+        return get_config("model_fallback_mappings", _DEFAULT_FALLBACK_MAPPINGS)
 
     async def start_monitoring(self):
         """Start availability monitoring"""

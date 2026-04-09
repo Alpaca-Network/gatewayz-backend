@@ -200,24 +200,8 @@ async def test_minute_token_limit_local(mod, fake_fallback):
     assert r2.remaining_tokens == 0
 
 
-# -------------------- Fail-open behavior on unexpected exception --------------------
-
-
-@pytest.mark.anyio
-async def test_fail_open_on_fallback_exception(monkeypatch, mod, fake_fallback):
-    limiter = mod.SlidingWindowRateLimiter(redis_client=None)
-    cfg = mod.RateLimitConfig(
-        burst_limit=50, concurrency_limit=10, requests_per_minute=60, tokens_per_minute=10000
-    )
-
-    async def boom(*a, **k):
-        raise RuntimeError("fallback exploded")
-
-    fake_fallback.check_rate_limit = boom
-
-    res = await limiter.check_rate_limit("keyZ", cfg, tokens_used=0)
-    assert res.allowed is True
-    assert "allowing request" in (res.reason or "").lower()
+# Note: test_fail_open_on_fallback_exception moved to
+# tests/conceptual_model/test_cm02_rate_limiting.py (CM-2.4.4).
 
 
 # -------------------- RateLimitManager: config load/save and integration --------------------

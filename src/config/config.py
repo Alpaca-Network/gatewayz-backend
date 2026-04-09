@@ -64,7 +64,7 @@ def _get_data_dir() -> Path:
     """Get data directory, using /tmp in serverless environments."""
     # Check if we're in a serverless environment (read-only /var/task)
     if os.path.exists("/var/task") and not os.access("/var/task", os.W_OK):
-        return Path("/tmp/gatewayz_data")
+        return Path("/tmp/gatewayz_data")  # nosec B108 — serverless read-only fs fallback
     return _src_root / "data"
 
 
@@ -89,7 +89,7 @@ def _ensure_directory(path: Path) -> Path:
 
         logger = logging.getLogger(__name__)
         logger.warning(f"Failed to create directory {path}: {e}. Using /tmp fallback.")
-        fallback = Path("/tmp") / path.name
+        fallback = Path("/tmp") / path.name  # nosec B108 — directory creation fallback
         fallback.mkdir(parents=True, exist_ok=True)
         return fallback
     return path
@@ -146,10 +146,12 @@ class Config:
     FEATHERLESS_API_KEY = os.environ.get("FEATHERLESS_API_KEY")
 
     # OpenAI Direct API Configuration
-    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") or os.environ.get("PROVIDER_OPENAI_API_KEY")
 
     # Anthropic Direct API / Autonomous Monitoring
-    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get(
+        "PROVIDER_ANTHROPIC_API_KEY"
+    )
     # Model to use for Anthropic API calls (bug fix generator, autonomous monitoring)
     # Valid models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
@@ -260,23 +262,6 @@ class Config:
         "true",
         "yes",
     }
-
-    # Butter.dev LLM Response Caching Configuration
-    # Butter.dev is a caching proxy for LLM APIs that identifies patterns in responses
-    # and serves cached responses to reduce costs and improve latency.
-    # See: https://butter.dev
-    # Supports both BUTTER_DEV_ENABLED and BUTTER_ENABLED env vars for compatibility
-    BUTTER_DEV_ENABLED: bool = os.environ.get(
-        "BUTTER_DEV_ENABLED", os.environ.get("BUTTER_ENABLED", "false")
-    ).lower() in {"1", "true", "yes"}
-    BUTTER_DEV_BASE_URL: str = os.environ.get(
-        "BUTTER_DEV_BASE_URL", os.environ.get("BUTTER_PROXY_URL", "https://proxy.butter.dev/v1")
-    )
-    BUTTER_DEV_TIMEOUT: int = int(os.environ.get("BUTTER_DEV_TIMEOUT", "30"))
-    # Enable automatic fallback to direct provider on Butter.dev errors
-    BUTTER_DEV_FALLBACK_ENABLED: bool = os.environ.get(
-        "BUTTER_DEV_FALLBACK_ENABLED", "true"
-    ).lower() in {"1", "true", "yes"}
 
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")

@@ -1,7 +1,7 @@
 """
-Unit tests for _MODEL_ID_MAPPINGS in src.services.model_transformations.
+Unit tests for model provider mappings (formerly _MODEL_ID_MAPPINGS).
 
-Covers ~1000 entries across 23 providers:
+Covers entries across all providers loaded from the DB-backed in-memory cache:
 - Structural validity of every mapping dict
 - Type correctness of all keys and values
 - Absence of no-op self-mappings on providers where every entry is a real
@@ -12,10 +12,23 @@ Covers ~1000 entries across 23 providers:
 
 import pytest
 
-from src.services.model_transformations import (
-    _MODEL_ID_MAPPINGS,
-    get_model_id_mapping,
-)
+from src.services.model_mappings_cache import get_all_provider_mappings, load_model_mappings_cache
+from src.services.model_transformations import get_model_id_mapping
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _ensure_mappings_loaded():
+    """Ensure the model mappings cache is populated before any test in this module runs."""
+    load_model_mappings_cache(force=True)
+    if not get_all_provider_mappings():
+        pytest.skip("Model mappings DB unavailable — skipping data-dependent tests")
+
+
+# Module-level snapshot used for parametrize (evaluated after cache is loaded via conftest).
+# Falls back to empty dict if the DB is unavailable in CI.
+def _get_mappings():
+    return get_all_provider_mappings()
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -57,28 +70,26 @@ _KNOWN_PROVIDERS = [
 
 
 # ---------------------------------------------------------------------------
-# 1.  _MODEL_ID_MAPPINGS is a non-empty dict
+# 1.  Provider mappings dict is a non-empty dict
 # ---------------------------------------------------------------------------
 
 
 class TestModelIdMappingsTopLevel:
     def test_mappings_is_dict(self):
-        assert isinstance(_MODEL_ID_MAPPINGS, dict)
+        assert isinstance(get_all_provider_mappings(), dict)
 
     def test_mappings_is_non_empty(self):
-        assert len(_MODEL_ID_MAPPINGS) > 0, "_MODEL_ID_MAPPINGS must not be empty"
+        assert len(get_all_provider_mappings()) > 0, "Provider mappings must not be empty"
 
     def test_expected_provider_count(self):
         # There should be at least 20 providers registered.
-        assert (
-            len(_MODEL_ID_MAPPINGS) >= 20
-        ), f"Expected at least 20 providers, found {len(_MODEL_ID_MAPPINGS)}"
+        mappings = get_all_provider_mappings()
+        assert len(mappings) >= 20, f"Expected at least 20 providers, found {len(mappings)}"
 
     def test_all_known_providers_present(self):
+        mappings = get_all_provider_mappings()
         for provider in _KNOWN_PROVIDERS:
-            assert (
-                provider in _MODEL_ID_MAPPINGS
-            ), f"Provider '{provider}' missing from _MODEL_ID_MAPPINGS"
+            assert provider in mappings, f"Provider '{provider}' missing from provider mappings"
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +98,9 @@ class TestModelIdMappingsTopLevel:
 
 
 class TestPerProviderMappingType:
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_provider_mapping_is_dict(self, provider):
-        mapping = _MODEL_ID_MAPPINGS[provider]
+        mapping = get_all_provider_mappings()[provider]
         assert isinstance(
             mapping, dict
         ), f"Mapping for provider '{provider}' must be a dict, got {type(mapping)}"
@@ -101,17 +112,17 @@ class TestPerProviderMappingType:
 
 
 class TestMappingKeyValueTypes:
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_all_keys_are_non_empty_strings(self, provider):
-        mapping = _MODEL_ID_MAPPINGS[provider]
+        mapping = get_all_provider_mappings()[provider]
         for key in mapping:
             assert (
                 isinstance(key, str) and key
             ), f"Provider '{provider}': key {key!r} is not a non-empty string"
 
-    @pytest.mark.parametrize("provider", list(_MODEL_ID_MAPPINGS.keys()))
+    @pytest.mark.parametrize("provider", list(get_all_provider_mappings().keys()))
     def test_all_values_are_non_empty_strings(self, provider):
-        mapping = _MODEL_ID_MAPPINGS[provider]
+        mapping = get_all_provider_mappings()[provider]
         for key, value in mapping.items():
             assert isinstance(value, str) and value, (
                 f"Provider '{provider}': value {value!r} for key {key!r} "
@@ -127,7 +138,7 @@ class TestMappingKeyValueTypes:
 class TestNoSelfMappings:
     @pytest.mark.parametrize(
         "provider",
-        sorted(_TRANSFORM_ONLY_PROVIDERS & _MODEL_ID_MAPPINGS.keys()),
+        sorted(_TRANSFORM_ONLY_PROVIDERS & get_all_provider_mappings().keys()),
     )
     def test_no_self_mapping_entries(self, provider):
         """
@@ -135,7 +146,7 @@ class TestNoSelfMappings:
         change the model ID.  A mapping where key == value is a no-op and
         likely a mistake.
         """
-        mapping = _MODEL_ID_MAPPINGS[provider]
+        mapping = get_all_provider_mappings()[provider]
         self_maps = [k for k, v in mapping.items() if k == v]
         assert not self_maps, (
             f"Provider '{provider}' has {len(self_maps)} no-op self-mapping(s): " f"{self_maps[:5]}"
@@ -173,8 +184,9 @@ class TestGetModelIdMapping:
         assert result == {}
 
     def test_return_value_matches_direct_lookup(self):
+        mappings = get_all_provider_mappings()
         for provider in _KNOWN_PROVIDERS:
-            assert get_model_id_mapping(provider) == _MODEL_ID_MAPPINGS.get(
+            assert get_model_id_mapping(provider) == mappings.get(
                 provider, {}
             ), f"get_model_id_mapping('{provider}') does not match direct dict lookup"
 

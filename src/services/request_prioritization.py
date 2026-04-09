@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 # Updated: 2025-12-12
 # =============================================================================
 
-# Models with sub-100ms average response time (ultra-fast)
+# Hardcoded fallback — used only when DB cache is unavailable.
+# The authoritative source is the models table (latency_tier=1 column).
 ULTRA_LOW_LATENCY_MODELS: set[str] = {
     "groq/moonshotai/kimi-k2-instruct-0905",  # 29ms
     "groq/openai/gpt-oss-120b",  # 74ms
@@ -35,7 +36,7 @@ LOW_LATENCY_MODELS: set[str] = {
     "groq/llama-3.3-70b-versatile",  # 492ms
     "groq/llama-3.1-70b-versatile",
     "groq/llama-3.1-8b-instant",
-    "groq/mixtral-8x7b-32768",
+    # groq/mixtral-8x7b-32768 REMOVED — Groq retired this model May 2025
     "groq/gemma2-9b-it",
     # OpenRouter fast models
     "arcee-ai/trinity-mini:free",  # 214ms
@@ -67,11 +68,25 @@ PROVIDER_LATENCY_TIERS: dict[str, int] = {
     "huggingface": 4,
     "featherless": 4,
     "near": 4,
-    "alibaba-cloud": 4,
+    "alibaba": 4,
 }
 
 # Default tier for unknown providers
 DEFAULT_PROVIDER_TIER = 3
+
+
+def _get_provider_latency_tier(provider_slug: str) -> int:
+    """Get latency tier for a provider, checking DB first then hardcoded fallback."""
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        entry = registry.get(provider_slug.lower())
+        if entry and entry.get("latency_tier") is not None:
+            return entry["latency_tier"]
+    except Exception as exc:
+        logger.warning("Failed to load latency tier from DB for %s: %s", provider_slug, exc)
+    return PROVIDER_LATENCY_TIERS.get(provider_slug.lower(), DEFAULT_PROVIDER_TIER)
 
 
 class RequestPriority(IntEnum):
@@ -309,7 +324,7 @@ def get_preferred_providers_for_priority(
 
     # Sort providers by their latency tier
     def get_tier(provider: str) -> int:
-        return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+        return _get_provider_latency_tier(provider)
 
     # Group providers by tier
     tier_1 = [p for p in available_providers if get_tier(p) == 1]  # Ultra-fast
@@ -365,11 +380,9 @@ def is_ultra_low_latency_model(model_id: str) -> bool:
     """
     Check if a model is classified as ultra-low-latency (<100ms).
 
-    Args:
-        model_id: The model identifier
-
-    Returns:
-        True if the model is in the ULTRA_LOW_LATENCY_MODELS set
+    Uses the curated ULTRA_LOW_LATENCY_MODELS set (measured p50 latency).
+    This is distinct from latency_tier=1 in the DB, which is provider-granularity
+    (all groq/cerebras models) and may include models with 200-500ms latency.
     """
     if not model_id:
         return False
@@ -386,7 +399,7 @@ def get_provider_latency_tier(provider: str) -> int:
     Returns:
         Tier number (1=fastest, 4=variable)
     """
-    return PROVIDER_LATENCY_TIERS.get(provider.lower(), DEFAULT_PROVIDER_TIER)
+    return _get_provider_latency_tier(provider)
 
 
 def get_low_latency_models() -> list[str]:
@@ -406,6 +419,14 @@ def get_ultra_low_latency_models() -> list[str]:
     Returns:
         List of model IDs with sub-100ms response times
     """
+    try:
+        from src.services.model_capabilities_cache import get_models_by_latency_tier
+
+        result = get_models_by_latency_tier(1)
+        if result:
+            return sorted(result)
+    except Exception as exc:
+        logger.warning("Failed to load ultra-low-latency models from DB: %s", exc)
     return sorted(ULTRA_LOW_LATENCY_MODELS)
 
 
@@ -416,8 +437,20 @@ def get_fastest_providers() -> list[str]:
     Returns:
         List of provider names sorted by speed
     """
-    sorted_providers = sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])
-    return [provider for provider, _ in sorted_providers]
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        db_tiers = {
+            slug: entry["latency_tier"]
+            for slug, entry in registry.items()
+            if entry.get("latency_tier") is not None
+        }
+        if db_tiers:
+            return [p for p, _ in sorted(db_tiers.items(), key=lambda x: x[1])]
+    except Exception as exc:
+        logger.warning("Failed to load fastest providers from DB: %s", exc)
+    return [p for p, _ in sorted(PROVIDER_LATENCY_TIERS.items(), key=lambda x: x[1])]
 
 
 def suggest_low_latency_alternative(model_id: str) -> str | None:
@@ -449,7 +482,9 @@ def suggest_low_latency_alternative(model_id: str) -> str | None:
         "o3": "groq/llama-3.3-70b-versatile",
         # For general chat
         "llama": "groq/llama-3.3-70b-versatile",
-        "mistral": "groq/mixtral-8x7b-32768",
+        # groq/mixtral-8x7b-32768 was retired from Groq May 2025; route Mistral
+        # requests to groq/llama-3.3-70b-versatile as the fastest available fallback
+        "mistral": "groq/llama-3.3-70b-versatile",
         "gemini": "google/gemini-2.0-flash-001",
         "gemma": "groq/gemma2-9b-it",
     }

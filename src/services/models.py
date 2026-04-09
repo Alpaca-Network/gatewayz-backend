@@ -617,38 +617,9 @@ def get_all_models_parallel():
 
     # Slow path: per-gateway parallel fetching (original implementation)
     try:
-        gateways = [
-            "openrouter",
-            "featherless",
-            "deepinfra",
-            "cerebras",
-            "nebius",
-            "xai",
-            "novita",
-            "hug",
-            "chutes",
-            "groq",
-            "fireworks",
-            "together",
-            "aimo",
-            "near",
-            "fal",
-            "helicone",
-            "anannas",
-            "aihubmix",
-            "alibaba",
-            "onerouter",
-            "google-vertex",
-            "cloudflare-workers-ai",
-            "clarifai",
-            "openai",
-            "anthropic",
-            "simplismart",
-            "sybil",
-            "canopywave",
-            "morpheus",
-            "vercel-ai-gateway",
-        ]
+        from src.db.providers_db import get_active_provider_slugs
+
+        gateways = get_active_provider_slugs()
 
         # Filter out gateways that are currently in error state (circuit breaker pattern)
         active_gateways = []
@@ -724,68 +695,13 @@ def get_all_models_parallel():
 
 def get_all_models_sequential():
     """Fallback sequential fetching (original implementation)"""
-    openrouter_models = get_cached_models("openrouter") or []
-    featherless_models = get_cached_models("featherless") or []
-    deepinfra_models = get_cached_models("deepinfra") or []
-    cerebras_models = get_cached_models("cerebras") or []
-    nebius_models = get_cached_models("nebius") or []
-    xai_models = get_cached_models("xai") or []
-    novita_models = get_cached_models("novita") or []
-    hug_models = get_cached_models("hug") or []
-    chutes_models = get_cached_models("chutes") or []
-    groq_models = get_cached_models("groq") or []
-    fireworks_models = get_cached_models("fireworks") or []
-    together_models = get_cached_models("together") or []
-    aimo_models = get_cached_models("aimo") or []
-    near_models = get_cached_models("near") or []
-    fal_models = get_cached_models("fal") or []
-    helicone_models = get_cached_models("helicone") or []
-    anannas_models = get_cached_models("anannas") or []
-    aihubmix_models = get_cached_models("aihubmix") or []
-    alibaba_models = get_cached_models("alibaba") or []
-    onerouter_models = get_cached_models("onerouter") or []
-    google_vertex_models = get_cached_models("google-vertex") or []
-    cloudflare_workers_ai_models = get_cached_models("cloudflare-workers-ai") or []
-    clarifai_models = get_cached_models("clarifai") or []
-    openai_models = get_cached_models("openai") or []
-    anthropic_models = get_cached_models("anthropic") or []
-    simplismart_models = get_cached_models("simplismart") or []
-    morpheus_models = get_cached_models("morpheus") or []
-    sybil_models = get_cached_models("sybil") or []
-    canopywave_models = get_cached_models("canopywave") or []
-    vercel_ai_gateway_models = get_cached_models("vercel-ai-gateway") or []
-    return (
-        openrouter_models
-        + featherless_models
-        + deepinfra_models
-        + cerebras_models
-        + nebius_models
-        + xai_models
-        + novita_models
-        + hug_models
-        + chutes_models
-        + groq_models
-        + fireworks_models
-        + together_models
-        + aimo_models
-        + near_models
-        + fal_models
-        + helicone_models
-        + anannas_models
-        + aihubmix_models
-        + alibaba_models
-        + onerouter_models
-        + google_vertex_models
-        + cloudflare_workers_ai_models
-        + clarifai_models
-        + openai_models
-        + anthropic_models
-        + simplismart_models
-        + morpheus_models
-        + sybil_models
-        + canopywave_models
-        + vercel_ai_gateway_models
-    )
+    from src.db.providers_db import get_active_provider_slugs
+
+    all_models = []
+    for slug in get_active_provider_slugs():
+        models = get_cached_models(slug) or []
+        all_models.extend(models)
+    return all_models
 
 
 def _build_multi_provider_catalog() -> AggregatedCatalog:
@@ -2404,28 +2320,9 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
         provider_model_id = f"{provider_name}/{model_name}".lower()
 
         # Check each gateway's cache
-        gateways = [
-            "openrouter",
-            "featherless",
-            "deepinfra",
-            "chutes",
-            "groq",
-            "fireworks",
-            "together",
-            "google-vertex",
-            "cerebras",
-            "nebius",
-            "xai",
-            "novita",
-            "huggingface",
-            "fal",
-            "helicone",
-            "vercel-ai-gateway",
-            "aihubmix",
-            "anannas",
-            "near",
-            "aimo",
-        ]
+        from src.db.providers_db import get_active_provider_slugs
+
+        gateways = get_active_provider_slugs()
 
         for gateway in gateways:
             models = get_cached_models(gateway)
@@ -2490,12 +2387,16 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             if fallback_detected and fallback_detected not in candidate_gateways:
                 candidate_gateways.append(fallback_detected)
 
-            if "openrouter" not in candidate_gateways:
+        # Add last-resort search targets only when no explicit gateway was requested
+        if not explicit_gateway:
+            if "openrouter" not in candidate_gateways and "onerouter" not in candidate_gateways:
                 candidate_gateways.append("openrouter")
-
+            # "huggingface" is the fetch-function key (not the normalized slug "hug")
             if "huggingface" not in candidate_gateways:
                 candidate_gateways.append("huggingface")
 
+        # fetch_specific_model_from_* functions live in this file (models.py),
+        # not in individual client modules, so dynamic import doesn't apply here.
         fetchers = {
             "openrouter": fetch_specific_model_from_openrouter,
             "featherless": fetch_specific_model_from_featherless,

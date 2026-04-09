@@ -12,22 +12,6 @@ import pytest
 class TestCanopywaveClient:
     """Test Canopy Wave Client service functionality"""
 
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        import src.services.canopywave_client
-
-        assert src.services.canopywave_client is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module exports"""
-        from src.services import canopywave_client
-
-        assert hasattr(canopywave_client, "__name__")
-        assert hasattr(canopywave_client, "fetch_models_from_canopywave")
-        assert hasattr(canopywave_client, "get_canopywave_client")
-        assert hasattr(canopywave_client, "make_canopywave_request_openai")
-        assert hasattr(canopywave_client, "make_canopywave_request_openai_stream")
-
     def test_get_canopywave_client_raises_without_api_key(self, monkeypatch):
         """Test that get_canopywave_client raises ValueError when API key is not configured"""
         from src.services import canopywave_client

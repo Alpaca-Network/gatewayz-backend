@@ -2,7 +2,7 @@
 Provider & Model Synchronization Service
 
 Manages automatic syncing of:
-1. Providers: Synced on startup from GATEWAY_REGISTRY (always current)
+1. Providers: DB is source of truth (Phase 2A) — sync_providers_to_database() is a no-op
 2. Models: Synced periodically from provider APIs (fetches latest)
 
 Usage:
@@ -21,8 +21,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from src.routes.catalog import GATEWAY_REGISTRY
-from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS, sync_provider_models
+from src.services.model_catalog_sync import sync_provider_models
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +30,8 @@ _background_sync_task: asyncio.Task | None = None
 _last_model_sync: datetime | None = None
 
 
-# Provider configuration mapping
+# FALLBACK — api_key_env_var now reads from DB providers table (Phase 2D).
+# Kept as documented fallback for seed_providers.py and cold-start scenarios.
 PROVIDER_ENV_VAR_MAP = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
@@ -65,58 +65,14 @@ PROVIDER_ENV_VAR_MAP = {
 
 
 async def sync_providers_to_database() -> dict[str, Any]:
+    """No-op: DB is now the source of truth for provider data (Phase 2A).
+
+    Previously this function read from GATEWAY_REGISTRY in catalog.py and
+    upserted to the providers table. Now the DB providers table is maintained
+    directly via migrations and admin APIs.
     """
-    Sync all providers from GATEWAY_REGISTRY to database
-
-    This ensures providers table is always up-to-date with code changes.
-    Runs on startup to ensure database matches GATEWAY_REGISTRY.
-
-    Returns:
-        Sync result dictionary
-    """
-    try:
-        from src.config.supabase_config import get_supabase_client
-
-        client = get_supabase_client()
-
-        logger.info(f"🔄 Syncing {len(GATEWAY_REGISTRY)} providers from GATEWAY_REGISTRY")
-
-        providers_to_upsert = []
-        for gateway_id, gateway_config in GATEWAY_REGISTRY.items():
-            provider = {
-                "name": gateway_config["name"],
-                "slug": gateway_id,
-                "description": f"{gateway_config['name']} - {gateway_config.get('priority', 'standard')} priority gateway",
-                "api_key_env_var": PROVIDER_ENV_VAR_MAP.get(
-                    gateway_id, f"{gateway_id.upper().replace('-', '_')}_API_KEY"
-                ),
-                "supports_streaming": True,
-                "is_active": True,
-                "site_url": gateway_config.get("site_url"),
-                "metadata": {
-                    "color": gateway_config.get("color", "bg-gray-500"),
-                    "priority": gateway_config.get("priority", "slow"),
-                    "icon": gateway_config.get("icon"),
-                    "aliases": gateway_config.get("aliases", []),
-                },
-            }
-            providers_to_upsert.append(provider)
-
-        # Upsert all providers (insert or update on conflict)
-        result = client.table("providers").upsert(providers_to_upsert, on_conflict="slug").execute()
-
-        synced_count = len(result.data) if result.data else 0
-        logger.info(f"✅ Synced {synced_count} providers to database")
-
-        return {
-            "success": True,
-            "providers_synced": synced_count,
-            "providers": [p["slug"] for p in providers_to_upsert],
-        }
-
-    except Exception as e:
-        logger.error(f"❌ Failed to sync providers: {e}", exc_info=True)
-        return {"success": False, "error": str(e), "providers_synced": 0}
+    logger.info("Provider sync skipped: DB is source of truth (Phase 2A)")
+    return {"success": True, "providers_synced": 0, "note": "DB is source of truth"}
 
 
 async def sync_models_from_providers(
@@ -136,8 +92,25 @@ async def sync_models_from_providers(
 
     try:
         if provider_slugs is None:
-            # Sync all providers that have fetch functions
-            provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            # Sync all active providers with fetch functions (DB-first)
+            try:
+                from src.db.providers_db import get_active_provider_slugs
+                from src.services.gateway_registry import get_gateway_registry
+
+                provider_slugs = await asyncio.to_thread(get_active_provider_slugs)
+                registry = await asyncio.to_thread(get_gateway_registry)
+                provider_slugs = [
+                    s
+                    for s in provider_slugs
+                    if registry.get(s, {}).get("has_fetch_function", False)
+                ]
+                if not provider_slugs:
+                    logger.info("DB returned zero fetchable providers; nothing to sync")
+            except Exception:
+                logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                from src.services.model_catalog_sync import PROVIDER_FETCH_FUNCTIONS
+
+                provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
 
         logger.info(f"🔄 Starting model sync for {len(provider_slugs)} providers")
 
@@ -202,7 +175,7 @@ async def sync_providers_on_startup() -> dict[str, Any]:
     Sync providers on application startup
 
     This is called during lifespan startup to ensure providers
-    are always up-to-date with GATEWAY_REGISTRY.
+    are always up-to-date with the DB providers table.
 
     Returns:
         Sync result dictionary

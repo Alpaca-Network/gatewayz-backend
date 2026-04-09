@@ -302,37 +302,42 @@ class ModelHealthMonitor:
             # Import here to avoid circular imports
             from src.services.models import get_cached_models
 
-            # Get models from different gateways
-            gateways = [
-                "openrouter",
-                "featherless",
-                "deepinfra",
-                "huggingface",
-                "groq",
-                "fireworks",
-                "together",
-                "xai",
-                "novita",
-                "chutes",
-                "aimo",
-                "near",
-                "fal",
-                "google-vertex",
-                "cerebras",
-                "nebius",
-                "helicone",
-                "aihubmix",
-                "anannas",
-                "onerouter",
-                "cloudflare-workers-ai",
-                "vercel-ai-gateway",
-                "openai",
-                "anthropic",
-                "clarifai",
-                "alibaba",
-                "simplismart",
-                "modelz",
-            ]
+            # Get models from different gateways (DB-driven, with fallback)
+            try:
+                from src.db.providers_db import get_active_provider_slugs
+
+                gateways = get_active_provider_slugs()
+            except Exception:
+                gateways = [
+                    "openrouter",
+                    "featherless",
+                    "deepinfra",
+                    "huggingface",
+                    "groq",
+                    "fireworks",
+                    "together",
+                    "xai",
+                    "novita",
+                    "chutes",
+                    "aimo",
+                    "near",
+                    "fal",
+                    "google-vertex",
+                    "cerebras",
+                    "nebius",
+                    "helicone",
+                    "aihubmix",
+                    "anannas",
+                    "onerouter",
+                    "cloudflare-workers-ai",
+                    "vercel-ai-gateway",
+                    "openai",
+                    "anthropic",
+                    "clarifai",
+                    "alibaba",
+                    "simplismart",
+                    "modelz",
+                ]
 
             for gateway in gateways:
                 try:

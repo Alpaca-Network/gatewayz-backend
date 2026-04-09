@@ -1,0 +1,318 @@
+"""
+BotFilterSpanProcessor — drop bot/scanner traces before they reach Tempo.
+
+WHY THIS EXISTS
+---------------
+FastAPIInstrumentor creates an OTel span the moment an HTTP request arrives,
+before SecurityMiddleware has a chance to return a 429. That means every probe
+from scanners and API-key brute-forcers produces a span that is queued and
+exported to Tempo, causing Tempo to OOM on Railway.
+
+HOW IT WORKS — CHAINED WRAPPER PATTERN
+---------------------------------------
+IMPORTANT: This processor uses the CHAINED WRAPPER pattern, NOT independent
+`add_span_processor()` registration. This distinction is critical.
+
+The OpenTelemetry Python SDK stores processors in a SynchronousMultiSpanProcessor
+that calls EVERY registered processor's on_end() INDEPENDENTLY. If we registered
+BotFilterSpanProcessor independently and returned early without calling downstream
+processors, those downstream processors would STILL receive the span directly from
+the multi-processor — making the filter completely ineffective.
+
+The solution: BotFilterSpanProcessor is registered as THE ONLY processor via
+add_span_processor(). It holds explicit references to all downstream processors
+and is the sole gate through which spans flow. Bot spans simply never get
+forwarded; legitimate spans are forwarded to each downstream processor manually.
+
+    TracerProvider
+        └── SynchronousMultiSpanProcessor
+                └── BotFilterSpanProcessor (the only registered processor)
+                        ├── drops bot spans here (no forwarding)
+                        └── forwards legit spans to:
+                                ├── ProviderSpanEnricher.on_end()
+                                └── ResilientSpanProcessor.on_end()
+                                        └── BatchSpanProcessor → Tempo
+
+DROP RULES (any match = drop)
+------------------------------
+1. Scanner route   — http.route or url matches /.env, /wp-login, /.git, etc.
+2. Bot user-agent  — http.user_agent contains known scanner tool names.
+3. Unauthenticated 401/403 flood — status 401/403 AND no customer/user id.
+4. Pure rate-limit spam — status 429 AND no customer/user id on the span.
+
+METRIC
+------
+bot_traces_dropped_total{reason} — Prometheus counter incremented per drop.
+"""
+
+import logging
+from typing import Sequence
+
+logger = logging.getLogger(__name__)
+
+try:
+    from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
+
+    _OTEL_AVAILABLE = True
+except ImportError:
+    _OTEL_AVAILABLE = False
+    SpanProcessor = object  # type: ignore
+    ReadableSpan = object  # type: ignore
+
+
+# ---------------------------------------------------------------------------
+# Known scanner route prefixes / exact paths
+# ---------------------------------------------------------------------------
+_SCANNER_ROUTE_PREFIXES: tuple[str, ...] = (
+    "/.env",
+    "/.git",
+    "/.svn",
+    "/wp-",
+    "/wordpress",
+    "/phpmyadmin",
+    "/mysqladmin",
+    "/actuator",
+    "/api/v1/pods",  # k8s probing
+    "/console",  # jboss / spring boot console
+    "/manager/html",  # tomcat
+    "/cgi-bin",
+    "/shell",
+    "/cmd",
+    "/.well-known/security",
+    "/boaform",
+    "/HNAP1",
+    "/setup.php",
+    "/_ignition",
+    "/vendor/",
+    "/config/",
+    "/server-status",
+    # NOT /admin — GatewayZ has a real /admin route
+)
+
+# ---------------------------------------------------------------------------
+# Bot / scanner user-agent substrings (case-insensitive)
+# ---------------------------------------------------------------------------
+_BOT_UA_SUBSTRINGS: tuple[str, ...] = (
+    "sqlmap",
+    "nuclei",
+    "zgrab",
+    "masscan",
+    "nmap",
+    "nikto",
+    "dirbuster",
+    "gobuster",
+    "ffuf",
+    "wfuzz",
+    "hydra",
+    "medusa",
+    "burpsuite",
+    "burp suite",
+    "zap/",  # OWASP ZAP
+    "python-requests/2",  # raw requests lib without a custom UA
+    "go-http-client",
+    "curl/",
+    "libwww-perl",
+    "petalbot",
+    "ahrefsbot",
+    "semrushbot",
+    "mj12bot",
+    "dotbot",
+    "scrapy",
+    "wget/",
+)
+
+
+def _get_str_attr(span: "ReadableSpan", key: str) -> str:
+    """Return a span attribute as a lowercase string, or empty string."""
+    if not hasattr(span, "attributes") or not span.attributes:
+        return ""
+    val = span.attributes.get(key, "")
+    return str(val).lower() if val else ""
+
+
+def _is_scanner_route(route: str, url: str) -> bool:
+    """Return True if the HTTP route/URL matches a known scanner pattern."""
+    for prefix in _SCANNER_ROUTE_PREFIXES:
+        if route.startswith(prefix) or url.startswith(prefix):
+            return True
+    return False
+
+
+def _is_bot_user_agent(ua: str) -> bool:
+    """Return True if the user-agent contains a known bot/scanner keyword."""
+    for keyword in _BOT_UA_SUBSTRINGS:
+        if keyword in ua:
+            return True
+    return False
+
+
+class BotFilterSpanProcessor(SpanProcessor):
+    """
+    A SpanProcessor that drops spans generated by bot/scanner traffic.
+
+    CRITICAL: This uses the CHAINED WRAPPER pattern.
+    Register this as the ONLY processor via add_span_processor().
+    Pass all downstream processors to the constructor.
+    Do NOT register ProviderSpanEnricher or ResilientSpanProcessor separately —
+    they must be passed here so this processor controls the flow.
+
+    Example (in opentelemetry_config.py):
+        bot_filter = BotFilterSpanProcessor(
+            provider_enricher, resilient_processor
+        )
+        cls._tracer_provider.add_span_processor(bot_filter)
+    """
+
+    def __init__(self, *downstream_processors: "SpanProcessor") -> None:
+        self._downstream: Sequence[SpanProcessor] = downstream_processors
+        self._dropped_total = 0
+        logger.info(
+            "🤖 BotFilterSpanProcessor registered (chained-wrapper, %d downstream processors) "
+            "— bot traces will be dropped before Tempo",
+            len(downstream_processors),
+        )
+
+    # ------------------------------------------------------------------
+    # SpanProcessor interface
+    # ------------------------------------------------------------------
+
+    def on_start(self, span, parent_context=None) -> None:
+        """Forward span starts to all downstream processors."""
+        for proc in self._downstream:
+            try:
+                proc.on_start(span, parent_context)
+            except Exception as e:
+                logger.debug("Error in downstream on_start: %s", e)
+
+    def on_end(self, span: "ReadableSpan") -> None:
+        """
+        Called when a span ends.
+
+        If the span matches a bot drop rule: discard it (do NOT forward).
+        Otherwise: forward to every downstream processor in order.
+
+        Because this is the ONLY processor registered on the TracerProvider,
+        not forwarding here means the span is permanently gone from the pipeline.
+        """
+        if not _OTEL_AVAILABLE:
+            # Safety: if OTel isn't available, forward everything
+            self._forward(span)
+            return
+
+        reason = self._classify(span)
+        if reason:
+            self._dropped_total += 1
+            _increment_dropped_counter(reason)
+            logger.debug(
+                "🤖 Bot trace dropped: reason=%s route=%s ua=%s status=%s",
+                reason,
+                _get_str_attr(span, "http.route") or _get_str_attr(span, "http.url"),
+                _get_str_attr(span, "http.user_agent")[:60],
+                _get_str_attr(span, "http.status_code"),
+            )
+            return  # ← span is NOT forwarded to any downstream processor
+
+        self._forward(span)
+
+    def _forward(self, span: "ReadableSpan") -> None:
+        """Forward a span to all downstream processors."""
+        for proc in self._downstream:
+            try:
+                proc.on_end(span)
+            except Exception as e:
+                logger.debug("Error in downstream on_end: %s", e)
+
+    def shutdown(self) -> None:
+        logger.info(
+            "🤖 BotFilterSpanProcessor shutdown — total bot traces dropped: %d",
+            self._dropped_total,
+        )
+        for proc in self._downstream:
+            try:
+                proc.shutdown()
+            except Exception:
+                pass
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        ok = True
+        for proc in self._downstream:
+            try:
+                result = proc.force_flush(timeout_millis)
+                if result is False:
+                    ok = False
+            except Exception:
+                ok = False
+        return ok
+
+    # ------------------------------------------------------------------
+    # Internal classification logic
+    # ------------------------------------------------------------------
+
+    def _classify(self, span: "ReadableSpan") -> str | None:
+        """
+        Return the drop reason string if this span should be dropped, else None.
+        """
+        route = _get_str_attr(span, "http.route")
+        url = _get_str_attr(span, "http.target") or _get_str_attr(span, "url.path") or ""
+        ua = _get_str_attr(span, "http.user_agent") or _get_str_attr(span, "user_agent.original")
+        status = _get_str_attr(span, "http.status_code") or _get_str_attr(
+            span, "http.response.status_code"
+        )
+        has_customer = bool(
+            _get_str_attr(span, "customer.id")
+            or _get_str_attr(span, "user.id")
+            or _get_str_attr(span, "enduser.id")
+        )
+
+        # Rule 1: Scanner route
+        if route or url:
+            if _is_scanner_route(route, url):
+                return "scanner_route"
+
+        # Rule 2: Bot user-agent
+        if ua and _is_bot_user_agent(ua):
+            return "bot_user_agent"
+
+        # Rule 3: Unauthenticated 401/403 flood (credential brute-force)
+        if status in ("401", "403") and not has_customer:
+            return "unauth_4xx_flood"
+
+        # Rule 4: Unauthenticated 429 (key-scanner)
+        if status == "429" and not has_customer:
+            return "unauth_429_spam"
+
+        return None
+
+    @property
+    def dropped_count(self) -> int:
+        """Total spans dropped since startup."""
+        return self._dropped_total
+
+
+# ---------------------------------------------------------------------------
+# Prometheus counter — imported lazily to avoid circular imports at load time
+# ---------------------------------------------------------------------------
+_prom_counter = None
+_prom_import_attempted = False
+
+
+def _increment_dropped_counter(reason: str) -> None:
+    """Increment the Prometheus bot_traces_dropped_total counter (lazy import)."""
+    global _prom_counter, _prom_import_attempted
+    if _prom_import_attempted and _prom_counter is None:
+        return
+
+    if not _prom_import_attempted:
+        _prom_import_attempted = True
+        try:
+            from src.services.prometheus_metrics import bot_traces_dropped_total
+
+            _prom_counter = bot_traces_dropped_total
+        except Exception:
+            _prom_counter = None
+
+    if _prom_counter is not None:
+        try:
+            _prom_counter.labels(reason=reason).inc()
+        except Exception:
+            pass

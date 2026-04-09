@@ -126,19 +126,31 @@ class _CacheDict(dict):
 # Cache dictionaries - Now using Redis-backed wrappers
 # ============================================================================
 
+# Dynamic cache registry: creates _CacheDict instances on demand.
+_cache_instances: dict[str, _CacheDict] = {}
+
+
+def _get_or_create_cache(slug: str) -> _CacheDict:
+    """Return the _CacheDict for *slug*, creating it on first access."""
+    if slug not in _cache_instances:
+        _cache_instances[slug] = _CacheDict(slug)
+    return _cache_instances[slug]
+
+
+# Pre-created aliases for backward compatibility (scripts + legacy imports)
 # OpenRouter (primary gateway)
-_models_cache = _CacheDict("openrouter")
+_models_cache = _get_or_create_cache("openrouter")
 
 # Multi-provider catalog (uses "all" as gateway slug)
-_multi_provider_catalog_cache = _CacheDict("all")
+_multi_provider_catalog_cache = _get_or_create_cache("all")
 
 # Major provider caches
-_featherless_models_cache = _CacheDict("featherless")
-_chutes_models_cache = _CacheDict("chutes")
-_groq_models_cache = _CacheDict("groq")
-_fireworks_models_cache = _CacheDict("fireworks")
-_together_models_cache = _CacheDict("together")
-_modelz_cache = _CacheDict("modelz")
+_featherless_models_cache = _get_or_create_cache("featherless")
+_chutes_models_cache = _get_or_create_cache("chutes")
+_groq_models_cache = _get_or_create_cache("groq")
+_fireworks_models_cache = _get_or_create_cache("fireworks")
+_together_models_cache = _get_or_create_cache("together")
+_modelz_cache = _get_or_create_cache("modelz")
 
 # Legacy caches (special handling needed)
 _huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
@@ -146,32 +158,32 @@ _provider_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 72
 
 
 # DeepInfra and Portkey-based providers
-_deepinfra_models_cache = _CacheDict("deepinfra")
-_cerebras_models_cache = _CacheDict("cerebras")
-_nebius_models_cache = _CacheDict("nebius")
-_xai_models_cache = _CacheDict("xai")
-_zai_models_cache = _CacheDict("zai")
-_novita_models_cache = _CacheDict("novita")
-_huggingface_models_cache = _CacheDict("huggingface")
-_aimo_models_cache = _CacheDict("aimo")
-_near_models_cache = _CacheDict("near")
-_fal_models_cache = _CacheDict("fal")
-_google_vertex_models_cache = _CacheDict("google-vertex")
+_deepinfra_models_cache = _get_or_create_cache("deepinfra")
+_cerebras_models_cache = _get_or_create_cache("cerebras")
+_nebius_models_cache = _get_or_create_cache("nebius")
+_xai_models_cache = _get_or_create_cache("xai")
+_zai_models_cache = _get_or_create_cache("zai")
+_novita_models_cache = _get_or_create_cache("novita")
+_huggingface_models_cache = _get_or_create_cache("huggingface")
+_aimo_models_cache = _get_or_create_cache("aimo")
+_near_models_cache = _get_or_create_cache("near")
+_fal_models_cache = _get_or_create_cache("fal")
+_google_vertex_models_cache = _get_or_create_cache("google-vertex")
 
 # Gateway and provider caches
-_vercel_ai_gateway_models_cache = _CacheDict("vercel-ai-gateway")
-_helicone_models_cache = _CacheDict("helicone")
-_aihubmix_models_cache = _CacheDict("aihubmix")
-_anannas_models_cache = _CacheDict("anannas")
-_onerouter_models_cache = _CacheDict("onerouter")
-_cloudflare_workers_ai_models_cache = _CacheDict("cloudflare-workers-ai")
-_clarifai_models_cache = _CacheDict("clarifai")
-_openai_models_cache = _CacheDict("openai")
-_anthropic_models_cache = _CacheDict("anthropic")
-_simplismart_models_cache = _CacheDict("simplismart")
-_sybil_models_cache = _CacheDict("sybil")
-_canopywave_models_cache = _CacheDict("canopywave")
-_morpheus_models_cache = _CacheDict("morpheus")
+_vercel_ai_gateway_models_cache = _get_or_create_cache("vercel-ai-gateway")
+_helicone_models_cache = _get_or_create_cache("helicone")
+_aihubmix_models_cache = _get_or_create_cache("aihubmix")
+_anannas_models_cache = _get_or_create_cache("anannas")
+_onerouter_models_cache = _get_or_create_cache("onerouter")
+_cloudflare_workers_ai_models_cache = _get_or_create_cache("cloudflare-workers-ai")
+_clarifai_models_cache = _get_or_create_cache("clarifai")
+_openai_models_cache = _get_or_create_cache("openai")
+_anthropic_models_cache = _get_or_create_cache("anthropic")
+_simplismart_models_cache = _get_or_create_cache("simplismart")
+_sybil_models_cache = _get_or_create_cache("sybil")
+_canopywave_models_cache = _get_or_create_cache("canopywave")
+_morpheus_models_cache = _get_or_create_cache("morpheus")
 
 # Special case: Alibaba cache with quota error tracking
 # Keep as regular dict since it has special fields beyond standard cache structure
@@ -207,42 +219,17 @@ def get_models_cache(gateway: str):
         DeprecationWarning,
         stacklevel=2,
     )
-    cache_map = {
-        "openrouter": _models_cache,
-        "featherless": _featherless_models_cache,
-        "deepinfra": _deepinfra_models_cache,
-        "chutes": _chutes_models_cache,
-        "groq": _groq_models_cache,
-        "fireworks": _fireworks_models_cache,
-        "together": _together_models_cache,
-        "google-vertex": _google_vertex_models_cache,
-        "cerebras": _cerebras_models_cache,
-        "nebius": _nebius_models_cache,
-        "xai": _xai_models_cache,
-        "zai": _zai_models_cache,
-        "novita": _novita_models_cache,
-        "huggingface": _huggingface_models_cache,
-        "hug": _huggingface_models_cache,  # Alias for backward compatibility
-        "aimo": _aimo_models_cache,
-        "near": _near_models_cache,
-        "fal": _fal_models_cache,
-        "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-        "helicone": _helicone_models_cache,
-        "aihubmix": _aihubmix_models_cache,
-        "anannas": _anannas_models_cache,
-        "alibaba": _alibaba_models_cache,
-        "onerouter": _onerouter_models_cache,
-        "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
-        "clarifai": _clarifai_models_cache,
-        "openai": _openai_models_cache,
-        "anthropic": _anthropic_models_cache,
-        "simplismart": _simplismart_models_cache,
-        "sybil": _sybil_models_cache,
-        "canopywave": _canopywave_models_cache,
-        "morpheus": _morpheus_models_cache,
-        "modelz": _modelz_cache,
-    }
-    return cache_map.get(gateway.lower())
+    slug = gateway.lower()
+    # Special cases
+    if slug == "hug":
+        slug = "huggingface"
+    elif slug == "alibaba":
+        return _alibaba_models_cache  # Special dict with quota tracking
+    # Only return caches for known providers; return None for unknown slugs
+    # to preserve backward-compat (callers guard with `if cache is None:`)
+    if slug in _cache_instances:
+        return _cache_instances[slug]
+    return None
 
 
 def get_providers_cache():
@@ -272,43 +259,16 @@ def clear_models_cache(gateway: str):
     except Exception as e:
         logger.error(f"Error delegating clear_models_cache to new cache system: {e}")
 
-        # Fallback: clear in-memory cache
-        cache_map = {
-            "openrouter": _models_cache,
-            "featherless": _featherless_models_cache,
-            "deepinfra": _deepinfra_models_cache,
-            "chutes": _chutes_models_cache,
-            "groq": _groq_models_cache,
-            "fireworks": _fireworks_models_cache,
-            "together": _together_models_cache,
-            "google-vertex": _google_vertex_models_cache,
-            "cerebras": _cerebras_models_cache,
-            "nebius": _nebius_models_cache,
-            "xai": _xai_models_cache,
-            "zai": _zai_models_cache,
-            "novita": _novita_models_cache,
-            "huggingface": _huggingface_models_cache,
-            "hug": _huggingface_models_cache,
-            "helicone": _helicone_models_cache,
-            "aimo": _aimo_models_cache,
-            "near": _near_models_cache,
-            "fal": _fal_models_cache,
-            "vercel-ai-gateway": _vercel_ai_gateway_models_cache,
-            "aihubmix": _aihubmix_models_cache,
-            "anannas": _anannas_models_cache,
-            "alibaba": _alibaba_models_cache,
-            "onerouter": _onerouter_models_cache,
-            "cloudflare-workers-ai": _cloudflare_workers_ai_models_cache,
-            "clarifai": _clarifai_models_cache,
-            "openai": _openai_models_cache,
-            "anthropic": _anthropic_models_cache,
-            "simplismart": _simplismart_models_cache,
-            "sybil": _sybil_models_cache,
-            "canopywave": _canopywave_models_cache,
-            "morpheus": _morpheus_models_cache,
-            "modelz": _modelz_cache,
-        }
-        cache = cache_map.get(gateway.lower())
+        # Fallback: clear in-memory cache via dynamic registry
+        slug = gateway.lower()
+        if slug == "hug":
+            slug = "huggingface"
+        elif slug == "alibaba":
+            # Alibaba uses a special dict with quota tracking, not _CacheDict
+            _alibaba_models_cache["data"] = None
+            _alibaba_models_cache["timestamp"] = None
+            return
+        cache = _cache_instances.get(slug)
         if cache:
             cache["data"] = None
             cache["timestamp"] = None

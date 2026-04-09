@@ -21,15 +21,17 @@ Security Design:
 import hashlib
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 # Configuration
 ANONYMOUS_DAILY_LIMIT = 3  # Maximum requests per day per IP
+# Hardcoded fallback free model list — used only when DB cache is unavailable.
+# The authoritative source is the models table (is_free=true column).
+# New free models should be added to the DB, not to this list.
 ANONYMOUS_ALLOWED_MODELS = [
-    # Verified free models from OpenRouter (end with :free)
     "google/gemini-2.0-flash-exp:free",
     "google/gemma-2-9b-it:free",
     "meta-llama/llama-3.2-3b-instruct:free",
@@ -109,8 +111,13 @@ def is_model_allowed_for_anonymous(model_id: str) -> bool:
     if not model_id.endswith(":free"):
         return False
 
-    # Must be in whitelist
-    return model_id.lower() in [m.lower() for m in ANONYMOUS_ALLOWED_MODELS]
+    # Check DB-backed free model list first, then fall back to hardcoded whitelist
+    try:
+        from src.services.model_capabilities_cache import is_free_model
+
+        return is_free_model(model_id)
+    except Exception:
+        return model_id.lower() in [m.lower() for m in ANONYMOUS_ALLOWED_MODELS]
 
 
 def get_anonymous_usage_count(ip_address: str) -> int:
@@ -285,6 +292,37 @@ def record_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]:
     )
 
     return {"count": new_count, "remaining": remaining, "limit": ANONYMOUS_DAILY_LIMIT}
+
+
+def get_anonymous_rate_limit_headers(limit: int, remaining: int) -> dict[str, str]:
+    """
+    Build standard rate limit headers for anonymous 429 responses.
+
+    Returns both IETF draft standard (RateLimit-*) and legacy (X-RateLimit-*)
+    headers, consistent with Layer 1 middleware headers.
+
+    Args:
+        limit: The daily request limit
+        remaining: Remaining requests (usually 0 when blocking)
+
+    Returns:
+        Dict of HTTP header name → value
+    """
+    now = datetime.now(UTC)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight = midnight + timedelta(days=1)
+    seconds_until_reset = int((next_midnight - now).total_seconds())
+
+    return {
+        "RateLimit-Limit": str(limit),
+        "RateLimit-Remaining": str(remaining),
+        "RateLimit-Reset": str(seconds_until_reset),
+        "Retry-After": str(seconds_until_reset),
+        "X-RateLimit-Limit-Requests": str(limit),
+        "X-RateLimit-Remaining-Requests": str(remaining),
+        "X-RateLimit-Reset-Requests": str(int(next_midnight.timestamp())),
+        "X-RateLimit-Reason": "anonymous_daily_limit",
+    }
 
 
 def get_anonymous_stats() -> dict[str, Any]:

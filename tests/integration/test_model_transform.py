@@ -2,6 +2,7 @@
 """Test the model transformation feature"""
 
 import json
+import os
 
 import requests
 
@@ -37,7 +38,7 @@ test_cases = [
 ]
 
 API_URL = "http://localhost:8000/v1/chat/completions"
-API_KEY = "gw_temp_lw1xmCuEfLkKn6tsaDF3vw"
+API_KEY = os.environ.get("GATEWAYZ_TEST_API_KEY", "gw_test_placeholder")  # ggignore
 
 
 def test_api():

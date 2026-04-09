@@ -4,6 +4,7 @@ Notification Service
 Handles low balance notifications, trial expiry alerts, and user communication
 """
 
+import json
 import logging
 import os
 from datetime import UTC, datetime, timedelta
@@ -24,6 +25,7 @@ from src.schemas.notification import (
     TrialExpiryAlert,
 )
 from src.services.trial_validation import validate_trial_access
+from src.utils.security_validators import generate_webhook_signature
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,7 @@ class NotificationService:
                     plan_expiry_reminder_days=data.get("plan_expiry_reminder_days", 7),
                     usage_alerts=data.get("usage_alerts", True),
                     webhook_url=data.get("webhook_url"),
+                    webhook_secret=data.get("webhook_secret"),
                     created_at=(
                         datetime.fromisoformat(data["created_at"].replace("Z", "+00:00"))
                         if data.get("created_at")
@@ -187,6 +190,45 @@ class NotificationService:
             return None
         except Exception as e:
             logger.error(f"Error checking low balance alert: {e}")
+            return None
+
+    def check_credits_depleted_alert(self, user_id: int) -> LowBalanceAlert | None:
+        """Check if user credits are fully depleted (balance <= 0).
+
+        Distinct from low-balance alert: fires only when credits hit zero,
+        enabling a credits.depleted webhook/notification event.
+        """
+        try:
+            user = self.supabase.table("users").select("*").eq("id", user_id).execute()
+            if not user.data:
+                return None
+
+            user_data = user.data[0]
+            preferences = self.get_user_preferences(user_id)
+
+            if not preferences or not preferences.email_notifications:
+                return None
+
+            current_credits = user_data.get("credits", 0)
+
+            if current_credits <= 0.0:
+                # Avoid duplicate notifications within 24 hours
+                if self._has_recent_notification(user_id, "credits_depleted", hours=24):
+                    return None
+
+                trial_validation = validate_trial_access(user_data.get("api_key", ""))
+                is_trial = trial_validation.get("is_trial", False)
+
+                return LowBalanceAlert(
+                    user_id=user_id,
+                    current_credits=current_credits,
+                    threshold=0.0,
+                    is_trial=is_trial,
+                )
+
+            return None
+        except Exception as e:
+            logger.error(f"Error checking credits depleted alert: {e}")
             return None
 
     def _has_recent_notification(
@@ -389,20 +431,46 @@ class NotificationService:
             logger.error(f"Error sending email notification via Resend: {e}")
             return False
 
-    def send_webhook_notification(self, webhook_url: str, data: dict[str, Any]) -> bool:
-        """Send webhook notification"""
-        # FREEZE FIX: Use httpx (already in requirements) instead of requests.
-        # httpx.Client() is sync-identical to requests.post but removes the extra
-        # dependency. For true async, callers should offload via asyncio.to_thread().
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                response = client.post(
-                    webhook_url, json=data, headers={"Content-Type": "application/json"}
+    def send_webhook_notification(
+        self, webhook_url: str, data: dict[str, Any], webhook_secret: str | None = None
+    ) -> bool:
+        """Send webhook notification with retry and exponential backoff.
+
+        Retries up to 3 times with exponential backoff (1s, 2s) on failure.
+        Optionally HMAC-signed when a webhook_secret is provided.
+        """
+        import time
+
+        max_retries = 3
+        headers = {"Content-Type": "application/json"}
+
+        if webhook_secret:
+            payload_json = json.dumps(data, separators=(",", ":"), sort_keys=True)
+            signature = generate_webhook_signature(payload_json, webhook_secret)
+            headers["X-Webhook-Signature"] = signature
+
+        for attempt in range(max_retries):
+            try:
+                if webhook_secret:
+                    response = requests.post(
+                        webhook_url, data=payload_json, headers=headers, timeout=10
+                    )
+                else:
+                    response = requests.post(webhook_url, json=data, headers=headers, timeout=10)
+
+                if 200 <= response.status_code < 300:
+                    return True
+                logger.warning(
+                    f"Webhook returned {response.status_code}, attempt {attempt + 1}/{max_retries}"
                 )
-            return response.status_code == 200
-        except Exception as e:
-            logger.error(f"Error sending webhook notification: {e}")
-            return False
+            except Exception as e:
+                logger.warning(f"Webhook delivery failed, attempt {attempt + 1}/{max_retries}: {e}")
+
+            if attempt < max_retries - 1:
+                time.sleep(2**attempt)  # 1s, 2s backoff
+
+        logger.error(f"Webhook delivery failed after {max_retries} attempts to {webhook_url}")
+        return False
 
     def create_notification(self, request: SendNotificationRequest) -> bool:
         """Create and send notification"""
@@ -430,6 +498,7 @@ class NotificationService:
                             "content": request.content,
                             "metadata": request.metadata,
                         },
+                        webhook_secret=preferences.webhook_secret,
                     )
 
             # Record notification

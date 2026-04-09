@@ -459,13 +459,16 @@ def create_app() -> FastAPI:
     # ==================== Load All Routes ====================
     logger.info("Loading application routes...")
 
-    # Write to file for debugging in CI
-    try:
-        with open("/tmp/route_loading_debug.txt", "w") as f:
-            f.write("Starting route loading...\n")
-            f.flush()
-    except Exception:
-        pass
+    # Write to file for debugging in CI (development/CI only)
+    if not Config.IS_PRODUCTION:
+        try:
+            with open(
+                "/tmp/route_loading_debug.txt", "w"
+            ) as f:  # nosec B108 - CI debug file, gated behind IS_PRODUCTION
+                f.write("Starting route loading...\n")
+                f.flush()
+        except Exception as e:
+            logger.debug("CI debug file write skipped: %s", e)
 
     # Define v1 routes (OpenAI-compatible API endpoints)
     # These routes are mounted under /v1 prefix via v1_router
@@ -480,7 +483,6 @@ def create_app() -> FastAPI:
         ("catalog", "Model Catalog"),
         ("model_health", "Model Health Tracking"),  # Model health monitoring and metrics
         ("status_page", "Public Status Page"),  # Public status page (no auth required)
-        ("butter_analytics", "Butter.dev Cache Analytics"),  # LLM response cache analytics
     ]
 
     # Define non-v1 routes (loaded directly on app without prefix)
@@ -512,6 +514,7 @@ def create_app() -> FastAPI:
         ("users", "User Management"),
         ("api_keys", "API Key Management"),
         ("admin", "Admin Operations"),
+        ("live_model_test", "Live Model Test"),  # Admin live inference sweep
         # ("admin_pricing_analytics", "Admin Pricing Analytics"),  # REMOVED - Phase 2 deprecation
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)

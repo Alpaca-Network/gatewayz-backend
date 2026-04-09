@@ -16,57 +16,6 @@ from src.utils.model_name_validator import clean_model_name
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-DEFAULT_CEREBRAS_MODELS: list[dict[str, Any]] = [
-    {
-        "id": "llama3.1-8b",
-        "name": "Llama 3.1 8B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama3.1-70b",
-        "name": "Llama 3.1 70B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama3.1-405b",
-        "name": "Llama 3.1 405B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama-3.3-70b",
-        "name": "Llama 3.3 70B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "llama-3.3-405b",
-        "name": "Llama 3.3 405B",
-        "owned_by": "meta",
-        "context_length": 131072,
-    },
-    {
-        "id": "qwen-3-32b",
-        "name": "Qwen 3 32B",
-        "owned_by": "qwen",
-        "context_length": 131072,
-    },
-    {
-        "id": "qwen-3-235b-a22b-instruct-2507",
-        "name": "Qwen 3 235B Instruct (Preview)",
-        "owned_by": "qwen",
-        "context_length": 131072,
-    },
-    {
-        "id": "zai-glm-4.6",
-        "name": "Z.ai GLM 4.6 (Preview)",
-        "owned_by": "zai",
-        "context_length": 131072,
-    },
-]
-
 DEFAULT_SUPPORTED_PARAMETERS = [
     "max_tokens",
     "temperature",
@@ -108,6 +57,24 @@ def get_cerebras_client():
         raise
 
 
+_CEREBRAS_REASONING_MODELS = ("qwen-3", "qwen3")
+
+
+def _apply_cerebras_reasoning_defaults(model: str, kwargs: dict) -> dict:
+    """Disable reasoning by default for Cerebras models that support it.
+
+    qwen-3 models have hybrid thinking enabled by default in cerebras-cloud-sdk
+    >=1.64.x. Without explicitly disabling it the API returns a 400 because the
+    gateway doesn't handle reasoning tokens in the stream. Pass
+    disable_reasoning=True unless the caller already set it.
+    """
+    model_lower = model.lower()
+    if any(tag in model_lower for tag in _CEREBRAS_REASONING_MODELS):
+        if "disable_reasoning" not in kwargs and "reasoning_effort" not in kwargs:
+            kwargs = {**kwargs, "disable_reasoning": True}
+    return kwargs
+
+
 def make_cerebras_request_openai(messages, model, **kwargs):
     """Make request to Cerebras using official SDK or OpenAI-compatible client
 
@@ -123,6 +90,7 @@ def make_cerebras_request_openai(messages, model, **kwargs):
         from src.utils.provider_timing import ProviderTimingContext
 
         client = get_cerebras_client()
+        kwargs = _apply_cerebras_reasoning_defaults(model, kwargs)
 
         # Log request for debugging
         logger.debug(f"Cerebras request - model: {model}, messages: {len(messages)}")
@@ -151,6 +119,7 @@ def make_cerebras_request_openai_stream(messages, model, **kwargs):
         from src.utils.provider_timing import ProviderTimingContext
 
         client = get_cerebras_client()
+        kwargs = _apply_cerebras_reasoning_defaults(model, kwargs)
 
         # Log request for debugging
         logger.debug(f"Cerebras streaming request - model: {model}, messages: {len(messages)}")
@@ -272,14 +241,7 @@ def _fallback_cerebras_models(reason: str) -> list[dict[str, Any]] | None:
     except Exception as e:
         logger.warning(f"Failed to get database fallback for Cerebras: {e}")
 
-    # Static fallback as last resort
-    logger.warning("Database fallback empty, using static fallback for Cerebras")
-    normalized = [
-        model
-        for model in (_normalize_cerebras_model(entry) for entry in DEFAULT_CEREBRAS_MODELS)
-        if model
-    ]
-    return normalized or None
+    return None
 
 
 def _extract_models_from_response(response: Any) -> list[Any]:

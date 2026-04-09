@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
+from src.config.config import Config
 from src.config.supabase_config import get_initialization_status, supabase
 from src.models.health_models import (
     HealthCheckRequest,
@@ -121,6 +122,7 @@ async def health_check():
     response = {
         "status": "healthy",
         "timestamp": datetime.now(UTC).isoformat(),
+        "version": Config.APP_VERSION,
     }
 
     # Add database status if there are issues
@@ -594,7 +596,6 @@ async def get_catalog_models(
     provider: str | None = Query(None, description="Filter by specific provider"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of models to return"),
     offset: int = Query(0, ge=0, description="Number of models to skip for pagination"),
-    api_key: str = Depends(get_api_key),
 ):
     """
     Get ALL models from the model catalog (not just health-tracked ones)
@@ -656,12 +657,16 @@ async def get_catalog_models(
             model_id = model.get("id", "unknown")
             health_data = health_lookup.get(model_id, {})
 
-            # Use health data if available, otherwise default to None/unknown
+            # Use health data if available; catalog-only models are "available"
             transformed = {
                 "model_id": model_id,
+                "name": model.get("name") or model.get("display_name") or model_id,
                 "provider": model.get("source_gateway", "unknown"),
+                "provider_slug": model.get("provider_slug", model.get("source_gateway", "unknown")),
                 "gateway": model.get("source_gateway", "unknown"),
-                "status": health_data.get("status", "unknown"),
+                "status": health_data.get("status", "available"),
+                "context_length": model.get("context_length"),
+                "modality": model.get("modality"),
                 "response_time_ms": health_data.get("response_time_ms"),
                 "avg_response_time_ms": health_data.get("avg_response_time_ms"),
                 "uptime_percentage": health_data.get("uptime_percentage"),
@@ -707,7 +712,6 @@ async def get_catalog_models(
 @router.get("/health/catalog/providers", tags=["health", "catalog"])
 async def get_catalog_providers(
     priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),
-    api_key: str = Depends(get_api_key),
 ):
     """
     Get ALL providers/gateways from the gateway registry (not just health-tracked ones)
@@ -727,8 +731,8 @@ async def get_catalog_providers(
     For health metrics, use /health/providers instead.
     """
     try:
-        from src.routes.catalog import GATEWAY_REGISTRY
         from src.services.gateway_health_service import GATEWAY_CONFIG
+        from src.services.gateway_registry import get_gateway_registry
 
         # Get health data from cache to merge with catalog data
         health_providers = simple_health_cache.get_providers_health() or []
@@ -736,7 +740,7 @@ async def get_catalog_providers(
         logger.debug(f"Loaded {len(health_lookup)} provider health records for catalog enrichment")
 
         providers = []
-        for gateway_id, registry_config in GATEWAY_REGISTRY.items():
+        for gateway_id, registry_config in get_gateway_registry().items():
             # Get additional config from GATEWAY_CONFIG if available
             gateway_config = GATEWAY_CONFIG.get(gateway_id, {})
             cache = gateway_config.get("cache", {})

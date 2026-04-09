@@ -69,38 +69,9 @@ def fetch_models_from_cohere():
                 },
                 "description": "August 2024 version of Command R+",
             },
-            {
-                "id": "cohere/command",
-                "name": "Command",
-                "provider": "Cohere",
-                "source_gateway": "openrouter",
-                "provider_slug": "cohere",
-                "context_length": 4096,
-                "max_output_tokens": 4096,
-                "supports_streaming": True,
-                "supports_function_calling": False,
-                "pricing": {
-                    "prompt": "0.000001",  # $1.00 per 1M tokens
-                    "completion": "0.000002",  # $2.00 per 1M tokens
-                },
-                "description": "Cohere's foundational command model",
-            },
-            {
-                "id": "cohere/command-light",
-                "name": "Command Light",
-                "provider": "Cohere",
-                "source_gateway": "openrouter",
-                "provider_slug": "cohere",
-                "context_length": 4096,
-                "max_output_tokens": 4096,
-                "supports_streaming": True,
-                "supports_function_calling": False,
-                "pricing": {
-                    "prompt": "0.0000003",  # $0.30 per 1M tokens
-                    "completion": "0.0000006",  # $0.60 per 1M tokens
-                },
-                "description": "Faster, lighter version of Command",
-            },
+            # cohere/command and cohere/command-light REMOVED — both deprecated by Cohere
+            # in favour of command-r and command-r-plus. No longer available via Cohere
+            # or OpenRouter as of 2025.
         ]
 
         logger.info(f"Loaded {len(models)} Cohere models from static configuration")

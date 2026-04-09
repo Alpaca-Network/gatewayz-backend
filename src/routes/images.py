@@ -29,12 +29,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Image provider dispatch table (module-level to avoid per-request allocation)
+IMAGE_PROVIDER_ROUTING = {
+    "deepinfra": make_deepinfra_image_request,
+    "fal": make_fal_image_request,
+}
+
 # DEPRECATED: Hardcoded image pricing fallback.
 # Canonical image pricing now lives in src/data/manual_pricing.json under the
 # "image_pricing" key.  This dict is kept only as a last-resort fallback during
-# the transition period.  It will be removed once all pricing is confirmed to be
-# served from manual_pricing.json.  Do NOT add new entries here -- update
-# manual_pricing.json instead.
+# Emergency fallback only — all entries here should also exist in manual_pricing.json.
+# Do NOT add new entries here; update manual_pricing.json (or the DB) instead.
+# This dict is the last resort when pricing_lookup returns nothing.
 _HARDCODED_IMAGE_COST_PER_IMAGE = {
     "deepinfra": {
         "stable-diffusion-3.5-large": 0.035,
@@ -311,14 +317,8 @@ async def generate_images(
             # Start timing inference
             start = time.monotonic()
 
-            if provider == "deepinfra":
-                # Direct DeepInfra request
-                make_request_func = partial(
-                    make_deepinfra_image_request, prompt=prompt, model=model, size=req.size, n=req.n
-                )
-                actual_provider = "deepinfra"
-            elif provider == "google-vertex":
-                # Google Vertex AI request
+            if provider == "google-vertex":
+                # Google Vertex needs extra params from the request object
                 google_project_id = (
                     req.google_project_id if hasattr(req, "google_project_id") else None
                 )
@@ -326,7 +326,6 @@ async def generate_images(
                 google_endpoint_id = (
                     req.google_endpoint_id if hasattr(req, "google_endpoint_id") else None
                 )
-
                 make_request_func = partial(
                     make_google_vertex_image_request,
                     prompt=prompt,
@@ -338,16 +337,21 @@ async def generate_images(
                     endpoint_id=google_endpoint_id,
                 )
                 actual_provider = "google-vertex"
-            elif provider == "fal":
-                # Fal.ai request
+            elif provider in IMAGE_PROVIDER_ROUTING:
                 make_request_func = partial(
-                    make_fal_image_request, prompt=prompt, model=model, size=req.size, n=req.n
+                    IMAGE_PROVIDER_ROUTING[provider],
+                    prompt=prompt,
+                    model=model,
+                    size=req.size,
+                    n=req.n,
                 )
-                actual_provider = "fal"
+                actual_provider = provider
             else:
+                supported = sorted(list(IMAGE_PROVIDER_ROUTING.keys()) + ["google-vertex"])
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Provider '{provider}' is not supported for image generation. Use 'deepinfra', 'google-vertex', or 'fal'",
+                    detail=f"Provider '{provider}' is not supported for image generation. "
+                    f"Use one of: {', '.join(supported)}",
                 )
 
             # Wrap image generation with distributed tracing for Tempo

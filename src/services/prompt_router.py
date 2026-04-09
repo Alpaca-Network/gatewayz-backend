@@ -11,10 +11,8 @@ Implements fail-open prompt-level routing with:
 This is the main entry point for prompt-level routing.
 """
 
-import json
 import logging
 import time
-from pathlib import Path
 from typing import Any
 
 from src.schemas.router import (
@@ -40,8 +38,8 @@ ROUTER_TIMEOUT_MS = 2.0
 DEFAULT_CHEAP_MODEL = "openai/gpt-4o-mini"
 DEFAULT_PROVIDER = "openai"
 
-# Curated list of known-stable models for fallback when health data unavailable
-# These are high-reliability models that should always work
+# Hardcoded fallback list — used only when DB cache is unavailable.
+# The authoritative source is the models table (latency_tier <= 2 + healthy).
 STABLE_FALLBACK_MODELS = [
     "openai/gpt-4o-mini",
     "openai/gpt-4o",
@@ -50,8 +48,18 @@ STABLE_FALLBACK_MODELS = [
     "google/gemini-1.5-flash",
 ]
 
-# Path to model capabilities data
-CAPABILITIES_DATA_PATH = Path(__file__).parent.parent / "data" / "model_capabilities.json"
+
+def _get_stable_fallback_models() -> list[str]:
+    """Return stable fallback models from DB cache, with hardcoded fallback."""
+    try:
+        from src.services.model_capabilities_cache import get_stable_models
+
+        result = get_stable_models()
+        if result:
+            return result
+    except Exception:
+        pass
+    return STABLE_FALLBACK_MODELS
 
 
 class PromptRouter:
@@ -69,32 +77,41 @@ class PromptRouter:
         self._load_capabilities()
 
     def _load_capabilities(self) -> None:
-        """Load model capabilities from JSON file."""
+        """Load model capabilities from the DB-backed in-memory cache."""
         try:
-            if CAPABILITIES_DATA_PATH.exists():
-                with open(CAPABILITIES_DATA_PATH) as f:
-                    data = json.load(f)
+            from src.services.model_capabilities_cache import (
+                get_models_by_latency_tier,
+                has_json_mode,
+            )
 
-                for model_id, caps in data.get("models", {}).items():
-                    self._capabilities_registry[model_id] = ModelCapabilities(
-                        model_id=model_id,
-                        provider=caps.get("provider", "unknown"),
-                        tools=caps.get("tools", False),
-                        json_mode=caps.get("json_mode", False),
-                        json_schema=caps.get("json_schema", False),
-                        vision=caps.get("vision", False),
-                        max_context=caps.get("max_context", 8192),
-                        tool_schema_adherence=caps.get("tool_schema_adherence", "medium"),
-                        cost_per_1k_input=caps.get("cost_per_1k_input", 0.01),
-                        cost_per_1k_output=caps.get("cost_per_1k_output", 0.01),
-                    )
+            # Build a capabilities registry from the cache.
+            # The registry is keyed by model_id and contains ModelCapabilities objects.
+            # We seed it with the models we know about from the latency tier cache.
+            model_ids = get_models_by_latency_tier(4)  # all tiers
+            populated = 0
+            for model_id in model_ids:
+                provider = model_id.split("/")[0] if "/" in model_id else "unknown"
+                self._capabilities_registry[model_id] = ModelCapabilities(
+                    model_id=model_id,
+                    provider=provider,
+                    tools=True,  # conservative: assume tools available unless known otherwise
+                    json_mode=has_json_mode(model_id),
+                    json_schema=False,
+                    vision="vision" in model_id or "vl" in model_id,
+                    max_context=128000,
+                    tool_schema_adherence="medium",
+                    cost_per_1k_input=0.001,
+                    cost_per_1k_output=0.002,
+                )
+                populated += 1
 
-                logger.info(f"Loaded capabilities for {len(self._capabilities_registry)} models")
+            if populated:
+                logger.info(f"Loaded capabilities for {populated} models from DB cache")
             else:
-                logger.warning(f"Capabilities file not found: {CAPABILITIES_DATA_PATH}")
+                logger.warning("DB capabilities cache empty; loading defaults")
                 self._load_default_capabilities()
         except Exception as e:
-            logger.error(f"Failed to load capabilities: {e}")
+            logger.error(f"Failed to load capabilities from DB cache: {e}")
             self._load_default_capabilities()
 
     def _load_default_capabilities(self) -> None:
@@ -249,7 +266,9 @@ class PromptRouter:
             except Exception as e:
                 logger.warning(f"Health snapshot read failed: {e}")
                 # Use curated stable models instead of entire registry to avoid unhealthy models
-                healthy = [m for m in STABLE_FALLBACK_MODELS if m in self._capabilities_registry]
+                healthy = [
+                    m for m in _get_stable_fallback_models() if m in self._capabilities_registry
+                ]
                 if not healthy:
                     # Last resort: use all models from registry
                     healthy = list(self._capabilities_registry.keys())

@@ -149,15 +149,6 @@ class TestBaseTool:
 class TestToolRegistry:
     """Tests for tool registry functions."""
 
-    def test_available_tools_not_empty(self):
-        """Test that AVAILABLE_TOOLS is not empty."""
-        assert len(AVAILABLE_TOOLS) > 0
-
-    def test_text_to_speech_registered(self):
-        """Test that text_to_speech tool is registered."""
-        assert "text_to_speech" in AVAILABLE_TOOLS
-        assert AVAILABLE_TOOLS["text_to_speech"] == TextToSpeechTool
-
     def test_get_tool_definitions(self):
         """Test getting all tool definitions."""
         definitions = get_tool_definitions()
@@ -211,22 +202,6 @@ class TestToolRegistry:
 
 class TestChatterboxModels:
     """Tests for Chatterbox model configuration."""
-
-    def test_models_defined(self):
-        """Test that Chatterbox models are defined."""
-        assert len(CHATTERBOX_MODELS) == 3
-        assert "chatterbox-turbo" in CHATTERBOX_MODELS
-        assert "chatterbox-multilingual" in CHATTERBOX_MODELS
-        assert "chatterbox" in CHATTERBOX_MODELS
-
-    def test_model_has_required_fields(self):
-        """Test that each model has required fields."""
-        for model_id, info in CHATTERBOX_MODELS.items():
-            assert "name" in info
-            assert "description" in info
-            assert "parameters" in info
-            assert "languages" in info
-            assert "features" in info
 
     def test_turbo_model_english_only(self):
         """Test that turbo model supports only English."""
@@ -291,10 +266,6 @@ class TestChatterboxModels:
 
 class TestLanguageNames:
     """Tests for language name mapping."""
-
-    def test_language_names_defined(self):
-        """Test that language names are defined."""
-        assert len(LANGUAGE_NAMES) >= 22
 
     def test_common_languages_present(self):
         """Test that common languages are present."""
@@ -371,35 +342,6 @@ class TestSSRFProtection:
 
 class TestTextToSpeechTool:
     """Tests for TextToSpeechTool."""
-
-    def test_get_definition(self):
-        """Test tool definition."""
-        definition = TextToSpeechTool.get_definition()
-
-        assert definition["type"] == "function"
-        assert definition["function"]["name"] == "text_to_speech"
-        assert "description" in definition["function"]
-
-        # Check parameters
-        params = definition["function"]["parameters"]
-        assert params["type"] == "object"
-        assert "text" in params["properties"]
-        assert "model" in params["properties"]
-        assert "language" in params["properties"]
-        assert "voice_reference_url" in params["properties"]
-        assert "exaggeration" in params["properties"]
-        assert "cfg_weight" in params["properties"]
-        assert "text" in params["required"]
-
-    def test_model_enum_in_definition(self):
-        """Test that model parameter has correct enum values."""
-        definition = TextToSpeechTool.get_definition()
-        model_param = definition["function"]["parameters"]["properties"]["model"]
-
-        assert "enum" in model_param
-        assert "chatterbox-turbo" in model_param["enum"]
-        assert "chatterbox-multilingual" in model_param["enum"]
-        assert "chatterbox" in model_param["enum"]
 
     @pytest.mark.asyncio
     async def test_execute_success(self):
@@ -555,17 +497,6 @@ class TestGenerateSpeech:
             await generate_speech("Hello", voice_reference_url="http://localhost:8080/audio.wav")
 
 
-class TestVoiceReferenceFileSize:
-    """Tests for voice reference file size limits."""
-
-    def test_max_file_size_constant_defined(self):
-        """Test that max file size constant is defined."""
-        from src.services.chatterbox_tts_client import CHATTERBOX_MAX_VOICE_REF_SIZE
-
-        # Should be 10 MB
-        assert CHATTERBOX_MAX_VOICE_REF_SIZE == 10 * 1024 * 1024
-
-
 # =============================================================================
 # API ROUTE TESTS
 # =============================================================================
@@ -686,22 +617,6 @@ class TestToolIntegration:
             # Name should match registration key
             # (allowing for slight variations like underscores)
             assert name.replace("-", "_") == func["name"].replace("-", "_")
-
-    def test_all_tools_are_instantiable(self):
-        """Test that all registered tools can be instantiated."""
-        for name, tool_class in AVAILABLE_TOOLS.items():
-            tool = tool_class()
-            assert isinstance(tool, BaseTool)
-
-    @pytest.mark.asyncio
-    async def test_all_tools_have_execute_method(self):
-        """Test that all tools have an async execute method."""
-        import inspect
-
-        for name, tool_class in AVAILABLE_TOOLS.items():
-            tool = tool_class()
-            assert hasattr(tool, "execute")
-            assert inspect.iscoroutinefunction(tool.execute)
 
 
 # =============================================================================

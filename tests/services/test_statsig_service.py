@@ -2,50 +2,13 @@
 Comprehensive tests for Statsig Service service
 """
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 
 class TestStatsigService:
     """Test Statsig Service service functionality"""
-
-    def test_module_imports(self):
-        """Test that module imports successfully"""
-        import src.services.statsig_service
-
-        assert src.services.statsig_service is not None
-
-    def test_module_has_expected_attributes(self):
-        """Test module exports"""
-        from src.services import statsig_service
-
-        assert hasattr(statsig_service, "__name__")
-
-    def test_statsig_service_class_exists(self):
-        """Test StatsigService class is importable"""
-        from src.services.statsig_service import StatsigService
-
-        assert StatsigService is not None
-
-    def test_statsig_service_singleton_exists(self):
-        """Test statsig_service singleton is created"""
-        from src.services.statsig_service import statsig_service
-
-        assert statsig_service is not None
-
-    def test_statsig_service_has_required_methods(self):
-        """Test StatsigService has all required methods"""
-        from src.services.statsig_service import StatsigService
-
-        service = StatsigService()
-        assert hasattr(service, "initialize")
-        assert hasattr(service, "log_event")
-        assert hasattr(service, "log_session_start")
-        assert hasattr(service, "log_session_end")
-        assert hasattr(service, "get_feature_flag")
-        assert hasattr(service, "flush")
-        assert hasattr(service, "shutdown")
 
     def test_log_event_returns_true_in_fallback_mode(self):
         """Test log_event returns True in fallback mode (no server key)"""

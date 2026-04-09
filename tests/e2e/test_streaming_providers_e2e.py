@@ -347,6 +347,7 @@ class TestProviderParameterE2E:
         if response.status_code == 200:
             assert "[DONE]" in response.text
 
+    @pytest.mark.timeout(30)
     def test_multiple_providers_in_sequence(self, client: TestClient, auth_headers: dict):
         """Test using different providers in sequence."""
         providers = ["openrouter", "featherless", "fireworks"]

@@ -62,7 +62,7 @@ class StartTrialRequest(BaseModel):
     """Request to start a trial"""
 
     api_key: str
-    trial_days: int = Field(default=3, ge=1, le=30)
+    trial_days: int = Field(default=14, ge=1, le=30)
 
 
 class StartTrialResponse(BaseModel):

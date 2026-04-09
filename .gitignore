@@ -61,8 +61,10 @@ response.json
 gateway_test_results_*.json
 production_test_results_*.json
 production_verification_report_*.json
+pricing_scheduler_performance_results_*.txt
 model_format_validation_results.json
 models_export_*.csv
+flags.ts
 
 # Admin keys and sensitive credentials
 .admin_key_*

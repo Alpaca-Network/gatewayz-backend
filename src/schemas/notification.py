@@ -21,6 +21,7 @@ class NotificationType(str, Enum):  # noqa: UP042
     PLAN_EXPIRED = "plan_expired"
     SUBSCRIPTION_EXPIRING = "subscription_expiring"
     CREDIT_ADDED = "credit_added"
+    CREDITS_DEPLETED = "credits_depleted"
     USAGE_ALERT = "usage_alert"
     WELCOME = "welcome"
     PASSWORD_RESET = "password_reset"
@@ -56,6 +57,7 @@ class NotificationPreferences(BaseModel):
     plan_expiry_reminder_days: int = 7  # Days before plan expires to send reminder
     usage_alerts: bool = True
     webhook_url: str | None = None
+    webhook_secret: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

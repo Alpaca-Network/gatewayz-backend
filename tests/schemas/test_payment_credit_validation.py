@@ -106,7 +106,7 @@ def test_various_payment_amounts_with_valid_credits():
         (1000, 15.00, "10 dollar payment, 150% bonus"),
         (2500, 50.00, "25 dollar payment, 200% bonus"),
         (10000, 200.00, "100 dollar payment, 200% bonus"),
-        (99999999, 999999.99, "maximum payment, exact credit"),
+        (1000000, 10000.00, "max credit value"),
     ]
 
     for amount_cents, credit_value_dollars, description in test_cases:

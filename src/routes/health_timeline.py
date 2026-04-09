@@ -38,7 +38,9 @@ _health_timeline_cache = {
 def get_cache_key(endpoint: str, **params) -> str:
     """Generate cache key from endpoint and parameters"""
     param_str = json.dumps(params, sort_keys=True)
-    return hashlib.md5(f"{endpoint}:{param_str}".encode()).hexdigest()
+    return hashlib.md5(
+        f"{endpoint}:{param_str}".encode()
+    ).hexdigest()  # nosec B324 - MD5 for cache key, not security
 
 
 def get_cached_response(cache_type: str, cache_key: str) -> dict | None:

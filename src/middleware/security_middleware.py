@@ -11,6 +11,8 @@ and 499 timeout spikes. It implements:
 import asyncio
 import hashlib
 import logging
+import os
+import secrets
 import time
 from collections import Counter, deque
 
@@ -630,13 +632,39 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         ip_limit = self._get_effective_limit(base_ip_limit, user_tier)
         fp_limit = self._get_effective_limit(FINGERPRINT_LIMIT, user_tier)
 
-        # 1. Check IP-based limit (skip for authenticated users - they have API key rate limiting)
-        if not is_authenticated and not await self._check_limit(f"ip:{client_ip}", ip_limit):
+        # 1. Check IP-based limit (skip for authenticated users and test environment)
+        _skip_rate_limit = os.environ.get("TESTING") == "true"
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"ip:{client_ip}", ip_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_ip_tier").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
                 f"🛡️ Blocked Aggressive IP: {client_ip} (Limit: {ip_limit} RPM){mode_indicator}"
             )
+
+            # Log security event to audit table (non-blocking)
+            try:
+                from src.db.activity import log_security_event
+
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        log_security_event,
+                        event_type="rate_limit_block",
+                        ip_address=client_ip,
+                        details={
+                            "limit_type": "ip",
+                            "limit": ip_limit,
+                            "fingerprint": fingerprint,
+                            "velocity_mode": velocity_active,
+                            "user_tier": user_tier,
+                        },
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to log security audit event: {e}")
 
             _ip_reset_ts = str(int(time.time()) + 60)
             headers = {
@@ -676,13 +704,38 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             )
 
         # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
-        #    Skip for authenticated users — they are already rate-limited by API key
-        if not is_authenticated and not await self._check_limit(f"fp:{fingerprint}", fp_limit):
+        #    Skip for authenticated users and test environment
+        if (
+            not _skip_rate_limit
+            and not is_authenticated
+            and not await self._check_limit(f"fp:{fingerprint}", fp_limit)
+        ):
             rate_limited_requests.labels(limit_type="security_fingerprint").inc()
             mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
             logger.warning(
                 f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}"
             )
+
+            # Log security event to audit table (non-blocking)
+            try:
+                from src.db.activity import log_security_event
+
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        log_security_event,
+                        event_type="rate_limit_block",
+                        ip_address=client_ip,
+                        details={
+                            "limit_type": "fingerprint",
+                            "limit": fp_limit,
+                            "fingerprint": fingerprint,
+                            "velocity_mode": velocity_active,
+                            "user_tier": user_tier,
+                        },
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Failed to log security audit event: {e}")
 
             _fp_reset_ts = str(int(time.time()) + 60)
             headers = {
@@ -733,15 +786,33 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if self._is_streaming_request(request):
             return await call_next(request)
 
+        # Detect internal live-test self-calls so their failures don't pollute the
+        # velocity-mode window.  Requires BOTH the marker header AND a Bearer token
+        # that matches ADMIN_API_KEY — external clients cannot forge this without the key.
+        _admin_key_env = os.environ.get("ADMIN_API_KEY", "")
+        _incoming_key = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        _is_internal_live_test = bool(
+            _admin_key_env
+            and _incoming_key
+            and request.headers.get("X-Internal-Source") == "live-test"
+            and secrets.compare_digest(_incoming_key, _admin_key_env)
+        )
+        # Expose to downstream route handlers so they can skip rate limiting.
+        # Validation already happened above (ADMIN_API_KEY comparison), so
+        # route handlers can trust this flag without re-checking the header.
+        request.state.is_live_test = _is_internal_live_test
+
         # Proceed to next middleware/app logic
         start_time = time.time()
         response = await call_next(request)
         request_duration = time.time() - start_time
 
         # Track response for Global Velocity Mode
-        # Record outcome and check if we should activate velocity mode
-        self._record_request_outcome(response.status_code, request_duration)
-        self._check_and_activate_velocity_mode()
+        # Skip for internal live-test calls — their provider failures should not
+        # inflate the system error rate and risk triggering velocity mode for other users.
+        if not _is_internal_live_test:
+            self._record_request_outcome(response.status_code, request_duration)
+            self._check_and_activate_velocity_mode()
 
         # Check if velocity mode should be deactivated and logged
         self._check_velocity_mode_deactivation()

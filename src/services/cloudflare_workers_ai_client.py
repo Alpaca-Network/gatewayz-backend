@@ -29,6 +29,7 @@ import httpx
 from src.config import Config
 from src.services.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_cloudflare_workers_ai_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -166,7 +167,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         "name": "Llama 3.3 70B Instruct FP8 Fast",
         "description": "Quantized Llama 3.3 70B optimized for speed, supports function calling",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -177,7 +178,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.2-11b-vision-instruct",
         "name": "Llama 3.2 11B Vision Instruct",
         "description": "Meta's Llama 3.2 with vision capabilities for image reasoning and captioning",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -185,7 +186,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.2-3b-instruct",
         "name": "Llama 3.2 3B Instruct",
         "description": "Meta's Llama 3.2 3B instruction-tuned for multilingual dialogue",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -193,7 +194,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.2-1b-instruct",
         "name": "Llama 3.2 1B Instruct",
         "description": "Meta's Llama 3.2 1B lightweight instruction-tuned model",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -204,7 +205,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.1-70b-instruct",
         "name": "Llama 3.1 70B Instruct",
         "description": "Meta's Llama 3.1 70B with multilingual dialogue optimization",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -212,7 +213,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.1-8b-instruct-fast",
         "name": "Llama 3.1 8B Instruct Fast",
         "description": "Fast variant of Llama 3.1 8B Instruct optimized for speed",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -220,7 +221,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.1-8b-instruct",
         "name": "Llama 3.1 8B Instruct",
         "description": "Meta's Llama 3.1 8B with multilingual dialogue optimization",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -228,7 +229,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.1-8b-instruct-fp8",
         "name": "Llama 3.1 8B Instruct FP8",
         "description": "Meta's Llama 3.1 8B quantized to FP8 for efficiency",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -236,7 +237,7 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "id": "@cf/meta/llama-3.1-8b-instruct-awq",
         "name": "Llama 3.1 8B Instruct AWQ",
         "description": "Meta's Llama 3.1 8B with AWQ quantization",
-        "context_length": 8192,
+        "context_length": 131072,
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
@@ -267,33 +268,10 @@ DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [
         "provider": "cloudflare-workers-ai",
         "source_gateway": "cloudflare-workers-ai",
     },
-    # ==========================================================================
-    # Meta Llama 2 Models (Legacy)
-    # ==========================================================================
-    {
-        "id": "@cf/meta/llama-2-7b-chat-fp16",
-        "name": "Llama 2 7B Chat FP16",
-        "description": "Meta's Llama 2 7B chat model in FP16 precision",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
-    {
-        "id": "@cf/meta/llama-2-7b-chat-int8",
-        "name": "Llama 2 7B Chat INT8",
-        "description": "Meta's Llama 2 7B chat model quantized to INT8",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
-    {
-        "id": "@cf/meta-llama/llama-2-7b-chat-hf-lora",
-        "name": "Llama 2 7B Chat HF LoRA",
-        "description": "Meta's Llama 2 7B with LoRA fine-tuning support",
-        "context_length": 4096,
-        "provider": "cloudflare-workers-ai",
-        "source_gateway": "cloudflare-workers-ai",
-    },
+    # Meta Llama 2 Models — REMOVED (EOL)
+    # @cf/meta/llama-2-7b-chat-fp16, @cf/meta/llama-2-7b-chat-int8,
+    # and @cf/meta-llama/llama-2-7b-chat-hf-lora were all sunset by Cloudflare
+    # Workers AI when Meta deprecated the entire Llama 2 family. No longer served.
     # ==========================================================================
     # Meta Llama Guard (Safety)
     # ==========================================================================
@@ -630,12 +608,40 @@ def fetch_models_from_cloudflare_workers_ai() -> list[dict[str, Any]]:
                 "fetch_models_from_cloudflare_workers_ai called from async context, "
                 "returning static list. Use fetch_models_from_cloudflare_workers_ai_async() instead."
             )
+            # Try database fallback first (from last successful sync)
+            try:
+                from src.services.models import get_fallback_models_from_db
+
+                db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
+                if db_fallback:
+                    logger.info(
+                        f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                    )
+                    cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+                    return db_fallback
+            except Exception as e:
+                logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {e}")
+            # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
             return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
         except RuntimeError:
             # No event loop running, we can use asyncio.run()
             return asyncio.run(fetch_models_from_cloudflare_workers_ai_async())
     except Exception as e:
         logger.error(f"Error in fetch_models_from_cloudflare_workers_ai: {e}")
+        # Try database fallback first (from last successful sync)
+        try:
+            from src.services.models import get_fallback_models_from_db
+
+            db_fallback = get_fallback_models_from_db("cloudflare-workers-ai")
+            if db_fallback:
+                logger.info(
+                    f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+                )
+                cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+                return db_fallback
+        except Exception as db_e:
+            logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {db_e}")
+        # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
         return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS
 
 
@@ -660,6 +666,23 @@ async def fetch_models_from_cloudflare_workers_ai_async() -> list[dict[str, Any]
             logger.info(f"Using {len(text_models)} models from Cloudflare API")
             return text_models
 
+    # Try database fallback first (from last successful sync)
+    try:
+        import asyncio
+
+        from src.services.models import get_fallback_models_from_db
+
+        db_fallback = await asyncio.to_thread(get_fallback_models_from_db, "cloudflare-workers-ai")
+        if db_fallback:
+            logger.info(
+                f"Using {len(db_fallback)} Cloudflare Workers AI models from database fallback"
+            )
+            cache_gateway_catalog("cloudflare-workers-ai", db_fallback)
+            return db_fallback
+    except Exception as e:
+        logger.warning(f"Failed to get database fallback for Cloudflare Workers AI: {e}")
+
+    # TODO: Phase 2 - remove static fallback once DB fallback is proven reliable
     # Fall back to static list
     logger.info("Falling back to static Cloudflare Workers AI model list")
     return DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS

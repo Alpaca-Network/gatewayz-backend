@@ -24,6 +24,8 @@ from src.schemas import ProxyRequest, ResponseRequest
 from src.security.deps import get_api_key, get_optional_api_key
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_ALLOWED_MODELS,
+    ANONYMOUS_DAILY_LIMIT,
+    get_anonymous_rate_limit_headers,
     record_anonymous_request,
     validate_anonymous_request,
 )
@@ -62,7 +64,6 @@ from src.adapters.chat import OpenAIChatAdapter
 
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
-from src.services.connection_pool import get_butter_pooled_async_client
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -121,6 +122,17 @@ except ImportError:
 # Import provider clients with graceful error handling
 # This prevents a single provider's import failure from breaking the entire chat endpoint
 _provider_import_errors = {}
+
+
+def _maybe_record_402(provider: str, status_code: int) -> None:
+    """Record a 402 for provider credit monitoring. Never raises."""
+    if status_code == 402:
+        try:
+            from src.services.provider_credit_monitor import record_provider_402
+
+            record_provider_402(provider)
+        except Exception:
+            pass
 
 
 # Helper function to safely import provider clients
@@ -299,6 +311,31 @@ PROVIDER_FUNCTIONS = {
         "process_zai_response",
         "make_zai_request_openai_stream",
     ],
+    "openai": [
+        "make_openai_request",
+        "process_openai_response",
+        "make_openai_request_stream",
+    ],
+    "anthropic": [
+        "make_anthropic_request",
+        "process_anthropic_response",
+        "make_anthropic_request_stream",
+    ],
+    "deepinfra": [
+        "make_deepinfra_request_openai",
+        "process_deepinfra_response",
+        "make_deepinfra_request_openai_stream",
+    ],
+    "nebius": [
+        "make_nebius_request_openai",
+        "process_nebius_response",
+        "make_nebius_request_openai_stream",
+    ],
+    "canopywave": [
+        "make_canopywave_request_openai",
+        "process_canopywave_response",
+        "make_canopywave_request_openai_stream",
+    ],
 }
 
 # Load all providers and expose functions to global namespace
@@ -436,6 +473,31 @@ PROVIDER_ROUTING = {
         "process": process_zai_response,  # noqa: F821
         "stream": make_zai_request_openai_stream,  # noqa: F821
     },
+    "openai": {
+        "request": make_openai_request,  # noqa: F821
+        "process": process_openai_response,  # noqa: F821
+        "stream": make_openai_request_stream,  # noqa: F821
+    },
+    "anthropic": {
+        "request": make_anthropic_request,  # noqa: F821
+        "process": process_anthropic_response,  # noqa: F821
+        "stream": make_anthropic_request_stream,  # noqa: F821
+    },
+    "deepinfra": {
+        "request": make_deepinfra_request_openai,  # noqa: F821
+        "process": process_deepinfra_response,  # noqa: F821
+        "stream": make_deepinfra_request_openai_stream,  # noqa: F821
+    },
+    "nebius": {
+        "request": make_nebius_request_openai,  # noqa: F821
+        "process": process_nebius_response,  # noqa: F821
+        "stream": make_nebius_request_openai_stream,  # noqa: F821
+    },
+    "canopywave": {
+        "request": make_canopywave_request_openai,  # noqa: F821
+        "process": process_canopywave_response,  # noqa: F821
+        "stream": make_canopywave_request_openai_stream,  # noqa: F821
+    },
 }
 
 import src.services.rate_limiting as rate_limiting_service
@@ -448,7 +510,7 @@ from src.services.health_routing import (
     should_use_health_based_routing,
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.pricing import calculate_cost_async
+from src.services.pricing import calculate_cost_async, get_model_pricing_async
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
@@ -565,182 +627,24 @@ PROVIDER_TIMEOUTS = {
     "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
 
-# Butter.dev provider configuration for caching proxy
-# Maps provider names to their API key config attribute and base URL
-BUTTER_PROVIDER_CONFIG = {
-    "openrouter": {
-        "api_key_attr": "OPENROUTER_API_KEY",
-        "base_url": "https://openrouter.ai/api/v1",
-    },
-    "featherless": {
-        "api_key_attr": "FEATHERLESS_API_KEY",
-        "base_url": "https://api.featherless.ai/v1",
-    },
-    "together": {
-        "api_key_attr": "TOGETHER_API_KEY",
-        "base_url": "https://api.together.xyz/v1",
-    },
-    "fireworks": {
-        "api_key_attr": "FIREWORKS_API_KEY",
-        "base_url": "https://api.fireworks.ai/inference/v1",
-    },
-    "groq": {
-        "api_key_attr": "GROQ_API_KEY",
-        "base_url": "https://api.groq.com/openai/v1",
-    },
-    "cerebras": {
-        "api_key_attr": "CEREBRAS_API_KEY",
-        "base_url": "https://api.cerebras.ai/v1",
-    },
-    "deepinfra": {
-        "api_key_attr": "DEEPINFRA_API_KEY",
-        "base_url": "https://api.deepinfra.com/v1/openai",
-    },
-    "xai": {
-        "api_key_attr": "XAI_API_KEY",
-        "base_url": "https://api.x.ai/v1",
-    },
-    "openai": {
-        "api_key_attr": "OPENAI_API_KEY",
-        "base_url": "https://api.openai.com/v1",
-    },
-    "huggingface": {
-        "api_key_attr": "HF_API_KEY",
-        "base_url": "https://api-inference.huggingface.co/v1",
-    },
-    "chutes": {
-        "api_key_attr": "CHUTES_API_KEY",
-        "base_url": "https://llm.chutes.ai/v1",
-    },
-    "onerouter": {
-        "api_key_attr": "ONEROUTER_API_KEY",
-        "base_url": "https://llm.infron.ai/v1",
-    },
-    "aihubmix": {
-        "api_key_attr": "AIHUBMIX_API_KEY",
-        "base_url": "https://aihubmix.com/v1",
-    },
-    "near": {
-        "api_key_attr": "NEAR_API_KEY",
-        "base_url": "https://cloud-api.near.ai/v1",
-    },
-    "morpheus": {
-        "api_key_attr": "MORPHEUS_API_KEY",
-        "base_url": "https://api.mor.org/api/v1",
-    },
-    "simplismart": {
-        "api_key_attr": "SIMPLISMART_API_KEY",
-        "base_url": "https://api.simplismart.live",
-    },
-    "sybil": {
-        "api_key_attr": "SYBIL_API_KEY",
-        "base_url": "https://api.sybil.com/v1",
-    },
-    "nosana": {
-        "api_key_attr": "NOSANA_API_KEY",
-        "base_url": "https://dashboard.k8s.prd.nos.ci/api/v1",
-    },
-    "akash": {
-        "api_key_attr": "AKASH_API_KEY",
-        "base_url": "https://api.akashml.com/v1",
-    },
-    "anannas": {
-        "api_key_attr": "ANANNAS_API_KEY",
-        "base_url": "https://api.anannas.ai/v1",
-    },
-    "helicone": {
-        "api_key_attr": "HELICONE_API_KEY",
-        "base_url": "https://ai-gateway.helicone.ai/v1",
-    },
-    "aimo": {
-        "api_key_attr": "AIMO_API_KEY",
-        "base_url": "https://beta.aimo.network/api/v1",
-    },
-}
-
-
-async def make_butter_proxied_stream(
-    messages: list,
-    model: str,
-    provider: str,
-    **kwargs,
-):
-    """
-    Make a streaming request through Butter.dev caching proxy.
-
-    This routes the request through Butter.dev which can cache responses
-    for identical prompts, reducing costs and latency.
-
-    Args:
-        messages: Chat messages
-        model: Model name
-        provider: Target provider (e.g., 'openrouter', 'together')
-        **kwargs: Additional arguments (temperature, max_tokens, etc.)
-
-    Returns:
-        Async stream iterator
-
-    Raises:
-        ValueError: If provider is not configured for Butter
-    """
-    provider_config = BUTTER_PROVIDER_CONFIG.get(provider)
-    if not provider_config:
-        raise ValueError(f"Provider '{provider}' is not configured for Butter.dev caching")
-
-    api_key = getattr(Config, provider_config["api_key_attr"], None)
-    if not api_key:
-        raise ValueError(f"API key not configured for provider '{provider}'")
-
-    base_url = provider_config["base_url"]
-
-    # Get the Butter-proxied async client
-    client = get_butter_pooled_async_client(
-        target_provider=provider,
-        target_api_key=api_key,
-        target_base_url=base_url,
-    )
-
-    logger.info(f"Butter.dev: Routing {provider}/{model} through cache proxy")
-
-    # Build request parameters
-    request_params = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-    }
-
-    # Add optional parameters
-    if kwargs.get("temperature") is not None:
-        request_params["temperature"] = kwargs["temperature"]
-    if kwargs.get("max_tokens") is not None:
-        request_params["max_tokens"] = kwargs["max_tokens"]
-    if kwargs.get("top_p") is not None:
-        request_params["top_p"] = kwargs["top_p"]
-    if kwargs.get("frequency_penalty") is not None:
-        request_params["frequency_penalty"] = kwargs["frequency_penalty"]
-    if kwargs.get("presence_penalty") is not None:
-        request_params["presence_penalty"] = kwargs["presence_penalty"]
-    if kwargs.get("stop") is not None:
-        request_params["stop"] = kwargs["stop"]
-    if kwargs.get("tools") is not None:
-        request_params["tools"] = kwargs["tools"]
-    if kwargs.get("tool_choice") is not None:
-        request_params["tool_choice"] = kwargs["tool_choice"]
-
-    # Make the streaming request
-    stream = await client.chat.completions.create(**request_params)
-
-    return stream
-
-
 # Auto-routing constants
 # Using "router" prefix to avoid confusion with OpenRouter's "openrouter/auto" model
 AUTO_ROUTE_MODEL_PREFIX = "router"
-AUTO_ROUTE_DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 # Code router constants
 CODE_ROUTER_PREFIX = "router:code"
-CODE_ROUTER_DEFAULT_MODEL = "zai/glm-4.7"  # Fallback model
+
+
+def _get_auto_route_default_model() -> str:
+    from src.db.system_config import get_config
+
+    return get_config("auto_route_default_model", "openai/gpt-4o-mini")
+
+
+def _get_code_router_default_model() -> str:
+    from src.db.system_config import get_config
+
+    return get_config("code_router_default_model", "zai/glm-4.7")
 
 
 def mask_key(k: str) -> str:
@@ -1398,6 +1302,7 @@ async def stream_generator(
     first_chunk_sent = False  # TTFC tracking
     ttfc_start = time.monotonic()  # TTFC tracking
     chunk_count = 0  # Initialized before try so it's available in except for refund metadata
+    dropped_chunks = 0  # Track chunks that failed normalization
     credit_deduction_success = False  # Track whether credits were actually deducted
 
     # Initialize normalizer
@@ -1547,12 +1452,54 @@ async def stream_generator(
             if normalized_chunk:
                 yield normalized_chunk.to_sse()
             else:
-                logger.debug(f"[STREAM] Chunk {chunk_count} resulted in no normalized output")
+                # Only count as a real drop if it's not an Anthropic control event
+                # (message_start, content_block_stop, ping, etc. legitimately produce no output)
+                is_anthropic_noop = False
+                if hasattr(chunk, "type") and chunk.type in {
+                    "message_start",
+                    "message_stop",
+                    "message_delta",
+                    "content_block_start",
+                    "content_block_stop",
+                    "ping",
+                }:
+                    is_anthropic_noop = True
+
+                if not is_anthropic_noop:
+                    dropped_chunks += 1
+                    logger.warning(
+                        "[STREAM_DROP] Chunk %d dropped for %s/%s (request_id=%s)",
+                        chunk_count,
+                        provider,
+                        model,
+                        request_id,
+                    )
+                    try:
+                        from src.services.prometheus_metrics import stream_chunks_dropped
+
+                        stream_chunks_dropped.labels(provider=provider, model=model).inc()
+                    except ImportError:
+                        pass
 
         accumulated_content = normalizer.get_accumulated_content()
         logger.info(
-            f"[STREAM] Stream completed with {chunk_count} chunks, accumulated content length: {len(accumulated_content)}"
+            "[STREAM] Stream completed: %d chunks, %d dropped, content_len=%d (request_id=%s)",
+            chunk_count,
+            dropped_chunks,
+            len(accumulated_content),
+            request_id,
         )
+
+        # Warn client if significant chunk loss occurred
+        # Note: chunk_count already includes dropped chunks (incremented for every chunk received)
+        if dropped_chunks > 0 and chunk_count > 0 and dropped_chunks > chunk_count * 0.5:
+            yield create_error_sse_chunk(
+                error_message=f"Warning: {dropped_chunks} of {chunk_count} chunks could not be normalized from provider {provider}",
+                error_type="stream_normalization_warning",
+                provider=provider,
+                model=model,
+                request_id=request_id,
+            )
 
         # DEFENSIVE: Detect empty streams and log as error
         if chunk_count == 0:
@@ -1565,6 +1512,8 @@ async def stream_generator(
                 error_type="empty_stream_error",
                 provider=provider,
                 model=model,
+                status=502,
+                request_id=request_id,
             )
             yield create_done_sse()
             return
@@ -1670,6 +1619,8 @@ async def stream_generator(
                 yield create_error_sse_chunk(
                     error_message=f"Plan limit exceeded: {post_plan.get('reason', 'unknown')}",
                     error_type="plan_limit_exceeded",
+                    status=429,
+                    request_id=request_id,
                 )
                 yield create_done_sse()
                 return
@@ -1825,6 +1776,7 @@ async def stream_generator(
             error_type=error_type,
             provider=provider if "provider" in dir() else None,
             model=model if "model" in dir() else None,
+            request_id=request_id if "request_id" in dir() else None,
         )
         yield create_done_sse()
     finally:
@@ -1937,6 +1889,10 @@ async def chat_completions(
                                     "code": "anonymous_daily_limit",
                                 }
                             },
+                            headers=get_anonymous_rate_limit_headers(
+                                limit=ANONYMOUS_DAILY_LIMIT,
+                                remaining=0,
+                            ),
                         )
 
                 user = None
@@ -2037,10 +1993,13 @@ async def chat_completions(
             if not pre_plan.get("allowed", False):
                 raise APIExceptions.plan_limit_exceeded(reason=pre_plan.get("reason", "unknown"))
 
-        # Allow disabling rate limiting for testing (DEV ONLY)
+        # Allow disabling rate limiting for testing (DEV ONLY) or internal live-test calls.
+        # is_live_test is set by security_middleware after validating X-Internal-Source + ADMIN_API_KEY.
         import os
 
-        disable_rate_limiting = os.getenv("DISABLE_RATE_LIMITING", "false").lower() == "true"
+        disable_rate_limiting = os.getenv(
+            "DISABLE_RATE_LIMITING", "false"
+        ).lower() == "true" or bool(request and getattr(request.state, "is_live_test", False))
 
         # Initialize rate limit variables
         rl_pre = None
@@ -2067,12 +2026,46 @@ async def chat_completions(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after,
+                    reason=rl_pre.reason,
+                    rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
 
         # Credit check (only for authenticated non-trial users)
         if not is_anonymous and not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
             raise APIExceptions.payment_required(credits=user.get("credits", 0.0))
+
+        # Pricing pre-check: block high-value models without pricing BEFORE
+        # hitting any upstream provider. get_model_pricing_async() raises ValueError
+        # for high-value models if only default pricing is available.
+        if not is_anonymous and not trial.get("is_trial", False):
+            try:
+                await get_model_pricing_async(req.model)
+            except ValueError as pricing_err:
+                err_str = str(pricing_err)
+                is_pricing_missing = (
+                    "Pricing data not available" in err_str
+                    or "HIGH_VALUE_MODEL_PRICING_MISSING" in err_str
+                )
+                if is_pricing_missing:
+                    logger.warning(
+                        "Pricing pre-check failed (request_id=%s, model=%s): %s",
+                        request_id,
+                        req.model,
+                        err_str,
+                    )
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "error": {
+                                "message": err_str,
+                                "type": "pricing_unavailable",
+                                "code": "model_pricing_missing",
+                            }
+                        },
+                    )
+                # Unknown ValueError — let it propagate as 500
+                raise
 
         # Pre-check plan limits before streaming (fail fast) - only for authenticated users
         if not is_anonymous:
@@ -2285,7 +2278,7 @@ async def chat_completions(
                         str(e),
                     )
                     # Use default model since original was an auto-route request
-                    req.model = AUTO_ROUTE_DEFAULT_MODEL
+                    req.model = _get_auto_route_default_model()
 
         # === 2.4) General Router (if model="router:general" or "gatewayz-general") ===
         # NotDiamond-powered intelligent routing for general-purpose prompts
@@ -2348,7 +2341,9 @@ async def chat_completions(
                         logger.debug(
                             "Prometheus metrics not available for general router fallback tracking"
                         )
-                    req.model = "anthropic/claude-sonnet-4"
+                    from src.db.system_config import get_config
+
+                    req.model = get_config("default_fallback_model", "anthropic/claude-sonnet-4")
 
         # === 2.5) Code-Optimized Routing (if model="router:code" or "router:code:<mode>") ===
         # Specialized router for code-related tasks with 2026 benchmark-optimized model selection
@@ -2400,7 +2395,7 @@ async def chat_completions(
                             except ImportError:
                                 # Prometheus metrics are optional - silently skip if not available
                                 pass
-                            req.model = CODE_ROUTER_DEFAULT_MODEL
+                            req.model = _get_code_router_default_model()
                         else:
                             # Extract context from messages
                             from src.services.code_classifier import get_classifier
@@ -2443,7 +2438,7 @@ async def chat_completions(
                         # Prometheus metrics are optional - silently skip if not available
                         pass
                     # Use default code model since original was a code-route request
-                    req.model = CODE_ROUTER_DEFAULT_MODEL
+                    req.model = _get_code_router_default_model()
 
         with tracker.stage("request_preparation"):
             optional = {}
@@ -2699,71 +2694,98 @@ async def chat_completions(
             # Streaming path
             # Use unified handler for authenticated streaming requests
             if not is_anonymous:
-                try:
-                    logger.info(
-                        f"[Unified Handler] Processing authenticated streaming request for model {original_model}"
-                    )
+                # Authenticated streaming with provider failover.
+                # We wrap consumption inside an async generator so that errors during
+                # iteration (not just setup) can be caught and the next provider tried,
+                # but only before the first content chunk has been sent to the client.
+                async def _auth_stream_with_failover():
+                    _adapter = OpenAIChatAdapter()
+                    last_exc = None
 
-                    # Convert external OpenAI format to internal format
-                    adapter = OpenAIChatAdapter()
-                    internal_request = adapter.to_internal_request(
-                        {"messages": messages, "model": original_model, "stream": True, **optional}
-                    )
+                    for _idx, _attempt_provider in enumerate(provider_chain):
+                        _is_last = _idx == len(provider_chain) - 1
+                        _content_started = False
+                        try:
+                            _internal_req = _adapter.to_internal_request(
+                                {
+                                    "messages": messages,
+                                    "model": original_model,
+                                    "stream": True,
+                                    **optional,
+                                }
+                            )
+                            # Set the provider for this attempt
+                            _internal_req.provider = _attempt_provider
 
-                    # Create unified handler with user context (pass request for disconnect detection)
-                    handler = ChatInferenceHandler(api_key, background_tasks, request=request)
+                            _handler = ChatInferenceHandler(
+                                api_key, background_tasks, request=request
+                            )
+                            _internal_stream = _handler.process_stream(_internal_req)
+                            _sse_stream = _adapter.from_internal_stream(_internal_stream)
 
-                    # Process stream through unified pipeline
-                    internal_stream = handler.process_stream(internal_request)
+                            async for _chunk in _sse_stream:
+                                _content_started = True
+                                yield _chunk
 
-                    # Convert internal stream to SSE format
-                    sse_stream = adapter.from_internal_stream(internal_stream)
+                            return  # Stream completed successfully
 
-                    # Prepare response headers
-                    stream_headers = {}
-                    if rl_pre is not None:
-                        stream_headers.update(get_rate_limit_headers(rl_pre))
+                        except HTTPException as _http_exc:
+                            if not _content_started and not _is_last and should_failover(_http_exc):
+                                logger.warning(
+                                    f"[Unified Handler] Provider '{_attempt_provider}' failed "
+                                    f"(HTTP {_http_exc.status_code}) for model {original_model}, "
+                                    f"failing over ({_idx + 1}/{len(provider_chain)})"
+                                )
+                                last_exc = _http_exc
+                                continue
+                            raise
 
-                    # PERF: Add timing headers
-                    if tracker:
-                        prep_time_ms = tracker.get_total_duration() * 1000
-                        stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
-                    stream_headers["X-Provider"] = "unified"
-                    stream_headers["X-Model"] = original_model
-                    stream_headers["X-Requested-Model"] = original_model
+                        except Exception as _exc:
+                            if not _content_started and not _is_last:
+                                logger.warning(
+                                    f"[Unified Handler] Provider '{_attempt_provider}' error "
+                                    f"({type(_exc).__name__}: {_exc}) for model {original_model}, "
+                                    f"failing over ({_idx + 1}/{len(provider_chain)})"
+                                )
+                                last_exc = map_provider_error(
+                                    _attempt_provider, original_model, _exc
+                                )
+                                continue
+                            if isinstance(_exc, HTTPException):
+                                raise
+                            raise map_provider_error(
+                                _attempt_provider, original_model, _exc
+                            ) from _exc
 
-                    # SSE streaming headers to prevent buffering by proxies/nginx
-                    stream_headers["X-Accel-Buffering"] = "no"
-                    stream_headers["Cache-Control"] = "no-cache, no-transform"
-                    stream_headers["Connection"] = "keep-alive"
+                    # All providers exhausted
+                    if last_exc:
+                        raise last_exc
 
-                    logger.info(
-                        f"[Unified Handler] Returning SSE streaming response for model {original_model}"
-                    )
+                # Prepare response headers
+                stream_headers = {}
+                if rl_pre is not None:
+                    stream_headers.update(get_rate_limit_headers(rl_pre))
+                if tracker:
+                    prep_time_ms = tracker.get_total_duration() * 1000
+                    stream_headers["X-Prep-Time-Ms"] = f"{prep_time_ms:.1f}"
+                stream_headers["X-Provider"] = "unified"
+                stream_headers["X-Model"] = original_model
+                stream_headers["X-Requested-Model"] = original_model
+                # SSE streaming headers to prevent buffering by proxies/nginx
+                stream_headers["X-Accel-Buffering"] = "no"
+                stream_headers["Cache-Control"] = "no-cache, no-transform"
+                stream_headers["Connection"] = "keep-alive"
 
-                    return StreamingResponse(
-                        sse_stream,
-                        media_type="text/event-stream",
-                        headers=stream_headers,
-                    )
+                logger.info(
+                    f"[Unified Handler] Returning SSE streaming response for model {original_model} "
+                    f"(provider_chain={provider_chain})"
+                )
 
-                except Exception as exc:
-                    # Map any errors to HTTPException
-                    logger.error(
-                        f"[Unified Handler] Streaming error: {type(exc).__name__}: {exc}",
-                        exc_info=True,
-                    )
-                    if isinstance(exc, HTTPException):
-                        raise
-                    # Map provider-specific errors
-                    from src.services.provider_failover import map_provider_error
-
-                    http_exc = map_provider_error(
-                        "onerouter",  # Default provider for error mapping
-                        original_model,
-                        exc,
-                    )
-                    raise http_exc
+                return StreamingResponse(
+                    _auth_stream_with_failover(),
+                    media_type="text/event-stream",
+                    headers=stream_headers,
+                )
             else:
                 # Anonymous users: keep existing provider routing logic
                 last_http_exc = None
@@ -2918,6 +2940,11 @@ async def chat_completions(
                         http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                         last_http_exc = http_exc
+
+                        # Record 402 for provider credit monitoring BEFORE failover
+                        # (must run before should_failover/continue skips past it)
+                        _maybe_record_402(attempt_provider, http_exc.status_code)
+
                         if idx < len(provider_chain) - 1 and should_failover(http_exc):
                             next_provider = provider_chain[idx + 1]
                             logger.warning(
@@ -2972,6 +2999,8 @@ async def chat_completions(
                 internal_request = adapter.to_internal_request(
                     {"messages": messages, "model": original_model, "stream": False, **optional}
                 )
+                # Pass the detected provider so the handler doesn't have to re-detect
+                internal_request.provider = provider
 
                 # Create unified handler with user context (pass request for disconnect detection)
                 handler = ChatInferenceHandler(api_key, background_tasks, request=request)
@@ -3060,9 +3089,7 @@ async def chat_completions(
                 logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
                 if isinstance(exc, HTTPException):
                     raise
-                # Map provider-specific errors
-                from src.services.provider_failover import map_provider_error
-
+                # Map provider-specific errors (map_provider_error imported at module level)
                 http_exc = map_provider_error(error_provider, error_model, exc)
                 raise http_exc
         else:
@@ -3197,6 +3224,10 @@ async def chat_completions(
                     http_exc = map_provider_error(attempt_provider, request_model, exc)
 
                     last_http_exc = http_exc
+
+                    # Record 402 for provider credit monitoring BEFORE failover
+                    _maybe_record_402(attempt_provider, http_exc.status_code)
+
                     if idx < len(provider_chain) - 1 and should_failover(http_exc):
                         next_provider = provider_chain[idx + 1]
                         logger.warning(
@@ -3289,14 +3320,13 @@ async def chat_completions(
                             "tokens_requested": total_tokens,
                         },
                     )
+                    rl_final_hdrs = get_rate_limit_headers(rl_final)
+                    if rl_final.retry_after:
+                        rl_final_hdrs["Retry-After"] = str(rl_final.retry_after)
                     raise HTTPException(
                         status_code=429,
                         detail=f"Rate limit exceeded: {rl_final.reason}",
-                        headers=(
-                            {"Retry-After": str(rl_final.retry_after)}
-                            if rl_final.retry_after
-                            else None
-                        ),
+                        headers=rl_final_hdrs or None,
                     )
 
         # Credit/usage tracking (only for authenticated users)
@@ -3556,9 +3586,17 @@ async def chat_completions(
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
 
-        pricing_info = get_model_pricing(model)
-        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-        output_cost = completion_tokens * pricing_info.get("completion", 0)
+        try:
+            pricing_info = get_model_pricing(model)
+            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+            output_cost = completion_tokens * pricing_info.get("completion", 0)
+        except ValueError:
+            logger.warning(
+                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                f"using zero cost for analytics record"
+            )
+            input_cost = 0.0
+            output_cost = 0.0
 
         background_tasks.add_task(
             save_chat_completion_request_with_cost,
@@ -3781,7 +3819,9 @@ async def unified_responses(
                     },
                 )
                 raise APIExceptions.rate_limited(
-                    retry_after=rl_pre.retry_after, reason=rl_pre.reason
+                    retry_after=rl_pre.retry_after,
+                    reason=rl_pre.reason,
+                    rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
 
         if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
@@ -4346,6 +4386,10 @@ async def unified_responses(
                     continue
 
                 last_http_exc = http_exc
+
+                # Record 402 for provider credit monitoring BEFORE failover
+                _maybe_record_402(attempt_provider, http_exc.status_code)
+
                 if idx < len(provider_chain) - 1 and should_failover(http_exc):
                     next_provider = provider_chain[idx + 1]
                     logger.warning(
@@ -4474,12 +4518,13 @@ async def unified_responses(
                         "tokens_requested": total_tokens,
                     },
                 )
+                rl_resp_hdrs = get_rate_limit_headers(rl_final)
+                if rl_final.retry_after:
+                    rl_resp_hdrs["Retry-After"] = str(rl_final.retry_after)
                 raise HTTPException(
                     status_code=429,
                     detail=f"Rate limit exceeded: {rl_final.reason}",
-                    headers=(
-                        {"Retry-After": str(rl_final.retry_after)} if rl_final.retry_after else None
-                    ),
+                    headers=rl_resp_hdrs or None,
                 )
 
         cost = await _handle_credits_and_usage(
@@ -4742,9 +4787,17 @@ async def unified_responses(
         # Calculate cost breakdown for analytics
         from src.services.pricing import get_model_pricing
 
-        pricing_info = get_model_pricing(model)
-        input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-        output_cost = completion_tokens * pricing_info.get("completion", 0)
+        try:
+            pricing_info = get_model_pricing(model)
+            input_cost = prompt_tokens * pricing_info.get("prompt", 0)
+            output_cost = completion_tokens * pricing_info.get("completion", 0)
+        except ValueError:
+            logger.warning(
+                f"[ANALYTICS] Pricing unavailable for high-value model {model}, "
+                f"using zero cost for analytics record"
+            )
+            input_cost = 0.0
+            output_cost = 0.0
 
         background_tasks.add_task(
             save_chat_completion_request_with_cost,

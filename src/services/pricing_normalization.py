@@ -136,7 +136,7 @@ PROVIDER_PRICING_FORMATS = {
     "google-vertex": PricingFormat.PER_1M_TOKENS,
     "novita": PricingFormat.PER_1M_TOKENS,
     "nebius": PricingFormat.PER_1M_TOKENS,
-    "alibaba-cloud": PricingFormat.PER_1M_TOKENS,
+    "alibaba": PricingFormat.PER_1M_TOKENS,
     "morpheus": PricingFormat.PER_1M_TOKENS,
     "helicone": PricingFormat.PER_1M_TOKENS,  # Helicone API returns per-1M pricing
     "vercel-ai-gateway": PricingFormat.PER_1M_TOKENS,  # Vercel API returns per-token, but we convert to per-1M in client
@@ -163,9 +163,25 @@ def get_provider_format(provider_slug: str) -> str:
         >>> get_provider_format('aihubmix')
         'per_1k'
     """
+    # DB-first: check providers metadata for pricing_format
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        entry = registry.get(provider_slug.lower())
+        if entry and entry.get("pricing_format"):
+            fmt = entry["pricing_format"]
+            if fmt == "per_token":
+                return PricingFormat.PER_TOKEN
+            elif fmt == "per_1k":
+                return PricingFormat.PER_1K_TOKENS
+            elif fmt == "per_1m":
+                return PricingFormat.PER_1M_TOKENS
+    except Exception as exc:
+        logger.warning("Failed to load pricing format from DB for %s: %s", provider_slug, exc)
     return PROVIDER_PRICING_FORMATS.get(
         provider_slug.lower(),
-        PricingFormat.PER_1M_TOKENS,  # Default assumption for unknown providers
+        PricingFormat.PER_1M_TOKENS,
     )
 
 

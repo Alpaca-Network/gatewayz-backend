@@ -91,6 +91,24 @@ class StreamNormalizer:
                     choices.append(normalized_choice)
 
         if not choices:
+            # Anthropic control events (message_start, content_block_stop, ping, message_stop)
+            # legitimately produce no choices — don't log these as drops.
+            _ANTHROPIC_NOOP_TYPES = {
+                "message_start",
+                "message_stop",
+                "message_delta",
+                "content_block_start",
+                "content_block_stop",
+                "ping",
+            }
+            event_type = chunk_data.get("type", "")
+            if event_type not in _ANTHROPIC_NOOP_TYPES:
+                logger.warning(
+                    "[STREAM_DROP] Chunk could not be normalized: provider=%s, model=%s, keys=%s",
+                    self.provider,
+                    self.model,
+                    list(chunk_data.keys())[:5],
+                )
             return None
 
         return NormalizedChunk(
@@ -326,16 +344,32 @@ class StreamNormalizer:
 
 
 def create_error_sse_chunk(
-    error_message: str, error_type: str, provider: str = None, model: str = None
+    error_message: str,
+    error_type: str,
+    provider: str = None,
+    model: str = None,
+    status: int = 500,
+    request_id: str = None,
 ) -> str:
-    error_data = {
+    """Create an SSE error chunk with SDK-compatible fields.
+
+    Produces a format that OpenAI-compatible SDKs can parse:
+    ``{"error": {"message", "type", "code", "status", ...}}``
+    """
+    error_data: dict = {
         "error": {
             "message": error_message,
             "type": error_type,
-            "provider": provider,
-            "model": model,
+            "code": error_type.upper().replace(" ", "_"),
+            "status": status,
         }
     }
+    if provider:
+        error_data["error"]["provider"] = provider
+    if model:
+        error_data["error"]["model"] = model
+    if request_id:
+        error_data["error"]["request_id"] = request_id
     return f"data: {json.dumps(error_data)}\n\n"
 
 

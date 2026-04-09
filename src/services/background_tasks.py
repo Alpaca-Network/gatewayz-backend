@@ -251,10 +251,10 @@ async def _collect_model_health_data() -> dict[str, dict[str, Any]]:
     if not health_data:
         from datetime import datetime
 
-        from src.services.health_snapshots import MEDIUM_TIER_POOL, SMALL_TIER_POOL
+        from src.services.health_snapshots import _get_tier_pool
 
         now = datetime.now(UTC)
-        all_models = set(SMALL_TIER_POOL) | set(MEDIUM_TIER_POOL)
+        all_models = set(_get_tier_pool(3))
 
         for model_id in all_models:
             health_data[model_id] = {

@@ -382,6 +382,52 @@ GATEWAY_CONFIG = {
 }
 
 
+# Rename to fallback; the active config is built dynamically
+_FALLBACK_GATEWAY_CONFIG = dict(GATEWAY_CONFIG)
+
+# Module-level dynamic config cache
+_dynamic_config_cache: dict[str, dict] | None = None
+_dynamic_config_ts: float = 0.0
+_DYNAMIC_CONFIG_TTL = 300  # 5 minutes
+
+
+def _get_gateway_config() -> dict[str, dict]:
+    """Build gateway health config from DB registry, with fallback.
+
+    Returns a dict compatible with the ``GATEWAY_CONFIG`` format.
+    """
+    global _dynamic_config_cache, _dynamic_config_ts
+    import time as _time
+
+    now = _time.monotonic()
+    if _dynamic_config_cache is not None and (now - _dynamic_config_ts) < _DYNAMIC_CONFIG_TTL:
+        return _dynamic_config_cache
+
+    try:
+        from src.services.gateway_registry import get_gateway_registry, get_provider_api_key
+
+        registry = get_gateway_registry()
+        configs: dict[str, dict] = {}
+        for slug, entry in registry.items():
+            configs[slug] = {
+                "name": entry.get("name", slug),
+                "url": entry.get("models_endpoint"),
+                "api_key_env": entry.get("api_key_env_var", ""),
+                "api_key": get_provider_api_key(slug),
+                "cache": _CacheWrapper(slug),
+                "min_expected_models": entry.get("min_expected_models", 1),
+                "header_type": entry.get("header_type", "bearer"),
+            }
+        if configs:
+            _dynamic_config_cache = configs
+            _dynamic_config_ts = now
+            return configs
+    except Exception as exc:
+        logger.warning("Failed to build dynamic gateway config: %s", exc)
+
+    return _FALLBACK_GATEWAY_CONFIG
+
+
 def build_headers(gateway_config: dict[str, Any]) -> dict[str, str]:
     """Build authentication headers based on gateway type"""
     api_key = gateway_config.get("api_key")
@@ -659,15 +705,16 @@ async def run_comprehensive_check(
     Returns:
         Dictionary with test results
     """
+    active_config = _get_gateway_config()
     if gateway:
         gateway_key = gateway.lower()
-        if gateway_key not in GATEWAY_CONFIG:
+        if gateway_key not in active_config:
             raise ValueError(
-                f"Unknown gateway: {gateway}. Available: {', '.join(GATEWAY_CONFIG.keys())}"
+                f"Unknown gateway: {gateway}. Available: {', '.join(active_config.keys())}"
             )
-        gateways_to_check = {gateway_key: GATEWAY_CONFIG[gateway_key]}
+        gateways_to_check = {gateway_key: active_config[gateway_key]}
     else:
-        gateways_to_check = GATEWAY_CONFIG
+        gateways_to_check = active_config
 
     results = {
         "timestamp": datetime.now(UTC).isoformat(),
@@ -701,7 +748,7 @@ async def run_comprehensive_check(
         if isinstance(gateway_result, Exception):
             logger.error(f"Error checking {gateway_name}: {gateway_result}")
             gateway_result = {
-                "name": GATEWAY_CONFIG[gateway_name]["name"],
+                "name": active_config.get(gateway_name, {}).get("name", gateway_name),
                 "final_status": "error",
                 "error": str(gateway_result),
             }

@@ -47,63 +47,103 @@ logger = logging.getLogger(__name__)
 # Maps lowercase hostname (or hostname suffix) → canonical peer.service name.
 # Tempo will use this value as the "server" label in service-graph metrics and
 # as the node label in the Live Service Dependency Map panel.
-_PROVIDER_HOST_MAP: dict[str, str] = {
-    # OpenAI family
-    "api.openai.com": "openai",
-    "api.openai.azure.com": "azure-openai",
-    # Anthropic
-    "api.anthropic.com": "anthropic",
-    # OpenRouter (aggregator — single edge, not per-model)
-    "openrouter.ai": "openrouter",
-    "api.openrouter.ai": "openrouter",
-    # Groq
-    "api.groq.com": "groq",
-    # Mistral
-    "api.mistral.ai": "mistral",
-    # Together AI
-    "api.together.ai": "together-ai",
-    "api.together.xyz": "together-ai",
-    # Perplexity
-    "api.perplexity.ai": "perplexity",
-    # Cohere
-    "api.cohere.com": "cohere",
-    "api.cohere.ai": "cohere",
-    # Google (Gemini / Vertex)
-    "generativelanguage.googleapis.com": "google-gemini",
-    "us-central1-aiplatform.googleapis.com": "google-vertex",
-    # Fireworks AI
-    "api.fireworks.ai": "fireworks",
-    # DeepSeek
-    "api.deepseek.com": "deepseek",
-    # xAI (Grok)
-    "api.x.ai": "xai",
-    # Cerebras
-    "api.cerebras.ai": "cerebras",
-    # Featherless
-    "inference.featherless.ai": "featherless",
-    # Hyperbolic
-    "api.hyperbolic.xyz": "hyperbolic",
-    # Novita
-    "api.novita.ai": "novita",
-    # HuggingFace
-    "api.huggingface.co": "huggingface",
-    "huggingface.co": "huggingface",
-    # Portkey (proxy/gateway)
-    "api.portkey.ai": "portkey",
-    # Replicate
-    "api.replicate.com": "replicate",
-    # AI21
-    "api.ai21.com": "ai21",
-    # Upstash (Redis)
-    # Not an AI provider, but useful to see in topology
+# Static infrastructure hosts (not AI providers — always kept in code)
+_INFRA_HOST_MAP: dict[str, str] = {
     "upstash.io": "upstash-redis",
-    # Supabase (Postgres)
     "supabase.co": "supabase",
-    # Stripe
     "api.stripe.com": "stripe",
-    # Sentry
     "sentry.io": "sentry",
 }
+
+# Static external AI providers (not in our gateway registry)
+_EXTERNAL_HOST_MAP: dict[str, str] = {
+    "api.openai.azure.com": "azure-openai",
+    "api.mistral.ai": "mistral",
+    "api.perplexity.ai": "perplexity",
+    "api.cohere.com": "cohere",
+    "api.cohere.ai": "cohere",
+    "api.deepseek.com": "deepseek",
+    "api.hyperbolic.xyz": "hyperbolic",
+    "api.portkey.ai": "portkey",
+    "api.replicate.com": "replicate",
+    "api.ai21.com": "ai21",
+}
+
+# Fallback map — used when the gateway registry is unavailable
+_FALLBACK_PROVIDER_HOST_MAP: dict[str, str] = {
+    "api.openai.com": "openai",
+    "api.openai.azure.com": "azure-openai",
+    "api.anthropic.com": "anthropic",
+    "openrouter.ai": "openrouter",
+    "api.openrouter.ai": "openrouter",
+    "api.groq.com": "groq",
+    "api.mistral.ai": "mistral",
+    "api.together.ai": "together",
+    "api.together.xyz": "together",
+    "api.perplexity.ai": "perplexity",
+    "api.cohere.com": "cohere",
+    "api.cohere.ai": "cohere",
+    "generativelanguage.googleapis.com": "google-gemini",
+    "us-central1-aiplatform.googleapis.com": "google-vertex",
+    "api.fireworks.ai": "fireworks",
+    "api.deepseek.com": "deepseek",
+    "api.x.ai": "xai",
+    "api.cerebras.ai": "cerebras",
+    "inference.featherless.ai": "featherless",
+    "api.hyperbolic.xyz": "hyperbolic",
+    "api.novita.ai": "novita",
+    "api.huggingface.co": "huggingface",
+    "huggingface.co": "huggingface",
+    "api.portkey.ai": "portkey",
+    "api.replicate.com": "replicate",
+    "api.ai21.com": "ai21",
+    "upstash.io": "upstash-redis",
+    "supabase.co": "supabase",
+    "api.stripe.com": "stripe",
+    "sentry.io": "sentry",
+}
+
+# Module-level cached host map (rebuilt when gateway registry refreshes)
+_host_map_cache: dict[str, str] | None = None
+_host_map_cache_ts: float = 0.0
+_HOST_MAP_TTL = 300  # 5 minutes
+
+
+def _build_provider_host_map() -> dict[str, str]:
+    """Build the hostname-to-provider map from gateway registry + static maps."""
+    global _host_map_cache, _host_map_cache_ts
+    import time
+
+    now = time.monotonic()
+    if _host_map_cache is not None and (now - _host_map_cache_ts) < _HOST_MAP_TTL:
+        return _host_map_cache
+
+    host_map: dict[str, str] = {}
+    # 1. Static infrastructure hosts
+    host_map.update(_INFRA_HOST_MAP)
+    # 2. External AI providers (not in our registry)
+    host_map.update(_EXTERNAL_HOST_MAP)
+    # 3. Provider hostnames from DB registry
+    try:
+        from src.services.gateway_registry import get_gateway_registry
+
+        registry = get_gateway_registry()
+        for slug, entry in registry.items():
+            for hostname in entry.get("hostnames", []):
+                host_map[hostname] = slug
+    except Exception:
+        # Fall back to static map
+        host_map.update(_FALLBACK_PROVIDER_HOST_MAP)
+        return host_map
+
+    _host_map_cache = host_map
+    _host_map_cache_ts = now
+    return host_map
+
+
+# Backward-compat alias — static fallback only; use _build_provider_host_map()
+# for the live DB-driven map.
+_PROVIDER_HOST_MAP = _FALLBACK_PROVIDER_HOST_MAP
 
 
 def _resolve_peer_service(host: str) -> str | None:
@@ -114,10 +154,11 @@ def _resolve_peer_service(host: str) -> str | None:
     Checks exact match first, then suffix match (e.g. any *.supabase.co).
     """
     host = host.lower()
-    if host in _PROVIDER_HOST_MAP:
-        return _PROVIDER_HOST_MAP[host]
+    host_map = _build_provider_host_map()
+    if host in host_map:
+        return host_map[host]
     # Suffix match — handles regional subdomains like us-east-1.supabase.co
-    for pattern, service in _PROVIDER_HOST_MAP.items():
+    for pattern, service in host_map.items():
         if host.endswith("." + pattern) or host == pattern:
             return service
     return None

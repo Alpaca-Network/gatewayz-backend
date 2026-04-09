@@ -154,18 +154,8 @@ class TestStreamNormalizer(unittest.TestCase):
             normalizer.get_accumulated_reasoning(), "Let me analyze this step by step..."
         )
 
-    def test_anthropic_text_delta(self):
-        """Test Anthropic text_delta events with type field"""
-        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
-        chunk = {
-            "type": "content_block_delta",
-            "index": 0,
-            "delta": {"type": "text_delta", "text": "Here is my response."},
-        }
-        normalized = normalizer.normalize_chunk(chunk)
-        self.assertIsNotNone(normalized)
-        self.assertEqual(normalized.choices[0]["delta"]["content"], "Here is my response.")
-        self.assertEqual(normalizer.get_accumulated_content(), "Here is my response.")
+    # Note: test_anthropic_text_delta moved to
+    # tests/conceptual_model/test_cm10_api_compatibility.py (CM-10.2.3).
 
     def test_anthropic_signature_delta(self):
         """Test Anthropic signature delta events for extended thinking verification"""
@@ -203,17 +193,8 @@ class TestStreamNormalizer(unittest.TestCase):
         # Empty text should return None
         self.assertIsNone(normalized)
 
-    def test_anthropic_message_delta_stop_reason(self):
-        """Test Anthropic message_delta event with stop_reason"""
-        normalizer = StreamNormalizer("anthropic", "claude-sonnet-4")
-        chunk = {
-            "type": "message_delta",
-            "delta": {"stop_reason": "end_turn"},
-            "usage": {"output_tokens": 100},
-        }
-        normalized = normalizer.normalize_chunk(chunk)
-        self.assertIsNotNone(normalized)
-        self.assertEqual(normalized.choices[0]["finish_reason"], "stop")
+    # Note: test_anthropic_message_delta_stop_reason moved to
+    # tests/conceptual_model/test_cm10_api_compatibility.py (CM-10.2.3).
 
     def test_anthropic_message_stop(self):
         """Test Anthropic message_stop event"""

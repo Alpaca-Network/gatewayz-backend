@@ -25,7 +25,7 @@ _pricing_cache_lock = threading.RLock()  # Reentrant lock to prevent race condit
 # Reverse-transform lookup: maps provider-specific (transformed) model IDs
 # back to their canonical/base form so pricing lookups succeed.
 #
-# Built lazily from model_transformations._MODEL_ID_MAPPINGS on first call.
+# Built lazily from the DB-backed model mappings cache on first call.
 # Key = transformed (native) model ID (lowercased)
 # Value = canonical model ID that the user originally supplied (the mapping *key*
 #         with an org/ prefix, i.e. the one most likely stored in the pricing DB).
@@ -44,8 +44,8 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
     """
     Build a reverse lookup from provider-native model IDs back to canonical IDs.
 
-    Uses _MODEL_ID_MAPPINGS from model_transformations.py.  For each provider
-    mapping (canonical -> native), we store native -> canonical so that when a
+    Uses the DB-backed model mappings cache.  For each provider mapping
+    (canonical -> native), we store native -> canonical so that when a
     pricing lookup receives a transformed ID we can recover the original.
 
     Priority rules when multiple canonical IDs map to the same native ID:
@@ -55,14 +55,16 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
       - Among entries with the same prefix status, the first one wins (stable).
     """
     try:
-        from src.services.model_transformations import _MODEL_ID_MAPPINGS
-    except ImportError:
-        logger.warning("Could not import _MODEL_ID_MAPPINGS for reverse transform lookup")
+        from src.services.model_mappings_cache import get_all_provider_mappings
+
+        all_mappings = get_all_provider_mappings()
+    except Exception as exc:
+        logger.warning("Could not load model mappings cache for reverse transform lookup: %s", exc)
         return {}
 
     reverse: dict[str, str] = {}
 
-    for _provider, mapping in _MODEL_ID_MAPPINGS.items():
+    for _provider, mapping in all_mappings.items():
         for canonical, native in mapping.items():
             native_lower = native.lower()
             # Skip identity mappings (canonical == native) -- they don't help
@@ -82,7 +84,7 @@ def _build_reverse_transform_lookup() -> dict[str, str]:
     logger.info(
         "[PRICING] Built reverse-transform lookup with %d entries from %d providers",
         len(reverse),
-        len(_MODEL_ID_MAPPINGS),
+        len(all_mappings),
     )
     return reverse
 
@@ -853,6 +855,8 @@ def get_model_pricing(model_id: str) -> dict[str, float]:
         }
         return default_pricing
 
+    except ValueError:
+        raise  # Re-raise pricing guard — do NOT fall back to default
     except Exception as e:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
         _track_default_pricing_usage(model_id, error=str(e))
@@ -1087,8 +1091,11 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         logger.error(f"Error getting pricing for model {model_id}: {e}", exc_info=True)
         _track_default_pricing_usage(model_id, error=str(e))
 
-        # Check if this is a high-value model even in error case
-        HIGH_VALUE_MODEL_PATTERNS = [
+        # Check if this is a high-value model even in error case.
+        # Block the request to prevent under-billing when pricing data is missing.
+        # Pattern list is a hardcoded guard — the DB is the authoritative source
+        # (models with high pricing should be rejected when pricing lookup fails).
+        _HIGH_VALUE_MODEL_PATTERNS = [
             "gpt-4",
             "gpt-5",
             "o1-",
@@ -1103,7 +1110,7 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
             "command-r-plus",
             "mixtral-8x22b",
         ]
-        if any(pattern in model_id.lower() for pattern in HIGH_VALUE_MODEL_PATTERNS):
+        if any(pattern in model_id.lower() for pattern in _HIGH_VALUE_MODEL_PATTERNS):
             raise ValueError(
                 f"Pricing data not available for high-value model '{model_id}'. "
                 f"Request blocked to prevent under-billing."
@@ -1543,9 +1550,8 @@ def get_pricing_coverage_report(model_ids: list[str]) -> dict[str, Any]:
             if not pricing.get("found", False) or pricing.get("source") == "default":
                 uncovered.append(model_id)
         except Exception:
-            # get_model_pricing catches ValueError internally for high-value
-            # models and returns default pricing instead. Any exception here
-            # means an unexpected failure, so treat the model as uncovered.
+            # ValueError is raised for high-value models with missing pricing.
+            # Any exception here (including ValueError) means the model is uncovered.
             uncovered.append(model_id)
 
     total = len(model_ids)
