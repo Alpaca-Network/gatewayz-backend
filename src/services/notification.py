@@ -10,7 +10,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import httpx
+import requests
 import resend
 
 from src.config.supabase_config import get_supabase_client

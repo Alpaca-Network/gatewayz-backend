@@ -1,5 +1,6 @@
 import logging
 
+import requests
 from openai import OpenAI
 
 from src.config import Config

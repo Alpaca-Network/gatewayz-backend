@@ -886,7 +886,6 @@ class ChatInferenceHandler:
         """
         prompt_tokens = 0
         completion_tokens = 0
-        finish_reason = None
         provider_used = None
 
         try:
