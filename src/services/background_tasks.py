@@ -16,7 +16,16 @@ logger = logging.getLogger(__name__)
 # Dedicated thread pool for heavy DB operations (catalog refresh, etc.)
 # This prevents heavy background DB work from starving the default executor
 # which is used by asyncio.to_thread() throughout the app.
-_db_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="db-background")
+import os as _os
+
+# FREEZE FIX: Increased from 2 → 6 (configurable via DB_EXECUTOR_MAX_WORKERS).
+# With only 2 workers, catalog refresh + model sync consume both slots, and every
+# subsequent run_in_executor() call queues indefinitely, stalling the event loop.
+# 6 workers: 2 catalog ops, 2 model sync, 2 buffer for concurrent requests.
+_db_executor = ThreadPoolExecutor(
+    max_workers=int(_os.getenv("DB_EXECUTOR_MAX_WORKERS", "6")),
+    thread_name_prefix="db-background",
+)
 
 # Queue for background tasks
 _background_tasks = []

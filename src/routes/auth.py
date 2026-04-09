@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import secrets
 from datetime import UTC, datetime, timedelta
@@ -1574,8 +1575,12 @@ async def register_user(
             )
 
         # Send welcome email
+        # FREEZE FIX: Wrap in asyncio.to_thread() — send_welcome_email() calls
+        # _wait_for_rate_limit() which uses time.sleep(0.5s). Calling it directly
+        # from an async route blocks the entire event loop for each email sent.
         try:
-            success = notif_module.enhanced_notification_service.send_welcome_email(
+            success = await asyncio.to_thread(
+                notif_module.enhanced_notification_service.send_welcome_email,
                 user_id=user_data["user_id"],
                 username=user_data["username"],
                 email=request.email,
@@ -1646,8 +1651,12 @@ async def request_password_reset(email: str, raw_request: Request):
         user = user_result.data[0]
 
         # Send password reset email
-        reset_token = notif_module.enhanced_notification_service.send_password_reset_email(
-            user_id=user["id"], username=user["username"], email=user["email"]
+        # FREEZE FIX: Wrap in asyncio.to_thread() — same _wait_for_rate_limit() sleep issue.
+        reset_token = await asyncio.to_thread(
+            notif_module.enhanced_notification_service.send_password_reset_email,
+            user_id=user["id"],
+            username=user["username"],
+            email=user["email"],
         )
 
         if reset_token:

@@ -103,10 +103,17 @@ class SimpleHealthCache:
                         f"Transient Redis cache write error for {key} "
                         f"(attempt {attempt + 1}/{max_retries + 1}): {type(e).__name__}, retrying..."
                     )
-                    # Brief delay before retry
-                    import time
-
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
+                    # FREEZE FIX: Only sleep when NOT inside the asyncio event loop.
+                    # time.sleep() in an async context blocks the entire event loop,
+                    # which can make /metrics and /health unreachable for 100-200ms per retry.
+                    try:
+                        import asyncio as _asyncio
+                        _asyncio.get_running_loop()
+                        # Running inside async context — skip the delay to avoid blocking.
+                    except RuntimeError:
+                        # No running event loop — safe to sleep in this thread.
+                        import time as _time
+                        _time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
                     continue
 
                 # Non-transient error or max retries reached
@@ -173,10 +180,13 @@ class SimpleHealthCache:
                         f"Transient Redis cache read error for {key} "
                         f"(attempt {attempt + 1}/{max_retries + 1}): {type(e).__name__}, retrying..."
                     )
-                    # Brief delay before retry
-                    import time
-
-                    time.sleep(0.1 * (attempt + 1))  # Exponential backoff: 100ms, 200ms
+                    # FREEZE FIX: Same as set_cache — skip sleep in async context.
+                    try:
+                        import asyncio as _asyncio
+                        _asyncio.get_running_loop()
+                    except RuntimeError:
+                        import time as _time
+                        _time.sleep(0.1 * (attempt + 1))
                     continue
 
                 # Non-transient error or max retries reached

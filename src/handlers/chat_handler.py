@@ -8,6 +8,7 @@ It handles provider routing, cost calculation, credit deduction, and logging.
 
 import asyncio
 import logging
+import os
 import time
 import uuid
 from typing import Any, AsyncIterator
@@ -46,6 +47,11 @@ from src.services.provider_selector import get_selector
 from src.services.trial_validation import track_trial_usage, validate_trial_access
 
 logger = logging.getLogger(__name__)
+
+# FREEZE FIX: Hard ceiling for streaming responses — prevents hung provider connections
+# from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
+# Mirrors the same constant in src/routes/chat.py (anonymous user path).
+_MAX_STREAM_DURATION = int(os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
 
 
 class ChatInferenceHandler:
@@ -925,62 +931,91 @@ class ChatInferenceHandler:
             accumulated_content = ""  # For token estimation fallback
             chunk_count = 0
 
-            async for provider_chunk in stream:
-                # CRITICAL: Check for client disconnect to prevent zombie requests (499)
-                if self.request and await self.request.is_disconnected():
-                    logger.warning(
-                        f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})"
-                    )
-                    finish_reason = "client_disconnected"
-                    break
+            # FREEZE FIX: Set wall-clock deadline before entering the streaming loop.
+            # A hung provider that sends headers then goes silent will hold this coroutine
+            # (and therefore the entire event loop) indefinitely without this guard.
+            _stream_deadline = time.monotonic() + _MAX_STREAM_DURATION
 
-                chunk_count += 1
+            try:
+                async for provider_chunk in stream:
+                    # CRITICAL: Check for client disconnect to prevent zombie requests (499)
+                    if self.request and await self.request.is_disconnected():
+                        logger.warning(
+                            f"[ChatHandler] Client disconnected during stream (request_id={self.request_id})"
+                        )
+                        finish_reason = "client_disconnected"
+                        break
 
-                # Extract delta content
-                if hasattr(provider_chunk, "choices") and provider_chunk.choices:
-                    choice = provider_chunk.choices[0]
-                    delta = getattr(choice, "delta", None)
+                    # FREEZE FIX: Wall-clock deadline — abort if provider stream exceeds limit.
+                    if time.monotonic() > _stream_deadline:
+                        _elapsed = time.monotonic() - (_stream_deadline - _MAX_STREAM_DURATION)
+                        logger.error(
+                            f"[STREAM WATCHDOG] ChatInferenceHandler stream exceeded "
+                            f"{_MAX_STREAM_DURATION}s ({_elapsed:.1f}s elapsed) for "
+                            f"provider={provider_used}, model={provider_model_id}. Terminating."
+                        )
+                        finish_reason = "stream_timeout"
+                        break
 
-                    if delta:
-                        content = getattr(delta, "content", None)
-                        role = getattr(delta, "role", None)
-                        tool_calls = getattr(delta, "tool_calls", None)
-                        chunk_finish_reason = getattr(choice, "finish_reason", None)
+                    chunk_count += 1
 
-                        if content:
-                            accumulated_content += content
+                    # Extract delta content
+                    if hasattr(provider_chunk, "choices") and provider_chunk.choices:
+                        choice = provider_chunk.choices[0]
+                        delta = getattr(choice, "delta", None)
 
-                        if chunk_finish_reason:
-                            finish_reason = chunk_finish_reason  # noqa: F841
+                        if delta:
+                            content = getattr(delta, "content", None)
+                            role = getattr(delta, "role", None)
+                            tool_calls = getattr(delta, "tool_calls", None)
+                            chunk_finish_reason = getattr(choice, "finish_reason", None)
 
-                        # Extract usage from final chunk if available
-                        if hasattr(provider_chunk, "usage") and provider_chunk.usage:
-                            prompt_tokens = getattr(provider_chunk.usage, "prompt_tokens", 0)
-                            completion_tokens = getattr(
-                                provider_chunk.usage, "completion_tokens", 0
+                            if content:
+                                accumulated_content += content
+
+                            if chunk_finish_reason:
+                                finish_reason = chunk_finish_reason  # noqa: F841
+
+                            # Extract usage from final chunk if available
+                            if hasattr(provider_chunk, "usage") and provider_chunk.usage:
+                                prompt_tokens = getattr(provider_chunk.usage, "prompt_tokens", 0)
+                                completion_tokens = getattr(
+                                    provider_chunk.usage, "completion_tokens", 0
+                                )
+
+                            # Yield internal chunk
+                            internal_chunk = InternalStreamChunk(
+                                id=self.request_id,
+                                model=request.model,
+                                created=int(time.time()),
+                                content=content,
+                                role=role,
+                                finish_reason=chunk_finish_reason,
+                                tool_calls=tool_calls,
+                                usage=(
+                                    InternalUsage(
+                                        prompt_tokens=prompt_tokens,
+                                        completion_tokens=completion_tokens,
+                                        total_tokens=prompt_tokens + completion_tokens,
+                                    )
+                                    if prompt_tokens > 0 or completion_tokens > 0
+                                    else None
+                                ),
                             )
 
-                        # Yield internal chunk
-                        internal_chunk = InternalStreamChunk(
-                            id=self.request_id,
-                            model=request.model,
-                            created=int(time.time()),
-                            content=content,
-                            role=role,
-                            finish_reason=chunk_finish_reason,
-                            tool_calls=tool_calls,
-                            usage=(
-                                InternalUsage(
-                                    prompt_tokens=prompt_tokens,
-                                    completion_tokens=completion_tokens,
-                                    total_tokens=prompt_tokens + completion_tokens,
-                                )
-                                if prompt_tokens > 0 or completion_tokens > 0
-                                else None
-                            ),
-                        )
+                            yield internal_chunk
 
-                        yield internal_chunk
+            finally:
+                # FREEZE FIX: Always release the underlying provider connection back to the pool.
+                # Without this, an aborted/timed-out stream holds the httpx connection open,
+                # exhausting the connection pool and eventually freezing new requests.
+                try:
+                    if hasattr(stream, "aclose"):
+                        await stream.aclose()
+                    elif hasattr(stream, "close"):
+                        stream.close()
+                except Exception:
+                    pass  # Never let cleanup block the generator teardown
 
             logger.debug(f"[ChatHandler] Streamed {chunk_count} chunks")
 

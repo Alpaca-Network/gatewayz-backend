@@ -377,14 +377,15 @@ def fetch_models_from_aihubmix():
     The API at https://aihubmix.com/api/v1/models includes pricing information.
     """
     try:
-        import requests
+        import httpx
 
-        # Fetch from AiHubMix public API which includes pricing
-        response = requests.get(
-            "https://aihubmix.com/api/v1/models",
-            timeout=30,
-            headers={"Accept": "application/json"},
-        )
+        # FREEZE FIX: Use httpx instead of requests — same sync interface but removes
+        # the extra requests dependency (httpx is already in requirements.txt).
+        with httpx.Client(timeout=30.0) as client:
+            response = client.get(
+                "https://aihubmix.com/api/v1/models",
+                headers={"Accept": "application/json"},
+            )
 
         if response.status_code != 200:
             error_msg = f"AiHubMix API returned status {response.status_code}"

@@ -31,8 +31,11 @@ class RedisConfig:
         # If Redis is slow, we fall back to local cache gracefully
         self.redis_socket_timeout = int(os.environ.get("REDIS_SOCKET_TIMEOUT", "5"))
         self.redis_socket_connect_timeout = int(os.environ.get("REDIS_SOCKET_CONNECT_TIMEOUT", "3"))
+        # FREEZE FIX: Default to False — with socket_timeout=5s, retry doubles the
+        # wait to 10s per slow Redis operation. At 50 concurrent requests this can
+        # mean 500s of thread-pool blocking. Fail fast and fall back to memory cache.
         self.redis_retry_on_timeout = (
-            os.environ.get("REDIS_RETRY_ON_TIMEOUT", "true").lower() == "true"
+            os.environ.get("REDIS_RETRY_ON_TIMEOUT", "false").lower() == "true"
         )
 
         self._client: redis.Redis | None = None

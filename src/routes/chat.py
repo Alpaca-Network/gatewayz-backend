@@ -1349,6 +1349,18 @@ async def _process_stream_completion_background(
         logger.error(f"Background stream processing error: {e}", exc_info=True)
 
 
+import os as _os
+
+# FREEZE FIX: Hard wall-clock deadline for the entire streaming response.
+# Without this, a provider that accepts the connection but sends data slowly (or not at all)
+# holds the asyncio event loop indefinitely, making ALL endpoints (including /metrics and
+# /health) unresponsive. Between-chunk check fires on the next received chunk; combined with
+# the per-provider httpx read_timeout it covers the two main hang patterns:
+#   1. Provider sends headers then goes completely silent (httpx read_timeout fires)
+#   2. Provider trickles bytes slowly over many minutes (wall-clock deadline fires between chunks)
+MAX_STREAM_DURATION = int(_os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
+
+
 async def stream_generator(
     stream,
     user,
@@ -1418,29 +1430,67 @@ async def stream_generator(
 
         async def iterate_stream():
             """Helper to support both sync and async iteration"""
-            if is_async_stream:
-                async for chunk in stream:
-                    yield chunk
-            else:
-                # Use non-blocking iteration for sync streams to avoid blocking the event loop
-                iterator = iter(stream)
-                while True:
-                    try:
-                        # Run the blocking next() call in a thread using safe wrapper
-                        # to avoid "StopIteration interacts badly with generators" error
-                        chunk = await asyncio.to_thread(_safe_next, iterator)
-                        if chunk is _STREAM_EXHAUSTED:
-                            break
+            try:
+                if is_async_stream:
+                    async for chunk in stream:
                         yield chunk
-                    except Exception as e:
-                        logger.error(f"Error during sync stream iteration: {e}")
-                        raise e
+                else:
+                    # Use non-blocking iteration for sync streams to avoid blocking the event loop
+                    iterator = iter(stream)
+                    while True:
+                        try:
+                            # Run the blocking next() call in a thread using safe wrapper
+                            # to avoid "StopIteration interacts badly with generators" error
+                            chunk = await asyncio.to_thread(_safe_next, iterator)
+                            if chunk is _STREAM_EXHAUSTED:
+                                break
+                            yield chunk
+                        except Exception as e:
+                            logger.error(f"Error during sync stream iteration: {e}")
+                            raise e
+            finally:
+                # FREEZE FIX: Always release the underlying provider connection back to
+                # the pool — whether the stream completed normally, was cancelled by the
+                # watchdog, or raised an exception. Without this, timed-out or aborted
+                # streams hold their httpx connection open indefinitely.
+                try:
+                    if is_async_stream and hasattr(stream, "aclose"):
+                        await stream.aclose()
+                    elif not is_async_stream and hasattr(stream, "close"):
+                        stream.close()
+                except Exception:
+                    pass  # Never let cleanup block generator teardown
+
+        # FREEZE FIX: Wall-clock deadline for the entire stream (between-chunk check).
+        # Fires when the provider is slow but still sending chunks. The per-provider
+        # httpx read_timeout covers the "provider sends headers then goes silent" case.
+        _stream_deadline = time.monotonic() + MAX_STREAM_DURATION
 
         async for chunk in iterate_stream():
             # CRITICAL: Check for client disconnect to prevent zombie requests (499)
             if request and await request.is_disconnected():
                 logger.warning(f"[StreamGenerator] Client disconnected (request_id={request_id})")
                 break
+
+            # FREEZE FIX: Wall-clock deadline — abort if stream exceeds MAX_STREAM_DURATION.
+            # This fires between chunk arrivals; the httpx read_timeout covers intra-chunk hangs.
+            if time.monotonic() > _stream_deadline:
+                _elapsed_s = time.monotonic() - start_time
+                logger.error(
+                    f"[STREAM WATCHDOG] Stream exceeded {MAX_STREAM_DURATION}s wall-clock limit "
+                    f"({_elapsed_s:.1f}s elapsed) for {provider}/{model}. Terminating."
+                )
+                yield create_error_sse_chunk(
+                    error_message=(
+                        f"Stream timeout: provider did not complete the response within "
+                        f"{MAX_STREAM_DURATION}s. Please retry or contact support."
+                    ),
+                    error_type="stream_timeout",
+                    provider=provider,
+                    model=model,
+                )
+                yield create_done_sse()
+                return
 
             chunk_count += 1
 

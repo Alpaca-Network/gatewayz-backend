@@ -9,7 +9,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import requests
+import httpx
 import resend
 
 from src.config.supabase_config import get_supabase_client
@@ -391,10 +391,14 @@ class NotificationService:
 
     def send_webhook_notification(self, webhook_url: str, data: dict[str, Any]) -> bool:
         """Send webhook notification"""
+        # FREEZE FIX: Use httpx (already in requirements) instead of requests.
+        # httpx.Client() is sync-identical to requests.post but removes the extra
+        # dependency. For true async, callers should offload via asyncio.to_thread().
         try:
-            response = requests.post(
-                webhook_url, json=data, headers={"Content-Type": "application/json"}, timeout=10
-            )
+            with httpx.Client(timeout=10.0) as client:
+                response = client.post(
+                    webhook_url, json=data, headers={"Content-Type": "application/json"}
+                )
             return response.status_code == 200
         except Exception as e:
             logger.error(f"Error sending webhook notification: {e}")
