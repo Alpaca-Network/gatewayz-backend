@@ -28,12 +28,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import gateway clients
-from src.services.openrouter_client import make_openrouter_request_openai, make_openrouter_request_openai_stream
-from src.services.featherless_client import make_featherless_request_openai, make_featherless_request_openai_stream
-from src.services.fireworks_client import make_fireworks_request_openai, make_fireworks_request_openai_stream
-from src.services.together_client import make_together_request_openai, make_together_request_openai_stream
-from src.services.xai_client import make_xai_request_openai, make_xai_request_openai_stream
-from src.services.cerebras_client import make_cerebras_request_openai, make_cerebras_request_openai_stream
+from src.services.providers.openrouter_client import make_openrouter_request_openai, make_openrouter_request_openai_stream
+from src.services.providers.featherless_client import make_featherless_request_openai, make_featherless_request_openai_stream
+from src.services.providers.fireworks_client import make_fireworks_request_openai, make_fireworks_request_openai_stream
+from src.services.providers.together_client import make_together_request_openai, make_together_request_openai_stream
+from src.services.providers.xai_client import make_xai_request_openai, make_xai_request_openai_stream
+from src.services.providers.cerebras_client import make_cerebras_request_openai, make_cerebras_request_openai_stream
 from src.services.models import (
     fetch_models_from_openrouter,
     fetch_models_from_featherless,

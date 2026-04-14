@@ -60,7 +60,12 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
 
 
 def _get_failover_priority() -> tuple[str, ...]:
-    """Get failover priority from DB, falling back to hardcoded tuple."""
+    """Get failover priority from DB, falling back to hardcoded tuple.
+
+    Only includes providers allowed by ENABLED_PROVIDERS.
+    """
+    from src.utils.provider_filter import is_provider_enabled
+
     try:
         from src.services.gateway_registry import get_gateway_registry
 
@@ -72,10 +77,12 @@ def _get_failover_priority() -> tuple[str, ...]:
         ]
         if prioritized:
             prioritized.sort()
-            return tuple(slug for _, slug in prioritized)
+            return tuple(
+                slug for _, slug in prioritized if is_provider_enabled(slug)
+            )
     except Exception as exc:
         logger.warning("Failed to load failover priority from DB: %s", exc)
-    return FALLBACK_PROVIDER_PRIORITY
+    return tuple(p for p in FALLBACK_PROVIDER_PRIORITY if is_provider_enabled(p))
 
 
 # DEPRECATED: production code now uses _get_failover_priority() for eligibility.
@@ -104,8 +111,16 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
 
     Always includes all eligible providers in the failover chain.
     Provider availability checks happen at request time, not at chain building time.
+    Disabled providers (per ENABLED_PROVIDERS) are strictly excluded.
     """
+    from src.utils.provider_filter import is_provider_enabled
+
     provider = (initial_provider or "").lower()
+
+    # Reject disabled providers outright — they must not enter the chain
+    if provider and not is_provider_enabled(provider):
+        logger.warning("Provider '%s' is disabled; excluded from failover chain", provider)
+        provider = ""
 
     priority = _get_failover_priority()
     eligible = set(priority)

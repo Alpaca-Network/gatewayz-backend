@@ -15,7 +15,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from prometheus_client import REGISTRY
 
-from src.config.supabase_config import get_initialization_status
+from src.db.client import get_initialization_status
 from src.security.deps import get_api_key
 from src.services.circuit_breaker import get_all_circuit_breakers
 

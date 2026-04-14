@@ -283,7 +283,7 @@ class TestOpenRouterCircuitConfig:
 
     def test_openrouter_config_has_optimized_values(self):
         """Test that OPENROUTER_CIRCUIT_CONFIG has the optimized parameters"""
-        from src.services.openrouter_client import OPENROUTER_CIRCUIT_CONFIG
+        from src.services.providers.openrouter_client import OPENROUTER_CIRCUIT_CONFIG
 
         # Check optimized values
         assert (

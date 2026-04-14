@@ -164,37 +164,4 @@ def shutdown_pyroscope() -> None:
         _initialized = False
 
 
-def tag_wrapper(tags: dict):
-    """
-    Return a pyroscope tag_wrapper context manager.
-
-    Usage in middleware::
-
-        with pyroscope_config.tag_wrapper({"endpoint": "/v1/chat/completions"}):
-            await self.app(scope, receive, send)
-
-    Every call-stack sample taken while the block is executing will be labelled
-    with the provided tags.  If pyroscope is not installed or not initialised,
-    this returns a no-op nullcontext() so the calling code is unchanged.
-
-    Why this matters
-    ----------------
-    Without tags, the flamegraph is a single flat view of the whole process.
-    With the ``endpoint`` tag you can filter in Grafana to see:
-
-        "Show me only the call stacks sampled during /v1/chat/completions
-         requests — which Python function consumes the most CPU there?"
-
-    For streaming LLM responses where the request may hold the event-loop for
-    20–30 seconds, this reveals exactly which part of the code is running
-    (token chunking?  Redis rate-limit check?  httpx send?).
-    """
-    if not _initialized:
-        return nullcontext()
-
-    try:
-        import pyroscope  # noqa: PLC0415
-
-        return pyroscope.tag_wrapper(tags)
-    except Exception:
-        return nullcontext()
+from src.utils.profiling import tag_wrapper  # re-export for backward compat  # noqa: E402,F401

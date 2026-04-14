@@ -326,48 +326,48 @@ def enhance_providers_with_logos_and_sites(providers: list) -> list:
 # Import fetch_models functions from their respective client modules
 def fetch_models_from_cerebras():
     """Fetch models from Cerebras client"""
-    from src.services.cerebras_client import fetch_models_from_cerebras as _fetch
+    from src.services.providers.cerebras_client import fetch_models_from_cerebras as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_xai():
     """Fetch models from xAI client"""
-    from src.services.xai_client import fetch_models_from_xai as _fetch
+    from src.services.providers.xai_client import fetch_models_from_xai as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_nebius():
     """Fetch models from Nebius client"""
-    from src.services.nebius_client import fetch_models_from_nebius as _fetch
+    from src.services.providers.nebius_client import fetch_models_from_nebius as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_novita():
     """Fetch models from Novita client"""
-    from src.services.novita_client import fetch_models_from_novita as _fetch
+    from src.services.providers.novita_client import fetch_models_from_novita as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_onerouter():
     """Fetch models from Infron AI client"""
-    from src.services.onerouter_client import fetch_models_from_onerouter as _fetch
+    from src.services.providers.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_morpheus():
     """Fetch models from Morpheus AI Gateway client"""
-    from src.services.morpheus_client import fetch_models_from_morpheus as _fetch
+    from src.services.providers.morpheus_client import fetch_models_from_morpheus as _fetch
 
     return _fetch()
 
 
 def fetch_models_from_simplismart():
     """Fetch models from Simplismart client"""
-    from src.services.simplismart_client import fetch_models_from_simplismart as _fetch
+    from src.services.providers.simplismart_client import fetch_models_from_simplismart as _fetch
 
     return _fetch()

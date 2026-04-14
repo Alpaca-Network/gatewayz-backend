@@ -518,8 +518,13 @@ def _get_registry() -> dict[str, dict]:
 
 
 def get_gateway_registry() -> dict[str, dict]:
-    """Return the full gateway registry dict (slug -> config)."""
-    return _get_registry()
+    """Return the full gateway registry dict (slug -> config).
+
+    Respects ENABLED_PROVIDERS — disabled providers are excluded from results.
+    """
+    from src.utils.provider_filter import filter_provider_dict
+
+    return filter_provider_dict(_get_registry())
 
 
 def get_valid_gateway_values() -> set[str]:

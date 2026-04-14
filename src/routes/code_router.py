@@ -20,7 +20,7 @@ from src.services.code_router import (
     get_router,
     route_code_prompt,
 )
-from src.services.code_router_client import (
+from src.services.providers.code_router_client import (
     CodeRouterMode,
     CodeRouterSettings,
     get_settings_options,

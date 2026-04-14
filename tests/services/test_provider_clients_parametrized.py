@@ -346,7 +346,7 @@ class TestSanitizeMessagesForFeatherless:
     """Test _sanitize_messages_for_featherless function."""
 
     def test_removes_null_tool_calls_from_dict(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         messages = [
             {"role": "user", "content": "Hello"},
@@ -358,7 +358,7 @@ class TestSanitizeMessagesForFeatherless:
         assert "tool_calls" not in sanitized[1]
 
     def test_preserves_valid_tool_calls(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         tool_calls = [{"id": "call_123", "function": {"name": "test", "arguments": "{}"}}]
         messages = [
@@ -370,7 +370,7 @@ class TestSanitizeMessagesForFeatherless:
         assert sanitized[1]["tool_calls"] == tool_calls
 
     def test_preserves_messages_without_tool_calls(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         messages = [
             {"role": "user", "content": "Hello"},
@@ -380,7 +380,7 @@ class TestSanitizeMessagesForFeatherless:
         assert sanitized == messages
 
     def test_does_not_mutate_original_messages(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         original = {"role": "assistant", "content": "Hi", "tool_calls": None}
         messages = [original]
@@ -389,13 +389,13 @@ class TestSanitizeMessagesForFeatherless:
         assert original["tool_calls"] is None
 
     def test_removes_invalid_tool_calls_type(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         messages = [{"role": "assistant", "content": "Hi", "tool_calls": "invalid_string"}]
         sanitized = _sanitize_messages_for_featherless(messages)
         assert "tool_calls" not in sanitized[0]
 
     def test_handles_empty_list(self):
-        from src.services.featherless_client import _sanitize_messages_for_featherless
+        from src.services.providers.featherless_client import _sanitize_messages_for_featherless
 
         assert _sanitize_messages_for_featherless([]) == []

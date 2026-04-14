@@ -11,7 +11,7 @@ import logging
 from fastapi import APIRouter, Depends
 
 from src.security.deps import get_api_key
-from src.services.alibaba_cloud_client import (
+from src.services.providers.alibaba_cloud_client import (
     get_alibaba_cloud_client,
     make_alibaba_cloud_request_openai,
     make_alibaba_cloud_request_openai_stream,

@@ -275,7 +275,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
         import httpx
         from prometheus_client import REGISTRY, generate_latest
 
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
         health_status = {
             "timestamp": datetime.now(UTC).isoformat(),
@@ -297,7 +297,7 @@ async def get_instrumentation_health(api_key: str | None = Depends(get_optional_
 
         # Check Supabase
         try:
-            client = get_supabase_client()
+            client = get_db()
             client.table("providers").select("id").limit(1).execute()
             health_status["components"]["supabase"] = {"status": "healthy"}
         except Exception as e:

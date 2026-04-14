@@ -7,7 +7,7 @@ from typing import Any
 from src.config.supabase_config import get_supabase_client
 from src.config.usage_limits import TRIAL_DURATION_DAYS
 from src.db.api_keys import create_api_key
-from src.services.prometheus_metrics import track_database_query
+from src.utils.db_instrumentation import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
 from src.utils.security_validators import sanitize_for_logging
 
@@ -184,37 +184,34 @@ def create_enhanced_user(
     username: str,
     email: str,
     auth_method: str,
-    credits: float = 5.0,
+    credits: float = 0.0,
     privy_user_id: str | None = None,
-    subscription_status: str = "trial",
+    subscription_status: str = "inactive",
 ) -> dict[str, Any]:
-    """Create a new user with automatic trial and $5 credits (limited to $1/day usage).
+    """Create a new user with zero credits. Users must purchase credits.
 
     Args:
         username: User's username
         email: User's email address
         auth_method: Authentication method used (e.g., 'privy', 'email')
-        credits: Initial credit amount (default $5)
+        credits: Initial credit amount (default 0 — paid only)
         privy_user_id: Optional Privy user ID for Privy-authenticated users
-        subscription_status: Initial subscription status (default 'trial', use 'bot' for temp emails)
+        subscription_status: Initial subscription status (default 'inactive')
     """
     try:
         client = get_supabase_client()
 
-        # Prepare user data with trial setup
-        trial_start = datetime.now(UTC)
-        trial_end = trial_start + timedelta(days=TRIAL_DURATION_DAYS)
+        now = datetime.now(UTC)
 
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,  # $5 trial credits with $1/day usage limit enforced
+            "credits": credits,
             "is_active": True,
-            "registration_date": trial_start.isoformat(),
+            "registration_date": now.isoformat(),
             "auth_method": auth_method,
             "subscription_status": subscription_status,
-            "trial_expires_at": trial_end.isoformat(),
-            "welcome_email_sent": False,  # New users haven't received welcome email yet
+            "welcome_email_sent": False,
             "tier": "basic",
         }
 
@@ -272,7 +269,6 @@ def create_enhanced_user(
             "credits": credits,
             "primary_api_key": primary_key,
             "subscription_status": subscription_status,
-            "trial_expires_at": trial_end.isoformat(),
             "tier": "basic",
         }
 
@@ -561,24 +557,18 @@ def add_credits_to_user(
         # Determine which field to update based on transaction type
         # Purchases go to purchased_credits, everything else uses current logic
         if transaction_type == "purchase":
-            # Credit purchases go to purchased_credits field
             purchased_after = purchased_before + credits
             allowance_after = allowance_before
-            update_data = {
-                "purchased_credits": purchased_after,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
         else:
-            # Other types (admin_credit, trial, etc.) - add to purchased for simplicity
-            # Could be enhanced to add to allowance for subscription-related credits
             purchased_after = purchased_before + credits
             allowance_after = allowance_before
-            update_data = {
-                "purchased_credits": purchased_after,
-                "updated_at": datetime.now(UTC).isoformat(),
-            }
 
         balance_after = allowance_after + purchased_after
+        update_data = {
+            "purchased_credits": purchased_after,
+            "credits": balance_after,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
 
         # Update user credits
         result = client.table("users").update(update_data).eq("id", user_id).execute()

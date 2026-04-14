@@ -27,12 +27,12 @@ from src.db.users import deduct_credits, get_user, record_usage
 # Unified chat handler and adapters for chat unification
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.security.deps import get_api_key
-from src.services.ai_sdk_client import (
+from src.services.providers.ai_sdk_client import (
     make_ai_sdk_request_openai_stream_async,
     process_ai_sdk_response,
     validate_ai_sdk_api_key,
 )
-from src.services.openrouter_client import (
+from src.services.providers.openrouter_client import (
     get_openrouter_client,
     make_openrouter_request_openai_stream_async,
 )

@@ -14,8 +14,8 @@ from src.db.model_health import record_model_call
 from src.db.users import deduct_credits, get_user, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
-from src.services.fal_image_client import make_fal_image_request
-from src.services.image_generation_client import (
+from src.services.providers.fal_image_client import make_fal_image_request
+from src.services.providers.image_generation_client import (
     make_deepinfra_image_request,
     make_google_vertex_image_request,
     process_image_generation_response,

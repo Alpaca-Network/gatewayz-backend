@@ -549,9 +549,9 @@ async def get_user_growth(
     - Total users at end of period
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Calculate date range
         end_date = datetime.now(UTC).date()
@@ -713,9 +713,9 @@ async def get_users_count(admin_user: dict = Depends(require_admin)):
     **Performance**: ~5-20ms (pure COUNT query)
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Simple COUNT query - no data fetching
         count_query = client.table("users").select("id", count="exact")
@@ -765,9 +765,9 @@ async def get_users_stats(
     **Performance**: ~10-50ms (vs 500ms+ for full user list)
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Simple partial match - searches anywhere in email address
         # This matches the intuitive behavior users expect
@@ -980,9 +980,9 @@ async def get_all_users_info(
     **Note**: Statistics are NOT included. Use `/admin/users/stats` for statistics.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # OPTIMIZATION: Use PostgreSQL RPC function for email search to avoid PostgREST edge function issues
         if email and not api_key and is_active is None:
@@ -1335,9 +1335,9 @@ async def get_user_by_api_key(
     ```
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Use PostgreSQL RPC function for fast, indexed lookup
         logger.info(f"Looking up user by API key: {api_key[:20]}...")
@@ -1440,9 +1440,9 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
     ```
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         logger.info(f"Admin {admin_user.get('id')} fetching API key details for ID: {api_key_id}")
 
@@ -1510,9 +1510,9 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
 async def get_user_info_by_id(user_id: int, admin_user: dict = Depends(require_admin)):
     """Get detailed information for a specific user (Admin only)"""
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Get user information
         user_result = client.table("users").select("*").eq("id", user_id).execute()
@@ -1597,9 +1597,9 @@ async def delete_users_by_domain(
     - Logs all deletions for audit trail
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Normalize domain
         domain = domain.lower().strip()
@@ -1882,9 +1882,9 @@ async def get_providers_with_requests_admin(admin_user: dict = Depends(require_a
     - Total requests across all models
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Try to use optimized RPC function first
         try:
@@ -1980,9 +1980,9 @@ async def get_request_counts_by_model_admin(admin_user: dict = Depends(require_a
     This is lighter than /models when you only need counts.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         result = (
             client.table("chat_completion_requests")
@@ -2049,9 +2049,9 @@ async def get_models_with_requests_admin(
     Optionally filter by provider_id.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Try RPC first
         try:
@@ -2181,9 +2181,9 @@ async def get_chat_completion_requests_admin(
     Returns full request details including model, provider, tokens, and performance metrics.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         query = client.table("chat_completion_requests").select(
             "*, models!inner(id, model_id, model_name, provider_model_id, provider_id, providers!inner(id, name, slug))"
@@ -2400,9 +2400,9 @@ async def get_chat_requests_plot_data_admin(
     Highly optimized for frontend plotting with minimal data transfer.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Get last 10 full requests
         recent_query = client.table("chat_completion_requests").select(
@@ -2509,9 +2509,9 @@ async def get_model_usage_analytics(
     - Sorting: ?sort_by=total_cost_usd&sort_order=desc
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Calculate offset for pagination
         offset = (page - 1) * limit

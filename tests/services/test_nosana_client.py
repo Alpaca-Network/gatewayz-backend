@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from src.services.nosana_client import (
+from src.services.providers.nosana_client import (
     DEPLOYMENT_STATUSES,
     DEPLOYMENT_STRATEGIES,
     build_container_job_definition,

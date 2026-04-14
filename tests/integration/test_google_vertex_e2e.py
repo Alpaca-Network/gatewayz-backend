@@ -35,7 +35,7 @@ os.environ.setdefault("ENCRYPTION_KEY", "test-encryption-key-32-bytes-long!")
 
 from src.main import app
 from src.services.google_models_config import get_google_models
-from src.services.google_vertex_client import diagnose_google_vertex_credentials
+from src.services.providers.google_vertex_client import diagnose_google_vertex_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ class TestVertexAIDirectCall:
 
     def test_vertex_client_can_make_request(self):
         """Test that the Vertex AI client can make a direct API call"""
-        from src.services.google_vertex_client import make_google_vertex_request_openai
+        from src.services.providers.google_vertex_client import make_google_vertex_request_openai
 
         # Test with a simple prompt
         try:

@@ -7,7 +7,7 @@ load_dotenv(override=True)
 import logging
 logging.basicConfig(level=logging.INFO)
 
-from src.services.huggingface_client import make_huggingface_request_openai
+from src.services.providers.huggingface_client import make_huggingface_request_openai
 
 print("=" * 70)
 print("TESTING HUGGINGFACE :hf-inference SUFFIX HANDLING")

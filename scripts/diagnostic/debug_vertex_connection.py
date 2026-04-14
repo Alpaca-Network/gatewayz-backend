@@ -74,7 +74,7 @@ def main():
     print("-" * 80)
 
     try:
-        from src.services.google_vertex_client import diagnose_google_vertex_credentials
+        from src.services.providers.google_vertex_client import diagnose_google_vertex_credentials
 
         diagnosis = diagnose_google_vertex_credentials()
 
@@ -115,7 +115,7 @@ def main():
     print("-" * 80)
 
     try:
-        from src.services.google_vertex_client import make_google_vertex_request_openai
+        from src.services.providers.google_vertex_client import make_google_vertex_request_openai
 
         # Simple test prompt
         messages = [
