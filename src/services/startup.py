@@ -221,6 +221,39 @@ async def lifespan(app):
         except Exception as e:
             logger.warning(f"Failed to pre-load system config (will use defaults): {e}")
 
+        # Sync DB providers table with ENABLED_PROVIDERS env var
+        try:
+            from src.utils.provider_filter import is_provider_enabled, get_enabled_providers
+            from src.config.supabase_config import get_client_for_query
+
+            enabled = get_enabled_providers()
+            if enabled is not None:
+                supabase = get_client_for_query()
+                # Deactivate providers not in ENABLED_PROVIDERS
+                resp = supabase.table("providers").select("slug, is_active").execute()
+                all_providers = resp.data or []
+                to_deactivate = [
+                    p["slug"] for p in all_providers
+                    if p.get("is_active") and not is_provider_enabled(p["slug"])
+                ]
+                to_activate = [
+                    p["slug"] for p in all_providers
+                    if not p.get("is_active") and is_provider_enabled(p["slug"])
+                ]
+                for slug in to_deactivate:
+                    supabase.table("providers").update({"is_active": False}).eq("slug", slug).execute()
+                for slug in to_activate:
+                    supabase.table("providers").update({"is_active": True}).eq("slug", slug).execute()
+                if to_deactivate or to_activate:
+                    logger.info(
+                        f"  providers synced with ENABLED_PROVIDERS={','.join(sorted(enabled))} "
+                        f"(activated: {to_activate or 'none'}, deactivated: {len(to_deactivate)} providers)"
+                    )
+                else:
+                    logger.info(f"  providers already in sync with ENABLED_PROVIDERS={','.join(sorted(enabled))}")
+        except Exception as e:
+            logger.warning(f"Failed to sync providers with ENABLED_PROVIDERS: {e}")
+
         # Warm gateway registry cache from DB
         try:
             from src.services.gateway_registry import refresh_registry_cache

@@ -14,46 +14,46 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.aihubmix_client import fetch_models_from_aihubmix
-from src.services.aimo_client import fetch_models_from_aimo
-from src.services.alibaba_cloud_client import fetch_models_from_alibaba
-from src.services.anannas_client import fetch_models_from_anannas
-from src.services.anthropic_client import fetch_models_from_anthropic
-from src.services.canopywave_client import fetch_models_from_canopywave
-from src.services.cerebras_client import fetch_models_from_cerebras
-from src.services.chutes_client import fetch_models_from_chutes
-from src.services.clarifai_client import fetch_models_from_clarifai
-from src.services.cloudflare_workers_ai_client import (
+from src.services.providers.aihubmix_client import fetch_models_from_aihubmix
+from src.services.providers.aimo_client import fetch_models_from_aimo
+from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
+from src.services.providers.anannas_client import fetch_models_from_anannas
+from src.services.providers.anthropic_client import fetch_models_from_anthropic
+from src.services.providers.canopywave_client import fetch_models_from_canopywave
+from src.services.providers.cerebras_client import fetch_models_from_cerebras
+from src.services.providers.chutes_client import fetch_models_from_chutes
+from src.services.providers.clarifai_client import fetch_models_from_clarifai
+from src.services.providers.cloudflare_workers_ai_client import (
     fetch_models_from_cloudflare_workers_ai,
 )
-from src.services.cohere_client import fetch_models_from_cohere
-from src.services.deepinfra_client import fetch_models_from_deepinfra
-from src.services.fal_image_client import fetch_models_from_fal
-from src.services.featherless_client import fetch_models_from_featherless
-from src.services.fireworks_client import fetch_models_from_fireworks
-from src.services.google_vertex_client import fetch_models_from_google_vertex
-from src.services.groq_client import fetch_models_from_groq
-from src.services.helicone_client import fetch_models_from_helicone
+from src.services.providers.cohere_client import fetch_models_from_cohere
+from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
+from src.services.providers.fal_image_client import fetch_models_from_fal
+from src.services.providers.featherless_client import fetch_models_from_featherless
+from src.services.providers.fireworks_client import fetch_models_from_fireworks
+from src.services.providers.google_vertex_client import fetch_models_from_google_vertex
+from src.services.providers.groq_client import fetch_models_from_groq
+from src.services.providers.helicone_client import fetch_models_from_helicone
 from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.services.modelz_client import fetch_models_from_modelz
-from src.services.morpheus_client import fetch_models_from_morpheus
-from src.services.near_client import fetch_models_from_near
-from src.services.nebius_client import fetch_models_from_nebius
-from src.services.novita_client import fetch_models_from_novita
-from src.services.onerouter_client import fetch_models_from_onerouter
-from src.services.openai_client import fetch_models_from_openai
-from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.providers.modelz_client import fetch_models_from_modelz
+from src.services.providers.morpheus_client import fetch_models_from_morpheus
+from src.services.providers.near_client import fetch_models_from_near
+from src.services.providers.nebius_client import fetch_models_from_nebius
+from src.services.providers.novita_client import fetch_models_from_novita
+from src.services.providers.onerouter_client import fetch_models_from_onerouter
+from src.services.providers.openai_client import fetch_models_from_openai
+from src.services.providers.openrouter_client import fetch_models_from_openrouter
 from src.services.pricing_normalization import (
     PricingFormat,
     get_provider_format,
     normalize_to_per_token,
 )
-from src.services.simplismart_client import fetch_models_from_simplismart
-from src.services.sybil_client import fetch_models_from_sybil
-from src.services.together_client import fetch_models_from_together
-from src.services.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
-from src.services.xai_client import fetch_models_from_xai
-from src.services.zai_client import fetch_models_from_zai
+from src.services.providers.simplismart_client import fetch_models_from_simplismart
+from src.services.providers.sybil_client import fetch_models_from_sybil
+from src.services.providers.together_client import fetch_models_from_together
+from src.services.providers.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
+from src.services.providers.xai_client import fetch_models_from_xai
+from src.services.providers.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +349,6 @@ def transform_normalized_model_to_db_schema(
         from src.utils.model_name_validator import clean_model_name
 
         model_name = clean_model_name(model_name)
-        provider_model_id = clean_model_name(provider_model_id)
 
         # Extract description
         description = normalized_model.get("description")
@@ -374,6 +373,11 @@ def transform_normalized_model_to_db_schema(
 
         # Extract pricing and normalize to per-token format
         pricing = extract_pricing(normalized_model)
+
+        # Free models (e.g. :free suffix) must have zero pricing
+        if normalized_model.get("is_free"):
+            for field in ("prompt", "completion", "image", "request"):
+                pricing[field] = Decimal("0")
 
         # Normalize pricing to per-token if the provider uses a different format
         # (e.g., per-1M for NEAR, DeepInfra, etc.)
@@ -447,15 +451,6 @@ def transform_normalized_model_to_db_schema(
         # null means "unknown" and the seed migration value should not be overwritten.
         if capabilities["max_output_tokens"] is not None:
             model_data["max_output_tokens"] = capabilities["max_output_tokens"]
-
-        # Store pricing info in metadata for later sync to model_pricing table
-        if any(pricing.values()):
-            model_data["metadata"]["pricing_raw"] = {
-                "prompt": str(pricing["prompt"]) if pricing["prompt"] else None,
-                "completion": str(pricing["completion"]) if pricing["completion"] else None,
-                "image": str(pricing["image"]) if pricing["image"] else None,
-                "request": str(pricing["request"]) if pricing["request"] else None,
-            }
 
         return model_data
 
@@ -984,8 +979,11 @@ def sync_all_providers(
         sync_start_time = time.time()
 
         # Get providers to sync
+        from src.utils.provider_filter import is_provider_enabled
+
         if provider_slugs:
-            providers_to_sync = provider_slugs
+            # Even explicit slugs must pass the enabled filter
+            providers_to_sync = [p for p in provider_slugs if is_provider_enabled(p)]
         else:
             # Use all active providers with fetch functions, minus skipped ones
             skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
@@ -1003,7 +1001,10 @@ def sync_all_providers(
             except Exception:
                 logger.warning("Failed to load providers from DB; using hardcoded fallback")
                 all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
-            providers_to_sync = [p for p in all_providers if p not in skip_set]
+            providers_to_sync = [
+                p for p in all_providers
+                if p not in skip_set and is_provider_enabled(p)
+            ]
             if skip_set:
                 logger.info(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
