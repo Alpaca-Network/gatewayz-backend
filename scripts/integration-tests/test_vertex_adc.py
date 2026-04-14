@@ -7,7 +7,7 @@ import sys
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
-from src.services.google_vertex_client import (
+from src.services.providers.google_vertex_client import (
     initialize_vertex_ai,
     make_google_vertex_request_openai,
     diagnose_google_vertex_credentials,

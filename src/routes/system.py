@@ -19,14 +19,14 @@ from fastapi.responses import HTMLResponse
 from src.security.deps import require_admin
 
 # Import fetch_models functions from their respective client files
-from src.services.aihubmix_client import fetch_models_from_aihubmix
-from src.services.aimo_client import fetch_models_from_aimo
-from src.services.anannas_client import fetch_models_from_anannas
-from src.services.chutes_client import fetch_models_from_chutes
-from src.services.fal_image_client import fetch_models_from_fal
-from src.services.featherless_client import fetch_models_from_featherless
-from src.services.fireworks_client import fetch_models_from_fireworks
-from src.services.groq_client import fetch_models_from_groq
+from src.services.providers.aihubmix_client import fetch_models_from_aihubmix
+from src.services.providers.aimo_client import fetch_models_from_aimo
+from src.services.providers.anannas_client import fetch_models_from_anannas
+from src.services.providers.chutes_client import fetch_models_from_chutes
+from src.services.providers.fal_image_client import fetch_models_from_fal
+from src.services.providers.featherless_client import fetch_models_from_featherless
+from src.services.providers.fireworks_client import fetch_models_from_fireworks
+from src.services.providers.groq_client import fetch_models_from_groq
 from src.services.huggingface_models import fetch_models_from_hug
 from src.services.model_catalog_cache import (
     clear_models_cache,
@@ -34,12 +34,12 @@ from src.services.model_catalog_cache import (
 )
 from src.services.model_catalog_cache import get_gateway_cache_metadata as get_models_cache
 from src.services.model_catalog_cache import get_provider_cache_metadata as get_providers_cache
-from src.services.modelz_client import clear_modelz_cache
-from src.services.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
-from src.services.modelz_client import refresh_modelz_cache
-from src.services.near_client import fetch_models_from_near
-from src.services.onerouter_client import fetch_models_from_onerouter
-from src.services.openrouter_client import fetch_models_from_openrouter
+from src.services.providers.modelz_client import clear_modelz_cache
+from src.services.providers.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
+from src.services.providers.modelz_client import refresh_modelz_cache
+from src.services.providers.near_client import fetch_models_from_near
+from src.services.providers.onerouter_client import fetch_models_from_onerouter
+from src.services.providers.openrouter_client import fetch_models_from_openrouter
 from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 from src.services.providers import (
     fetch_models_from_cerebras,
@@ -47,7 +47,7 @@ from src.services.providers import (
     fetch_models_from_novita,
     fetch_models_from_xai,
 )
-from src.services.together_client import fetch_models_from_together
+from src.services.providers.together_client import fetch_models_from_together
 
 # Initialize logging
 logger = logging.getLogger(__name__)

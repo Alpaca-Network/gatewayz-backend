@@ -11,7 +11,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from src.services.providers import fetch_models_from_cerebras
-from src.services.cerebras_client import make_cerebras_request_openai
+from src.services.providers.cerebras_client import make_cerebras_request_openai
 from src.config import Config
 
 def test_fetch_cerebras_models():

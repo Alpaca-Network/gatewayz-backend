@@ -1,0 +1,153 @@
+PROVIDER CLIENT HARDCODED MODELS AUDIT
+======================================
+Date: 2026-04-01
+Files Audited: 41 provider clients + 1 provider registry
+
+CRITICAL FINDINGS (5 files with hardcoded model lists):
+======================================================
+
+1. cerebras_client.py:19
+   DEFAULT_CEREBRAS_MODELS = [8 models]
+   - llama3.1-8b, llama3.1-70b, llama3.1-405b
+   - llama-3.3-70b, llama-3.3-405b
+   - qwen-3-32b, qwen-3-235b-a22b-instruct-2507, zai-glm-4.6
+   - Used by: _fallback_cerebras_models() on line 299
+   - Impact: Models cannot be deprecated without code change
+
+2. nebius_client.py:21
+   DEFAULT_NEBIUS_MODELS = [5 models]
+   - deepseek-ai/DeepSeek-R1-0528, deepseek-ai/DeepSeek-V3-0324
+   - meta-llama/Llama-3.3-70B-Instruct
+   - Qwen/Qwen3-235B-A22B
+   - mistralai/Mistral-Small-24B-Instruct-2501
+   - Used by: _fallback_nebius_models() on line 254
+   - Impact: Models cannot be deprecated without code change
+
+3. novita_client.py:38
+   DEFAULT_NOVITA_MODELS = [5 models]
+   - qwen3-235b-thinking, qwen3-max, deepseek-v3
+   - llama-3.3-70b, mistral-nemo
+   - Also: Line 380 hardcodes parameter defaults
+   - Used by: _fallback_novita_models() on line 177
+   - Impact: Models cannot be deprecated without code change
+
+4. cloudflare_workers_ai_client.py:131
+   DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS = [47 models]
+   - GPT-OSS (120B, 20B)
+   - Llama 4 Scout, Llama 3.3, 3.2, 3.1, 3, 2
+   - Qwen (3, QwQ, 2.5-Coder)
+   - Gemma (3, 7B, 2B)
+   - Mistral, DeepSeek, Granite, Hermes, Phi-2
+   - Used by: fetch_models_from_cloudflare_workers_ai_async() on line 665
+   - Impact: 47 models cannot be dynamically removed
+
+5. xai_client.py:13-31 and 267-352
+   XAI_REASONING_MODELS = {7 models}
+   XAI_NON_REASONING_MODELS = {6 models}
+   + Hardcoded fallback list [4 models] on line 267
+   - Impact: Reasoning capability is hardcoded; new reasoning models can't be added
+   - Impact: 13 models cannot be dynamically removed
+
+HIGH PRIORITY (1 file with hardcoded metadata):
+===============================================
+
+6. providers.py:23
+   MANUAL_LOGO_DB = {54 provider entries}
+   - Used by: get_provider_logo_from_services() on line 135
+   - Impact: New provider logos require code changes
+
+GOOD PRACTICES (34+ files):
+===========================
+
+✅ openai_client.py:261
+✅ anthropic_client.py:252
+✅ openrouter_client.py:666
+✅ groq_client.py:308
+✅ together_client.py:245
+✅ fireworks_client.py:232
+✅ featherless_client.py:321
+✅ deepinfra_client.py:232
+✅ google_vertex_client.py:1717
+✅ All others have fetch_models_from_*() with minimal hardcoded fallbacks
+
+ROOT CAUSE ANALYSIS:
+====================
+
+Problem: Static constants as "last resort" fallbacks block database-driven updates
+
+Current Flow:
+  API (live) → Database (last successful sync) → Static constant (HARDCODED)
+
+Issue:
+  - Deprecated model in API
+  - DB sync hasn't run yet
+  - Code serves hardcoded model anyway
+  - No way to remove it without deploying code change
+
+IMPACT SUMMARY:
+===============
+
+Blocked Capabilities:
+  ❌ Cannot deprecate models without code changes
+  ❌ Cannot add new reasoning models without code changes
+  ❌ Cannot add new vision model tags without code changes
+  ❌ Cannot add provider logos without code changes
+  ❌ Database alone cannot control the catalog
+
+Count of Hardcoded Models That Cannot Be Dynamically Removed:
+  cerebras: 8
+  nebius: 5
+  novita: 5
+  cloudflare: 47
+  xai: 13
+  TOTAL: 78 models
+
+RECOMMENDATIONS:
+================
+
+Priority 1 (CRITICAL): Remove hardcoded model lists
+  - Replace DEFAULT_*_MODELS with empty list []
+  - This forces reliance on database fallback
+  - Add alert/logging when no DB fallback available
+
+Priority 2 (HIGH): Externalize capability tags
+  - Move XAI_REASONING_MODELS to database table
+  - Move vision model tags to database
+  - Query capabilities at request time
+
+Priority 3 (HIGH): Externalize provider metadata
+  - Move MANUAL_LOGO_DB to config file or database
+  - Remove hardcoded provider entries
+
+FILES TO MODIFY:
+================
+
+1. src/services/cerebras_client.py
+   - Remove lines 19-68 (DEFAULT_CEREBRAS_MODELS)
+   - Update _fallback_cerebras_models() to return [] instead of DEFAULT_CEREBRAS_MODELS
+
+2. src/services/nebius_client.py
+   - Remove lines 21-52 (DEFAULT_NEBIUS_MODELS)
+   - Update _fallback_nebius_models() to return [] instead of DEFAULT_NEBIUS_MODELS
+
+3. src/services/novita_client.py
+   - Remove lines 38-69 (DEFAULT_NOVITA_MODELS)
+   - Update _fallback_novita_models() to return [] instead of DEFAULT_NOVITA_MODELS
+
+4. src/services/cloudflare_workers_ai_client.py
+   - Remove lines 131-460 (DEFAULT_CLOUDFLARE_WORKERS_AI_MODELS)
+   - Update fetch_models_from_cloudflare_workers_ai_async() to return [] as final fallback
+
+5. src/services/xai_client.py
+   - Remove lines 13-31 (XAI_REASONING_MODELS and XAI_NON_REASONING_MODELS)
+   - Remove lines 267-352 (hardcoded fallback models)
+   - Update is_xai_reasoning_model() to query database instead of hardcoded sets
+   - Update fetch_models_from_xai() to use database-only fallback
+
+6. src/services/providers.py
+   - Move lines 23-77 (MANUAL_LOGO_DB) to external config or database
+   - Update get_provider_logo_from_services() to use external source
+
+DETAILED REPORT:
+================
+See: HARDCODED_MODELS_AUDIT.md (comprehensive with code snippets and line numbers)

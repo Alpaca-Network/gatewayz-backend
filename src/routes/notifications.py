@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from src.config.supabase_config import get_supabase_client
+from src.db.client import get_db
 from src.enhanced_notification_service import enhanced_notification_service
 from src.schemas.notification import (
     NotificationChannel,
@@ -212,7 +212,7 @@ async def send_usage_report(
 async def get_notification_stats(admin_user: dict = Depends(require_admin)):
     """Get notification statistics for admin"""
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         # Check if notifications table exists
         try:

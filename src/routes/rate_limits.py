@@ -541,11 +541,11 @@ async def delete_rate_limits(
     - Success status
     - The key will use default rate limits going forward
     """
-    from src.config.supabase_config import get_supabase_client
+    from src.db.client import get_db
 
     def _delete_rate_limits_sync(target_api_key: str) -> dict:
         """Synchronous helper to delete rate limits in a thread."""
-        client = get_supabase_client()
+        client = get_db()
 
         # Delete from rate_limit_configs table (migrated from legacy rate_limits table)
         deleted_from_rate_limit_configs = False
@@ -667,9 +667,9 @@ async def get_users_rate_limits(
         q_limit: int, q_offset: int, q_user_id: int | None, q_has_custom: bool | None
     ) -> dict:
         """Synchronous helper to fetch all user rate limits in a thread."""
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Try query with rate_limit_config column first, fallback without it
         rate_limit_config_available = True

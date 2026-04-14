@@ -91,7 +91,7 @@ async def validate_model_availability(
 async def _validate_cerebras_model(model_id: str) -> dict[str, Any]:
     """Validate model availability on Cerebras"""
     try:
-        from src.services.cerebras_client import get_cerebras_client
+        from src.services.providers.cerebras_client import get_cerebras_client
 
         client = get_cerebras_client()
 
@@ -340,7 +340,7 @@ async def _validate_model_by_test_request(model_id: str, provider: str) -> dict[
     try:
         # Make minimal test request based on provider
         if provider == "cerebras":
-            from src.services.cerebras_client import make_cerebras_request_openai
+            from src.services.providers.cerebras_client import make_cerebras_request_openai
 
             try:
                 make_cerebras_request_openai(

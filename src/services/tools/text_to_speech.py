@@ -13,7 +13,7 @@ Features:
 
 import logging
 
-from src.services.chatterbox_tts_client import (
+from src.services.providers.chatterbox_tts_client import (
     CHATTERBOX_MODELS,
     LANGUAGE_NAMES,
     generate_speech,

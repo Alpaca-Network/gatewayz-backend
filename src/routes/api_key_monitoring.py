@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from src.config.supabase_config import get_supabase_client
+from src.db.client import get_db
 from src.security.deps import get_admin_key
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ async def get_api_key_tracking_quality(
         - recommendations: List of actionable recommendations
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         # Calculate time window
         end_time = datetime.now(UTC)
@@ -210,7 +210,7 @@ async def get_api_key_tracking_trend(
         - summary: Overall statistics for the period
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         end_time = datetime.now(UTC)
         start_time = end_time - timedelta(days=days)

@@ -783,9 +783,9 @@ async def get_providers_with_requests(api_key: str | None = Depends(get_optional
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Try to use optimized RPC function first (fastest)
         try:
@@ -917,9 +917,9 @@ async def get_request_counts_by_model(api_key: str | None = Depends(get_optional
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Get all requests with model info
         result = client.table("chat_completion_requests").select("""
@@ -1014,9 +1014,9 @@ async def get_models_with_requests(
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Try to use optimized RPC function first (fastest)
         try:
@@ -1208,9 +1208,9 @@ async def get_chat_completion_requests(
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Build the query with joins to get model and provider information
         query = client.table("chat_completion_requests").select("""
@@ -1319,9 +1319,9 @@ async def get_chat_requests_plot_data(
     Authentication: Optional. Provide API key for authenticated access.
     """
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.client import get_db
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Build base query
         base_filters = []

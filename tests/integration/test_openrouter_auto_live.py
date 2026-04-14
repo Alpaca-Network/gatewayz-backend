@@ -26,7 +26,7 @@ def test_openrouter_auto():
     print(f"\n✅ OPENROUTER_API_KEY is configured (length: {len(api_key)})")
 
     # Try to import required modules
-    from src.services.openrouter_client import make_openrouter_request_openai
+    from src.services.providers.openrouter_client import make_openrouter_request_openai
 
     print("✅ Successfully imported OpenRouter client")
 

@@ -933,7 +933,7 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
         # Guard: if price looks too large for per-token format (> 0.001),
         # auto-detect the format and normalize to per-token.
         # Per-token prices should be < 0.001 (even GPT-4 is ~$0.00003/token).
-        from src.services.pricing_normalization import auto_detect_format, normalize_to_per_token
+        from src.utils.pricing_normalization import auto_detect_format, normalize_to_per_token
 
         if input_price > Decimal("0.001"):
             detected = auto_detect_format(float(input_price))
@@ -1658,6 +1658,7 @@ def transform_db_models_batch(db_models: list[dict[str, Any]]) -> list[dict[str,
         List of models in API format with pricing enrichment applied
     """
     try:
+        # TODO: Phase 2 — move transform_db_models_batch to services layer
         from src.services.pricing_lookup import (
             _build_openrouter_pricing_index,
             enrich_model_with_pricing,
@@ -2215,6 +2216,7 @@ def transform_unique_models_batch(db_models: list[dict[str, Any]]) -> list[dict[
         List of API-formatted models with pricing enrichment applied
     """
     try:
+        # TODO: Phase 2 — move transform_db_models_batch to services layer
         from src.services.pricing_lookup import get_all_pricing_batch, get_model_pricing
 
         # Pre-fetch ALL pricing in ONE query (eliminates N per-model DB round-trips)

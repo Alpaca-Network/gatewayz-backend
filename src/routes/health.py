@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from src.config.config import Config
-from src.config.supabase_config import get_initialization_status, supabase
+from src.db.client import get_db, get_initialization_status
 from src.models.health_models import (
     HealthCheckRequest,
     HealthDashboardResponse,
@@ -1457,7 +1457,7 @@ async def check_google_vertex_health():
     ```
     """
     try:
-        from src.services.google_vertex_client import diagnose_google_vertex_credentials
+        from src.services.providers.google_vertex_client import diagnose_google_vertex_credentials
 
         diagnosis = diagnose_google_vertex_credentials()
 
@@ -1507,7 +1507,7 @@ async def database_health():
             # to prevent blocking the event loop (Supabase SDK is synchronous)
             try:
                 await asyncio.wait_for(
-                    asyncio.to_thread(lambda: supabase.table("users").limit(1).execute()),
+                    asyncio.to_thread(lambda: get_db().table("users").limit(1).execute()),
                     timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
                 )
             except TimeoutError as timeout_err:

@@ -13,7 +13,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.security.security import audit_logger, validate_api_key_security
 from src.services.user_lookup_cache import get_user
-from src.utils.trial_utils import validate_trial_expiration
 from src.utils.validators import ensure_api_key_like, ensure_non_empty_string
 
 logger = logging.getLogger(__name__)
@@ -210,10 +209,6 @@ async def get_current_user(api_key: str = Depends(get_api_key)) -> dict[str, Any
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Check if trial has expired
-    # Validate trial expiration using centralized utility
-    validate_trial_expiration(user)
-
     return user
 
 
@@ -390,9 +385,6 @@ async def check_credits(
     Raises:
         HTTPException: 402 if insufficient credits or trial expired
     """
-    # Check if trial has expired using centralized utility
-    validate_trial_expiration(user)
-
     current_credits = user.get("credits", 0.0)
 
     if current_credits < min_credits:

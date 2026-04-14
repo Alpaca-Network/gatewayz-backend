@@ -101,7 +101,7 @@ class GeneralRouter:
     def __init__(self):
         """Initialize general router with NotDiamond client."""
         from src.services.general_router_fallback import get_fallback_models
-        from src.services.notdiamond_client import get_notdiamond_client
+        from src.services.providers.notdiamond_client import get_notdiamond_client
 
         self.notdiamond_client = get_notdiamond_client()
         self.fallback_models = get_fallback_models()

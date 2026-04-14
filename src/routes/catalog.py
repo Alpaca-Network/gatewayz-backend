@@ -47,7 +47,7 @@ from src.services.models import (
     get_model_count_by_provider,
     normalize_provider_slug,
 )
-from src.services.modelz_client import (
+from src.services.providers.modelz_client import (
     check_model_exists_on_modelz,
     fetch_modelz_tokens,
     get_modelz_model_details,

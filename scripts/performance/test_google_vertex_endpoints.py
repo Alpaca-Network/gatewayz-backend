@@ -29,7 +29,7 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../.."))
 
 from src.config import Config
-from src.services.google_vertex_client import (
+from src.services.providers.google_vertex_client import (
     _get_model_location,
     make_google_vertex_request_openai,
 )

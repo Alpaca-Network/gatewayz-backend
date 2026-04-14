@@ -46,7 +46,7 @@ def test_vercel_client_import():
     print("-" * 60)
 
     try:
-        from src.services.vercel_ai_gateway_client import (
+        from src.services.providers.vercel_ai_gateway_client import (
             get_vercel_ai_gateway_client,
             make_vercel_ai_gateway_request_openai,
             make_vercel_ai_gateway_request_openai_stream,

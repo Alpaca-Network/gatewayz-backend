@@ -12,7 +12,7 @@ sys.modules["google.protobuf"] = MagicMock()
 sys.modules["google.protobuf.json_format"] = MagicMock()
 
 from src.config import Config
-from src.services.google_vertex_client import (
+from src.services.providers.google_vertex_client import (
     _translate_openai_tools_to_vertex,
     _translate_tool_choice_to_vertex,
     make_google_vertex_request_openai,

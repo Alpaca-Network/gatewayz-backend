@@ -31,7 +31,7 @@ from src.config import Config
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.schemas import MessagesRequest
 from src.security.deps import get_api_key
-from src.services.anthropic_transformer import (
+from src.services.providers.anthropic_transformer import (
     extract_text_from_content,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
@@ -331,11 +331,28 @@ async def anthropic_messages(
                     headers=headers or None,
                 )
 
-        if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
-            raise HTTPException(
-                status_code=402,
-                detail="Insufficient credits. Please add credits to continue.",
+        # Credit check — cost-based pre-check (not just balance > 0)
+        if not trial.get("is_trial", False):
+            from src.services.billing.credit_precheck import estimate_and_check_credits
+
+            _user_credits = user.get("credits", 0.0)
+            if _user_credits <= 0:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient credits. Please add credits to continue.",
+                )
+            _msgs = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in (req.messages or [])]
+            _precheck = estimate_and_check_credits(
+                model_id=req.model,
+                messages=_msgs,
+                user_credits=_user_credits,
+                max_tokens=getattr(req, "max_tokens", None),
             )
+            if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
+                raise HTTPException(
+                    status_code=402,
+                    detail="Insufficient credits. Please add credits to continue.",
+                )
 
         # Pre-check plan limits before processing (fail fast)
         pre_plan = await _to_thread(enforce_plan_limits, user["id"], 0, environment_tag)

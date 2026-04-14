@@ -458,6 +458,22 @@ class Config:
         if s.strip()
     }
 
+    # Enabled providers — only these providers will be loaded, routed to,
+    # shown in the catalog, and synced.  Comma-separated slugs using the
+    # hyphenated gateway names (e.g. "openrouter,openai,anthropic").
+    # Empty string or unset means ALL providers are enabled.
+    _raw_enabled = os.environ.get("ENABLED_PROVIDERS", "openrouter")
+    ENABLED_PROVIDERS: frozenset[str] | None = (
+        frozenset(s.strip() for s in _raw_enabled.split(",") if s.strip())
+        if _raw_enabled.strip()
+        else None  # None = all providers enabled
+    )
+
+    # Pricing markup — multiplier applied on top of upstream provider cost.
+    # 1.0 = pass-through (no profit), 1.25 = 25% margin, 1.30 = 30% margin.
+    # This is the primary revenue lever for inference requests.
+    PRICING_MARKUP: float = float(os.environ.get("PRICING_MARKUP", "1.25"))
+
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
     # No separate pricing sync configuration needed

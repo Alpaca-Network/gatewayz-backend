@@ -16,7 +16,7 @@ def test_cerebras_direct_import():
     print("=" * 80)
 
     try:
-        from src.services.cerebras_client import (
+        from src.services.providers.cerebras_client import (
             get_cerebras_client,
             make_cerebras_request_openai,
             make_cerebras_request_openai_stream,
@@ -83,7 +83,7 @@ def test_cerebras_client_initialization():
         return True
 
     try:
-        from src.services.cerebras_client import get_cerebras_client
+        from src.services.providers.cerebras_client import get_cerebras_client
 
         client = get_cerebras_client()
         print("✅ Cerebras client initialized successfully")
@@ -108,7 +108,7 @@ def test_cerebras_inference():
         return True
 
     try:
-        from src.services.cerebras_client import (
+        from src.services.providers.cerebras_client import (
             make_cerebras_request_openai,
             process_cerebras_response
         )

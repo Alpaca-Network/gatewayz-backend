@@ -8,7 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.config.redis_config import get_redis_config
-from src.config.supabase_config import get_supabase_client
+from src.db.client import get_db
 from src.schemas.trial_analytics import (
     BestWorstCohort,
     CohortAnalysisResponse,
@@ -98,7 +98,7 @@ async def get_trial_users(
     **Purpose:** Monitor trial usage to detect abuse, track conversion, and segment users
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
         current_time = datetime.now(UTC)
 
         # Build base query joining users and api_keys
@@ -329,7 +329,7 @@ async def get_domain_analysis(
             except (json.JSONDecodeError, KeyError, TypeError) as e:
                 logger.warning(f"Failed to decode cached domain analysis: {e}, fetching fresh data")
 
-        client = get_supabase_client()
+        client = get_db()
         current_time = datetime.now(UTC)
 
         # Fetch all trial users with their API key data
@@ -486,7 +486,7 @@ async def get_conversion_funnel(
     **Purpose:** Analyze conversion patterns and optimize trial experience
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         # Fetch all trial API keys with conversion data
         # Paginate to get all records beyond 1000 limit
@@ -686,7 +686,7 @@ async def save_conversion_metrics(
     **Note:** This should be called automatically when a user upgrades from trial
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         # Insert conversion metrics
         result = (
@@ -742,7 +742,7 @@ async def get_cohort_analysis(
     **Purpose:** Track conversion rates and patterns across different signup cohorts
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
         current_time = datetime.now(UTC)
 
         # Calculate cohort periods

@@ -28,13 +28,12 @@ from src.services.credit_precheck import estimate_and_check_credits
 # Providers with native async streaming use direct imports (currently OpenRouter).
 # All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
 # circular deps with chat.py which imports this module).
-from src.services.openrouter_client import (
+from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
 from src.services.pricing import calculate_cost
 from src.services.provider_selector import get_selector
-from src.services.trial_validation import track_trial_usage, validate_trial_access
 
 logger = logging.getLogger(__name__)
 
@@ -56,17 +55,18 @@ class ChatInferenceHandler:
     """
 
     def __init__(
-        self, api_key: str, background_tasks: Any | None = None, request: Request | None = None
+        self, api_key: str | None, background_tasks: Any | None = None, request: Request | None = None
     ):
         """
         Initialize the handler with user context.
 
         Args:
-            api_key: User's API key for authentication and billing
+            api_key: User's API key for authentication and billing, or None for anonymous requests
             background_tasks: FastAPI BackgroundTasks for async operations
             request: FastAPI Request object for disconnect detection
         """
         self.api_key = api_key
+        self.is_anonymous = api_key is None
         self.background_tasks = background_tasks
         self.request = request
         self.user: dict[str, Any] | None = None
@@ -74,15 +74,24 @@ class ChatInferenceHandler:
         self.request_id = str(uuid.uuid4())
         self.start_time = time.monotonic()
 
-        logger.debug(f"[ChatHandler] Initialized with request_id={self.request_id}")
+        logger.debug(f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}")
 
     async def _initialize_user_context(self) -> None:
         """
         Load user and trial data with detailed error handling.
 
+        For anonymous requests, sets user=None and a synthetic trial dict
+        so that downstream code can proceed without auth.
+
         Raises:
             HTTPException: With detailed error response if authentication or authorization fails
         """
+        if self.is_anonymous:
+            self.user = None
+            self.trial = {"is_valid": True, "is_trial": False, "is_anonymous": True}
+            logger.debug(f"[ChatHandler] Anonymous request, request_id={self.request_id}")
+            return
+
         from fastapi import HTTPException
 
         from src.utils.error_factory import DetailedErrorFactory
@@ -113,46 +122,10 @@ class ChatInferenceHandler:
                 detail=error_response.dict(exclude_none=True),
             )
 
-        # Validate trial access
-        try:
-            self.trial = await asyncio.to_thread(validate_trial_access, self.api_key)
-            if not self.trial.get("is_valid", False):
-                # Trial validation failed - determine error type
-                trial_error = self.trial.get("error", "Access denied")
-
-                # Check if it's a trial expired error
-                if "trial" in trial_error.lower() and "expired" in trial_error.lower():
-                    error_response = DetailedErrorFactory.trial_expired(request_id=self.request_id)
-                else:
-                    # Generic authorization error
-                    error_response = DetailedErrorFactory.invalid_api_key(
-                        reason=trial_error,
-                        request_id=self.request_id,
-                    )
-
-                raise HTTPException(
-                    status_code=error_response.error.status,
-                    detail=error_response.dict(exclude_none=True),
-                )
-        except HTTPException:
-            # Re-raise HTTP exceptions
-            raise
-        except Exception as e:
-            # Unexpected error during trial validation
-            logger.error(f"[ChatHandler] Error validating trial: {e}", exc_info=True)
-            error_response = DetailedErrorFactory.internal_error(
-                operation="trial_validation",
-                error=e,
-                request_id=self.request_id,
-            )
-            raise HTTPException(
-                status_code=error_response.error.status,
-                detail=error_response.dict(exclude_none=True),
-            )
+        self.trial = {"is_valid": True, "is_trial": False}
 
         logger.debug(
-            f"[ChatHandler] User context loaded: user_id={self.user.get('id')}, "
-            f"is_trial={self.trial.get('is_trial')}"
+            f"[ChatHandler] User context loaded: user_id={self.user.get('id')}"
         )
 
     async def _check_credit_sufficiency(
@@ -160,34 +133,33 @@ class ChatInferenceHandler:
         model_id: str,
         messages: list[dict],
         max_tokens: int | None,
-    ) -> None:
+    ) -> int | None:
         """
-        Pre-flight credit check: verify user has sufficient credits for maximum possible cost.
+        Pre-flight credit check with automatic max_tokens capping.
 
-        This follows OpenAI's model:
-        1. Estimate input tokens from messages
-        2. Use max_tokens for maximum output
-        3. Calculate maximum possible cost
-        4. Verify user has sufficient credits
+        If the user cannot afford the full ``max_tokens`` but CAN afford
+        some output, the method returns a reduced ``max_tokens`` value that
+        the caller must use instead.
 
-        Args:
-            model_id: Model to be used
-            messages: Chat messages
-            max_tokens: Maximum output tokens (from request)
+        Returns:
+            Effective max_tokens to use (may be lower than the requested
+            value).  ``None`` only when the check is skipped entirely
+            (anonymous / trial).
 
         Raises:
-            HTTPException: 402 Payment Required if insufficient credits
+            HTTPException: 402 Payment Required if the user cannot afford
+                any output at all.
         """
 
-        # Trial users don't need credit checks
-        if self.trial.get("is_trial", False):
-            logger.debug("[ChatHandler] Skipping credit check for trial user")
-            return
+        # Anonymous requests don't require credits
+        if self.is_anonymous:
+            logger.debug("[ChatHandler] Skipping credit check for anonymous request")
+            return max_tokens
 
         # Get user's current credits
         user_credits = self.user.get("credits", 0.0)
 
-        # Perform pre-flight check
+        # Perform pre-flight check (now includes affordability capping)
         check_result = estimate_and_check_credits(
             model_id=model_id,
             messages=messages,
@@ -197,7 +169,7 @@ class ChatInferenceHandler:
         )
 
         if not check_result["allowed"]:
-            # Insufficient credits - reject before provider call
+            # Cannot afford any output — reject before provider call
             from src.utils.exceptions import APIExceptions
 
             max_cost = check_result["max_cost"]
@@ -209,7 +181,6 @@ class ChatInferenceHandler:
                 f"need ${max_cost:.4f}, have ${user_credits:.4f}"
             )
 
-            # Use detailed error with actionable suggestions
             raise APIExceptions.insufficient_credits_for_reservation(
                 current_credits=user_credits,
                 max_cost=max_cost,
@@ -219,11 +190,26 @@ class ChatInferenceHandler:
                 request_id=self.request_id,
             )
 
-        # Log successful check
+        # Check if max_tokens was capped to an affordable limit
+        capped = check_result.get("capped_max_tokens")
+        if capped is not None:
+            logger.warning(
+                "[ChatHandler] max_tokens capped for user %s: "
+                "original=%s → capped=%d (credits=%.4f, model=%s)",
+                self.user.get("id"),
+                check_result.get("original_max_tokens"),
+                capped,
+                user_credits,
+                model_id,
+            )
+            return capped
+
+        # Full budget is affordable — no cap needed
         logger.info(
             f"[ChatHandler] Credit pre-check passed: max_cost=${check_result['max_cost']:.4f}, "
             f"available=${user_credits:.4f}"
         )
+        return max_tokens
 
     def _call_provider(
         self,
@@ -273,8 +259,7 @@ class ChatInferenceHandler:
                     return make_openrouter_request_openai(messages, model_id, **kwargs)
 
                 # Registry-based dispatch for all other providers
-                # Lazy import to avoid circular dependency (chat.py imports this module)
-                from src.routes.chat import PROVIDER_ROUTING
+                from src.handlers.provider_registry import PROVIDER_ROUTING
 
                 routing = PROVIDER_ROUTING.get(provider_name)
                 if routing and routing.get("request"):
@@ -418,8 +403,7 @@ class ChatInferenceHandler:
                         yield chunk
                 else:
                     # Registry-based dispatch for all other providers
-                    # Lazy import to avoid circular dependency (chat.py imports this module)
-                    from src.routes.chat import PROVIDER_ROUTING
+                    from src.handlers.provider_registry import PROVIDER_ROUTING
 
                     routing = PROVIDER_ROUTING.get(provider_name)
                     if routing and routing.get("stream"):
@@ -485,76 +469,49 @@ class ChatInferenceHandler:
         Raises:
             Exception: If credit deduction fails
         """
+        # Anonymous requests are not charged
+        if self.is_anonymous:
+            logger.debug("[ChatHandler] Skipping charge for anonymous request")
+            return
+
         total_tokens = prompt_tokens + completion_tokens
-        is_trial = self.trial.get("is_trial", False)
 
-        # Override trial status if user has active subscription (defense-in-depth)
-        if is_trial and self.user:
-            has_active_subscription = (
-                self.user.get("stripe_subscription_id") is not None
-                and self.user.get("subscription_status") == "active"
-            ) or self.user.get("tier") in ("pro", "max", "admin")
+        # Deduct credits
+        try:
+            await asyncio.to_thread(
+                deduct_credits,
+                self.api_key,
+                cost,
+                f"Chat completion - {model_name}",
+                {
+                    "model": model_name,
+                    "total_tokens": total_tokens,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "cost_usd": cost,
+                    "request_id": self.request_id,
+                },
+            )
 
-            if has_active_subscription:
-                logger.warning(
-                    f"[ChatHandler] User {self.user.get('id')} has is_trial=TRUE "
-                    f"but has active subscription. Forcing paid path."
-                )
-                is_trial = False
+            # Record usage for analytics
+            elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
+            await asyncio.to_thread(
+                record_usage,
+                self.user["id"],
+                self.api_key,
+                model_name,
+                total_tokens,
+                cost,
+                elapsed_ms,
+            )
 
-        # Track trial usage
-        if is_trial and not self.trial.get("is_expired"):
-            try:
-                await asyncio.to_thread(
-                    track_trial_usage,
-                    self.api_key,
-                    total_tokens,
-                    1,  # request count
-                    model_id=model_name,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                )
-                logger.debug(f"[ChatHandler] Tracked trial usage: {total_tokens} tokens")
-            except Exception as e:
-                logger.warning(f"[ChatHandler] Failed to track trial usage: {e}")
-
-        # Deduct credits for non-trial users
-        if not is_trial:
-            try:
-                await asyncio.to_thread(
-                    deduct_credits,
-                    self.api_key,
-                    cost,
-                    f"Chat completion - {model_name}",
-                    {
-                        "model": model_name,
-                        "total_tokens": total_tokens,
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "cost_usd": cost,
-                        "request_id": self.request_id,
-                    },
-                )
-
-                # Record usage for analytics
-                elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
-                await asyncio.to_thread(
-                    record_usage,
-                    self.user["id"],
-                    self.api_key,
-                    model_name,
-                    total_tokens,
-                    cost,
-                    elapsed_ms,
-                )
-
-                logger.debug(
-                    f"[ChatHandler] Charged ${cost:.6f} for {total_tokens} tokens "
-                    f"(user_id={self.user.get('id')})"
-                )
-            except Exception as e:
-                logger.error(f"[ChatHandler] Credit deduction failed: {e}")
-                raise
+            logger.debug(
+                f"[ChatHandler] Charged ${cost:.6f} for {total_tokens} tokens "
+                f"(user_id={self.user.get('id')})"
+            )
+        except Exception as e:
+            logger.error(f"[ChatHandler] Credit deduction failed: {e}")
+            raise
 
     def _save_request_record(
         self,
@@ -593,7 +550,7 @@ class ChatInferenceHandler:
                 provider_name=provider_name,
                 model_id=None,  # Will be looked up in save function
                 api_key_id=self.user.get("key_id") if self.user else None,
-                is_anonymous=False,
+                is_anonymous=self.is_anonymous,
             )
         else:
             # Synchronous save if no background tasks
@@ -609,7 +566,7 @@ class ChatInferenceHandler:
                 provider_name=provider_name,
                 model_id=None,
                 api_key_id=self.user.get("key_id") if self.user else None,
-                is_anonymous=False,
+                is_anonymous=self.is_anonymous,
             )
 
         logger.debug(
@@ -648,7 +605,7 @@ class ChatInferenceHandler:
 
             logger.info(
                 f"[ChatHandler] Processing request: model={request.model}, "
-                f"messages={len(request.messages)}, user_id={self.user.get('id')}"
+                f"messages={len(request.messages)}, user_id={self.user.get('id') if self.user else 'anonymous'}"
             )
 
             # Step 1.5: Convert internal messages to OpenAI format for provider clients
@@ -663,8 +620,8 @@ class ChatInferenceHandler:
                 for msg in request.messages
             ]
 
-            # Step 1.6: Pre-flight credit check (verify user has enough credits for max possible cost)
-            await self._check_credit_sufficiency(
+            # Step 1.6: Pre-flight credit check (may cap max_tokens to affordable limit)
+            effective_max_tokens = await self._check_credit_sufficiency(
                 model_id=request.model,
                 messages=messages,
                 max_tokens=request.max_tokens,
@@ -673,7 +630,7 @@ class ChatInferenceHandler:
             # Step 2: Build provider kwargs
             kwargs = {
                 "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
+                "max_tokens": effective_max_tokens,
                 "top_p": request.top_p,
                 "frequency_penalty": request.frequency_penalty,
                 "presence_penalty": request.presence_penalty,
@@ -889,7 +846,7 @@ class ChatInferenceHandler:
 
             logger.info(
                 f"[ChatHandler] Processing streaming request: model={request.model}, "
-                f"messages={len(request.messages)}, user_id={self.user.get('id')}"
+                f"messages={len(request.messages)}, user_id={self.user.get('id') if self.user else 'anonymous'}"
             )
 
             # Step 2: Prepare messages and kwargs (provider selector handles model transformation)
@@ -904,8 +861,8 @@ class ChatInferenceHandler:
                 for msg in request.messages
             ]
 
-            # Step 2.5: Pre-flight credit check (streaming)
-            await self._check_credit_sufficiency(
+            # Step 2.5: Pre-flight credit check (streaming, may cap max_tokens)
+            effective_max_tokens = await self._check_credit_sufficiency(
                 model_id=request.model,
                 messages=messages,
                 max_tokens=request.max_tokens,
@@ -913,7 +870,7 @@ class ChatInferenceHandler:
 
             kwargs = {
                 "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
+                "max_tokens": effective_max_tokens,
                 "top_p": request.top_p,
                 "frequency_penalty": request.frequency_penalty,
                 "presence_penalty": request.presence_penalty,

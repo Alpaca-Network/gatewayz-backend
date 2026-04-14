@@ -61,7 +61,7 @@ def diagnose_openrouter_auth():
     # Check 3: OpenRouter client initialization
     print("\n[CHECK 3] OpenRouter Client Initialization")
     try:
-        from src.services.openrouter_client import get_openrouter_client
+        from src.services.providers.openrouter_client import get_openrouter_client
 
         client = get_openrouter_client()
         print("✅ OpenRouter client initialized successfully")

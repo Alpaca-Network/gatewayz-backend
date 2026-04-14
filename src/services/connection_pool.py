@@ -734,9 +734,13 @@ def warmup_provider_connections() -> dict[str, str]:
     establishing TCP connections, completing TLS handshakes, and
     setting up HTTP/2 multiplexing before any user requests arrive.
 
+    Only warms enabled providers (per ENABLED_PROVIDERS).
+
     Returns:
         Dict mapping provider names to their warmup status ("ok" or error message)
     """
+    from src.utils.provider_filter import is_provider_enabled
+
     # Fallback warmup list (used if registry unavailable)
     _FALLBACK_WARMUP = [
         ("openai", get_openai_pooled_client),
@@ -766,28 +770,32 @@ def warmup_provider_connections() -> dict[str, str]:
 
     if slugs_to_warm is not None:
         for slug in slugs_to_warm:
+            if not is_provider_enabled(slug):
+                continue
             try:
                 get_provider_pooled_client(slug)
                 results[slug] = "ok"
-                logger.info(f"✅ Warmed up connection to {slug}")
+                logger.info(f"Warmed up connection to {slug}")
             except ValueError as e:
                 results[slug] = f"skipped: {e}"
-                logger.debug(f"⏭️  Skipping {slug} warmup: {e}")
+                logger.debug(f"Skipping {slug} warmup: {e}")
             except Exception as e:
                 results[slug] = f"error: {e}"
-                logger.warning(f"⚠️  Failed to warm up {slug}: {e}")
+                logger.warning(f"Failed to warm up {slug}: {e}")
     else:
         for provider_name, get_client_fn in _FALLBACK_WARMUP:
+            if not is_provider_enabled(provider_name):
+                continue
             try:
                 get_client_fn()
                 results[provider_name] = "ok"
-                logger.info(f"✅ Warmed up connection to {provider_name}")
+                logger.info(f"Warmed up connection to {provider_name}")
             except ValueError as e:
                 results[provider_name] = f"skipped: {e}"
-                logger.debug(f"⏭️  Skipping {provider_name} warmup: {e}")
+                logger.debug(f"Skipping {provider_name} warmup: {e}")
             except Exception as e:
                 results[provider_name] = f"error: {e}"
-                logger.warning(f"⚠️  Failed to warm up {provider_name}: {e}")
+                logger.warning(f"Failed to warm up {provider_name}: {e}")
 
     return results
 

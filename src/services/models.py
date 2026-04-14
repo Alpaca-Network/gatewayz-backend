@@ -1861,7 +1861,7 @@ def get_vercel_model_pricing(model_id: str) -> dict:
         dict with 'prompt', 'completion', 'request', and 'image' pricing fields
     """
     try:
-        from src.services.vercel_ai_gateway_client import fetch_model_pricing_from_vercel
+        from src.services.providers.vercel_ai_gateway_client import fetch_model_pricing_from_vercel
 
         # Attempt to fetch pricing from Vercel or underlying provider
         pricing_data = fetch_model_pricing_from_vercel(model_id)
@@ -2983,7 +2983,7 @@ def get_helicone_model_pricing(model_id: str) -> dict:
         dict with 'prompt', 'completion', 'request', and 'image' pricing fields
     """
     try:
-        from src.services.helicone_client import fetch_helicone_pricing_from_public_api
+        from src.services.providers.helicone_client import fetch_helicone_pricing_from_public_api
 
         # Fetch pricing from Helicone's public API (no circular dependency)
         pricing_map = fetch_helicone_pricing_from_public_api()

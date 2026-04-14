@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from src.security.deps import get_current_user
-from src.services.nosana_client import (
+from src.services.providers.nosana_client import (
     DEPLOYMENT_STATUSES,
     DEPLOYMENT_STRATEGIES,
     archive_deployment,

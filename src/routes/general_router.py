@@ -98,7 +98,7 @@ async def get_available_models() -> dict[str, Any]:
 
     Returns list of NotDiamond candidate models with Gatewayz mappings.
     """
-    from src.services.notdiamond_client import get_notdiamond_client
+    from src.services.providers.notdiamond_client import get_notdiamond_client
 
     client = get_notdiamond_client()
     if not client.enabled:

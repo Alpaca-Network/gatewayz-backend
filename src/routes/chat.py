@@ -63,7 +63,9 @@ except ImportError:
 from src.adapters.chat import OpenAIChatAdapter
 
 # Unified chat handler and adapters for chat unification
+from src.handlers.braintrust_logging import log_to_braintrust
 from src.handlers.chat_handler import ChatInferenceHandler
+from src.handlers.error_persistence import save_failed_request
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -119,9 +121,22 @@ except ImportError:
         pass
 
 
-# Import provider clients with graceful error handling
-# This prevents a single provider's import failure from breaking the entire chat endpoint
-_provider_import_errors = {}
+# Import provider registry from canonical module (breaks circular dep with chat_handler.py)
+from src.handlers.provider_registry import (
+    PROVIDER_FUNCTIONS,
+    PROVIDER_ROUTING,
+    _provider_import_errors,
+    _safe_import_provider,
+)
+
+# Inject provider functions into this module's globals for backward compatibility.
+# Tests patch src.routes.chat.make_openrouter_request_openai etc., so these
+# functions must exist as attributes of the chat module.
+_current_globals = globals()
+for _prov_name, _func_names in PROVIDER_FUNCTIONS.items():
+    _prov_module = _safe_import_provider(_prov_name, _func_names)
+    for _fn in _func_names:
+        _current_globals[_fn] = _prov_module.get(_fn)
 
 
 def _maybe_record_402(provider: str, status_code: int) -> None:
@@ -133,372 +148,6 @@ def _maybe_record_402(provider: str, status_code: int) -> None:
             record_provider_402(provider)
         except Exception:
             pass
-
-
-# Helper function to safely import provider clients
-def _safe_import_provider(provider_name, imports_list):
-    """Safely import provider functions with error logging
-
-    Returns a dict with either:
-    - Real functions if import succeeds
-    - Sentinel functions that raise HTTPException if used
-    """
-    try:
-        module_path = f"src.services.{provider_name}_client"
-        module = __import__(module_path, fromlist=imports_list)
-        result = {}
-        for import_name in imports_list:
-            result[import_name] = getattr(module, import_name)
-        logging.getLogger(__name__).debug(f"✓ Loaded {provider_name} provider client")
-        return result
-    except Exception as e:
-        error_msg = (
-            f"⚠  Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
-        )
-        logging.getLogger(__name__).error(error_msg)
-        _provider_import_errors[provider_name] = str(e)
-
-        # Return sentinel functions that raise informative errors when called
-        def make_error_raiser(prov_name, func_name, error):
-            async def async_error(*args, **kwargs):
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}",
-                )
-
-            def sync_error(*args, **kwargs):
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Provider '{prov_name}' is unavailable: {func_name} failed to load. Error: {str(error)[:100]}",
-                )
-
-            # Return the sync version by default (async handling is done elsewhere)
-            return sync_error
-
-        return {
-            import_name: make_error_raiser(provider_name, import_name, e)
-            for import_name in imports_list
-        }
-
-
-# Load all provider clients using registry pattern
-# Define provider functions to import (reduces boilerplate from ~280 lines to ~60 lines)
-PROVIDER_FUNCTIONS = {
-    "openrouter": [
-        "make_openrouter_request_openai",
-        "process_openrouter_response",
-        "make_openrouter_request_openai_stream",
-        "make_openrouter_request_openai_stream_async",
-    ],
-    "featherless": [
-        "make_featherless_request_openai",
-        "process_featherless_response",
-        "make_featherless_request_openai_stream",
-    ],
-    "fireworks": [
-        "make_fireworks_request_openai",
-        "process_fireworks_response",
-        "make_fireworks_request_openai_stream",
-    ],
-    "together": [
-        "make_together_request_openai",
-        "process_together_response",
-        "make_together_request_openai_stream",
-    ],
-    "huggingface": [
-        "make_huggingface_request_openai",
-        "process_huggingface_response",
-        "make_huggingface_request_openai_stream",
-    ],
-    "aimo": [
-        "make_aimo_request_openai",
-        "process_aimo_response",
-        "make_aimo_request_openai_stream",
-    ],
-    "xai": ["make_xai_request_openai", "process_xai_response", "make_xai_request_openai_stream"],
-    "cerebras": [
-        "make_cerebras_request_openai",
-        "process_cerebras_response",
-        "make_cerebras_request_openai_stream",
-    ],
-    "chutes": [
-        "make_chutes_request_openai",
-        "process_chutes_response",
-        "make_chutes_request_openai_stream",
-    ],
-    "google_vertex": [
-        "make_google_vertex_request_openai",
-        "process_google_vertex_response",
-        "make_google_vertex_request_openai_stream",
-    ],
-    "near": [
-        "make_near_request_openai",
-        "process_near_response",
-        "make_near_request_openai_stream",
-    ],
-    "vercel_ai_gateway": [
-        "make_vercel_ai_gateway_request_openai",
-        "process_vercel_ai_gateway_response",
-        "make_vercel_ai_gateway_request_openai_stream",
-    ],
-    "helicone": [
-        "make_helicone_request_openai",
-        "process_helicone_response",
-        "make_helicone_request_openai_stream",
-    ],
-    "aihubmix": [
-        "make_aihubmix_request_openai",
-        "process_aihubmix_response",
-        "make_aihubmix_request_openai_stream",
-    ],
-    "anannas": [
-        "make_anannas_request_openai",
-        "process_anannas_response",
-        "make_anannas_request_openai_stream",
-    ],
-    "alpaca_network": [
-        "make_alpaca_network_request_openai",
-        "process_alpaca_network_response",
-        "make_alpaca_network_request_openai_stream",
-    ],
-    "alibaba_cloud": [
-        "make_alibaba_cloud_request_openai",
-        "process_alibaba_cloud_response",
-        "make_alibaba_cloud_request_openai_stream",
-    ],
-    "clarifai": [
-        "make_clarifai_request_openai",
-        "process_clarifai_response",
-        "make_clarifai_request_openai_stream",
-    ],
-    "groq": [
-        "make_groq_request_openai",
-        "process_groq_response",
-        "make_groq_request_openai_stream",
-    ],
-    "cloudflare_workers_ai": [
-        "make_cloudflare_workers_ai_request_openai",
-        "process_cloudflare_workers_ai_response",
-        "make_cloudflare_workers_ai_request_openai_stream",
-    ],
-    "morpheus": [
-        "make_morpheus_request_openai",
-        "process_morpheus_response",
-        "make_morpheus_request_openai_stream",
-    ],
-    "onerouter": [
-        "make_onerouter_request_openai",
-        "process_onerouter_response",
-        "make_onerouter_request_openai_stream",
-    ],
-    "simplismart": [
-        "make_simplismart_request_openai",
-        "process_simplismart_response",
-        "make_simplismart_request_openai_stream",
-    ],
-    "sybil": [
-        "make_sybil_request_openai",
-        "process_sybil_response",
-        "make_sybil_request_openai_stream",
-    ],
-    "nosana": [
-        "make_nosana_request_openai",
-        "process_nosana_response",
-        "make_nosana_request_openai_stream",
-    ],
-    "zai": [
-        "make_zai_request_openai",
-        "process_zai_response",
-        "make_zai_request_openai_stream",
-    ],
-    "openai": [
-        "make_openai_request",
-        "process_openai_response",
-        "make_openai_request_stream",
-    ],
-    "anthropic": [
-        "make_anthropic_request",
-        "process_anthropic_response",
-        "make_anthropic_request_stream",
-    ],
-    "deepinfra": [
-        "make_deepinfra_request_openai",
-        "process_deepinfra_response",
-        "make_deepinfra_request_openai_stream",
-    ],
-    "nebius": [
-        "make_nebius_request_openai",
-        "process_nebius_response",
-        "make_nebius_request_openai_stream",
-    ],
-    "canopywave": [
-        "make_canopywave_request_openai",
-        "process_canopywave_response",
-        "make_canopywave_request_openai_stream",
-    ],
-}
-
-# Load all providers and expose functions to global namespace
-_current_globals = globals()
-for provider_name, function_names in PROVIDER_FUNCTIONS.items():
-    provider_module = _safe_import_provider(provider_name, function_names)
-    for func_name in function_names:
-        _current_globals[func_name] = provider_module.get(func_name)
-
-# Provider routing registry - maps provider names (with hyphens) to their functions
-# This eliminates the need for massive if-elif chains (~750 lines reduced to ~50 lines)
-PROVIDER_ROUTING = {
-    "featherless": {
-        "request": make_featherless_request_openai,  # noqa: F821
-        "process": process_featherless_response,  # noqa: F821
-        "stream": make_featherless_request_openai_stream,  # noqa: F821
-    },
-    "fireworks": {
-        "request": make_fireworks_request_openai,  # noqa: F821
-        "process": process_fireworks_response,  # noqa: F821
-        "stream": make_fireworks_request_openai_stream,  # noqa: F821
-    },
-    "together": {
-        "request": make_together_request_openai,  # noqa: F821
-        "process": process_together_response,  # noqa: F821
-        "stream": make_together_request_openai_stream,  # noqa: F821
-    },
-    "huggingface": {
-        "request": make_huggingface_request_openai,  # noqa: F821
-        "process": process_huggingface_response,  # noqa: F821
-        "stream": make_huggingface_request_openai_stream,  # noqa: F821
-    },
-    "aimo": {
-        "request": make_aimo_request_openai,  # noqa: F821
-        "process": process_aimo_response,  # noqa: F821
-        "stream": make_aimo_request_openai_stream,  # noqa: F821
-    },
-    "xai": {
-        "request": make_xai_request_openai,  # noqa: F821
-        "process": process_xai_response,  # noqa: F821
-        "stream": make_xai_request_openai_stream,  # noqa: F821
-    },
-    "cerebras": {
-        "request": make_cerebras_request_openai,  # noqa: F821
-        "process": process_cerebras_response,  # noqa: F821
-        "stream": make_cerebras_request_openai_stream,  # noqa: F821
-    },
-    "chutes": {
-        "request": make_chutes_request_openai,  # noqa: F821
-        "process": process_chutes_response,  # noqa: F821
-        "stream": make_chutes_request_openai_stream,  # noqa: F821
-    },
-    "near": {
-        "request": make_near_request_openai,  # noqa: F821
-        "process": process_near_response,  # noqa: F821
-        "stream": make_near_request_openai_stream,  # noqa: F821
-    },
-    "google-vertex": {
-        "request": make_google_vertex_request_openai,  # noqa: F821
-        "process": process_google_vertex_response,  # noqa: F821
-        "stream": make_google_vertex_request_openai_stream,  # noqa: F821
-    },
-    "vercel-ai-gateway": {
-        "request": make_vercel_ai_gateway_request_openai,  # noqa: F821
-        "process": process_vercel_ai_gateway_response,  # noqa: F821
-        "stream": make_vercel_ai_gateway_request_openai_stream,  # noqa: F821
-    },
-    "helicone": {
-        "request": make_helicone_request_openai,  # noqa: F821
-        "process": process_helicone_response,  # noqa: F821
-        "stream": make_helicone_request_openai_stream,  # noqa: F821
-    },
-    "aihubmix": {
-        "request": make_aihubmix_request_openai,  # noqa: F821
-        "process": process_aihubmix_response,  # noqa: F821
-        "stream": make_aihubmix_request_openai_stream,  # noqa: F821
-    },
-    "anannas": {
-        "request": make_anannas_request_openai,  # noqa: F821
-        "process": process_anannas_response,  # noqa: F821
-        "stream": make_anannas_request_openai_stream,  # noqa: F821
-    },
-    "alpaca-network": {
-        "request": make_alpaca_network_request_openai,  # noqa: F821
-        "process": process_alpaca_network_response,  # noqa: F821
-        "stream": make_alpaca_network_request_openai_stream,  # noqa: F821
-    },
-    "alibaba-cloud": {
-        "request": make_alibaba_cloud_request_openai,  # noqa: F821
-        "process": process_alibaba_cloud_response,  # noqa: F821
-        "stream": make_alibaba_cloud_request_openai_stream,  # noqa: F821
-    },
-    "clarifai": {
-        "request": make_clarifai_request_openai,  # noqa: F821
-        "process": process_clarifai_response,  # noqa: F821
-        "stream": make_clarifai_request_openai_stream,  # noqa: F821
-    },
-    "groq": {
-        "request": make_groq_request_openai,  # noqa: F821
-        "process": process_groq_response,  # noqa: F821
-        "stream": make_groq_request_openai_stream,  # noqa: F821
-    },
-    "cloudflare-workers-ai": {
-        "request": make_cloudflare_workers_ai_request_openai,  # noqa: F821
-        "process": process_cloudflare_workers_ai_response,  # noqa: F821
-        "stream": make_cloudflare_workers_ai_request_openai_stream,  # noqa: F821
-    },
-    "morpheus": {
-        "request": make_morpheus_request_openai,  # noqa: F821
-        "process": process_morpheus_response,  # noqa: F821
-        "stream": make_morpheus_request_openai_stream,  # noqa: F821
-    },
-    "onerouter": {
-        "request": make_onerouter_request_openai,  # noqa: F821
-        "process": process_onerouter_response,  # noqa: F821
-        "stream": make_onerouter_request_openai_stream,  # noqa: F821
-    },
-    "simplismart": {
-        "request": make_simplismart_request_openai,  # noqa: F821
-        "process": process_simplismart_response,  # noqa: F821
-        "stream": make_simplismart_request_openai_stream,  # noqa: F821
-    },
-    "sybil": {
-        "request": make_sybil_request_openai,  # noqa: F821
-        "process": process_sybil_response,  # noqa: F821
-        "stream": make_sybil_request_openai_stream,  # noqa: F821
-    },
-    "nosana": {
-        "request": make_nosana_request_openai,  # noqa: F821
-        "process": process_nosana_response,  # noqa: F821
-        "stream": make_nosana_request_openai_stream,  # noqa: F821
-    },
-    "zai": {
-        "request": make_zai_request_openai,  # noqa: F821
-        "process": process_zai_response,  # noqa: F821
-        "stream": make_zai_request_openai_stream,  # noqa: F821
-    },
-    "openai": {
-        "request": make_openai_request,  # noqa: F821
-        "process": process_openai_response,  # noqa: F821
-        "stream": make_openai_request_stream,  # noqa: F821
-    },
-    "anthropic": {
-        "request": make_anthropic_request,  # noqa: F821
-        "process": process_anthropic_response,  # noqa: F821
-        "stream": make_anthropic_request_stream,  # noqa: F821
-    },
-    "deepinfra": {
-        "request": make_deepinfra_request_openai,  # noqa: F821
-        "process": process_deepinfra_response,  # noqa: F821
-        "stream": make_deepinfra_request_openai_stream,  # noqa: F821
-    },
-    "nebius": {
-        "request": make_nebius_request_openai,  # noqa: F821
-        "process": process_nebius_response,  # noqa: F821
-        "stream": make_nebius_request_openai_stream,  # noqa: F821
-    },
-    "canopywave": {
-        "request": make_canopywave_request_openai,  # noqa: F821
-        "process": process_canopywave_response,  # noqa: F821
-        "stream": make_canopywave_request_openai_stream,  # noqa: F821
-    },
-}
 
 import src.services.rate_limiting as rate_limiting_service
 import src.services.trial_validation as trial_module
@@ -760,12 +409,15 @@ async def _to_thread(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
-async def _ensure_plan_capacity(user_id: int, environment_tag: str) -> dict[str, Any]:
-    """Run a lightweight plan-limit precheck before making upstream calls."""
-    plan_check = await _to_thread(enforce_plan_limits, user_id, 0, environment_tag)
-    if not plan_check.get("allowed", False):
-        raise APIExceptions.plan_limit_exceeded(reason=plan_check.get("reason", "unknown"))
-    return plan_check
+# Post-processing functions extracted to src/handlers/post_processing.py
+# Re-exported here so existing patches at src.routes.chat.* continue to work.
+from src.handlers.post_processing import (  # noqa: F401
+    _ensure_plan_capacity,
+    _handle_credits_and_usage,
+    _handle_credits_and_usage_with_fallback,
+    _process_stream_completion_background,
+    _record_inference_metrics_and_health,
+)
 
 
 def _fallback_get_user(api_key: str):
@@ -786,471 +438,6 @@ def _fallback_get_user(api_key: str):
         )
         return None
     return None
-
-
-async def _handle_credits_and_usage(
-    api_key: str,
-    user: dict,
-    model: str,
-    trial: dict,
-    total_tokens: int,
-    prompt_tokens: int,
-    completion_tokens: int,
-    elapsed_ms: int,
-    is_streaming: bool = False,
-    request_id: str | None = None,
-) -> float:
-    """
-    Centralized credit/trial handling logic.
-
-    This is a thin wrapper around the shared credit_handler module to maintain
-    backward compatibility while ensuring consistent billing across all endpoints.
-
-    Args:
-        is_streaming: Whether this is a streaming request (affects retry behavior)
-        request_id: Optional UUID idempotency key to prevent duplicate deductions
-
-    Returns: cost (float)
-    """
-    from src.services.credit_handler import handle_credits_and_usage
-
-    return await handle_credits_and_usage(
-        api_key=api_key,
-        user=user,
-        model=model,
-        trial=trial,
-        total_tokens=total_tokens,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        elapsed_ms=elapsed_ms,
-        endpoint="/v1/chat/completions",
-        is_streaming=is_streaming,
-        request_id=request_id,
-    )
-
-
-async def _handle_credits_and_usage_with_fallback(
-    api_key: str,
-    user: dict,
-    model: str,
-    trial: dict,
-    total_tokens: int,
-    prompt_tokens: int,
-    completion_tokens: int,
-    elapsed_ms: int,
-    request_id: str | None = None,
-) -> tuple[float, bool]:
-    """
-    Credit handling for streaming background tasks with fallback on failure.
-
-    This wrapper is specifically designed for streaming requests where the response
-    has already been sent to the client. It:
-    1. Attempts credit deduction with full retry logic
-    2. On failure, logs for reconciliation and returns (cost, False)
-    3. Never raises - failures are tracked for manual reconciliation
-
-    Args:
-        request_id: Optional UUID idempotency key to prevent duplicate deductions
-
-    Returns: tuple[float, bool] - (cost, success)
-    """
-    from src.services.credit_handler import handle_credits_and_usage_with_fallback
-
-    return await handle_credits_and_usage_with_fallback(
-        api_key=api_key,
-        user=user,
-        model=model,
-        trial=trial,
-        total_tokens=total_tokens,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        elapsed_ms=elapsed_ms,
-        endpoint="/v1/chat/completions",
-        is_streaming=True,
-        request_id=request_id,
-    )
-
-
-async def _record_inference_metrics_and_health(
-    provider: str,
-    model: str,
-    elapsed_seconds: float,
-    prompt_tokens: int,
-    completion_tokens: int,
-    cost: float,
-    success: bool = True,
-    error_message: str | None = None,
-):
-    """
-    Record Prometheus metrics, Redis metrics, and passive health monitoring.
-
-    This centralizes metrics recording for both streaming and non-streaming requests.
-    """
-    try:
-        # Record Prometheus metrics with trace exemplars for metrics→traces correlation
-        status = "success" if success else "error"
-        exemplar = get_trace_exemplar()
-
-        # Request count
-        model_inference_requests.labels(provider=provider, model=model, status=status).inc(
-            1, exemplar=exemplar
-        )
-
-        # Duration
-        model_inference_duration.labels(provider=provider, model=model).observe(
-            elapsed_seconds, exemplar=exemplar
-        )
-
-        # Token usage
-        if prompt_tokens > 0:
-            tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-                prompt_tokens, exemplar=exemplar
-            )
-
-        if completion_tokens > 0:
-            tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-                completion_tokens, exemplar=exemplar
-            )
-
-        # Credits consumed
-        if cost > 0:
-            credits_used.labels(provider=provider, model=model).inc(cost, exemplar=exemplar)
-
-        # Record Redis metrics (real-time dashboards)
-        redis_metrics = get_redis_metrics()
-        await redis_metrics.record_request(
-            provider=provider,
-            model=model,
-            latency_ms=int(elapsed_seconds * 1000),
-            success=success,
-            cost=cost,
-            tokens_input=prompt_tokens,
-            tokens_output=completion_tokens,
-            error_message=error_message,
-        )
-
-        # Passive health monitoring (background task)
-        response_time_ms = int(elapsed_seconds * 1000)
-        health_status = "success" if success else "error"
-
-        # Create usage dict for health monitoring
-        usage = {
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "total_tokens": prompt_tokens + completion_tokens,
-        }
-
-        # Call passive health monitor in background (non-blocking)
-        # Note: capture_model_health is already async, so we just create a task for it
-        asyncio.create_task(
-            capture_model_health(
-                provider=provider,
-                model=model,
-                response_time_ms=response_time_ms,
-                status=health_status,
-                error_message=error_message,
-                usage=usage,
-            )
-        )
-
-        logger.debug(
-            f"Recorded metrics for {provider}/{model}: "
-            f"duration={elapsed_seconds:.3f}s, "
-            f"tokens={prompt_tokens}+{completion_tokens}, "
-            f"cost=${cost:.4f}, "
-            f"status={status}"
-        )
-
-    except Exception as e:
-        # Never let metrics recording break the main flow
-        logger.warning(f"Failed to record inference metrics: {e}", exc_info=True)
-
-
-async def _process_stream_completion_background(
-    user,
-    api_key,
-    model,
-    trial,
-    environment_tag,
-    session_id,
-    messages,
-    accumulated_content,
-    prompt_tokens,
-    completion_tokens,
-    total_tokens,
-    elapsed,
-    provider,
-    is_anonymous=False,
-    request_id=None,
-    client_ip=None,
-    api_key_id=None,
-):
-    """
-    Background task for post-stream processing (100-200ms faster [DONE] event!)
-
-    This runs asynchronously after the stream completes, allowing the [DONE]
-    event to be sent immediately without waiting for database operations.
-
-    For anonymous users, only metrics recording is performed (no credits, usage tracking, or history).
-    """
-    try:
-        # Add distributed tracing for streaming completion
-        async with AITracer.trace_inference(
-            provider=provider,
-            model=model,
-            request_type=AIRequestType.CHAT_COMPLETION,
-            operation_name=f"stream_completion_{provider}_{model}",
-        ) as trace_ctx:
-            # Calculate cost for tracing
-            cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
-
-            # Set token usage and cost on trace span
-            trace_ctx.set_token_usage(
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                total_tokens=total_tokens,
-            )
-            trace_ctx.set_cost(cost)
-
-            # Set response model (for streaming, use requested model as we don't capture response model)
-            trace_ctx.set_response_model(
-                response_model=model,
-                finish_reason="stop",  # Streaming completed successfully
-            )
-
-            # Set user info if authenticated
-            if not is_anonymous and user:
-                trace_ctx.set_user_info(
-                    user_id=str(user.get("id")),
-                    tier="trial" if trial.get("is_trial") else "paid",
-                )
-
-            # Add streaming-specific event
-            trace_ctx.add_event(
-                "stream_completed",
-                {
-                    "content_length": len(accumulated_content),
-                    "elapsed_seconds": elapsed,
-                },
-            )
-
-            # Skip user-specific operations for anonymous requests
-            if is_anonymous:
-                logger.info("Skipping user-specific post-processing for anonymous request")
-
-                # Record anonymous usage for rate limiting (IMPORTANT: prevents abuse)
-                if client_ip:
-                    try:
-                        await _to_thread(record_anonymous_request, client_ip, model)
-                    except Exception as e:
-                        logger.warning(f"Failed to record anonymous request: {e}")
-
-                # Record Prometheus metrics and passive health monitoring (allowed for anonymous)
-                cost = await calculate_cost_async(model, prompt_tokens, completion_tokens)
-                await _record_inference_metrics_and_health(
-                    provider=provider,
-                    model=model,
-                    elapsed_seconds=elapsed,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    cost=cost,
-                    success=True,
-                    error_message=None,
-                )
-                # Capture health metrics (passive monitoring)
-                try:
-                    await capture_model_health(
-                        provider=provider,
-                        model=model,
-                        response_time_ms=elapsed * 1000,
-                        status="success",
-                        usage={
-                            "prompt_tokens": prompt_tokens,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                        },
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to capture health metric: {e}")
-                return
-
-            # Handle credits and usage (centralized helper with fallback for streaming)
-            # Use the fallback handler which:
-            # 1. Has built-in retry logic with exponential backoff
-            # 2. Logs failures for reconciliation instead of crashing
-            # 3. Records metrics for monitoring credit deduction reliability
-            cost, credit_deduction_success = await _handle_credits_and_usage_with_fallback(
-                api_key=api_key,
-                user=user,
-                model=model,
-                trial=trial,
-                total_tokens=total_tokens,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                elapsed_ms=int(elapsed * 1000),
-                request_id=request_id,
-            )
-
-            if not credit_deduction_success:
-                logger.warning(
-                    f"Credit deduction failed for streaming request. "
-                    f"User: {user.get('id')}, Model: {model}, Cost: ${cost:.6f}. "
-                    f"Logged for reconciliation."
-                )
-                # NOTE: Credit deduction failed, so no credits were taken.
-                # No refund needed here - the reconciliation log handles this case.
-
-            # Increment API key usage counter
-            await _to_thread(increment_api_key_usage, api_key)
-
-            # Record Prometheus metrics and passive health monitoring
-            await _record_inference_metrics_and_health(
-                provider=provider,
-                model=model,
-                elapsed_seconds=elapsed,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cost=cost,
-                success=True,
-                error_message=None,
-            )
-
-            # Log activity
-            try:
-                provider_name = get_provider_from_model(model)
-                speed = total_tokens / elapsed if elapsed > 0 else 0
-                await _to_thread(
-                    log_activity,
-                    user_id=user["id"],
-                    model=model,
-                    provider=provider_name,
-                    tokens=total_tokens,
-                    cost=cost,
-                    speed=speed,
-                    finish_reason="stop",
-                    app="API",
-                    metadata={
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "endpoint": "/v1/chat/completions",
-                        "stream": True,
-                        "session_id": session_id,
-                        "gateway": provider,
-                    },
-                )
-            except Exception as e:
-                logger.error(
-                    f"Failed to log activity for user {user['id']}, model {model}: {e}",
-                    exc_info=True,
-                )
-
-            # Save chat history
-            # Validate session_id before attempting to save
-            if session_id:
-                if session_id < -2147483648 or session_id > 2147483647:
-                    logger.warning(
-                        "Invalid session_id %s in streaming response: out of PostgreSQL integer range. Skipping history save.",
-                        sanitize_for_logging(str(session_id)),
-                    )
-                    session_id = None
-
-            if session_id:
-                try:
-                    session = await _to_thread(get_chat_session, session_id, user["id"])
-                    if session:
-                        last_user = None
-                        for m in reversed(messages):
-                            if m.get("role") == "user":
-                                last_user = m
-                                break
-                        if last_user:
-                            user_content = last_user.get("content", "")
-                            if isinstance(user_content, list):
-                                text_parts = []
-                                for item in user_content:
-                                    if isinstance(item, dict) and item.get("type") == "text":
-                                        text_parts.append(item.get("text", ""))
-                                user_content = (
-                                    " ".join(text_parts) if text_parts else "[multimodal content]"
-                                )
-
-                            await _to_thread(
-                                save_chat_message,
-                                session_id,
-                                "user",
-                                user_content,
-                                model,
-                                0,
-                                user["id"],
-                            )
-
-                        if accumulated_content:
-                            await _to_thread(
-                                save_chat_message,
-                                session_id,
-                                "assistant",
-                                accumulated_content,
-                                model,
-                                total_tokens,
-                                user["id"],
-                            )
-                except Exception as e:
-                    logger.error(
-                        f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
-                        exc_info=True,
-                    )
-
-            # Capture health metrics (passive monitoring)
-            try:
-                await capture_model_health(
-                    provider=provider,
-                    model=model,
-                    response_time_ms=elapsed * 1000,
-                    status="success",
-                    usage={
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                    },
-                )
-            except Exception as e:
-                logger.debug(f"Failed to capture health metric: {e}")
-
-            # Save chat completion request metadata to database with cost tracking
-            if request_id:
-                try:
-                    # Calculate cost breakdown for analytics
-                    from src.services.pricing import get_model_pricing
-
-                    pricing_info = get_model_pricing(model)
-                    input_cost = prompt_tokens * pricing_info.get("prompt", 0)
-                    output_cost = completion_tokens * pricing_info.get("completion", 0)
-                    total_cost = input_cost + output_cost
-
-                    await _to_thread(
-                        save_chat_completion_request_with_cost,
-                        request_id=request_id,
-                        model_name=model,
-                        input_tokens=prompt_tokens,
-                        output_tokens=completion_tokens,
-                        processing_time_ms=int(elapsed * 1000),
-                        cost_usd=total_cost,
-                        input_cost_usd=input_cost,
-                        output_cost_usd=output_cost,
-                        pricing_source="calculated",
-                        status="completed",
-                        error_message=None,
-                        user_id=user["id"] if user else None,
-                        provider_name=provider,
-                        model_id=None,
-                        api_key_id=api_key_id,
-                        is_anonymous=is_anonymous,
-                    )
-                except Exception as e:
-                    logger.debug(f"Failed to save chat completion request: {e}")
-
-    except Exception as e:
-        logger.error(f"Background stream processing error: {e}", exc_info=True)
 
 
 async def stream_generator(
@@ -1982,8 +1169,22 @@ async def chat_completions(
                 )
 
         # Credit check (only for authenticated non-trial users)
-        if not is_anonymous and not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
-            raise APIExceptions.payment_required(credits=user.get("credits", 0.0))
+        # Uses cost-based pre-check instead of simple balance > 0
+        if not is_anonymous and not trial.get("is_trial", False):
+            from src.services.billing.credit_precheck import estimate_and_check_credits
+
+            _user_credits = user.get("credits", 0.0)
+            if _user_credits <= 0:
+                raise APIExceptions.payment_required(credits=_user_credits)
+            _msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+            _precheck = estimate_and_check_credits(
+                model_id=req.model,
+                messages=_msgs,
+                user_credits=_user_credits,
+                max_tokens=getattr(req, "max_tokens", None),
+            )
+            if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
+                raise APIExceptions.payment_required(credits=_user_credits)
 
         # Pricing pre-check: block high-value models without pricing BEFORE
         # hitting any upstream provider. get_model_pricing_async() raises ValueError
@@ -3419,104 +2620,25 @@ async def chat_completions(
                 logger.debug(f"Failed to attach code routing metadata: {e}")
 
         # === 7) Log to Braintrust ===
-        try:
-            logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
-                f"available={check_braintrust_available()}, span_type={type(span).__name__}"
-            )
-            # Safely convert messages to dicts, filtering out None values and sanitizing content
-            messages_for_log = []
-            for m in req.messages:
-                if m is None:
-                    continue
-                msg_dict = m.model_dump() if hasattr(m, "model_dump") else m
-                if msg_dict is None:
-                    continue
-                # Sanitize content to avoid NoneType subscript errors in Braintrust SDK
-                if isinstance(msg_dict, dict) and "content" in msg_dict:
-                    content = msg_dict.get("content")
-                    if content is None:
-                        msg_dict["content"] = ""
-                    elif isinstance(content, list):
-                        # Filter out None items and sanitize nested dicts in content list
-                        sanitized_content = []
-                        for item in content:
-                            if item is None:
-                                continue
-                            if isinstance(item, dict):
-                                # Deep sanitize dict items (e.g., {"type": "text", "text": None})
-                                sanitized_item = {}
-                                for k, v in item.items():
-                                    if v is None:
-                                        sanitized_item[k] = "" if k in ("text", "content") else v
-                                    else:
-                                        sanitized_item[k] = v
-                                sanitized_content.append(sanitized_item)
-                            else:
-                                sanitized_content.append(item)
-                        msg_dict["content"] = sanitized_content
-                messages_for_log.append(msg_dict)
-            # Safely extract output content for Braintrust logging
-            bt_choices = processed.get("choices") or []
-            bt_first_choice = bt_choices[0] if bt_choices else None
-            bt_message = (
-                bt_first_choice.get("message") if isinstance(bt_first_choice, dict) else None
-            )
-            bt_content = bt_message.get("content") if isinstance(bt_message, dict) else None
-            # Handle case where content is None, a string, or a list (multimodal)
-            if bt_content is None:
-                bt_output = ""
-            elif isinstance(bt_content, str):
-                bt_output = bt_content
-            elif isinstance(bt_content, list):
-                # Extract text from multimodal content, filtering empty strings
-                texts = []
-                for item in bt_content:
-                    if item is None:
-                        continue
-                    if isinstance(item, dict):
-                        text = item.get("text")
-                        if text is not None:
-                            texts.append(str(text))
-                    else:
-                        texts.append(str(item))
-                bt_output = " ".join(t for t in texts if t)
-            else:
-                bt_output = str(bt_content)
-            # Safely get user_id and environment for anonymous users (user=None)
-            bt_user_id = user["id"] if user else "anonymous"
-            bt_environment = user.get("environment_tag", "live") if user else "live"
-            bt_is_trial = trial.get("is_trial", False) if trial else False
-            logger.info(
-                f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}"
-            )
-            span.log(
-                input=messages_for_log,
-                output=bt_output,
-                metrics={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "latency_ms": int(elapsed * 1000),
-                    "cost_usd": cost if not bt_is_trial else 0.0,
-                },
-                metadata={
-                    "model": model,
-                    "provider": provider,
-                    "user_id": bt_user_id,
-                    "session_id": session_id,
-                    "is_trial": bt_is_trial,
-                    "environment": bt_environment,
-                },
-            )
-            span.end()
-            # Flush to ensure data is sent to Braintrust
-            braintrust_flush()
-            logger.info(
-                f"[Braintrust] Successfully logged and flushed span for request_id={request_id}"
-            )
-        except Exception as e:
-            logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
+        await log_to_braintrust(
+            span=span,
+            messages=req.messages,
+            processed_response=processed,
+            model=model,
+            provider=provider,
+            user=user,
+            trial=trial,
+            session_id=session_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            elapsed=elapsed,
+            cost=cost,
+            request_id=request_id,
+            endpoint=None,
+            check_braintrust_available=check_braintrust_available,
+            braintrust_flush=braintrust_flush,
+        )
 
         # Capture health metrics (passive monitoring) - run as background task
         background_tasks.add_task(
@@ -3577,37 +2699,21 @@ async def chat_completions(
 
     except HTTPException as http_exc:
         # Save failed request for HTTPException errors (rate limits, auth errors, etc.)
-        if request_id:
-            try:
-                # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if "start" in dir() else 0
-
-                # Save failed request to database with cost tracking (costs are 0 for failed requests)
-                await _to_thread(
-                    save_chat_completion_request_with_cost,
-                    request_id=request_id,
-                    model_name=(
-                        model
-                        if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
-                    ),
-                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
-                    output_tokens=0,  # No output on error
-                    processing_time_ms=int(error_elapsed * 1000),
-                    cost_usd=0.0,
-                    input_cost_usd=0.0,
-                    output_cost_usd=0.0,
-                    pricing_source="error",
-                    status="failed",
-                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user["id"] if user and "user" in dir() else None,
-                    provider_name=provider if "provider" in dir() else None,
-                    model_id=None,
-                    api_key_id=api_key_id if "api_key_id" in dir() else None,
-                    is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
-                )
-            except Exception as save_err:
-                logger.debug(f"Failed to save failed request metadata: {save_err}")
+        await save_failed_request(
+            _to_thread=_to_thread,
+            save_chat_completion_request_with_cost=save_chat_completion_request_with_cost,
+            request_id=request_id,
+            model=model if "model" in dir() else None,
+            original_model=original_model if "original_model" in dir() else None,
+            prompt_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
+            start_time=start if "start" in dir() else 0,
+            error=http_exc,
+            error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+            user=user if "user" in dir() else None,
+            provider=provider if "provider" in dir() else None,
+            api_key_id=api_key_id if "api_key_id" in dir() else None,
+            is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
+        )
         raise
     except Exception as e:
         logger.exception(
@@ -3616,37 +2722,21 @@ async def chat_completions(
         )
 
         # Save failed request for unexpected errors
-        if request_id:
-            try:
-                # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if "start" in dir() else 0
-
-                # Save failed request to database with cost tracking (costs are 0 for failed requests)
-                await _to_thread(
-                    save_chat_completion_request_with_cost,
-                    request_id=request_id,
-                    model_name=(
-                        model
-                        if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
-                    ),
-                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
-                    output_tokens=0,  # No output on error
-                    processing_time_ms=int(error_elapsed * 1000),
-                    cost_usd=0.0,
-                    input_cost_usd=0.0,
-                    output_cost_usd=0.0,
-                    pricing_source="error",
-                    status="failed",
-                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user["id"] if user and "user" in dir() else None,
-                    provider_name=provider if "provider" in dir() else None,
-                    model_id=None,
-                    api_key_id=api_key_id if "api_key_id" in dir() else None,
-                    is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
-                )
-            except Exception as save_err:
-                logger.debug(f"Failed to save failed request metadata: {save_err}")
+        await save_failed_request(
+            _to_thread=_to_thread,
+            save_chat_completion_request_with_cost=save_chat_completion_request_with_cost,
+            request_id=request_id,
+            model=model if "model" in dir() else None,
+            original_model=original_model if "original_model" in dir() else None,
+            prompt_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
+            start_time=start if "start" in dir() else 0,
+            error=e,
+            error_message=f"{type(e).__name__}: {str(e)[:500]}",
+            user=user if "user" in dir() else None,
+            provider=provider if "provider" in dir() else None,
+            api_key_id=api_key_id if "api_key_id" in dir() else None,
+            is_anonymous=is_anonymous if "is_anonymous" in dir() else False,
+        )
 
         # Don't leak internal details, but include request ID for support
         raise HTTPException(
@@ -3774,8 +2864,22 @@ async def unified_responses(
                     rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
 
-        if not trial.get("is_trial", False) and user.get("credits", 0.0) <= 0:
-            raise APIExceptions.payment_required(credits=user.get("credits", 0.0))
+        # Credit check — cost-based pre-check (not just balance > 0)
+        if not trial.get("is_trial", False):
+            from src.services.billing.credit_precheck import estimate_and_check_credits
+
+            _user_credits = user.get("credits", 0.0)
+            if _user_credits <= 0:
+                raise APIExceptions.payment_required(credits=_user_credits)
+            _msgs = [{"role": m.role, "content": m.content} for m in req.messages]
+            _precheck = estimate_and_check_credits(
+                model_id=req.model,
+                messages=_msgs,
+                user_credits=_user_credits,
+                max_tokens=getattr(req, "max_tokens", None),
+            )
+            if not _precheck["allowed"] and _precheck.get("capped_max_tokens") is None:
+                raise APIExceptions.payment_required(credits=_user_credits)
 
         # === 2) Transform 'input' to 'messages' format for upstream ===
         messages = []
@@ -4638,100 +3742,25 @@ async def unified_responses(
             response["gateway_usage"]["cost_usd"] = round(cost, 6)
 
         # === 7) Log to Braintrust ===
-        try:
-            logger.info(
-                f"[Braintrust] Starting log for request_id={request_id}, model={model}, "
-                f"endpoint=/v1/responses, available={check_braintrust_available()}, span_type={type(span).__name__}"
-            )
-            # Convert input messages to loggable format, safely handling None values
-            input_messages = []
-            for inp_msg in req.input:
-                if inp_msg is None:
-                    continue
-                content = inp_msg.content
-                if content is None:
-                    content = ""
-                elif isinstance(content, list):
-                    # Safely extract text from multimodal content, filtering None items
-                    text_parts = []
-                    for item in content:
-                        if item is None:
-                            continue
-                        if isinstance(item, dict):
-                            # Extract text field if present
-                            text = item.get("text")
-                            if text is not None:
-                                text_parts.append(str(text))
-                        elif isinstance(item, str):
-                            text_parts.append(item)
-                    content = " ".join(text_parts) if text_parts else ""
-                elif not isinstance(content, str):
-                    content = str(content)
-                input_messages.append({"role": inp_msg.role, "content": content})
-
-            # Safely extract output content for Braintrust logging
-            bt_output = ""
-            output_list = response.get("output")
-            if isinstance(output_list, list) and len(output_list) > 0:
-                first_output = output_list[0]
-                if isinstance(first_output, dict):
-                    bt_content = first_output.get("content")
-                    # Handle case where content is None, a string, or a list (multimodal)
-                    if bt_content is None:
-                        bt_output = ""
-                    elif isinstance(bt_content, str):
-                        bt_output = bt_content
-                    elif isinstance(bt_content, list):
-                        # Extract text from multimodal content, filtering empty strings
-                        texts = []
-                        for item in bt_content:
-                            if item is None:
-                                continue
-                            if isinstance(item, dict):
-                                text = item.get("text")
-                                if text is not None:
-                                    texts.append(str(text))
-                            else:
-                                texts.append(str(item))
-                        bt_output = " ".join(t for t in texts if t)
-                    else:
-                        bt_output = str(bt_content)
-
-            # Safely get user_id and environment for anonymous users (user=None)
-            bt_user_id = user["id"] if user else "anonymous"
-            bt_environment = user.get("environment_tag", "live") if user else "live"
-            bt_is_trial = trial.get("is_trial", False) if trial else False
-            logger.info(
-                f"[Braintrust] Logging span: user_id={bt_user_id}, model={model}, tokens={total_tokens}"
-            )
-            span.log(
-                input=input_messages,
-                output=bt_output,
-                metrics={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": total_tokens,
-                    "latency_ms": int(elapsed * 1000),
-                    "cost_usd": cost if not bt_is_trial else 0.0,
-                },
-                metadata={
-                    "model": model,
-                    "provider": provider,
-                    "user_id": bt_user_id,
-                    "session_id": session_id,
-                    "is_trial": bt_is_trial,
-                    "environment": bt_environment,
-                    "endpoint": "/v1/responses",
-                },
-            )
-            span.end()
-            # Flush to ensure data is sent to Braintrust
-            braintrust_flush()
-            logger.info(
-                f"[Braintrust] Successfully logged and flushed span for request_id={request_id}"
-            )
-        except Exception as e:
-            logger.warning(f"[Braintrust] Failed to log to Braintrust: {e}", exc_info=True)
+        await log_to_braintrust(
+            span=span,
+            messages=req.input,
+            processed_response=response,
+            model=model,
+            provider=provider,
+            user=user,
+            trial=trial,
+            session_id=session_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            elapsed=elapsed,
+            cost=cost,
+            request_id=request_id,
+            endpoint="/v1/responses",
+            check_braintrust_available=check_braintrust_available,
+            braintrust_flush=braintrust_flush,
+        )
 
         # Save chat completion request metadata to database with cost tracking - run as background task
         # Calculate cost breakdown for analytics
@@ -4773,73 +3802,41 @@ async def unified_responses(
 
     except HTTPException as http_exc:
         # Save failed request for HTTPException errors
-        if request_id:
-            try:
-                # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if "start" in dir() else 0
-
-                # Save failed request to database with cost tracking (costs are 0 for failed requests)
-                await _to_thread(
-                    save_chat_completion_request_with_cost,
-                    request_id=request_id,
-                    model_name=(
-                        model
-                        if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
-                    ),
-                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
-                    output_tokens=0,  # No output on error
-                    processing_time_ms=int(error_elapsed * 1000),
-                    cost_usd=0.0,
-                    input_cost_usd=0.0,
-                    output_cost_usd=0.0,
-                    pricing_source="error",
-                    status="failed",
-                    error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
-                    user_id=user["id"] if user and "user" in dir() else None,
-                    provider_name=provider if "provider" in dir() else None,
-                    model_id=None,
-                    api_key_id=api_key_id if "api_key_id" in dir() else None,
-                    is_anonymous=False,  # /v1/responses requires authentication
-                )
-            except Exception as save_err:
-                logger.debug(f"Failed to save failed request metadata: {save_err}")
+        await save_failed_request(
+            _to_thread=_to_thread,
+            save_chat_completion_request_with_cost=save_chat_completion_request_with_cost,
+            request_id=request_id,
+            model=model if "model" in dir() else None,
+            original_model=original_model if "original_model" in dir() else None,
+            prompt_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
+            start_time=start if "start" in dir() else 0,
+            error=http_exc,
+            error_message=f"HTTP {http_exc.status_code}: {http_exc.detail}",
+            user=user if "user" in dir() else None,
+            provider=provider if "provider" in dir() else None,
+            api_key_id=api_key_id if "api_key_id" in dir() else None,
+            is_anonymous=False,  # /v1/responses requires authentication
+        )
         raise
     except Exception as e:
         logger.exception("Unhandled server error in unified_responses")
 
         # Save failed request for unexpected errors
-        if request_id:
-            try:
-                # Calculate elapsed time
-                error_elapsed = time.monotonic() - start if "start" in dir() else 0
-
-                # Save failed request to database with cost tracking (costs are 0 for failed requests)
-                await _to_thread(
-                    save_chat_completion_request_with_cost,
-                    request_id=request_id,
-                    model_name=(
-                        model
-                        if "model" in dir()
-                        else original_model if "original_model" in dir() else "unknown"
-                    ),
-                    input_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
-                    output_tokens=0,  # No output on error
-                    processing_time_ms=int(error_elapsed * 1000),
-                    cost_usd=0.0,
-                    input_cost_usd=0.0,
-                    output_cost_usd=0.0,
-                    pricing_source="error",
-                    status="failed",
-                    error_message=f"{type(e).__name__}: {str(e)[:500]}",
-                    user_id=user["id"] if user and "user" in dir() else None,
-                    provider_name=provider if "provider" in dir() else None,
-                    model_id=None,
-                    api_key_id=api_key_id if "api_key_id" in dir() else None,
-                    is_anonymous=False,  # /v1/responses requires authentication
-                )
-            except Exception as save_err:
-                logger.debug(f"Failed to save failed request metadata: {save_err}")
+        await save_failed_request(
+            _to_thread=_to_thread,
+            save_chat_completion_request_with_cost=save_chat_completion_request_with_cost,
+            request_id=request_id,
+            model=model if "model" in dir() else None,
+            original_model=original_model if "original_model" in dir() else None,
+            prompt_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
+            start_time=start if "start" in dir() else 0,
+            error=e,
+            error_message=f"{type(e).__name__}: {str(e)[:500]}",
+            user=user if "user" in dir() else None,
+            provider=provider if "provider" in dir() else None,
+            api_key_id=api_key_id if "api_key_id" in dir() else None,
+            is_anonymous=False,  # /v1/responses requires authentication
+        )
 
         raise APIExceptions.internal_error(operation="unified_responses")
     finally:

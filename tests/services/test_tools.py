@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.services.chatterbox_tts_client import (
+from src.services.providers.chatterbox_tts_client import (
     CHATTERBOX_MODELS,
     LANGUAGE_NAMES,
     _is_safe_url,
@@ -440,7 +440,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_empty_text_raises_error(self):
         """Test that empty text raises ValueError."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Text cannot be empty"):
             await generate_speech("")
@@ -448,7 +448,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_whitespace_text_raises_error(self):
         """Test that whitespace-only text raises ValueError."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Text cannot be empty"):
             await generate_speech("   ")
@@ -456,7 +456,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_text_too_long_raises_error(self):
         """Test that text over 5000 chars raises ValueError."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         long_text = "a" * 5001
         with pytest.raises(ValueError, match="Text too long"):
@@ -465,7 +465,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_invalid_model_raises_error(self):
         """Test that invalid model raises ValueError."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Invalid model"):
             await generate_speech("Hello", model="invalid-model")
@@ -473,7 +473,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_invalid_language_for_model_raises_error(self):
         """Test that invalid language for model raises ValueError."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Language.*not supported"):
             await generate_speech("Hello", model="chatterbox-multilingual", language="invalid_lang")
@@ -481,7 +481,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_ssrf_url_raises_error(self):
         """Test that SSRF URLs are rejected."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Invalid voice reference URL"):
             await generate_speech(
@@ -491,7 +491,7 @@ class TestGenerateSpeech:
     @pytest.mark.asyncio
     async def test_localhost_url_raises_error(self):
         """Test that localhost URLs are rejected."""
-        from src.services.chatterbox_tts_client import generate_speech
+        from src.services.providers.chatterbox_tts_client import generate_speech
 
         with pytest.raises(ValueError, match="Invalid voice reference URL"):
             await generate_speech("Hello", voice_reference_url="http://localhost:8080/audio.wav")

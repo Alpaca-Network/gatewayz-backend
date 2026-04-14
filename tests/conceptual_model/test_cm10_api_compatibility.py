@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.services.anthropic_transformer import (
+from src.services.providers.anthropic_transformer import (
     extract_message_with_tools,
     transform_openai_to_anthropic,
 )
@@ -110,7 +110,7 @@ class TestOpenAIResponseFormatHasChoices:
     """CM-10.1.1: OpenAI response has `choices` array."""
 
     def test_openai_response_format_has_choices(self):
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         mock_resp = _make_mock_openrouter_response()
         result = process_openrouter_response(mock_resp)
@@ -129,7 +129,7 @@ class TestOpenAIResponseFormatHasUsage:
     """CM-10.1.2: OpenAI response has `usage` with prompt_tokens, completion_tokens, total_tokens."""
 
     def test_openai_response_format_has_usage(self):
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         mock_resp = _make_mock_openrouter_response(prompt_tokens=12, completion_tokens=8)
         result = process_openrouter_response(mock_resp)
@@ -147,7 +147,7 @@ class TestOpenAIResponseFormatHasId:
     """CM-10.1.3: OpenAI response has `id` field."""
 
     def test_openai_response_format_has_id(self):
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         mock_resp = _make_mock_openrouter_response()
         result = process_openrouter_response(mock_resp)
@@ -162,7 +162,7 @@ class TestOpenAIResponseFormatHasModel:
     """CM-10.1.4: OpenAI response has `model` field."""
 
     def test_openai_response_format_has_model(self):
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         mock_resp = _make_mock_openrouter_response(model="meta-llama/Llama-3.3-70B-Instruct")
         result = process_openrouter_response(mock_resp)
@@ -221,7 +221,7 @@ class TestOpenAIJsonModeReturnsValidJson:
     def test_openai_json_mode_returns_valid_json(self):
         """When a provider returns JSON content, process_openrouter_response
         preserves the content string, which must be parseable JSON."""
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         json_content = '{"name": "Alice", "age": 30}'
         mock_resp = _make_mock_openrouter_response(content=json_content)
@@ -273,7 +273,7 @@ class TestOpenAILogprobsIncludedWhenRequested:
     def test_openai_logprobs_included_when_requested(self):
         """process_openrouter_response preserves logprobs when present in provider response.
         Note: logprobs is a per-choice field, handled at the choice level."""
-        from src.services.openrouter_client import process_openrouter_response
+        from src.services.providers.openrouter_client import process_openrouter_response
 
         logprobs_data = {
             "content": [

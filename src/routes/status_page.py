@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.config.supabase_config import supabase
+from src.db.client import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/status", tags=["status-page"])
@@ -27,7 +27,7 @@ async def get_overall_status():
     """
     try:
         # Get overall system health from view
-        response = supabase.table("provider_health_current").select("*").execute()
+        response = get_db().table("provider_health_current").select("*").execute()
 
         providers = response.data or []
 
@@ -70,7 +70,7 @@ async def get_overall_status():
 
         # Get active incidents count
         incidents_response = (
-            supabase.table("model_health_incidents")
+            get_db().table("model_health_incidents")
             .select("id", count="exact")
             .eq("status", "active")
             .execute()
@@ -131,7 +131,7 @@ async def get_providers_status():
     Returns health status for each provider/gateway combination.
     """
     try:
-        response = supabase.table("provider_health_current").select("*").order("provider").execute()
+        response = get_db().table("provider_health_current").select("*").order("provider").execute()
 
         providers = response.data or []
 
@@ -187,7 +187,7 @@ async def get_models_status(
     Supports filtering and pagination.
     """
     try:
-        query = supabase.table("model_status_current").select("*")
+        query = get_db().table("model_status_current").select("*")
 
         # Apply filters
         if provider:
@@ -245,7 +245,7 @@ async def get_model_status(provider: str, model_id: str, gateway: str | None = Q
     """
     try:
         query = (
-            supabase.table("model_status_current")
+            get_db().table("model_status_current")
             .select("*")
             .eq("provider", provider)
             .eq("model", model_id)
@@ -303,7 +303,7 @@ async def get_incidents(
     Returns recent incidents with filtering.
     """
     try:
-        query = supabase.table("model_health_incidents").select("*")
+        query = get_db().table("model_health_incidents").select("*")
 
         # Apply filters
         if status:
@@ -387,7 +387,7 @@ async def get_model_uptime_history(
 
         # Query aggregated data
         query = (
-            supabase.table("model_health_aggregates")
+            get_db().table("model_health_aggregates")
             .select("*")
             .eq("provider", provider)
             .eq("model", model_id)
@@ -445,7 +445,7 @@ async def search_models(
         sanitized_q = q.replace(",", "").replace("(", "").replace(")", "").replace(".", "")
 
         query = (
-            supabase.table("model_status_current")
+            get_db().table("model_status_current")
             .select("*")
             .or_(f"model.ilike.%{sanitized_q}%,provider.ilike.%{sanitized_q}%")
             .limit(limit)
@@ -485,7 +485,7 @@ async def get_stats():
     try:
         # Get model counts by tier
         tier_counts_response = (
-            supabase.table("model_health_tracking")
+            get_db().table("model_health_tracking")
             .select("monitoring_tier", count="exact")
             .eq("is_enabled", True)
             .execute()
@@ -499,7 +499,7 @@ async def get_stats():
 
         # Get incident statistics
         incidents_response = (
-            supabase.table("model_health_incidents")
+            get_db().table("model_health_incidents")
             .select("severity,status", count="exact")
             .execute()
         )
@@ -510,7 +510,7 @@ async def get_stats():
         # Get check statistics from last 24h
         yesterday = datetime.now(UTC) - timedelta(hours=24)
         checks_response = (
-            supabase.table("model_health_history")
+            get_db().table("model_health_history")
             .select("status", count="exact")
             .gte("checked_at", yesterday.isoformat())
             .execute()

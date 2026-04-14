@@ -978,8 +978,8 @@ async def privy_auth(
                     email=user_email,
                     auth_method=auth_method_str,
                     privy_user_id=request.user.id,
-                    credits=5,  # Users start with $5 trial credits for 3 days
-                    subscription_status=subscription_status,
+                    credits=0,  # No free credits — paid only
+                    subscription_status="inactive",
                 )
             except Exception as creation_error:
                 logger.warning(
@@ -1300,18 +1300,17 @@ async def privy_auth(
                 logger.error(
                     f"Failed to convert new user credits (value: {user_data['credits']}, "
                     f"type: {type(user_data['credits']).__name__}): {credits_error}, "
-                    "defaulting to 5.0"
+                    "defaulting to 0.0"
                 )
-                new_user_credits = 5.0
+                new_user_credits = 0.0
             logger.info(f"Returning registration response with credits: {new_user_credits}")
 
             tier_value = user_data.get("tier")
 
             # Calculate tiered credit fields for new users
-            # New users start with trial credits, which go to purchased_credits (not subscription)
             new_user_credits_cents = int(new_user_credits * 100)
             new_subscription_allowance = 0  # No subscription yet
-            new_purchased_credits = new_user_credits_cents  # Trial credits are purchased credits
+            new_purchased_credits = new_user_credits_cents
             new_total_credits = new_user_credits_cents
 
             # CRITICAL: Verify API key exists before returning success
@@ -1468,8 +1467,8 @@ async def register_user(
                 email=request.email,
                 auth_method=auth_method_str,
                 privy_user_id=None,  # No Privy for direct registration
-                credits=5,
-                subscription_status=subscription_status,
+                credits=0,  # No free credits — paid only
+                subscription_status="inactive",
             )
         except Exception as creation_error:
             logger.warning(
@@ -1478,23 +1477,19 @@ async def register_user(
                 str(creation_error),
             )
 
-            trial_start = datetime.now(UTC)
-            trial_end = trial_start + timedelta(days=3)
-
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
-                "credits": 5,
+                "credits": 0,
                 "privy_user_id": None,
                 "auth_method": (
                     request.auth_method.value
                     if hasattr(request.auth_method, "value")
                     else str(request.auth_method)
                 ),
-                "created_at": trial_start.isoformat(),
+                "created_at": datetime.now(UTC).isoformat(),
                 "welcome_email_sent": False,
-                "subscription_status": "bot" if is_temp_email else "trial",
-                "trial_expires_at": trial_end.isoformat(),
+                "subscription_status": "inactive",
                 "tier": "basic",
             }
 

@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from src.config.config import Config
-from src.config.supabase_config import get_supabase_client
+from src.db.client import get_db
 from src.db.credit_transactions import (
     TransactionType,
     get_admin_daily_grant_total,
@@ -211,7 +211,7 @@ async def add_credits_endpoint(
         # Enforce admin credit grant safety controls
         await _validate_admin_credit_grant(request.amount, admin_user)
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Get user
         user_result = (
@@ -304,7 +304,7 @@ async def adjust_credits_endpoint(
         if request.amount > 0:
             await _validate_admin_credit_grant(request.amount, admin_user)
 
-        client = get_supabase_client()
+        client = get_db()
 
         # Get user
         user_result = (
@@ -416,7 +416,7 @@ async def bulk_add_credits_endpoint(
             bulk_user_count=len(unique_user_ids),
         )
 
-        client = get_supabase_client()
+        client = get_db()
         results = []
         successful = 0
         failed = 0
@@ -557,7 +557,7 @@ async def refund_credits_endpoint(
     - Transaction details
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         # Get user
         user_result = (
@@ -647,7 +647,7 @@ async def get_credits_summary_endpoint(
     - System-wide statistics (if no user_id specified)
     """
     try:
-        client = get_supabase_client()
+        client = get_db()
 
         if user_id:
             # Get summary for specific user

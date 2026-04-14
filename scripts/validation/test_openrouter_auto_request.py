@@ -29,7 +29,7 @@ def test_openrouter_auto_request():
 
     # Import the OpenRouter client
     try:
-        from src.services.openrouter_client import make_openrouter_request_openai
+        from src.services.providers.openrouter_client import make_openrouter_request_openai
         print("✅ Successfully imported OpenRouter client")
     except Exception as e:
         print(f"❌ Failed to import OpenRouter client: {e}")
