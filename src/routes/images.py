@@ -293,7 +293,10 @@ async def generate_images(
             # For concurrent request safety, we add a small buffer (10%) to account for
             # potential race conditions where balance could change between check and deduction.
             required_credits = estimated_cost * 1.1  # 10% buffer for safety
-            if user["credits"] < required_credits:
+            _user_balance = float(user.get("subscription_allowance") or 0) + float(
+                user.get("purchased_credits") or 0
+            )
+            if _user_balance < required_credits:
                 logger.warning(
                     "Insufficient credits for image generation (user %s): "
                     "estimated_cost=%.4f, required_with_buffer=%.4f, available=%.4f, "
@@ -301,7 +304,7 @@ async def generate_images(
                     user.get("id"),
                     estimated_cost,
                     required_credits,
-                    user["credits"],
+                    _user_balance,
                     cost_per_image,
                     req.n,
                 )
@@ -439,7 +442,7 @@ async def generate_images(
                 # This avoids stale data from the pre-request user lookup
                 updated_user = await loop.run_in_executor(executor, get_user, api_key)
                 if updated_user:
-                    actual_balance_after = updated_user.get("credits")
+                    actual_balance_after = float(updated_user.get("subscription_allowance", 0) or 0) + float(updated_user.get("purchased_credits", 0) or 0)
 
                 await loop.run_in_executor(
                     executor,
@@ -479,7 +482,7 @@ async def generate_images(
                 "user_balance_after": (
                     actual_balance_after
                     if actual_balance_after is not None
-                    else user["credits"] - total_cost  # Fallback to estimate if fetch failed
+                    else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost  # Fallback to estimate if fetch failed
                 ),
                 "user_api_key": f"{api_key[:10]}...",
                 "images_generated": req.n,

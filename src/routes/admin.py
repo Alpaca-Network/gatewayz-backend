@@ -63,7 +63,7 @@ async def create_api_key(request: UserRegistrationRequest):
             username=request.username,
             email=request.email,
             auth_method=request.auth_method,
-            credits=5,  # $5 worth of credits (250,000 tokens)
+            credits=0,  # No initial credits — users must purchase
         )
 
         # Send a welcome email with API key information
@@ -165,7 +165,7 @@ async def admin_add_credits(req: AddCreditsRequest, admin_user: dict = Depends(r
         return {
             "status": "success",
             "message": f"Added {req.credits} credits to user {user.get('username', user['id'])}",
-            "new_balance": updated_user["credits"],
+            "new_balance": float(updated_user.get("subscription_allowance", 0) or 0) + float(updated_user.get("purchased_credits", 0) or 0),
             "user_id": user["id"],
             "reason": description,
         }
@@ -189,7 +189,7 @@ async def admin_get_all_balances(admin_user: dict = Depends(require_admin)):
             user_balances.append(
                 {
                     "api_key": user["api_key"],
-                    "credits": user["credits"],
+                    "credits": float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0),
                     "created_at": user.get("created_at"),
                     "updated_at": user.get("updated_at"),
                 }
@@ -860,11 +860,11 @@ async def get_users_stats(
         if api_key:
             credits_query = (
                 client.table("users")
-                .select("credits, api_keys_new!inner(api_key)", count="exact")
+                .select("subscription_allowance, purchased_credits, api_keys_new!inner(api_key)", count="exact")
                 .limit(100000)
             )
         else:
-            credits_query = client.table("users").select("credits", count="exact").limit(100000)
+            credits_query = client.table("users").select("subscription_allowance, purchased_credits", count="exact").limit(100000)
 
         # Apply same filters to credits query
         if email_pattern:
@@ -878,7 +878,7 @@ async def get_users_stats(
         credits_data = credits_result.data if credits_result.data else []
 
         # Calculate credit statistics
-        total_credits = sum(float(u.get("credits", 0)) for u in credits_data)
+        total_credits = sum(float(u.get("subscription_allowance", 0) or 0) + float(u.get("purchased_credits", 0) or 0) for u in credits_data)
         avg_credits = round(total_credits / total_users, 2) if total_users > 0 else 0
         logger.info(
             f"Stats calculated - active: {active_users}, credits: {total_credits}, avg: {avg_credits}"
@@ -1357,7 +1357,7 @@ async def get_user_by_api_key(
             "id": user_data.get("user_id"),
             "username": user_data.get("username"),
             "email": user_data.get("email"),
-            "credits": user_data.get("credits", 0),
+            "credits": float(user_data.get("subscription_allowance", 0) or 0) + float(user_data.get("purchased_credits", 0) or 0),
             "is_active": user_data.get("is_active", True),
             "role": user_data.get("role", "user"),
             "subscription_status": user_data.get("subscription_status", "trial"),
@@ -1483,7 +1483,7 @@ async def get_api_key_details_by_id(api_key_id: int, admin_user: dict = Depends(
                 "id": user_data.get("id"),
                 "email": user_data.get("email"),
                 "username": user_data.get("username"),
-                "credits": user_data.get("credits"),
+                "credits": float(user_data.get("subscription_allowance", 0) or 0) + float(user_data.get("purchased_credits", 0) or 0),
                 "is_active": user_data.get("is_active"),
                 "role": user_data.get("role"),
                 "subscription_status": user_data.get("subscription_status"),
@@ -1622,7 +1622,7 @@ async def delete_users_by_domain(
         # Using ilike for case-insensitive matching with wildcard
         users_query = (
             client.table("users")
-            .select("id, email, username, created_at, credits")
+            .select("id, email, username, created_at, subscription_allowance, purchased_credits")
             .ilike("email", f"%@{domain}")
         )
 
@@ -1646,7 +1646,7 @@ async def delete_users_by_domain(
                 "email": u.get("email"),
                 "username": u.get("username"),
                 "created_at": u.get("created_at"),
-                "credits": u.get("credits", 0),
+                "credits": float(u.get("subscription_allowance", 0) or 0) + float(u.get("purchased_credits", 0) or 0),
             }
             for u in users_to_delete
         ]

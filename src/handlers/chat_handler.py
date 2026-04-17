@@ -162,8 +162,15 @@ class ChatInferenceHandler:
             logger.debug("[ChatHandler] Skipping credit check for anonymous request")
             return max_tokens
 
-        # Get user's current credits
-        user_credits = self.user.get("credits", 0.0)
+        # Get user's current spendable balance (subscription allowance + purchased credits)
+        user_credits = float(self.user.get("subscription_allowance") or 0) + float(
+            self.user.get("purchased_credits") or 0
+        )
+
+        # Free models cost $0 — always allow regardless of balance
+        if model_id and model_id.endswith(":free"):
+            logger.debug("[ChatHandler] Skipping credit check for free model %s", model_id)
+            return max_tokens
 
         # Perform pre-flight check (now includes affordability capping)
         check_result = estimate_and_check_credits(

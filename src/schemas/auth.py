@@ -146,8 +146,8 @@ class PrivyAuthResponse(BaseModel):
     tier_display_name: str | None = None
     trial_expires_at: str | None = None
     subscription_end_date: int | None = None
-    # Tiered credit fields (in cents for frontend consistency)
-    subscription_allowance: int | None = None  # Monthly subscription allowance
-    purchased_credits: int | None = None  # One-time purchased credits
-    total_credits: int | None = None  # Sum of subscription_allowance + purchased_credits
+    # Tiered credit fields — 1 credit = $1, stored as float
+    subscription_allowance: float | None = None  # Monthly subscription allowance
+    purchased_credits: float | None = None  # One-time purchased credits
+    total_credits: float | None = None  # Sum of subscription_allowance + purchased_credits
     allowance_reset_date: str | None = None  # When allowance was last reset

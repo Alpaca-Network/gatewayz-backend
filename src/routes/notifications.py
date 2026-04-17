@@ -97,7 +97,7 @@ async def test_notification(
                 <h2>Test Low Balance Alert</h2>
                 <p>Hello {user.get('username', 'User')},</p>
                 <p>This is a test notification for low balance alerts.</p>
-                <p>Current Credits: ${user.get('credits', 0):.2f}</p>
+                <p>Current Credits: ${(float(user.get('subscription_allowance', 0) or 0) + float(user.get('purchased_credits', 0) or 0)):.2f}</p>
                 <p>This is just a test - no action required.</p>
                 <p>Best regards,<br>The {os.environ.get('APP_NAME', 'AI Gateway')} Team</p>
             </body>
@@ -185,7 +185,7 @@ async def send_usage_report(
             "total_requests": 1000,
             "tokens_used": 50000,
             "credits_spent": 5.00,
-            "remaining_credits": user.get("credits", 0),
+            "remaining_credits": float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0),
         }
 
         success = enhanced_notification_service.send_monthly_usage_report(

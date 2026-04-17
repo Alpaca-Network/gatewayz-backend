@@ -480,16 +480,20 @@ def apply_referral_bonus(
         )
 
         # Fetch fresh balance data after credits have been added
-        user_fresh = client.table("users").select("credits").eq("id", user_id).execute()
-        referrer_fresh = client.table("users").select("credits").eq("id", referrer["id"]).execute()
+        user_fresh = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
+        referrer_fresh = client.table("users").select("purchased_credits, subscription_allowance").eq("id", referrer["id"]).execute()
+
+        def _total_balance(row_list):
+            if not row_list:
+                return 0
+            row = row_list[0]
+            return float(row.get("purchased_credits", 0) or 0) + float(row.get("subscription_allowance", 0) or 0)
 
         bonus_data = {
             "user_bonus": REFERRAL_BONUS,
             "referrer_bonus": REFERRAL_BONUS,
-            "user_new_balance": float(user_fresh.data[0]["credits"]) if user_fresh.data else 0,
-            "referrer_new_balance": (
-                float(referrer_fresh.data[0]["credits"]) if referrer_fresh.data else 0
-            ),
+            "user_new_balance": _total_balance(user_fresh.data),
+            "referrer_new_balance": _total_balance(referrer_fresh.data),
             "referrer_username": referrer.get("username", "Unknown"),
             "referrer_email": referrer.get("email", "Unknown"),
         }
@@ -610,7 +614,7 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
             "remaining_uses": remaining_uses,
             "max_uses": MAX_REFERRAL_USES,
             "total_earned": float(total_earned),
-            "current_balance": float(user.get("credits", 0) or 0),
+            "current_balance": float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0),
             "referred_by_code": user.get("referred_by_code"),
             "referrals": referral_details,
         }

@@ -32,7 +32,7 @@ class UserRegistrationResponse(BaseModel):
 class CreateUserRequest(BaseModel):
     username: str
     email: EmailStr
-    initial_credits: int = 1000
+    initial_credits: int = 0
 
 
 class CreateUserResponse(BaseModel):
@@ -55,11 +55,11 @@ class UserProfileUpdate(BaseModel):
 class UserProfileResponse(BaseModel):
     user_id: int
     api_key: str
-    credits: int
-    # Tiered credit fields (in cents for frontend consistency)
-    subscription_allowance: int | None = None  # Monthly subscription allowance remaining
-    purchased_credits: int | None = None  # One-time purchased credits
-    total_credits: int | None = None  # Computed sum of both
+    credits: float
+    # Tiered credit fields — 1 credit = $1, stored as float
+    subscription_allowance: float | None = None  # Monthly subscription allowance remaining
+    purchased_credits: float | None = None  # One-time purchased credits
+    total_credits: float | None = None  # Computed sum of both
     allowance_reset_date: str | None = None  # When allowance was last reset
     username: str | None
     email: str | None

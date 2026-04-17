@@ -359,7 +359,7 @@ def redeem_coupon(
         coupon_value = validation["coupon_value"]
 
         # Step 2: Get current user balance
-        user_result = client.table("users").select("credits").eq("id", user_id).execute()
+        user_result = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
 
         if not user_result.data:
             return {
@@ -372,12 +372,15 @@ def redeem_coupon(
                 "coupon_code": code,
             }
 
-        current_balance = float(user_result.data[0]["credits"])
-        new_balance = current_balance + coupon_value
+        purchased = float(user_result.data[0].get("purchased_credits", 0) or 0)
+        allowance = float(user_result.data[0].get("subscription_allowance", 0) or 0)
+        current_balance = purchased + allowance
+        new_purchased = purchased + coupon_value
+        new_balance = new_purchased + allowance
 
-        # Step 3: Update user balance
+        # Step 3: Update purchased_credits
         update_result = (
-            client.table("users").update({"credits": new_balance}).eq("id", user_id).execute()
+            client.table("users").update({"purchased_credits": new_purchased}).eq("id", user_id).execute()
         )
 
         if not update_result.data:

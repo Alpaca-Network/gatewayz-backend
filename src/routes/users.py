@@ -101,10 +101,13 @@ async def get_user_balance(
                 "user_id": user.get("id"),
             }
         else:
-            # For non-trial users, show regular credits
+            # For non-trial users, show spendable balance (subscription_allowance + purchased_credits)
+            allowance = float(user.get("subscription_allowance") or 0)
+            purchased = float(user.get("purchased_credits") or 0)
+            total_dollars = allowance + purchased
             return {
                 "api_key": f"{api_key[:10]}...",
-                "credits": user["credits"],
+                "credits": total_dollars,  # 1 credit = $1, no conversion
                 "status": "active",
                 "user_id": user.get("id"),
             }
@@ -249,9 +252,7 @@ async def get_user_profile_endpoint(api_key: str = Depends(get_api_key)):
             "Profile retrieved successfully for user %s", sanitize_for_logging(str(user.get("id")))
         )
 
-        # Ensure credits is an integer for Pydantic validation
-        if profile and "credits" in profile:
-            profile["credits"] = int(profile["credits"])
+        # credits is float (1 credit = $1) — no coercion needed
 
         return profile
 

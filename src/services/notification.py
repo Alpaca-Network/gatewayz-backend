@@ -147,7 +147,7 @@ class NotificationService:
             if not preferences or not preferences.email_notifications:
                 return None
 
-            current_credits = user_data.get("credits", 0)
+            current_credits = float(user_data.get("subscription_allowance", 0) or 0) + float(user_data.get("purchased_credits", 0) or 0)
 
             # All users get notified when credits fall below $5
             low_balance_threshold = 5.0
@@ -209,7 +209,7 @@ class NotificationService:
             if not preferences or not preferences.email_notifications:
                 return None
 
-            current_credits = user_data.get("credits", 0)
+            current_credits = float(user_data.get("subscription_allowance", 0) or 0) + float(user_data.get("purchased_credits", 0) or 0)
 
             if current_credits <= 0.0:
                 # Avoid duplicate notifications within 24 hours

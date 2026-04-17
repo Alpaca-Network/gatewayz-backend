@@ -1688,7 +1688,9 @@ async def chat_completions(
         if not is_anonymous and not trial.get("is_trial", False) and not is_free_model(req.model):
             from src.services.billing.credit_precheck import estimate_and_check_credits
 
-            _user_credits = user.get("credits", 0.0)
+            _user_credits = float(user.get("subscription_allowance") or 0) + float(
+                user.get("purchased_credits") or 0
+            )
             if _user_credits <= 0:
                 raise APIExceptions.payment_required(credits=_user_credits)
             _msgs = [{"role": m.role, "content": m.content} for m in req.messages]

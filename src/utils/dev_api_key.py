@@ -41,7 +41,8 @@ def get_or_create_dev_api_key() -> str | None:
             user_data = {
                 "email": DEV_USER_EMAIL,
                 "username": DEV_USER_USERNAME,
-                "credits": 1000000.0,  # Large amount for development
+                "purchased_credits": 1000000.0,  # Large amount for development
+                "subscription_allowance": 0.0,
                 "is_active": True,
                 "environment_tag": "development",
             }

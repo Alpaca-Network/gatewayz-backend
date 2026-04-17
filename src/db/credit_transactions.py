@@ -439,10 +439,10 @@ def add_credits(
 
         # Get user by ID if provided, otherwise by API key
         if user_id:
-            user_result = client.table("users").select("id, credits").eq("id", user_id).execute()
+            user_result = client.table("users").select("id, purchased_credits, subscription_allowance").eq("id", user_id).execute()
         else:
             user_result = (
-                client.table("users").select("id, credits").eq("api_key", api_key).execute()
+                client.table("users").select("id, purchased_credits, subscription_allowance").eq("api_key", api_key).execute()
             )
 
         if not user_result.data:
@@ -453,13 +453,16 @@ def add_credits(
 
         user = user_result.data[0]
         resolved_user_id = user["id"]
-        balance_before = float(user.get("credits", 0) or 0)
-        balance_after = balance_before + amount
+        purchased = float(user.get("purchased_credits", 0) or 0)
+        allowance = float(user.get("subscription_allowance", 0) or 0)
+        balance_before = purchased + allowance
+        new_purchased = purchased + amount
+        balance_after = new_purchased + allowance
 
-        # Update user's credits (using same column as payment system)
+        # Update purchased_credits (one-time credits added by admin/referral/coupon)
         update_result = (
             client.table("users")
-            .update({"credits": balance_after})
+            .update({"purchased_credits": new_purchased})
             .eq("id", resolved_user_id)
             .execute()
         )

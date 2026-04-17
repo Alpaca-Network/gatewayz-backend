@@ -215,20 +215,31 @@ async def add_credits_endpoint(
 
         # Get user
         user_result = (
-            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+            client.table("users")
+            .select("id, purchased_credits, subscription_allowance")
+            .eq("id", request.user_id)
+            .execute()
         )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]
-        balance_before = float(user.get("credits", 0) or 0)
-        balance_after = balance_before + request.amount
+        balance_before = float(user.get("purchased_credits", 0) or 0) + float(
+            user.get("subscription_allowance", 0) or 0
+        )
+        new_purchased = float(user.get("purchased_credits", 0) or 0) + request.amount
+        balance_after = new_purchased + float(user.get("subscription_allowance", 0) or 0)
 
-        # Update user's credits
+        # Update user's purchased_credits (spendable by deduction RPC)
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {
+                    "purchased_credits": new_purchased,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            )
             .eq("id", request.user_id)
             .execute()
         )
@@ -308,27 +319,38 @@ async def adjust_credits_endpoint(
 
         # Get user
         user_result = (
-            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+            client.table("users")
+            .select("id, purchased_credits, subscription_allowance")
+            .eq("id", request.user_id)
+            .execute()
         )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]
-        balance_before = float(user.get("credits", 0) or 0)
-        balance_after = balance_before + request.amount
+        balance_before = float(user.get("purchased_credits", 0) or 0) + float(
+            user.get("subscription_allowance", 0) or 0
+        )
+        new_purchased = float(user.get("purchased_credits", 0) or 0) + request.amount
+        balance_after = new_purchased + float(user.get("subscription_allowance", 0) or 0)
 
         # Prevent negative balance
-        if balance_after < 0:
+        if new_purchased < 0:
             raise HTTPException(
                 status_code=400,
-                detail=f"Adjustment would result in negative balance. Current: {balance_before}, Adjustment: {request.amount}",
+                detail=f"Adjustment would result in negative purchased_credits. Current: {balance_before}, Adjustment: {request.amount}",
             )
 
-        # Update user's credits
+        # Update user's purchased_credits (spendable by deduction RPC)
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {
+                    "purchased_credits": new_purchased,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            )
             .eq("id", request.user_id)
             .execute()
         )
@@ -424,7 +446,7 @@ async def bulk_add_credits_endpoint(
         # Batch fetch: Get all users at once to reduce N+1 queries
         users_result = (
             client.table("users")
-            .select("id, credits, username")
+            .select("id, purchased_credits, subscription_allowance, username")
             .in_("id", unique_user_ids)
             .execute()
         )
@@ -446,13 +468,21 @@ async def bulk_add_credits_endpoint(
                     failed += 1
                     continue
 
-                balance_before = float(user.get("credits", 0) or 0)
-                balance_after = balance_before + request.amount
+                balance_before = float(user.get("purchased_credits", 0) or 0) + float(
+                    user.get("subscription_allowance", 0) or 0
+                )
+                new_purchased = float(user.get("purchased_credits", 0) or 0) + request.amount
+                balance_after = new_purchased + float(user.get("subscription_allowance", 0) or 0)
 
-                # Update user's credits
+                # Update user's purchased_credits (spendable by deduction RPC)
                 update_result = (
                     client.table("users")
-                    .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+                    .update(
+                        {
+                            "purchased_credits": new_purchased,
+                            "updated_at": datetime.now(UTC).isoformat(),
+                        }
+                    )
                     .eq("id", user_id)
                     .execute()
                 )
@@ -561,20 +591,31 @@ async def refund_credits_endpoint(
 
         # Get user
         user_result = (
-            client.table("users").select("id, credits").eq("id", request.user_id).execute()
+            client.table("users")
+            .select("id, purchased_credits, subscription_allowance")
+            .eq("id", request.user_id)
+            .execute()
         )
 
         if not user_result.data or len(user_result.data) == 0:
             raise HTTPException(status_code=404, detail=f"User {request.user_id} not found")
 
         user = user_result.data[0]
-        balance_before = float(user.get("credits", 0) or 0)
-        balance_after = balance_before + request.amount
+        balance_before = float(user.get("purchased_credits", 0) or 0) + float(
+            user.get("subscription_allowance", 0) or 0
+        )
+        new_purchased = float(user.get("purchased_credits", 0) or 0) + request.amount
+        balance_after = new_purchased + float(user.get("subscription_allowance", 0) or 0)
 
-        # Update user's credits
+        # Update user's purchased_credits (spendable by deduction RPC)
         update_result = (
             client.table("users")
-            .update({"credits": balance_after, "updated_at": datetime.now(UTC).isoformat()})
+            .update(
+                {
+                    "purchased_credits": new_purchased,
+                    "updated_at": datetime.now(UTC).isoformat(),
+                }
+            )
             .eq("id", request.user_id)
             .execute()
         )
@@ -655,7 +696,7 @@ async def get_credits_summary_endpoint(
 
             # Get user info
             user_result = (
-                client.table("users").select("id, username, credits").eq("id", user_id).execute()
+                client.table("users").select("id, username, subscription_allowance, purchased_credits").eq("id", user_id).execute()
             )
             user_info = user_result.data[0] if user_result.data else None
 
@@ -663,7 +704,7 @@ async def get_credits_summary_endpoint(
                 "status": "success",
                 "user_id": user_id,
                 "user_info": user_info,
-                "current_balance": float(user_info.get("credits", 0) or 0) if user_info else 0,
+                "current_balance": (float(user_info.get("subscription_allowance", 0) or 0) + float(user_info.get("purchased_credits", 0) or 0)) if user_info else 0,
                 "summary": summary,
                 "filters": {
                     "from_date": from_date,
@@ -674,11 +715,11 @@ async def get_credits_summary_endpoint(
         else:
             # Get system-wide summary
             # Get all users with their balances
-            users_result = client.table("users").select("id, credits").execute()
+            users_result = client.table("users").select("id, subscription_allowance, purchased_credits").execute()
             users = users_result.data or []
 
             total_users = len(users)
-            total_credits = sum(float(u.get("credits", 0) or 0) for u in users)
+            total_credits = sum(float(u.get("subscription_allowance", 0) or 0) + float(u.get("purchased_credits", 0) or 0) for u in users)
             avg_credits = total_credits / total_users if total_users > 0 else 0
 
             # Get transaction counts

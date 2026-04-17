@@ -1,3 +1,7 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # Gatewayz Universal Inference API - Context
 
 ## Overview
@@ -28,7 +32,7 @@
 ## Directory Structure
 
 ```
-src/                           # 85,080 LOC Python
+src/                           # Python source
 ├── main.py                   # FastAPI app factory
 ├── config/                   # 8 files: config, db, redis, supabase, arize, logging, opentelemetry
 ├── middleware/               # 6 files: sentry, observability, timeout, security, gzip, trace
@@ -145,34 +149,19 @@ See `tests/conceptual_model/README.md` for details. Uses `@pytest.mark.cm_verifi
 
 ---
 
-## Recent Updates (2025-02-11)
-
-- Three-layer rate limiting architecture (#1091)
-- Security middleware with velocity mode
-- IP rate limits increased (60→300 RPM, 10→60 RPM)
-- Velocity thresholds adjusted (10%→25%, 10min→3min)
-- Authenticated user exemption from IP limits
-- Improved error classification (exclude 4xx)
-- Comprehensive rate limit headers
-- Enhanced Prometheus metrics
-- 30 provider integrations (up from 17)
-
----
-
 ## Quick Reference
 
 | Component | Location | Count |
 |-----------|----------|-------|
-| Routes | `src/routes/` | 43 |
-| Services | `src/services/` | 95 |
-| DB Modules | `src/db/` | 24 |
+| Routes | `src/routes/` | 60 |
+| Services | `src/services/` | 75 |
+| DB Modules | `src/db/` | 35 |
 | Schemas | `src/schemas/` | 15 |
 | Config | `src/config/` | 8 |
 | Middleware | `src/middleware/` | 6 |
 | Utils | `src/utils/` | 15 |
-| Tests | `tests/` | 228 |
+| Test Files | `tests/` | 200+ |
 | Migrations | `supabase/migrations/` | 36 |
-| **Total Code** | `src/` | **85,080 LOC** |
 
 ---
 
@@ -226,12 +215,12 @@ Frontend auto-discovers from `GET /gateways` endpoint.
 
 ---
 
-**Version**: 2.0.4 | **Updated**: 2025-02-11
+**Version**: 2.0.4
 
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **gatewayz-backend** (26852 symbols, 57181 relationships, 206 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **gatewayz-backend** (26703 symbols, 56922 relationships, 195 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

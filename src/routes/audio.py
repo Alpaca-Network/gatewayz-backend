@@ -191,7 +191,7 @@ async def _deduct_audio_credits(
         # Fetch fresh balance after deduction for accurate reporting
         updated_user = await loop.run_in_executor(executor, get_user, api_key)
         if updated_user:
-            actual_balance_after = updated_user.get("credits")
+            actual_balance_after = float(updated_user.get("subscription_allowance", 0) or 0) + float(updated_user.get("purchased_credits", 0) or 0)
 
         await loop.run_in_executor(
             executor,
@@ -344,15 +344,18 @@ async def create_transcription(
         estimated_cost, cost_per_minute, _ = get_audio_cost(model, estimated_duration)
 
         # Pre-flight credit sufficiency check with 10% buffer for race conditions
+        _user_balance = float(user.get("subscription_allowance") or 0) + float(
+            user.get("purchased_credits") or 0
+        )
         required_credits = estimated_cost * 1.1
-        if user["credits"] < required_credits:
+        if _user_balance < required_credits:
             raise HTTPException(
                 status_code=402,
                 detail=(
                     f"Insufficient credits. Audio transcription estimated cost: ${estimated_cost:.4f} "
                     f"(${cost_per_minute:.4f}/min x {estimated_duration:.1f} min estimated), "
                     f"requires ${required_credits:.4f} with safety buffer. "
-                    f"Available: ${user['credits']:.4f}"
+                    f"Available: ${_user_balance:.4f}"
                 ),
             )
 
@@ -476,7 +479,7 @@ async def create_transcription(
             "user_balance_after": (
                 actual_balance_after
                 if actual_balance_after is not None
-                else user["credits"] - total_cost
+                else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost
             ),
             "user_api_key": f"{api_key[:10]}...",
             "used_fallback_pricing": used_fallback_pricing,
@@ -600,15 +603,18 @@ async def create_transcription_base64(
         estimated_cost, cost_per_minute, _ = get_audio_cost(model, estimated_duration)
 
         # Pre-flight credit sufficiency check with 10% buffer for race conditions
+        _user_balance = float(user.get("subscription_allowance") or 0) + float(
+            user.get("purchased_credits") or 0
+        )
         required_credits = estimated_cost * 1.1
-        if user["credits"] < required_credits:
+        if _user_balance < required_credits:
             raise HTTPException(
                 status_code=402,
                 detail=(
                     f"Insufficient credits. Audio transcription estimated cost: ${estimated_cost:.4f} "
                     f"(${cost_per_minute:.4f}/min x {estimated_duration:.1f} min estimated), "
                     f"requires ${required_credits:.4f} with safety buffer. "
-                    f"Available: ${user['credits']:.4f}"
+                    f"Available: ${_user_balance:.4f}"
                 ),
             )
 
@@ -698,7 +704,7 @@ async def create_transcription_base64(
             "user_balance_after": (
                 actual_balance_after
                 if actual_balance_after is not None
-                else user["credits"] - total_cost
+                else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost
             ),
             "user_api_key": f"{api_key[:10]}...",
             "used_fallback_pricing": used_fallback_pricing,

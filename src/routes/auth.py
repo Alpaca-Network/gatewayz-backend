@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -176,10 +176,12 @@ def _handle_existing_user(
     """Build a consistent response for existing users."""
     logger.info(f"Existing Privy user found: {existing_user['id']}")
     logger.info(f"User welcome email status: {existing_user.get('welcome_email_sent', 'Not set')}")
+    _login_allowance = existing_user.get("subscription_allowance", 0) or 0
+    _login_purchased = existing_user.get("purchased_credits", 0) or 0
     logger.info(
-        "User credits at login: %s (type: %s)",
-        existing_user.get("credits", "NOT_FOUND"),
-        type(existing_user.get("credits")).__name__,
+        "User credits at login: subscription_allowance=%s purchased_credits=%s",
+        _login_allowance,
+        _login_purchased,
     )
 
     client = supabase_config.get_supabase_client()
@@ -251,25 +253,8 @@ def _handle_existing_user(
         # Don't return temporary keys - force key recreation by setting to None
         api_key_to_return = None
 
-    user_credits = existing_user.get("credits")
-    try:
-        if user_credits is None:
-            logger.warning("User %s has None/null credits, defaulting to 0.0", existing_user["id"])
-            user_credits = 0.0
-        else:
-            user_credits = float(user_credits)
-            logger.debug(
-                "Normalized user %s credits to float: %s", existing_user["id"], user_credits
-            )
-    except (ValueError, TypeError) as credits_error:
-        logger.error(
-            "Failed to convert credits for user %s (value: %s, type: %s): %s, defaulting to 0.0",
-            existing_user["id"],
-            user_credits,
-            type(user_credits).__name__,
-            credits_error,
-        )
-        user_credits = 0.0
+    # user_credits is only used for legacy migration detection below; tiered fields are used for response
+    user_credits = float(existing_user.get("subscription_allowance") or 0) + float(existing_user.get("purchased_credits") or 0)
 
     tier = existing_user.get("tier")
     tier_display_name = _get_tier_display_name(tier)
@@ -283,7 +268,7 @@ def _handle_existing_user(
     purchased_credits_dollars = float(existing_user.get("purchased_credits") or 0)
     legacy_credits_dollars = float(existing_user.get("credits") or 0)
 
-    # If tiered fields are empty but legacy credits exist, use legacy credits
+    # If tiered fields are empty but legacy credits exist, migrate them once at login
     if (
         subscription_allowance_dollars == 0
         and purchased_credits_dollars == 0
@@ -296,12 +281,27 @@ def _handle_existing_user(
             # Basic user or no active subscription - legacy credits are purchased credits
             purchased_credits_dollars = legacy_credits_dollars
 
+        # Write back to DB so deduction RPC sees the correct values
+        try:
+            _supabase = supabase_config.get_supabase_client()
+            _supabase.table("users").update({
+                "subscription_allowance": subscription_allowance_dollars,
+                "purchased_credits": purchased_credits_dollars,
+            }).eq("id", existing_user["id"]).execute()
+            logger.info(
+                "Migrated legacy credits for user %s: $%.2f → subscription_allowance=$%.2f, purchased_credits=$%.2f",
+                existing_user["id"], legacy_credits_dollars,
+                subscription_allowance_dollars, purchased_credits_dollars,
+            )
+        except Exception as _migration_err:
+            logger.warning("Failed to persist legacy credit migration for user %s: %s", existing_user["id"], _migration_err)
+
     total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
 
-    # Convert to cents for frontend (multiply by 100)
-    subscription_allowance_cents = int(subscription_allowance_dollars * 100)
-    purchased_credits_cents = int(purchased_credits_dollars * 100)
-    total_credits_cents = int(total_credits_dollars * 100)
+    # Send raw DB values — no unit conversion
+    subscription_allowance_cents = subscription_allowance_dollars
+    purchased_credits_cents = purchased_credits_dollars
+    total_credits_cents = total_credits_dollars
     allowance_reset_date = existing_user.get("allowance_reset_date")
 
     user_email = existing_user.get("email") or email
@@ -378,7 +378,9 @@ def _handle_existing_user(
             )
             # Return None as api_key - frontend should handle this case
 
-    logger.info("Returning login response with credits: %s", user_credits)
+    # Send raw credit value — no unit conversion
+    user_credits_cents = user_credits
+    logger.info("Returning login response with credits: %.4f", user_credits)
 
     # CRITICAL: Verify API key exists before returning success for existing users
     # This prevents silent failures where user exists but has no working key
@@ -407,7 +409,7 @@ def _handle_existing_user(
         display_name=existing_user.get("username") or display_name,
         email=user_email,
         phone_number=phone_number or existing_user.get("phone_number"),
-        credits=user_credits,
+        credits=user_credits_cents,  # In cents — matches /user/profile
         timestamp=datetime.now(UTC),
         subscription_status=subscription_status_value,
         tier=tier,
@@ -1035,21 +1037,18 @@ async def privy_auth(
                     )
                     username = resolved_username
 
-                trial_start = datetime.now(UTC)
-                trial_end = trial_start + timedelta(days=3)
-
                 user_payload = {
                     "username": username,
                     "email": fallback_email,
-                    "credits": 10,
+                    "purchased_credits": 0.0,
+                    "subscription_allowance": 0.0,
                     "privy_user_id": request.user.id,
                     "auth_method": (
                         auth_method.value if hasattr(auth_method, "value") else str(auth_method)
                     ),
-                    "created_at": trial_start.isoformat(),
+                    "created_at": datetime.now(UTC).isoformat(),
                     "welcome_email_sent": False,
-                    "subscription_status": "bot" if is_temp_email else "trial",
-                    "trial_expires_at": trial_end.isoformat(),
+                    "subscription_status": "inactive",
                     "tier": "basic",
                 }
 
@@ -1197,11 +1196,11 @@ async def privy_auth(
                         "user_id": created_user["id"],
                         "username": created_user.get("username", username),
                         "email": created_user.get("email", fallback_email),
-                        "credits": created_user.get("credits", 10),
+                        "credits": float(created_user.get("purchased_credits", 0) or 0) + float(created_user.get("subscription_allowance", 0) or 0),
                         "primary_api_key": api_key_value,
                         "api_key": api_key_value,
                         "scope_permissions": created_user.get("scope_permissions", {}),
-                        "subscription_status": created_user.get("subscription_status", "trial"),
+                        "subscription_status": created_user.get("subscription_status", "inactive"),
                         "trial_expires_at": created_user.get("trial_expires_at"),
                         "tier": created_user.get("tier"),
                         "subscription_end_date": created_user.get("subscription_end_date"),
@@ -1308,11 +1307,11 @@ async def privy_auth(
 
             tier_value = user_data.get("tier")
 
-            # Calculate tiered credit fields for new users
-            new_user_credits_cents = int(new_user_credits * 100)
+            # No unit conversion — raw credit value
+            new_user_credits_cents = new_user_credits
             new_subscription_allowance = 0  # No subscription yet
-            new_purchased_credits = new_user_credits_cents
-            new_total_credits = new_user_credits_cents
+            new_purchased_credits = new_user_credits
+            new_total_credits = new_user_credits
 
             # CRITICAL: Verify API key exists before returning success
             # This prevents silent failures where user is created but has no working key
@@ -1341,9 +1340,9 @@ async def privy_auth(
                 display_name=display_name or user_data["username"],
                 email=email,
                 phone_number=phone_number,
-                credits=new_user_credits,
+                credits=new_user_credits_cents,  # In cents — matches /user/profile
                 timestamp=datetime.now(UTC),
-                subscription_status=user_data.get("subscription_status", "trial"),
+                subscription_status=user_data.get("subscription_status", "inactive"),
                 tier=tier_value,
                 tier_display_name=_get_tier_display_name(tier_value),
                 trial_expires_at=user_data.get("trial_expires_at"),
@@ -1481,7 +1480,8 @@ async def register_user(
             fallback_payload = {
                 "username": request.username,
                 "email": request.email,
-                "credits": 0,
+                "purchased_credits": 0.0,
+                "subscription_allowance": 0.0,
                 "privy_user_id": None,
                 "auth_method": (
                     request.auth_method.value
@@ -1537,11 +1537,11 @@ async def register_user(
                     "user_id": created_user["id"],
                     "username": created_user.get("username", request.username),
                     "email": created_user.get("email", request.email),
-                    "credits": created_user.get("credits", 10),
+                    "credits": float(created_user.get("purchased_credits", 0) or 0) + float(created_user.get("subscription_allowance", 0) or 0),
                     "primary_api_key": api_key_value,
                     "api_key": api_key_value,
                     "scope_permissions": created_user.get("scope_permissions", {}),
-                    "subscription_status": created_user.get("subscription_status", "trial"),
+                    "subscription_status": created_user.get("subscription_status", "inactive"),
                     "trial_expires_at": created_user.get("trial_expires_at"),
                     "tier": created_user.get("tier"),
                     "subscription_end_date": created_user.get("subscription_end_date"),

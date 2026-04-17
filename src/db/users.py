@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # PERF: In-memory cache for user lookups to reduce database queries
 # Structure: {api_key: {"user": dict, "timestamp": float}}
 _user_cache: dict[str, dict[str, Any]] = {}
-_user_cache_ttl = 300  # 5 minutes TTL - increased for better cache hit rate
+_user_cache_ttl = 60  # 60 seconds TTL — balance must not be stale longer than this
 # Note: Cache is invalidated on credit/profile updates, so longer TTL is safe
 
 
@@ -206,7 +206,8 @@ def create_enhanced_user(
         user_data = {
             "username": username,
             "email": email,
-            "credits": credits,
+            "purchased_credits": credits,
+            "subscription_allowance": 0.0,
             "is_active": True,
             "registration_date": now.isoformat(),
             "auth_method": auth_method,
@@ -566,7 +567,6 @@ def add_credits_to_user(
         balance_after = allowance_after + purchased_after
         update_data = {
             "purchased_credits": purchased_after,
-            "credits": balance_after,
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
@@ -658,7 +658,7 @@ def log_api_usage_transaction(
             return
 
         user_id = user["id"]
-        balance_before = user.get("credits", 0.0) or 0.0
+        balance_before = float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)
         balance_after = balance_before - cost if not is_trial else balance_before
 
         # Log the transaction (negative amount for usage)
@@ -881,6 +881,9 @@ def deduct_credits(
                     new_allowance = float(result_data.get("new_allowance", 0))
                     new_purchased = float(result_data.get("new_purchased", 0))
                     new_balance = float(result_data.get("new_balance", 0))
+
+                    # Invalidate in-memory cache so next get_user() reflects the new balance
+                    invalidate_user_cache(api_key)
 
                     logger.info(
                         "ATOMIC deducted $%s from user %s. Balance: $%s → $%s "
@@ -1437,7 +1440,7 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
         if not key_result.data:
             # Fallback to legacy users table
             user_result = (
-                client.table("users").select("id, credits").eq("api_key", api_key).execute()
+                client.table("users").select("id").eq("api_key", api_key).execute()
             )
             if not user_result.data:
                 return None
@@ -1446,11 +1449,11 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
             user_id = key_result.data[0]["user_id"]
 
         # Get user credits
-        user_result = client.table("users").select("credits").eq("id", user_id).execute()
+        user_result = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
         if not user_result.data:
             return None
 
-        current_credits = user_result.data[0]["credits"]
+        current_credits = float(user_result.data[0].get("purchased_credits", 0) or 0) + float(user_result.data[0].get("subscription_allowance", 0) or 0)
 
         # Use the database function to get usage metrics
         result = client.rpc("get_user_usage_metrics", {"user_api_key": api_key}).execute()
@@ -1529,7 +1532,7 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
             # Then get user data for credit calculations (limited to avoid memory issues)
             users_result = (
-                client.table("users").select("id, credits, api_key").limit(10000).execute()
+                client.table("users").select("id, purchased_credits, subscription_allowance, api_key").limit(10000).execute()
             )
             users = users_result.data or []
         except Exception as e:
@@ -1934,41 +1937,37 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         tier_display_name = tier_display_map.get(tier) if tier else None
 
         # Calculate credit breakdown
-        # Database stores values in dollars, but frontend expects cents for consistency with TIER_CONFIG
-        subscription_allowance_dollars = float(user.get("subscription_allowance") or 0)
-        purchased_credits_dollars = float(user.get("purchased_credits") or 0)
-        legacy_credits_dollars = float(user.get("credits") or 0)
+        # Database stores raw credit/token values — send as-is to frontend (no unit conversion)
+        subscription_allowance_val = float(user.get("subscription_allowance") or 0)
+        purchased_credits_val = float(user.get("purchased_credits") or 0)
+        legacy_credits_val = float(user.get("credits") or 0)
 
-        # If tiered fields are empty but legacy credits exist, use legacy credits
-        # For Pro/Max users with active subscription, legacy credits should go to subscription_allowance
-        # For basic users or purchased credits, they should go to purchased_credits
+        # If tiered fields are empty but legacy credits exist, migrate at read time
         if (
-            subscription_allowance_dollars == 0
-            and purchased_credits_dollars == 0
-            and legacy_credits_dollars > 0
+            subscription_allowance_val == 0
+            and purchased_credits_val == 0
+            and legacy_credits_val > 0
         ):
             if tier in ("pro", "max") and user.get("subscription_status") == "active":
-                # Active Pro/Max subscriber - legacy credits are subscription allowance
-                subscription_allowance_dollars = legacy_credits_dollars
+                subscription_allowance_val = legacy_credits_val
             else:
-                # Basic user or no active subscription - legacy credits are purchased credits
-                purchased_credits_dollars = legacy_credits_dollars
+                purchased_credits_val = legacy_credits_val
 
-        total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
+        total_credits_val = subscription_allowance_val + purchased_credits_val
 
-        # Convert to cents for frontend (multiply by 100)
-        subscription_allowance_cents = int(subscription_allowance_dollars * 100)
-        purchased_credits_cents = int(purchased_credits_dollars * 100)
-        total_credits_cents = int(total_credits_dollars * 100)
+        # No unit conversion — DB value IS the credit count
+        subscription_allowance_cents = subscription_allowance_val
+        purchased_credits_cents = purchased_credits_val
+        total_credits_cents = total_credits_val
 
         # Return profile data
         profile = {
             "user_id": user["id"],
             "api_key": f"{api_key[:10]}...",
-            "credits": total_credits_cents,  # Total credits in cents (sum for backward compatibility)
-            "subscription_allowance": subscription_allowance_cents,  # Monthly subscription allowance in cents
-            "purchased_credits": purchased_credits_cents,  # One-time purchased credits in cents
-            "total_credits": total_credits_cents,  # Explicit sum of both in cents
+            "credits": total_credits_val,  # Total credits (raw DB value, no unit conversion)
+            "subscription_allowance": subscription_allowance_val,
+            "purchased_credits": purchased_credits_val,
+            "total_credits": total_credits_val,
             "allowance_reset_date": user.get(
                 "allowance_reset_date"
             ),  # When allowance was last reset

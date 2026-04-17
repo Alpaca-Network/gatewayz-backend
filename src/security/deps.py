@@ -385,7 +385,9 @@ async def check_credits(
     Raises:
         HTTPException: 402 if insufficient credits or trial expired
     """
-    current_credits = user.get("credits", 0.0)
+    current_credits = float(user.get("subscription_allowance") or 0) + float(
+        user.get("purchased_credits") or 0
+    )
 
     if current_credits < min_credits:
         logger.warning(
