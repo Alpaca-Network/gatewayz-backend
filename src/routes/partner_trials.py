@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from src.security.deps import get_api_key
 from src.security.deps import get_user_id as get_current_user_id
+from src.security.deps import require_admin_or_env_key
 from src.services.partner_trial_service import PartnerTrialService
 
 logger = logging.getLogger(__name__)
@@ -206,18 +207,15 @@ async def get_partner_analytics(
     partner_code: str,
     start_date: datetime | None = Query(None, description="Filter start date"),
     end_date: datetime | None = Query(None, description="Filter end date"),
-    api_key: str = Depends(get_api_key),
+    _: str = Depends(require_admin_or_env_key),
 ):
     """
     Get analytics for a specific partner's trials.
 
     Returns conversion rates, revenue, and trial status breakdown.
 
-    Requires admin privileges (TODO: add admin check).
+    Requires admin privileges (env ADMIN_API_KEY or user with admin role).
     """
-    # TODO: Add admin role check
-    # For now, any authenticated user can access analytics
-
     analytics = PartnerTrialService.get_partner_analytics(
         partner_code=partner_code,
         start_date=start_date,
@@ -233,17 +231,14 @@ async def get_partner_analytics(
 @router.post("/expire/{target_user_id}")
 async def force_expire_trial(
     target_user_id: int,
-    api_key: str = Depends(get_api_key),
+    _: str = Depends(require_admin_or_env_key),
 ):
     """
     Force expire a user's partner trial.
 
-    This is an admin endpoint for manually expiring trials.
-
-    Requires admin privileges (TODO: add admin check).
+    Admin-only endpoint for manually expiring trials.
+    Requires env ADMIN_API_KEY or user with admin role.
     """
-    # TODO: Add admin role check
-
     result = PartnerTrialService.expire_partner_trial(target_user_id)
 
     if not result.get("success"):

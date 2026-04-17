@@ -239,45 +239,6 @@ class ResponseFormat(BaseModel):
     json_schema: dict[str, Any] | None = None
 
 
-class InputMessage(BaseModel):
-    """
-    Unified input message for v1/responses endpoint.
-    Supports multimodal input (text, images, etc.)
-    """
-
-    role: str
-    content: str | list[dict[str, Any]]  # String or multimodal content array
-
-
-class ResponseRequest(BaseModel):
-    """
-    Unified API request schema for v1/responses endpoint.
-    This is the newer, more flexible alternative to v1/chat/completions.
-    """
-
-    model: str
-    input: list[InputMessage]  # Replaces 'messages' in chat/completions
-    max_tokens: int | None = 4096
-    temperature: float | None = 1.0
-    top_p: float | None = 1.0
-    frequency_penalty: float | None = 0.0
-    presence_penalty: float | None = 0.0
-    stream: bool | None = False
-    tools: list[dict] | None = None  # Function calling tools
-    response_format: ResponseFormat | None = None
-    provider: str | None = None
-
-    class Config:
-        extra = "allow"
-
-    @field_validator("input")
-    @classmethod
-    def validate_input(cls, messages: list[InputMessage]) -> list[InputMessage]:
-        if not messages:
-            raise ValueError("input must contain at least one message.")
-        return messages
-
-
 # ============================================================================
 # Anthropic Messages API Schemas
 # Compatible with: https://platform.claude.com/docs/en/api/messages
@@ -555,70 +516,6 @@ class ToolDefinition(BaseModel):
         extra = "allow"
 
 
-class MessagesRequest(BaseModel):
-    """
-    Anthropic Messages API request schema (Claude API compatible).
-    Endpoint: POST /v1/messages
-
-    See: https://platform.claude.com/docs/en/api/messages
-
-    Key differences from OpenAI:
-    - Uses 'messages' array (like OpenAI) but 'system' is separate parameter
-    - 'max_tokens' is REQUIRED (not optional)
-    - Content can be string or array of content blocks
-    - No frequency_penalty or presence_penalty
-    - Supports tool use (function calling)
-    - Supports extended thinking configuration
-    """
-
-    # Required parameters
-    model: str  # e.g., "claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101"
-    messages: list[AnthropicMessage]
-    max_tokens: int  # REQUIRED for Anthropic API
-
-    # Optional parameters
-    system: str | list[SystemContentBlock] | None = None  # System prompt (string or content blocks)
-    temperature: float | None = 1.0  # 0.0 (analytical) to 1.0 (creative)
-    top_p: float | None = None  # Nucleus sampling (use instead of temperature)
-    top_k: int | None = None  # Sample from top K options
-    stop_sequences: list[str] | None = None  # Custom stop sequences
-    stream: bool | None = False  # Incrementally stream response
-    metadata: dict[str, Any] | None = None  # External identifier (user_id) for abuse detection
-    service_tier: Literal["auto", "standard_only"] | None = None  # Service tier selection
-
-    # Tool use parameters
-    tools: list[ToolDefinition | dict[str, Any]] | None = None  # Tool definitions
-    tool_choice: ToolChoice | dict[str, Any] | None = None  # Discriminated union by 'type' field
-
-    # Extended thinking configuration
-    thinking: ThinkingConfig | None = None
-
-    # Gateway-specific fields (not part of Anthropic API)
-    provider: str | None = None
-
-    class Config:
-        extra = "allow"
-
-    @field_validator("messages")
-    @classmethod
-    def validate_messages(cls, messages: list[AnthropicMessage]) -> list[AnthropicMessage]:
-        if not messages:
-            raise ValueError("messages must contain at least one message.")
-        return messages
-
-    @field_validator("max_tokens")
-    @classmethod
-    def validate_max_tokens(cls, max_tokens: int) -> int:
-        if max_tokens <= 0:
-            raise ValueError("max_tokens must be a positive integer.")
-        return max_tokens
-
-    @field_validator("temperature")
-    @classmethod
-    def validate_temperature(cls, temperature: float | None) -> float | None:
-        if temperature is not None and (temperature < 0.0 or temperature > 1.0):
-            raise ValueError("temperature must be between 0.0 and 1.0.")
-        return temperature
 
 
 # ============================================================================
@@ -679,27 +576,3 @@ class ToolUseBlockResponse(BaseModel):
         extra = "allow"
 
 
-class MessagesResponse(BaseModel):
-    """
-    Anthropic Messages API response schema.
-
-    See: https://platform.claude.com/docs/en/api/messages#response-format
-    """
-
-    id: str  # e.g., "msg_..."
-    type: Literal["message"] = "message"
-    role: Literal["assistant"] = "assistant"
-    model: str
-    content: list[TextBlockResponse | ThinkingBlockResponse | ToolUseBlockResponse | dict[str, Any]]
-    stop_reason: (
-        Literal["end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"]
-        | None
-    )
-    stop_sequence: str | None = None  # The stop sequence that was generated, if applicable
-    usage: UsageResponse
-
-    # Gateway-specific fields
-    gateway_usage: dict[str, Any] | None = None
-
-    class Config:
-        extra = "allow"

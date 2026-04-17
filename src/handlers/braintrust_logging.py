@@ -135,11 +135,7 @@ async def log_to_braintrust(
     braintrust_flush,
     **extra_metadata
 ) -> None:
-    """Log a chat completion or unified response span to Braintrust.
-
-    For chat completions, pass endpoint=None and messages=req.messages.
-    For unified responses, pass endpoint="/v1/responses" and messages=req.input.
-    """
+    """Log a chat completion span to Braintrust."""
     try:
         log_parts = [
             f"[Braintrust] Starting log for request_id={request_id}, model={model}",

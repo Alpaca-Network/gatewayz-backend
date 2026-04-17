@@ -710,6 +710,108 @@ async def lifespan(app):
         logger.warning(f"Failed to start scheduled model sync: {e}")
         # Don't fail startup if scheduled sync fails to start
 
+    # ---------------------------------------------------------------------------
+    # Additional startup work (migrated from @app.on_event("startup"))
+    # ---------------------------------------------------------------------------
+
+    # Validate full configuration (validate_critical_env_vars already ran above;
+    # Config.validate() checks additional fields and logs a summary)
+    try:
+        from src.config import Config as _Config
+        _Config.validate()
+        logger.info("  [OK] Configuration validated")
+    except Exception as e:
+        logger.warning(f"Configuration validation warning: {e}")
+
+    # Warn if admin key is missing in production (don't fail startup)
+    try:
+        import os as _os
+        from src.config import Config as _Config2
+        if _Config2.IS_PRODUCTION and not _os.environ.get("ADMIN_API_KEY"):
+            logger.warning(
+                "  [WARN] ADMIN_API_KEY is not set in production. "
+                "Admin endpoints will be inaccessible."
+            )
+    except Exception:
+        pass
+
+    # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
+    # Must run after OTel but before any LLM SDK calls
+    try:
+        from src.config.traceloop_config import initialize_traceloop
+
+        if initialize_traceloop():
+            logger.info("  [OK] Traceloop SDK (OpenLLMetry) initialized")
+        else:
+            logger.info("  [SKIP] Traceloop SDK not enabled or not available")
+    except ImportError:
+        logger.debug("  [SKIP] Traceloop SDK not installed")
+    except Exception as tl_e:
+        logger.warning(f"    Traceloop initialization warning: {tl_e}")
+
+    # Set default admin user in background (non-blocking)
+    async def _setup_admin_user_background():
+        try:
+            from src.config import Config as _Cfg
+            from src.config.supabase_config import get_supabase_client
+            from src.db.roles import UserRole, update_user_role
+
+            ADMIN_EMAIL = _Cfg.ADMIN_EMAIL
+            if not ADMIN_EMAIL:
+                logger.debug("ADMIN_EMAIL not configured - skipping admin setup")
+                return
+
+            client = get_supabase_client()
+            result = (
+                client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
+            )
+            if result.data:
+                user = result.data[0]
+                if user.get("role", "user") != UserRole.ADMIN:
+                    update_user_role(
+                        user_id=user["id"],
+                        new_role=UserRole.ADMIN,
+                        reason="Default admin setup on startup",
+                    )
+                    logger.info(f"   Set {ADMIN_EMAIL} as admin")
+                else:
+                    logger.debug(f"{ADMIN_EMAIL} is already admin")
+        except Exception as admin_e:
+            logger.warning(f"Admin setup warning: {admin_e}")
+
+    _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
+
+    # Initialize analytics services (Statsig, PostHog, Braintrust)
+    try:
+        logger.info("   Initializing analytics services...")
+
+        from src.services.statsig_service import statsig_service
+        await statsig_service.initialize()
+        logger.info("   Statsig analytics initialized")
+
+        from src.services.posthog_service import posthog_service
+        posthog_service.initialize()
+        logger.info("   PostHog analytics initialized")
+
+        try:
+            from src.services.braintrust_service import initialize_braintrust
+            if initialize_braintrust(project="Gatewayz Backend"):
+                logger.info("   Braintrust tracing initialized (async_flush=False)")
+            else:
+                logger.warning(
+                    "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
+                )
+        except Exception as bt_e:
+            logger.warning(f"    Braintrust initialization warning: {bt_e}")
+
+    except Exception as analytics_e:
+        logger.warning(f"    Analytics initialization warning: {analytics_e}")
+
+    logger.info("\n🎉 Application startup complete!")
+    logger.info(" API Documentation: http://localhost:8000/docs")
+    logger.info(" Health Check: http://localhost:8000/health")
+    logger.info(" Public Status Page: http://localhost:8000/v1/status\n")
+
     yield
 
     # Shutdown
@@ -790,6 +892,36 @@ async def lifespan(app):
             shutdown_pyroscope()
         except Exception as e:
             logger.warning(f"Pyroscope shutdown warning: {e}")
+
+        # Shutdown analytics services (migrated from @app.on_event("shutdown"))
+        try:
+            from src.services.statsig_service import statsig_service
+
+            await statsig_service.shutdown()
+            logger.info("Statsig shutdown complete")
+        except Exception as e:
+            logger.warning(f"    Statsig shutdown warning: {e}")
+
+        try:
+            from src.services.posthog_service import posthog_service
+
+            posthog_service.shutdown()
+            logger.info("PostHog shutdown complete")
+        except Exception as e:
+            logger.warning(f"    PostHog shutdown warning: {e}")
+
+        # Shutdown Traceloop SDK (OpenLLMetry)
+        try:
+            from src.config.traceloop_config import is_initialized
+            from src.config.traceloop_config import shutdown as traceloop_shutdown
+
+            if is_initialized():
+                traceloop_shutdown()
+                logger.info("Traceloop SDK shutdown complete")
+        except ImportError:
+            pass  # Traceloop not installed
+        except Exception as e:
+            logger.warning(f"    Traceloop shutdown warning: {e}")
 
         # Shutdown OpenTelemetry (Tempo tracing)
         try:

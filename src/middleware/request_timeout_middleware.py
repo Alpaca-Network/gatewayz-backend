@@ -23,10 +23,6 @@ DEFAULT_REQUEST_TIMEOUT = 55.0
 # Paths that are exempt from timeout enforcement (e.g., streaming endpoints, admin operations)
 TIMEOUT_EXEMPT_PATHS = [
     "/v1/chat/completions",  # OpenAI-compatible streaming
-    "/v1/messages",  # Anthropic Messages API streaming
-    # FREEZE FIX: Corrected AI SDK paths — actual routes are /api/chat/ai-sdk* not /ai-sdk/chat/*
-    "/api/chat/ai-sdk",  # AI SDK streaming (unified handler)
-    "/api/chat/ai-sdk-completions",  # AI SDK completions streaming
     "/admin/",  # Admin operations (model sync, background jobs)
     "/api/catalog",  # Model catalog fetches (can be slow)
     "/v1/models",  # Model listing (can be slow with many providers)

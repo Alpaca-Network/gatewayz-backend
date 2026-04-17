@@ -246,6 +246,15 @@ def _build_openrouter_pricing_index() -> dict[str, dict]:
     if _openrouter_pricing_index is not None:
         return _openrouter_pricing_index
 
+    # CRITICAL: when we're inside the catalog rebuild path, calling
+    # get_cached_models("openrouter") would re-enter transform_db_models_batch
+    # → _build_openrouter_pricing_index → … (infinite recursion through the
+    # rebuild lock). Skip the index build entirely; cross-reference lookups
+    # are already a no-op while building (see _get_cross_reference_pricing
+    # at the _is_building_catalog() guard) so an empty index is harmless.
+    if _is_building_catalog():
+        return {}
+
     index: dict[str, dict] = {}
     try:
         from src.services.models import get_cached_models
@@ -470,11 +479,12 @@ def _get_pricing_from_database(model_id: str) -> dict[str, str] | None:
 def get_all_pricing_batch() -> dict[str, dict]:
     """Fetch all model pricing in a single database query.
 
-    Returns a dict keyed by model_name with pricing sub-dicts so callers can
-    do O(1) lookups instead of issuing one Supabase HTTP call per model.
+    Returns a dict keyed by ``provider_model_id`` (the canonical API identifier
+    used as ``model["id"]`` in downstream catalog responses) so enrichment
+    callers can do O(1) lookups instead of one Supabase HTTP call per model.
 
     Returns:
-        {model_name: {"prompt": "...", "completion": "...", "request": "...", "image": "...", "source": "..."}}
+        {provider_model_id: {"prompt": "...", "completion": "...", "request": "...", "image": "...", "source": "..."}}
     """
     try:
         from src.config.supabase_config import get_supabase_client
@@ -491,7 +501,8 @@ def get_all_pricing_batch() -> dict[str, dict]:
             result = (
                 client.table("models")
                 .select(
-                    "model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)"
+                    "model_name, provider_model_id, metadata, "
+                    "model_pricing(price_per_input_token, price_per_output_token)"
                 )
                 .eq("is_active", True)
                 .range(offset, offset + page_size - 1)
@@ -509,11 +520,14 @@ def get_all_pricing_batch() -> dict[str, dict]:
 
         pricing_map: dict[str, dict] = {}
         for row in all_rows:
-            model_name = row.get("model_name")
-            if not model_name:
+            # Key by provider_model_id — the canonical API identifier used as
+            # `model["id"]` in every downstream catalog response. model_name is
+            # only a display label and is not unique, so it cannot be the key.
+            key = row.get("provider_model_id")
+            if not key:
                 continue
 
-            # Source 1: model_pricing JOIN (legacy table)
+            # Source 1: model_pricing JOIN (dedicated pricing table)
             mp = row.get("model_pricing")
             if mp and isinstance(mp, list) and len(mp) > 0:
                 mp = mp[0]
@@ -522,12 +536,12 @@ def get_all_pricing_batch() -> dict[str, dict]:
                 and isinstance(mp, dict)
                 and (mp.get("price_per_input_token") or mp.get("price_per_output_token"))
             ):
-                pricing_map[model_name] = {
+                pricing_map[key] = {
                     "prompt": validate_pricing_value(
-                        mp.get("price_per_input_token", 0), "prompt", model_name
+                        mp.get("price_per_input_token", 0), "prompt", key
                     ),
                     "completion": validate_pricing_value(
-                        mp.get("price_per_output_token", 0), "completion", model_name
+                        mp.get("price_per_output_token", 0), "completion", key
                     ),
                     "request": "0",
                     "image": "0",
@@ -535,7 +549,7 @@ def get_all_pricing_batch() -> dict[str, dict]:
                 }
                 continue
 
-            # Source 2: metadata.pricing_raw (primary sync path)
+            # Source 2: metadata.pricing_raw (inline sync path)
             metadata = row.get("metadata") or {}
             if isinstance(metadata, dict):
                 pricing_raw = metadata.get("pricing_raw") or metadata.get("pricing") or {}
@@ -543,18 +557,18 @@ def get_all_pricing_batch() -> dict[str, dict]:
                     pricing_raw.get("prompt") is not None
                     or pricing_raw.get("completion") is not None
                 ):
-                    pricing_map[model_name] = {
+                    pricing_map[key] = {
                         "prompt": validate_pricing_value(
-                            pricing_raw.get("prompt", 0), "prompt", model_name
+                            pricing_raw.get("prompt", 0), "prompt", key
                         ),
                         "completion": validate_pricing_value(
-                            pricing_raw.get("completion", 0), "completion", model_name
+                            pricing_raw.get("completion", 0), "completion", key
                         ),
                         "request": validate_pricing_value(
-                            pricing_raw.get("request", 0), "request", model_name
+                            pricing_raw.get("request", 0), "request", key
                         ),
                         "image": validate_pricing_value(
-                            pricing_raw.get("image", 0), "image", model_name
+                            pricing_raw.get("image", 0), "image", key
                         ),
                         "source": "metadata_batch",
                     }

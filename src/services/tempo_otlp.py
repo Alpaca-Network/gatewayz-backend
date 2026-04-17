@@ -154,7 +154,6 @@ def _should_trace_httpx_request(request) -> bool:
     # Skip tracing for provider streaming endpoints (these return SSE streams)
     streaming_patterns = [
         "/chat/completions",
-        "/v1/messages",
         "/v1/completions",
         "/v1/engines/",
     ]

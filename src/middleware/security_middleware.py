@@ -107,7 +107,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     STREAMING_PATHS = {
         "/v1/chat/completions",
         "/chat/completions",
-        "/v1/responses",
     }
 
     def __init__(self, app: ASGIApp, redis_client=None):

@@ -38,7 +38,7 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         Sampling strategy:
         - Development: 100% (all requests)
         - Health/metrics endpoints: 0% (skip monitoring endpoints)
-        - Critical endpoints: 20% (chat, messages)
+        - Critical endpoints: 20% (chat)
         - Other endpoints: 10%
         - Errors: Always sampled (parent_sampled)
         """
@@ -62,7 +62,7 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
             return 0.0
 
         # Critical inference endpoints: 20% sampling
-        if endpoint in ["/v1/chat/completions", "/v1/messages", "/v1/images/generations"]:
+        if endpoint in ["/v1/chat/completions", "/v1/images/generations"]:
             return 0.2
 
         # Admin endpoints: 50% sampling (important but lower volume)
@@ -213,16 +213,9 @@ def create_app() -> FastAPI:
     #   [8] Observability   — records Prometheus metrics / latency after routing
     #   [9] GZip            — compresses response bodies (innermost, last to touch body)
     #  [10] StagingSecurity — staging-env access gate (no-op in production)
-    #  [11] Deprecation     — appends deprecation warnings to responses (innermost)
     #
-    # Registration order below is therefore [11] → [1] (innermost first).
+    # Registration order below is therefore [10] → [1] (innermost first).
     # ---------------------------------------------------------------------------
-
-    # [11] Deprecation — innermost; appends deprecation headers/warnings
-    from src.middleware.deprecation import DeprecationMiddleware
-
-    app.add_middleware(DeprecationMiddleware)
-    logger.info("  ⚠️  [11] Deprecation middleware enabled (legacy endpoint warnings)")
 
     # [10] StagingSecurity — gates access to the staging environment
     from src.middleware.staging_security import StagingSecurityMiddleware
@@ -472,11 +465,10 @@ def create_app() -> FastAPI:
 
     # Define v1 routes (OpenAI-compatible API endpoints)
     # These routes are mounted under /v1 prefix via v1_router
-    # IMPORTANT: chat & messages must be before catalog to avoid /* being caught by /model/{provider}/{model}
+    # Single canonical inference endpoint: POST /v1/chat/completions
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
         ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
-        ("messages", "Anthropic Messages API"),  # Claude-compatible endpoint
         ("images", "Image Generation"),  # Image generation endpoints
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
@@ -495,7 +487,6 @@ def create_app() -> FastAPI:
         ("diagnostics", "Diagnostics API"),  # Real-time bottleneck diagnostics
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
-        ("ai_sdk", "Vercel AI SDK"),  # AI SDK compatibility endpoint
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
@@ -526,7 +517,7 @@ def create_app() -> FastAPI:
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links
-        ("ranking", "Model Ranking"),
+        # ("ranking", "Model Ranking"),  # Removed — feature deprecated
         ("activity", "Activity Tracking"),
         ("coupons", "Coupon Management"),
         ("referral", "Referral System"),
@@ -581,7 +572,7 @@ def create_app() -> FastAPI:
             failed_count += 1
 
             # For critical routes, log more details
-            if module_name in ["chat", "messages", "catalog", "health"]:
+            if module_name in ["chat", "catalog", "health"]:
                 logger.error(f"       [CRITICAL] Failed to load critical route: {module_name}")
 
         except AttributeError as e:
@@ -748,202 +739,8 @@ def create_app() -> FastAPI:
             headers={"X-Request-ID": request_id} if request_id else None,
         )
 
-    # ==================== Startup Event ====================
-
-    # In the on_startup event, add this after database initialization:
-
-    @app.on_event("startup")
-    async def on_startup():
-        logger.info("\n🔧 Initializing application...")
-
-        try:
-            # Initialize OpenTelemetry tracing
-            try:
-                from src.config.opentelemetry_config import OpenTelemetryConfig
-
-                init_result = OpenTelemetryConfig.initialize()
-                if init_result:
-                    OpenTelemetryConfig.instrument_fastapi(app)
-                    logger.info("  [OK] OpenTelemetry tracing initialized")
-                else:
-                    logger.warning(
-                        "  [WARN] OpenTelemetry initialization returned False - tracing disabled"
-                    )
-            except Exception as otel_e:
-                logger.warning(f"    OpenTelemetry initialization warning: {otel_e}", exc_info=True)
-
-            # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
-            # Must run after OTel but before any LLM SDK calls
-            try:
-                from src.config.traceloop_config import initialize_traceloop
-
-                if initialize_traceloop():
-                    logger.info("  [OK] Traceloop SDK (OpenLLMetry) initialized")
-                else:
-                    logger.info("  [SKIP] Traceloop SDK not enabled or not available")
-            except ImportError:
-                logger.debug("  [SKIP] Traceloop SDK not installed")
-            except Exception as tl_e:
-                logger.warning(f"    Traceloop initialization warning: {tl_e}")
-
-            # Validate configuration
-            logger.info("    Validating configuration...")
-            Config.validate()
-            logger.info("  [OK] Configuration validated")
-
-            # Warn if admin key is missing in production (don't fail startup)
-            if Config.IS_PRODUCTION and not os.environ.get("ADMIN_API_KEY"):
-                logger.warning(
-                    "  [WARN] ADMIN_API_KEY is not set in production. Admin endpoints will be inaccessible."
-                )
-                logger.warning(
-                    "        Set ADMIN_API_KEY environment variable to enable admin functionality."
-                )
-
-            # Initialize database
-            try:
-                logger.info("    Initializing database...")
-                from src.config.supabase_config import init_db
-
-                init_db()
-                logger.info("   Database initialized")
-
-            except Exception as db_e:
-                logger.warning(f"    Database initialization warning: {db_e}")
-
-            # Set default admin user in background (don't block startup)
-            async def setup_admin_user_background():
-                try:
-                    from src.config.supabase_config import get_supabase_client
-                    from src.db.roles import UserRole, update_user_role
-
-                    ADMIN_EMAIL = Config.ADMIN_EMAIL
-
-                    if not ADMIN_EMAIL:
-                        logger.debug("ADMIN_EMAIL not configured - skipping admin setup")
-                        return
-
-                    client = get_supabase_client()
-                    result = (
-                        client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
-                    )
-
-                    if result.data:
-                        user = result.data[0]
-                        current_role = user.get("role", "user")
-
-                        if current_role != UserRole.ADMIN:
-                            update_user_role(
-                                user_id=user["id"],
-                                new_role=UserRole.ADMIN,
-                                reason="Default admin setup on startup",
-                            )
-                            logger.info(f"   Set {ADMIN_EMAIL} as admin")
-                        else:
-                            logger.debug(f"{ADMIN_EMAIL} is already admin")
-
-                except Exception as admin_e:
-                    logger.warning(f"Admin setup warning: {admin_e}")
-
-            asyncio.create_task(setup_admin_user_background())
-
-            # Initialize analytics services (Statsig, PostHog, and Braintrust)
-            try:
-                logger.info("   Initializing analytics services...")
-
-                # Initialize Statsig
-                from src.services.statsig_service import statsig_service
-
-                await statsig_service.initialize()
-                logger.info("   Statsig analytics initialized")
-
-                # Initialize PostHog
-                from src.services.posthog_service import posthog_service
-
-                posthog_service.initialize()
-                logger.info("   PostHog analytics initialized")
-
-                # Initialize Braintrust tracing service
-                # Uses centralized service to ensure spans are properly associated with project
-                try:
-                    from src.services.braintrust_service import initialize_braintrust
-
-                    if initialize_braintrust(project="Gatewayz Backend"):
-                        logger.info("   Braintrust tracing initialized (async_flush=False)")
-                    else:
-                        logger.warning(
-                            "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
-                        )
-                except Exception as bt_e:
-                    logger.warning(f"    Braintrust initialization warning: {bt_e}")
-
-            except Exception as analytics_e:
-                logger.warning(f"    Analytics initialization warning: {analytics_e}")
-
-            # Cache warming is handled by preload_hot_models_cache() in lifespan
-            # and update_full_model_catalog_loop() background task.
-            # No additional cache warming needed here to avoid thread pool contention.
-            logger.info("  [OK] Cache warming delegated to lifespan background tasks")
-
-            # NOTE: Health monitoring is handled by the dedicated health-service container
-            # The main API reads health data from Redis cache populated by health-service
-            # See: health-service/main.py and DISABLE_ACTIVE_HEALTH_MONITORING env var
-            logger.info("   Health monitoring handled by dedicated health-service container")
-
-        except Exception as e:
-            logger.error(f"   Startup initialization failed: {e}")
-
-        logger.info("\n🎉 Application startup complete!")
-        logger.info(" API Documentation: http://localhost:8000/docs")
-        logger.info(" Health Check: http://localhost:8000/health")
-        logger.info(" Public Status Page: http://localhost:8000/v1/status\n")
-
-    # ==================== Shutdown Event ====================
-
-    @app.on_event("shutdown")
-    async def on_shutdown():
-        logger.info("🛑 Shutting down application...")
-
-        # NOTE: Health monitoring is handled by the dedicated health-service container
-        # No health monitor shutdown needed in main API
-        logger.info("   Health monitoring handled by health-service (no shutdown needed)")
-
-        # Shutdown OpenTelemetry
-        try:
-            from src.config.opentelemetry_config import OpenTelemetryConfig
-
-            OpenTelemetryConfig.shutdown()
-        except Exception as e:
-            logger.warning(f"    OpenTelemetry shutdown warning: {e}")
-
-        # Shutdown Traceloop SDK (OpenLLMetry) - only if available
-        try:
-            from src.config.traceloop_config import is_initialized
-            from src.config.traceloop_config import shutdown as traceloop_shutdown
-
-            if is_initialized():
-                traceloop_shutdown()
-        except ImportError:
-            pass  # Traceloop not installed
-        except Exception as e:
-            logger.warning(f"    Traceloop shutdown warning: {e}")
-
-        # Shutdown analytics services gracefully
-        try:
-            from src.services.statsig_service import statsig_service
-
-            await statsig_service.shutdown()
-            logger.info("   Statsig shutdown complete")
-        except Exception as e:
-            logger.warning(f"    Statsig shutdown warning: {e}")
-
-        try:
-            from src.services.posthog_service import posthog_service
-
-            posthog_service.shutdown()
-            logger.info("   PostHog shutdown complete")
-        except Exception as e:
-            logger.warning(f"    PostHog shutdown warning: {e}")
+    # Startup and shutdown lifecycle is managed by src/services/startup.py:lifespan,
+    # which is registered via FastAPI(lifespan=lifespan) above.
 
     return app
 

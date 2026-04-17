@@ -184,6 +184,21 @@ def enforce_model_failover_rules(
     aliased_model_id = apply_model_alias(model_id)
     normalized = aliased_model_id.lower()
 
+    # Check for OpenRouter-specific suffixes FIRST (:free, :exacto, :extended)
+    # These must be checked before native prefix rules — a model like
+    # "openai/gpt-oss-120b:free" has the openai/ prefix but is only available
+    # on OpenRouter (native OpenAI API returns 404 for open-weight :free models).
+    if ":" in normalized:
+        suffix = normalized.split(":", 1)[1]
+        if suffix in _OPENROUTER_SUFFIX_LOCKS and "openrouter" in provider_chain:
+            logger.info(
+                "Model '%s' has OpenRouter-specific suffix ':%s'; locking to OpenRouter "
+                "(takes priority over native provider prefix rules)",
+                model_id,
+                suffix,
+            )
+            return ["openrouter"]
+
     # Check for native provider prefixes (openai/, anthropic/)
     # These should try native provider first, then OpenRouter as fallback
     # IMPORTANT: These restrictions apply EVEN with payment failover enabled,
