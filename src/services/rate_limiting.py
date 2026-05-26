@@ -16,7 +16,7 @@ from typing import Any
 import redis
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
-from src.services.pyroscope_config import tag_wrapper
+from src.utils.profiling import tag_wrapper
 from src.services.rate_limiting_fallback import get_fallback_rate_limit_manager
 
 logger = logging.getLogger(__name__)

@@ -248,7 +248,7 @@ class ChatInferenceHandler:
         """
         from fastapi import HTTPException
 
-        from src.services.pyroscope_config import tag_wrapper
+        from src.utils.profiling import tag_wrapper
         from src.utils.error_factory import DetailedErrorFactory
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
@@ -390,7 +390,7 @@ class ChatInferenceHandler:
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
 
-        from src.services.pyroscope_config import tag_wrapper
+        from src.utils.profiling import tag_wrapper
         from src.utils.error_factory import DetailedErrorFactory
 
         try:

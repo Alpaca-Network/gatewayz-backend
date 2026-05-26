@@ -41,11 +41,10 @@ def _log_telemetry_startup_status() -> None:
 
     Signals covered
     ---------------
-    1. Pyroscope  — continuous CPU/memory profiling (push → self-hosted Pyroscope)
-    2. Loki       — structured log shipping (push → Grafana Loki)
-    3. Tempo      — distributed tracing via OTLP (push → Grafana Tempo)
-    4. Prometheus — metrics scrape endpoint + optional remote-write to Mimir
-    5. Sentry     — error monitoring + Sentry-side profiling
+    1. Loki       — structured log shipping (push → Grafana Loki)
+    2. Tempo      — distributed tracing via OTLP (push → Grafana Tempo)
+    3. Prometheus — metrics scrape endpoint + optional remote-write to Mimir
+    4. Sentry     — error monitoring + Sentry-side profiling
     """
     from src.config.config import Config
 
@@ -53,9 +52,6 @@ def _log_telemetry_startup_status() -> None:
 
     def _status(enabled: bool) -> str:
         return "ENABLED " if enabled else "DISABLED"
-
-    pyroscope_enabled = os.getenv("PYROSCOPE_ENABLED", "false").lower() == "true"
-    pyroscope_addr = os.getenv("PYROSCOPE_SERVER_ADDRESS", "").strip() or "(not set)"
 
     loki_enabled = Config.LOKI_ENABLED
     loki_push = Config.LOKI_PUSH_URL or "(not set)"
@@ -76,8 +72,6 @@ def _log_telemetry_startup_status() -> None:
         "=" * W,
         f"  {'Signal':<14} {'Status':<10} Detail",
         "  " + "-" * (W - 2),
-        f"  {'Pyroscope':<14} {_status(pyroscope_enabled):<10} server={pyroscope_addr}",
-        f"  {'  tags':<14} {'':10} service_name=gatewayz-backend | env={os.getenv('RAILWAY_ENVIRONMENT', 'local')} | endpoint+method+provider+model",
         f"  {'Loki':<14} {_status(loki_enabled):<10} push={loki_push}",
         f"  {'Tempo/OTLP':<14} {_status(tempo_enabled):<10} endpoint={tempo_endpoint}",
         f"  {'  service':<14} {'':10} otel_service_name={otel_service}",
@@ -88,8 +82,6 @@ def _log_telemetry_startup_status() -> None:
 
     # Highlight any signals that are enabled but missing a required endpoint
     warnings = []
-    if pyroscope_enabled and pyroscope_addr == "(not set)":
-        warnings.append("  WARN: PYROSCOPE_ENABLED=true but PYROSCOPE_SERVER_ADDRESS is not set")
     if loki_enabled and loki_push == "(not set)":
         warnings.append("  WARN: LOKI_ENABLED=true but LOKI_PUSH_URL is not set")
     if tempo_enabled and tempo_endpoint == "(not set)":
@@ -273,19 +265,6 @@ async def lifespan(app):
             init_tempo_otlp_fastapi(app)
         except Exception as e:
             logger.warning(f"FastAPI instrumentation warning: {e}")
-
-        # Initialize Pyroscope continuous profiling.
-        # Starts a background sampling thread that captures CPU/memory flamegraphs
-        # every 10 ms and pushes them to the self-hosted Pyroscope service every 15 s.
-        # Gated by PYROSCOPE_ENABLED=true — does nothing when the env var is absent,
-        # so local and test environments are never affected.
-        # Must run AFTER OTel instrumentation so the asyncio event loop is ready.
-        try:
-            from src.services.pyroscope_config import init_pyroscope
-
-            init_pyroscope()
-        except Exception as e:
-            logger.warning(f"Pyroscope initialisation warning: {e}")
 
         # Log a comprehensive telemetry status banner so Railway logs immediately
         # show which signals are active and which endpoints they push to.
@@ -871,16 +850,6 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
-
-        # Flush final Pyroscope profile data before the process exits.
-        # The sampler buffers ~15 s of flamegraph data in memory; without an
-        # explicit shutdown that data is lost when the container stops.
-        try:
-            from src.services.pyroscope_config import shutdown_pyroscope
-
-            shutdown_pyroscope()
-        except Exception as e:
-            logger.warning(f"Pyroscope shutdown warning: {e}")
 
         # Shutdown analytics services (migrated from @app.on_event("shutdown"))
         try:
