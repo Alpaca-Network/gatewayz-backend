@@ -781,7 +781,7 @@ async def lifespan(app):
 
     _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
 
-    # Initialize analytics services (Statsig, PostHog, Braintrust)
+    # Initialize analytics services (Statsig, PostHog)
     try:
         logger.info("   Initializing analytics services...")
 
@@ -792,17 +792,6 @@ async def lifespan(app):
         from src.services.posthog_service import posthog_service
         posthog_service.initialize()
         logger.info("   PostHog analytics initialized")
-
-        try:
-            from src.services.braintrust_service import initialize_braintrust
-            if initialize_braintrust(project="Gatewayz Backend"):
-                logger.info("   Braintrust tracing initialized (async_flush=False)")
-            else:
-                logger.warning(
-                    "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
-                )
-        except Exception as bt_e:
-            logger.warning(f"    Braintrust initialization warning: {bt_e}")
 
     except Exception as analytics_e:
         logger.warning(f"    Analytics initialization warning: {analytics_e}")

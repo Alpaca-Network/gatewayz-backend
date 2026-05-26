@@ -40,8 +40,6 @@ tiktoken>=0.7.0
 # Analytics
 statsig-python-core==0.10.2
 posthog==6.7.8
-# Braintrust pinned to prevent version resolution issues
-braintrust==0.1.0
 prometheus-client==0.21.0
 python-snappy==0.7.0
 protobuf==5.29.4
