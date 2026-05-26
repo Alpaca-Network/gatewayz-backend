@@ -24,6 +24,7 @@ from fastapi.responses import JSONResponse
 from src.config import Config
 from src.db.api_keys import increment_api_key_usage
 from src.db.users import deduct_credits, get_user, record_usage
+from src.security.inference_gates import enforce_subscription_status_gate
 from src.security.deps import get_api_key
 from src.services.connection_pool import get_openai_pooled_client
 from src.utils.ai_tracing import AIRequestType, AITracer
@@ -339,6 +340,8 @@ async def create_transcription(
             else:
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
+        enforce_subscription_status_gate(user)
+
         # Estimate duration from file size for pre-check
         estimated_duration = estimate_audio_duration_minutes(len(content), extension)
         estimated_cost, cost_per_minute, _ = get_audio_cost(model, estimated_duration)
@@ -597,6 +600,8 @@ async def create_transcription_base64(
                 }
             else:
                 raise HTTPException(status_code=401, detail="Invalid API key")
+
+        enforce_subscription_status_gate(user)
 
         # Estimate duration from file size for pre-check
         estimated_duration = estimate_audio_duration_minutes(len(content), extension)
