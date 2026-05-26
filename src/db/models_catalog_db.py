@@ -136,7 +136,7 @@ def get_model_by_id(model_id: int) -> dict[str, Any] | None:
         supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
-            .select("*, providers!inner(*)")
+            .select("*, providers!inner(id,slug,name,site_url,logo_url)")
             .eq("id", model_id)
             .single()
             .execute()
@@ -182,7 +182,7 @@ def get_models_by_provider_slug(
 
             query = (
                 supabase.table("models")
-                .select("*, providers!inner(*)")
+                .select("*, providers!inner(id,slug,name,site_url,logo_url)")
                 .eq("providers.slug", provider_slug)
             )
 
@@ -227,7 +227,7 @@ def get_model_by_provider_and_model_id(
         supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
-            .select("*, providers!inner(*)")
+            .select("*, providers!inner(id,slug,name,site_url,logo_url)")
             .eq("provider_id", provider_id)
             .eq("provider_model_id", provider_model_id)
             .single()
