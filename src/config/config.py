@@ -339,8 +339,8 @@ class Config:
     }
 
     # Tempo/OpenTelemetry OTLP Configuration
-    # Enabled by default for distributed tracing observability
-    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "true").lower() in {
+    # Hard-defaulted off as part of cost reduction; consumers no-op when false.
+    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "false").lower() in {
         "1",
         "true",
         "yes",
