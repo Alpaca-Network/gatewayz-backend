@@ -8,15 +8,21 @@ Implements IP-based rate limiting for authentication endpoints to prevent:
 - Password reset email bombing
 - API key creation abuse
 
-Uses sliding window algorithm with in-memory storage (with optional Redis support).
+Uses sliding window algorithm backed by Redis when available, with an in-memory
+fallback for unit tests / Redis-down scenarios.
+
+Previously held per-IP timestamp queues in process memory (O(n) iteration per
+check, GC pressure under high IP cardinality). Now delegates to the unified
+sliding window in `services.rate_limiting` with a dedicated key prefix.
 """
 
 import asyncio
 import logging
 import time
-from collections import defaultdict, deque
 from dataclasses import dataclass
 from enum import Enum
+
+from src.services.rate_limiting import sliding_window_check
 
 logger = logging.getLogger(__name__)
 
@@ -70,53 +76,107 @@ class AuthRateLimiter:
     """
     IP-based rate limiter for authentication endpoints.
 
-    Uses sliding window algorithm to track requests per IP address.
-    Thread-safe with asyncio lock.
+    Uses sliding window algorithm. Distributed (Redis) when available, otherwise
+    falls back to in-memory per-process state keyed by `(limit_type, identifier)`.
+    The in-memory fallback stores timestamps as plain `list[float]`.
     """
 
     def __init__(self, config: AuthRateLimitConfig = None):
         self.config = config or DEFAULT_AUTH_CONFIG
-        # Separate windows for each rate limit type
-        self.login_windows: dict[str, deque] = defaultdict(deque)
-        self.register_windows: dict[str, deque] = defaultdict(deque)
-        self.password_reset_windows: dict[str, deque] = defaultdict(deque)
-        self.api_key_create_windows: dict[str, deque] = defaultdict(deque)
+        # In-memory fallback: keyed by (limit_type.value, identifier) -> list of timestamps
+        self._local: dict[tuple[str, str], list[float]] = {}
         self.lock = asyncio.Lock()
 
-        # Periodic cleanup tracking
-        self._last_cleanup = time.time()
-        self._cleanup_interval = 300  # Clean up every 5 minutes
-
-    def _get_window_and_config(
-        self, limit_type: AuthRateLimitType
-    ) -> tuple[dict[str, deque], int, int]:
-        """Get the appropriate window dict, limit, and window size for a rate limit type."""
+    def _config_for(self, limit_type: AuthRateLimitType) -> tuple[int, int]:
+        """Return (limit, window_seconds) for a given action type."""
         if limit_type == AuthRateLimitType.LOGIN:
             return (
-                self.login_windows,
                 self.config.login_attempts_per_window,
                 self.config.login_window_seconds,
             )
-        elif limit_type == AuthRateLimitType.REGISTER:
+        if limit_type == AuthRateLimitType.REGISTER:
             return (
-                self.register_windows,
                 self.config.register_attempts_per_window,
                 self.config.register_window_seconds,
             )
-        elif limit_type == AuthRateLimitType.PASSWORD_RESET:
+        if limit_type == AuthRateLimitType.PASSWORD_RESET:
             return (
-                self.password_reset_windows,
                 self.config.password_reset_attempts_per_window,
                 self.config.password_reset_window_seconds,
             )
-        elif limit_type == AuthRateLimitType.API_KEY_CREATE:
+        if limit_type == AuthRateLimitType.API_KEY_CREATE:
             return (
-                self.api_key_create_windows,
                 self.config.api_key_create_attempts_per_window,
                 self.config.api_key_create_window_seconds,
             )
-        else:
-            raise ValueError(f"Unknown rate limit type: {limit_type}")
+        raise ValueError(f"Unknown rate limit type: {limit_type}")
+
+    @staticmethod
+    def _redis_key(limit_type: AuthRateLimitType, identifier: str) -> str:
+        return f"authrl:{limit_type.value}:{identifier}"
+
+    def _redis_available(self) -> bool:
+        try:
+            from src.config.redis_config import get_redis_client
+
+            return get_redis_client() is not None
+        except Exception:
+            return False
+
+    def _local_check(
+        self,
+        identifier: str,
+        limit_type: AuthRateLimitType,
+        record: bool,
+    ) -> AuthRateLimitResult:
+        """In-memory sliding window check. Called under self.lock."""
+        limit, window_seconds = self._config_for(limit_type)
+        bucket_key = (limit_type.value, identifier)
+        now = time.time()
+        cutoff = now - window_seconds
+
+        timestamps = self._local.get(bucket_key)
+        if timestamps is None:
+            timestamps = []
+            self._local[bucket_key] = timestamps
+
+        # Drop expired entries (in-place to avoid reallocation churn)
+        i = 0
+        for ts in timestamps:
+            if ts >= cutoff:
+                break
+            i += 1
+        if i:
+            del timestamps[:i]
+
+        count = len(timestamps)
+
+        if count >= limit:
+            oldest = timestamps[0]
+            retry_after = max(1, int(oldest + window_seconds - now) + 1)
+            logger.warning(
+                "Auth rate limit exceeded: type=%s, identifier=%s, count=%d, limit=%d",
+                limit_type.value,
+                self._mask_identifier(identifier),
+                count,
+                limit,
+            )
+            return AuthRateLimitResult(
+                allowed=False,
+                remaining=0,
+                retry_after=retry_after,
+                reason=f"{limit_type.value} rate limit exceeded",
+                limit_type=limit_type,
+            )
+
+        if record:
+            timestamps.append(now)
+
+        return AuthRateLimitResult(
+            allowed=True,
+            remaining=max(0, limit - count - (1 if record else 0)),
+            limit_type=limit_type,
+        )
 
     async def check_rate_limit(
         self,
@@ -133,42 +193,20 @@ class AuthRateLimiter:
         Returns:
             AuthRateLimitResult with allowed status and remaining attempts
         """
-        async with self.lock:
-            current_time = time.time()
+        limit, window_seconds = self._config_for(limit_type)
 
-            # Periodic cleanup of old entries
-            if current_time - self._last_cleanup > self._cleanup_interval:
-                await self._cleanup_all_windows(current_time)
-                self._last_cleanup = current_time
-
-            window, limit, window_seconds = self._get_window_and_config(limit_type)
-
-            # Clean up old entries for this identifier
-            cutoff_time = current_time - window_seconds
-            while window[identifier] and window[identifier][0] < cutoff_time:
-                window[identifier].popleft()
-
-            current_count = len(window[identifier])
-
-            if current_count >= limit:
-                # Calculate retry_after based on oldest entry in the window
-                # The oldest entry will expire first, freeing up a slot
-                if window[identifier]:
-                    oldest = window[identifier][0]
-                    retry_after = max(1, int(oldest + window_seconds - current_time) + 1)
-                else:
-                    # This branch shouldn't happen (count >= limit but empty window)
-                    # Use a short retry as a safe fallback
-                    retry_after = 60
-
+        if self._redis_available():
+            key = self._redis_key(limit_type, identifier)
+            allowed, remaining, retry_after = await asyncio.to_thread(
+                sliding_window_check, key, limit, window_seconds
+            )
+            if not allowed:
                 logger.warning(
-                    "Auth rate limit exceeded: type=%s, identifier=%s, count=%d, limit=%d",
+                    "Auth rate limit exceeded: type=%s, identifier=%s, limit=%d",
                     limit_type.value,
                     self._mask_identifier(identifier),
-                    current_count,
                     limit,
                 )
-
                 return AuthRateLimitResult(
                     allowed=False,
                     remaining=0,
@@ -176,37 +214,69 @@ class AuthRateLimiter:
                     reason=f"{limit_type.value} rate limit exceeded",
                     limit_type=limit_type,
                 )
-
-            # Record this request
-            window[identifier].append(current_time)
-
             return AuthRateLimitResult(
                 allowed=True,
-                remaining=limit - current_count - 1,
+                remaining=remaining,
                 limit_type=limit_type,
             )
 
-    async def _cleanup_all_windows(self, current_time: float):
-        """Clean up old entries from all windows."""
-        windows_config = [
-            (self.login_windows, self.config.login_window_seconds),
-            (self.register_windows, self.config.register_window_seconds),
-            (self.password_reset_windows, self.config.password_reset_window_seconds),
-            (self.api_key_create_windows, self.config.api_key_create_window_seconds),
-        ]
+        async with self.lock:
+            return self._local_check(identifier, limit_type, record=True)
 
-        for window, window_seconds in windows_config:
-            cutoff_time = current_time - window_seconds
-            # Remove empty entries
-            empty_keys = []
-            for key, timestamps in window.items():
-                while timestamps and timestamps[0] < cutoff_time:
-                    timestamps.popleft()
-                if not timestamps:
-                    empty_keys.append(key)
+    async def get_remaining(self, identifier: str, limit_type: AuthRateLimitType) -> int:
+        """Get remaining attempts for an identifier."""
+        limit, _ = self._config_for(limit_type)
 
-            for key in empty_keys:
-                del window[key]
+        if self._redis_available():
+            # Non-recording probe: read current count from Redis without inserting.
+            from src.config.redis_config import get_redis_client
+
+            try:
+                r = get_redis_client()
+                if r is None:
+                    raise RuntimeError("redis unavailable")
+                key = self._redis_key(limit_type, identifier)
+                _, window_seconds = self._config_for(limit_type)
+                now_ms = int(time.time() * 1000)
+                window_start = now_ms - window_seconds * 1000
+
+                def _probe():
+                    pipe = r.pipeline()
+                    pipe.zremrangebyscore(key, 0, window_start)
+                    pipe.zcard(key)
+                    return pipe.execute()
+
+                results = await asyncio.to_thread(_probe)
+                count = int(results[1])
+                return max(0, limit - count)
+            except Exception as e:
+                logger.warning("get_remaining: Redis probe failed (%s); using local", e)
+
+        async with self.lock:
+            result = self._local_check(identifier, limit_type, record=False)
+            return result.remaining if result.allowed else 0
+
+    async def reset(self, identifier: str, limit_type: AuthRateLimitType):
+        """Reset rate limit for an identifier (admin function)."""
+        if self._redis_available():
+            from src.config.redis_config import get_redis_client
+
+            try:
+                r = get_redis_client()
+                if r is not None:
+                    await asyncio.to_thread(r.delete, self._redis_key(limit_type, identifier))
+            except Exception as e:
+                logger.warning("reset: Redis delete failed (%s)", e)
+
+        async with self.lock:
+            bucket_key = (limit_type.value, identifier)
+            if bucket_key in self._local:
+                self._local[bucket_key].clear()
+                logger.info(
+                    "Rate limit reset: type=%s, identifier=%s",
+                    limit_type.value,
+                    self._mask_identifier(identifier),
+                )
 
     @staticmethod
     def _mask_identifier(identifier: str) -> str:
@@ -221,31 +291,6 @@ class AuthRateLimiter:
         if len(identifier) > 8:
             return f"{identifier[:8]}..."
         return identifier
-
-    async def get_remaining(self, identifier: str, limit_type: AuthRateLimitType) -> int:
-        """Get remaining attempts for an identifier."""
-        async with self.lock:
-            current_time = time.time()
-            window, limit, window_seconds = self._get_window_and_config(limit_type)
-
-            # Clean up old entries
-            cutoff_time = current_time - window_seconds
-            while window[identifier] and window[identifier][0] < cutoff_time:
-                window[identifier].popleft()
-
-            return max(0, limit - len(window[identifier]))
-
-    async def reset(self, identifier: str, limit_type: AuthRateLimitType):
-        """Reset rate limit for an identifier (admin function)."""
-        async with self.lock:
-            window, _, _ = self._get_window_and_config(limit_type)
-            if identifier in window:
-                window[identifier].clear()
-                logger.info(
-                    "Rate limit reset: type=%s, identifier=%s",
-                    limit_type.value,
-                    self._mask_identifier(identifier),
-                )
 
 
 # Global auth rate limiter instance
