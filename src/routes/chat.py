@@ -159,6 +159,11 @@ from src.services.health_routing import (
     should_use_health_based_routing,
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
+from src.security.inference_gates import (
+    enforce_anonymous_gate,
+    enforce_model_pricing_gate,
+    enforce_subscription_status_gate,
+)
 from src.services.pricing import calculate_cost_async, get_model_pricing_async, model_has_pricing
 from src.services.provider_failover import (
     build_provider_failover_chain,
@@ -1473,34 +1478,6 @@ async def chat_completions(
     # Determine if this is an authenticated or anonymous request
     is_anonymous = api_key is None
 
-    # Reject anonymous requests when the feature is disabled. Drops requests at the
-    # earliest point so they never hit DB writes, model lookups, or upstream providers.
-    if is_anonymous and not Config.ANONYMOUS_ENABLED:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "error": {
-                    "message": "Authentication required. Provide a valid API key in the Authorization header.",
-                    "type": "authentication_error",
-                    "code": "missing_api_key",
-                }
-            },
-        )
-
-    # Reject requests for models we cannot price. Unpriced models trigger upstream costs
-    # we cannot recover from users — historically the largest source of abuse traffic.
-    if Config.REQUIRE_MODEL_PRICING and not await _to_thread(model_has_pricing, req.model):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "error": {
-                    "message": f"Model '{req.model}' is not available for inference (no pricing configured).",
-                    "type": "invalid_request_error",
-                    "code": "model_not_priced",
-                }
-            },
-        )
-
     logger.info(
         "chat_completions start (request_id=%s, api_key=%s, model=%s, anonymous=%s)",
         request_id,
@@ -1508,6 +1485,15 @@ async def chat_completions(
         req.model,
         is_anonymous,
         extra={"request_id": request_id},
+    )
+
+    # Abuse-control gates (anonymous + unpriced models). Centralized helpers so
+    # /v1/images and /v1/audio can adopt the same policy.
+    enforce_anonymous_gate(is_anonymous, request_id=request_id, model_id=req.model)
+    await enforce_model_pricing_gate(
+        req.model,
+        request_id=request_id,
+        api_key_mask=mask_key(api_key) if api_key else "anonymous",
     )
 
     # Start Braintrust span for this request (uses logger.start_span() for project association)
@@ -1623,25 +1609,7 @@ async def chat_completions(
                     )
                     raise APIExceptions.invalid_api_key()
 
-                # Block users whose subscription_status is in the blocked list (expired/bot/etc).
-                # Catches abusers continuing to call the API after their trial ends.
-                sub_status = (user.get("subscription_status") or "").lower()
-                if sub_status in Config.BLOCKED_SUBSCRIPTION_STATUSES:
-                    logger.warning(
-                        "Blocking request from user_id=%s with subscription_status=%s",
-                        user.get("id"),
-                        sub_status,
-                    )
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "error": {
-                                "message": f"Your account ({sub_status}) is not permitted to make API calls. Please contact support or renew your subscription.",
-                                "type": "permission_error",
-                                "code": f"subscription_{sub_status}",
-                            }
-                        },
-                    )
+                enforce_subscription_status_gate(user, request_id=request_id)
 
                 # Track API key ID lookup results
                 if api_key_id is None:

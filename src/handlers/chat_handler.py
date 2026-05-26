@@ -33,7 +33,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
-from src.services.pricing import calculate_cost
+from src.services.pricing import calculate_cost, calculate_cost_split
 from src.services.provider_selector import get_selector
 
 logger = logging.getLogger(__name__)
@@ -551,6 +551,15 @@ class ChatInferenceHandler:
         """
         elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
 
+        # pricing_source enum (per migration 20260115000001):
+        # 'calculated' = computed from model_pricing on a successful billable call
+        # 'free'       = legitimate zero-cost call (e.g. OpenRouter :free models)
+        # Failed/errored requests inherit the DB default ('calculated') with cost=0.
+        if status == "completed":
+            pricing_source = "calculated" if cost_usd > 0 else "free"
+        else:
+            pricing_source = "calculated"  # DB default; tokens/cost will be 0
+
         save_kwargs = dict(
             request_id=self.request_id,
             model_name=model_name,
@@ -560,7 +569,7 @@ class ChatInferenceHandler:
             cost_usd=cost_usd,
             input_cost_usd=input_cost_usd,
             output_cost_usd=output_cost_usd,
-            pricing_source="calculated" if cost_usd > 0 else "error",
+            pricing_source=pricing_source,
             status=status,
             error_message=error_message,
             user_id=self.user.get("id") if self.user else None,
@@ -745,13 +754,9 @@ class ChatInferenceHandler:
 
             total_tokens = prompt_tokens + completion_tokens
 
-            # Step 5: Calculate cost
-            cost = await asyncio.to_thread(
-                calculate_cost, request.model, prompt_tokens, completion_tokens
-            )
-            input_cost = await asyncio.to_thread(calculate_cost, request.model, prompt_tokens, 0)
-            output_cost = await asyncio.to_thread(
-                calculate_cost, request.model, 0, completion_tokens
+            # Step 5: Calculate cost (single pricing lookup, returns split)
+            cost, input_cost, output_cost = await asyncio.to_thread(
+                calculate_cost_split, request.model, prompt_tokens, completion_tokens
             )
 
             logger.debug(
@@ -1039,12 +1044,8 @@ class ChatInferenceHandler:
                 )
 
             # Step 7: Calculate cost and charge user after stream completes
-            cost = await asyncio.to_thread(
-                calculate_cost, request.model, prompt_tokens, completion_tokens
-            )
-            input_cost = await asyncio.to_thread(calculate_cost, request.model, prompt_tokens, 0)
-            output_cost = await asyncio.to_thread(
-                calculate_cost, request.model, 0, completion_tokens
+            cost, input_cost, output_cost = await asyncio.to_thread(
+                calculate_cost_split, request.model, prompt_tokens, completion_tokens
             )
 
             logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")

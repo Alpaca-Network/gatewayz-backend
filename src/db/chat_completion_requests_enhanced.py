@@ -190,14 +190,18 @@ def backfill_request_costs(limit: int = 1000, offset: int = 0) -> dict[str, Any]
     try:
         client = get_supabase_client()
 
-        # Get requests without cost data
+        # Get requests without cost data. Catches both legacy NULL rows AND rows
+        # written with cost_usd=0 by the old broken save path (before the cost-tracking
+        # fix in chat_handler.py:529). Only successful, token-bearing rows qualify —
+        # zero-token rows or failed rows legitimately have cost=0.
         result = (
             client.table("chat_completion_requests")
             .select(
                 "request_id, model_id, input_tokens, output_tokens, models(pricing_prompt, pricing_completion)"
             )
-            .is_("cost_usd", "null")
+            .or_("cost_usd.is.null,cost_usd.eq.0")
             .eq("status", "completed")
+            .gt("input_tokens", 0)
             .range(offset, offset + limit - 1)
             .execute()
         )

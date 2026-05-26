@@ -126,9 +126,15 @@ class Config:
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
     # Subscription statuses that may NOT call the API (comma-separated).
+    # Includes both American (Stripe) and British spellings of cancel*, plus all
+    # Stripe failure states: past_due (charge failed), unpaid (multiple failures),
+    # incomplete_expired (initial payment never confirmed).
     BLOCKED_SUBSCRIPTION_STATUSES = {
         s.strip().lower()
-        for s in os.environ.get("BLOCKED_SUBSCRIPTION_STATUSES", "expired,bot,cancelled,suspended").split(",")
+        for s in os.environ.get(
+            "BLOCKED_SUBSCRIPTION_STATUSES",
+            "expired,bot,canceled,cancelled,suspended,past_due,unpaid,incomplete_expired",
+        ).split(",")
         if s.strip()
     }
 

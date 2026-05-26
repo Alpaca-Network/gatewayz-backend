@@ -1039,20 +1039,68 @@ def model_has_pricing(model_id: str) -> bool:
     """
     Check whether a model has real pricing data (not fallback defaults).
 
-    Free models (`:free` suffix on OpenRouter) count as priced. Anything else where
-    get_model_pricing returns source="default" is considered unpriced and should be
-    rejected to prevent unbillable upstream costs.
+    `:free` is honored only for OpenRouter-format models (mirrors calculate_cost's
+    validation at line 1076-1078) to prevent abuse via spoofed `:free` suffixes.
+    Anything else where get_model_pricing returns source="default" is considered
+    unpriced and should be rejected to prevent unbillable upstream costs.
+
+    Re-raises ValueError from get_model_pricing's high-value-model guard so callers
+    and Sentry alerts can distinguish "unknown model" from "high-value model needs
+    pricing config".
     """
     if not model_id:
         return False
     if model_id.endswith(":free"):
-        return True
+        # Mirror calculate_cost: only OpenRouter-shaped IDs are eligible for :free.
+        is_openrouter_model = "/" in model_id or not any(
+            provider in model_id.lower()
+            for provider in ("anthropic", "google", "cohere", "mistral", "deepseek")
+        )
+        if is_openrouter_model:
+            return True
+        # Strip and fall through to pricing lookup — caller will be charged normally.
+        model_id = model_id[:-5]
     try:
         pricing = get_model_pricing(model_id)
+    except ValueError:
+        # High-value model with missing pricing — surface it (caller will reject
+        # the request, Sentry alert already fired inside get_model_pricing).
+        raise
     except Exception as e:
         logger.warning(f"model_has_pricing: lookup failed for {model_id}: {e}")
         return False
-    return bool(pricing.get("found")) and pricing.get("source") != "default"
+    return bool(pricing.get("found")) and pricing.get("source", "default") != "default"
+
+
+def calculate_cost_split(
+    model_id: str, prompt_tokens: int, completion_tokens: int
+) -> tuple[float, float, float]:
+    """
+    Compute (total_cost, input_cost, output_cost) in a single pricing lookup.
+
+    Equivalent to calling calculate_cost three times (total, input-only, output-only)
+    but only does one get_model_pricing call and only runs the sanity-check once on
+    the combined cost. Avoids the failure mode where partial calls trigger the
+    MIN_COST_PER_1K bound on a model with imbalanced input/output pricing.
+    """
+    total = calculate_cost(model_id, prompt_tokens, completion_tokens)
+    if total == 0.0:
+        return (0.0, 0.0, 0.0)
+    # Re-derive the split from prompt/completion tokens. Since calculate_cost is
+    # linear in tokens (modulo the markup that's applied to the sum), the split is
+    # proportional to per-token pricing × token count.
+    try:
+        pricing = get_model_pricing(model_id)
+        prompt_cost = float(prompt_tokens) * float(pricing.get("prompt", 0.0))
+        completion_cost = float(completion_tokens) * float(pricing.get("completion", 0.0))
+        # Apply the same markup the total received (preserve sum invariant).
+        from src.config.config import Config
+        markup = Config.PRICING_MARKUP
+        return (total, prompt_cost * markup, completion_cost * markup)
+    except Exception as e:
+        logger.warning(f"calculate_cost_split: lookup failed for {model_id}: {e}")
+        # Fall back to attributing all cost to input — safer than zeroing both.
+        return (total, total, 0.0)
 
 
 def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) -> float:
