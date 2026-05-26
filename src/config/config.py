@@ -120,6 +120,18 @@ class Config:
         "yes",
     }
 
+    # Abuse / Cost Controls
+    # Anonymous (unauthenticated) inference is off by default. Set to "true" to allow.
+    ANONYMOUS_ENABLED = os.environ.get("ANONYMOUS_ENABLED", "false").lower() in {"1", "true", "yes"}
+    # Reject inference requests for models without a row in model_pricing.
+    REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
+    # Subscription statuses that may NOT call the API (comma-separated).
+    BLOCKED_SUBSCRIPTION_STATUSES = {
+        s.strip().lower()
+        for s in os.environ.get("BLOCKED_SUBSCRIPTION_STATUSES", "expired,bot,cancelled,suspended").split(",")
+        if s.strip()
+    }
+
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY")

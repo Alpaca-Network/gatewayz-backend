@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator
 
 from fastapi import Request
 
-from src.db.chat_completion_requests import save_chat_completion_request
+from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
 from src.db.users import deduct_credits, get_user, record_usage
 from src.schemas.internal.chat import (
     InternalChatRequest,
@@ -534,6 +534,9 @@ class ChatInferenceHandler:
         output_tokens: int,
         status: str = "completed",
         error_message: str | None = None,
+        cost_usd: float = 0.0,
+        input_cost_usd: float = 0.0,
+        output_cost_usd: float = 0.0,
     ) -> None:
         """
         Log request metadata to chat_completion_requests table.
@@ -548,39 +551,29 @@ class ChatInferenceHandler:
         """
         elapsed_ms = int((time.monotonic() - self.start_time) * 1000)
 
-        # Save as background task if available
+        save_kwargs = dict(
+            request_id=self.request_id,
+            model_name=model_name,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            processing_time_ms=elapsed_ms,
+            cost_usd=cost_usd,
+            input_cost_usd=input_cost_usd,
+            output_cost_usd=output_cost_usd,
+            pricing_source="calculated" if cost_usd > 0 else "error",
+            status=status,
+            error_message=error_message,
+            user_id=self.user.get("id") if self.user else None,
+            provider_name=provider_name,
+            model_id=None,
+            api_key_id=self.user.get("key_id") if self.user else None,
+            is_anonymous=self.is_anonymous,
+        )
+
         if self.background_tasks:
-            self.background_tasks.add_task(
-                save_chat_completion_request,
-                request_id=self.request_id,
-                model_name=model_name,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                processing_time_ms=elapsed_ms,
-                status=status,
-                error_message=error_message,
-                user_id=self.user.get("id") if self.user else None,
-                provider_name=provider_name,
-                model_id=None,  # Will be looked up in save function
-                api_key_id=self.user.get("key_id") if self.user else None,
-                is_anonymous=self.is_anonymous,
-            )
+            self.background_tasks.add_task(save_chat_completion_request_with_cost, **save_kwargs)
         else:
-            # Synchronous save if no background tasks
-            save_chat_completion_request(
-                request_id=self.request_id,
-                model_name=model_name,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                processing_time_ms=elapsed_ms,
-                status=status,
-                error_message=error_message,
-                user_id=self.user.get("id") if self.user else None,
-                provider_name=provider_name,
-                model_id=None,
-                api_key_id=self.user.get("key_id") if self.user else None,
-                is_anonymous=self.is_anonymous,
-            )
+            save_chat_completion_request_with_cost(**save_kwargs)
 
         logger.debug(
             f"[ChatHandler] Saved request record: request_id={self.request_id}, "
@@ -776,6 +769,9 @@ class ChatInferenceHandler:
                 input_tokens=prompt_tokens,
                 output_tokens=completion_tokens,
                 status="completed",
+                cost_usd=cost,
+                input_cost_usd=input_cost,
+                output_cost_usd=output_cost,
             )
 
             # Step 8: Return InternalChatResponse with all metadata
@@ -1046,6 +1042,10 @@ class ChatInferenceHandler:
             cost = await asyncio.to_thread(
                 calculate_cost, request.model, prompt_tokens, completion_tokens
             )
+            input_cost = await asyncio.to_thread(calculate_cost, request.model, prompt_tokens, 0)
+            output_cost = await asyncio.to_thread(
+                calculate_cost, request.model, 0, completion_tokens
+            )
 
             logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
 
@@ -1058,6 +1058,9 @@ class ChatInferenceHandler:
                 input_tokens=prompt_tokens,
                 output_tokens=completion_tokens,
                 status="completed",
+                cost_usd=cost,
+                input_cost_usd=input_cost,
+                output_cost_usd=output_cost,
             )
 
             logger.info(

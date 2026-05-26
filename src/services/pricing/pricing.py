@@ -1035,6 +1035,26 @@ async def get_model_pricing_async(model_id: str) -> dict[str, float]:
         return {"prompt": 0.00002, "completion": 0.00002, "found": False, "source": "default"}
 
 
+def model_has_pricing(model_id: str) -> bool:
+    """
+    Check whether a model has real pricing data (not fallback defaults).
+
+    Free models (`:free` suffix on OpenRouter) count as priced. Anything else where
+    get_model_pricing returns source="default" is considered unpriced and should be
+    rejected to prevent unbillable upstream costs.
+    """
+    if not model_id:
+        return False
+    if model_id.endswith(":free"):
+        return True
+    try:
+        pricing = get_model_pricing(model_id)
+    except Exception as e:
+        logger.warning(f"model_has_pricing: lookup failed for {model_id}: {e}")
+        return False
+    return bool(pricing.get("found")) and pricing.get("source") != "default"
+
+
 def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) -> float:
     """
     Calculate the total cost for a chat completion based on model pricing
