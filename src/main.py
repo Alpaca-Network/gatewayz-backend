@@ -72,19 +72,22 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         # All other endpoints: 10% sampling
         return 0.1
 
-    sentry_sdk.init(
-        dsn=Config.SENTRY_DSN,
-        # Add data like request headers and IP for users
-        send_default_pii=True,
-        # Set environment (development, staging, production)
-        environment=Config.SENTRY_ENVIRONMENT,
-        # Release tracking for Sentry release management
-        release=Config.SENTRY_RELEASE,
-        # Adaptive sampling function (replaces static traces_sample_rate)
-        traces_sampler=sentry_traces_sampler,
-        # Reduced profiling: 5% (down from default)
-        profiles_sample_rate=0.05,
+    _on_vercel = bool(os.getenv("VERCEL"))
+    _profiles_rate = (
+        0.0 if _on_vercel else float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.05"))
     )
+    _sentry_init_kwargs = {
+        "dsn": Config.SENTRY_DSN,
+        "send_default_pii": True,
+        "environment": Config.SENTRY_ENVIRONMENT,
+        "release": Config.SENTRY_RELEASE,
+        "profiles_sample_rate": _profiles_rate,
+    }
+    if _on_vercel:
+        _sentry_init_kwargs["traces_sample_rate"] = 0.0
+    else:
+        _sentry_init_kwargs["traces_sampler"] = sentry_traces_sampler
+    sentry_sdk.init(**_sentry_init_kwargs)
     logger.info(
         f"✅ Sentry initialized with adaptive sampling "
         f"(environment: {Config.SENTRY_ENVIRONMENT}, release: {Config.SENTRY_RELEASE})"
