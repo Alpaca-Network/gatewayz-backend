@@ -63,62 +63,30 @@ except ImportError:
 from src.adapters.chat import OpenAIChatAdapter
 
 # Unified chat handler and adapters for chat unification
-from src.handlers.braintrust_logging import log_to_braintrust
 from src.handlers.chat_handler import ChatInferenceHandler
 from src.handlers.error_persistence import save_failed_request
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
-# Braintrust tracing - use centralized service for proper project association
-# The key fix is using logger.start_span() instead of standalone start_span()
-try:
-    # Import traced decorator from braintrust SDK for route decoration
-    from braintrust import traced
 
-    from src.services.braintrust_service import (
-        NoopSpan,
-        create_span,
-    )
-    from src.services.braintrust_service import flush as braintrust_flush
-    from src.services.braintrust_service import is_available as check_braintrust_available
 
-    # Wrapper to maintain backward compatibility with existing code
-    def start_span(name=None, span_type=None, **kwargs):
-        """Create a span using the centralized service."""
-        return create_span(name=name, span_type=span_type or "llm", **kwargs)
+# Braintrust removed for cost reduction (see docs/superpowers/specs/2026-05-25-cost-reduction-design.md)
+def traced(*args, **kwargs):
+    if args and callable(args[0]):
+        return args[0]
 
-    BRAINTRUST_AVAILABLE = True
-except ImportError:
-    BRAINTRUST_AVAILABLE = False
+    def _wrap(fn):
+        return fn
 
-    def check_braintrust_available():
-        return False
+    return _wrap
 
-    # Create no-op decorators and functions when braintrust is not available
-    def traced(name=None, type=None):
-        def decorator(func):
-            return func
 
-        return decorator
+def check_braintrust_available():
+    return False
 
-    class NoopSpan:
-        def log(self, *args, **kwargs):
-            pass
 
-        def end(self):
-            pass
-
-    # Alias for backward compatibility
-    MockSpan = NoopSpan
-
-    def start_span(name=None, span_type=None, **kwargs):
-        return NoopSpan()
-
-    def current_span():
-        return NoopSpan()
-
-    def braintrust_flush():
-        pass
+def braintrust_flush():
+    return None
 
 
 # Import provider registry from canonical module (breaks circular dep with chat_handler.py)
@@ -1496,8 +1464,6 @@ async def chat_completions(
         api_key_mask=mask_key(api_key) if api_key else "anonymous",
     )
 
-    # Start Braintrust span for this request (uses logger.start_span() for project association)
-    span = start_span(name=f"chat_{req.model}", span_type="llm")
 
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
@@ -3151,27 +3117,6 @@ async def chat_completions(
                 processed["routing_metadata"] = routing_metadata
             except Exception as e:
                 logger.debug(f"Failed to attach code routing metadata: {e}")
-
-        # === 7) Log to Braintrust ===
-        await log_to_braintrust(
-            span=span,
-            messages=req.messages,
-            processed_response=processed,
-            model=model,
-            provider=provider,
-            user=user,
-            trial=trial,
-            session_id=session_id,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            elapsed=elapsed,
-            cost=cost,
-            request_id=request_id,
-            endpoint=None,
-            check_braintrust_available=check_braintrust_available,
-            braintrust_flush=braintrust_flush,
-        )
 
         # Capture health metrics (passive monitoring) - run as background task
         background_tasks.add_task(

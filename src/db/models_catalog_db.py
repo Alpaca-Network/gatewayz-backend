@@ -136,7 +136,7 @@ def get_model_by_id(model_id: int) -> dict[str, Any] | None:
         supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
-            .select("*, providers!inner(*)")
+            .select("*, providers!inner(id,slug,name,site_url,logo_url)")
             .eq("id", model_id)
             .single()
             .execute()
@@ -182,7 +182,7 @@ def get_models_by_provider_slug(
 
             query = (
                 supabase.table("models")
-                .select("*, providers!inner(*)")
+                .select("*, providers!inner(id,slug,name,site_url,logo_url)")
                 .eq("providers.slug", provider_slug)
             )
 
@@ -227,7 +227,7 @@ def get_model_by_provider_and_model_id(
         supabase = get_client_for_query(read_only=True)
         response = (
             supabase.table("models")
-            .select("*, providers!inner(*)")
+            .select("*, providers!inner(id,slug,name,site_url,logo_url)")
             .eq("provider_id", provider_id)
             .eq("provider_model_id", provider_model_id)
             .single()
@@ -1117,6 +1117,25 @@ def get_all_models_for_catalog(include_inactive: bool = False) -> list[dict[str,
         >>> len(models)
         11432  # All active models from all providers (not limited to 1000)
     """
+    # Active-only catalog reads hit the shared Redis-backed full catalog cache
+    # (TTL_FULL_CATALOG = 15 min). The include_inactive=True path is rare,
+    # admin-scoped, and bypasses the cache to avoid polluting it.
+    if not include_inactive:
+        try:
+            from src.services.cache.model_catalog_cache import (
+                cache_full_catalog,
+                get_cached_full_catalog,
+            )
+
+            cached = get_cached_full_catalog()
+            if cached is not None:
+                return cached
+        except Exception as e:
+            logger.debug(f"Catalog cache lookup failed, falling through to DB: {e}")
+            cache_full_catalog = None  # type: ignore[assignment]
+    else:
+        cache_full_catalog = None  # type: ignore[assignment]
+
     step_logger = StepLogger("Database: Fetch All Models", total_steps=2)
     step_logger.start(table="models", include_inactive=include_inactive)
 
@@ -1188,6 +1207,12 @@ def get_all_models_for_catalog(include_inactive: bool = False) -> list[dict[str,
         step_logger.complete(
             total_models=len(all_models), table="models", include_inactive=include_inactive
         )
+
+        if cache_full_catalog is not None and all_models:
+            try:
+                cache_full_catalog(all_models)
+            except Exception as cache_err:
+                logger.debug(f"Catalog cache set failed (non-fatal): {cache_err}")
 
         return all_models
 

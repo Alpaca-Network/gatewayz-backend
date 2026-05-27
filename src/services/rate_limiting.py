@@ -16,7 +16,7 @@ from typing import Any
 import redis
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
-from src.services.pyroscope_config import tag_wrapper
+from src.utils.profiling import tag_wrapper
 from src.services.rate_limiting_fallback import get_fallback_rate_limit_manager
 
 logger = logging.getLogger(__name__)
@@ -847,6 +847,58 @@ async def get_rate_limit_status(api_key: str, config: RateLimitConfig) -> dict[s
     """Get rate limit status for API key"""
     limiter = get_rate_limiter()
     return await limiter.get_rate_limit_status(api_key, config)
+
+
+def sliding_window_check(
+    key: str, limit: int, window_seconds: int
+) -> tuple[bool, int, int | None]:
+    """Redis-backed sliding window primitive.
+
+    Returns:
+        (allowed, remaining, retry_after_seconds)
+        retry_after_seconds is None when allowed.
+        Fails open (allowed=True, remaining=limit) if Redis is unavailable.
+    """
+    from src.config.redis_config import get_redis_client
+
+    try:
+        r = get_redis_client()
+    except Exception as e:
+        logger.warning("sliding_window_check: Redis client unavailable (%s); failing open", e)
+        return True, limit, None
+
+    if r is None:
+        return True, limit, None
+
+    now_ms = int(time.time() * 1000)
+    window_ms = window_seconds * 1000
+    window_start = now_ms - window_ms
+
+    try:
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(key, 0, window_start)
+        pipe.zcard(key)
+        results = pipe.execute()
+        count = int(results[1])
+
+        if count >= limit:
+            oldest = r.zrange(key, 0, 0, withscores=True)
+            if oldest:
+                _, oldest_ts = oldest[0]
+                retry_after = max(1, int((oldest_ts + window_ms - now_ms) / 1000) + 1)
+            else:
+                retry_after = window_seconds
+            return False, 0, retry_after
+
+        pipe = r.pipeline()
+        pipe.zadd(key, {f"{now_ms}:{count}": now_ms})
+        pipe.expire(key, window_seconds + 1)
+        pipe.execute()
+
+        return True, max(0, limit - count - 1), None
+    except Exception as e:
+        logger.warning("sliding_window_check: Redis op failed (%s); failing open", e)
+        return True, limit, None
 
 
 PREMIUM_CONFIG = RateLimitConfig(

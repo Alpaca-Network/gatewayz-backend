@@ -43,7 +43,7 @@ except ImportError:
 import redis
 
 from src.config.redis_config import get_redis_client, is_redis_available
-from src.services.pyroscope_config import tag_wrapper
+from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 

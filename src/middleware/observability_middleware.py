@@ -32,9 +32,7 @@ from src.services.prometheus_metrics import (
     record_http_response,
 )
 
-# Pyroscope tag_wrapper is imported lazily inside __call__ via pyroscope_config
-# so the middleware can be loaded even when pyroscope-io is not installed.
-from src.services.pyroscope_config import tag_wrapper as _pyroscope_tag_wrapper
+from src.utils.profiling import tag_wrapper as _pyroscope_tag_wrapper
 
 logger = logging.getLogger(__name__)
 

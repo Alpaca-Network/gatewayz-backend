@@ -24,7 +24,6 @@ from src.services.prometheus_remote_write import (
     shutdown_prometheus_remote_write,
 )
 from src.services.response_cache import get_cache
-from src.services.tempo_otlp import init_tempo_otlp_fastapi
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +40,9 @@ def _log_telemetry_startup_status() -> None:
 
     Signals covered
     ---------------
-    1. Pyroscope  — continuous CPU/memory profiling (push → self-hosted Pyroscope)
-    2. Loki       — structured log shipping (push → Grafana Loki)
-    3. Tempo      — distributed tracing via OTLP (push → Grafana Tempo)
-    4. Prometheus — metrics scrape endpoint + optional remote-write to Mimir
-    5. Sentry     — error monitoring + Sentry-side profiling
+    1. Loki       — structured log shipping (push → Grafana Loki)
+    2. Prometheus — metrics scrape endpoint + optional remote-write to Mimir
+    3. Sentry     — error monitoring + Sentry-side profiling
     """
     from src.config.config import Config
 
@@ -54,15 +51,8 @@ def _log_telemetry_startup_status() -> None:
     def _status(enabled: bool) -> str:
         return "ENABLED " if enabled else "DISABLED"
 
-    pyroscope_enabled = os.getenv("PYROSCOPE_ENABLED", "false").lower() == "true"
-    pyroscope_addr = os.getenv("PYROSCOPE_SERVER_ADDRESS", "").strip() or "(not set)"
-
     loki_enabled = Config.LOKI_ENABLED
     loki_push = Config.LOKI_PUSH_URL or "(not set)"
-
-    tempo_enabled = Config.TEMPO_ENABLED
-    tempo_endpoint = Config.TEMPO_OTLP_HTTP_ENDPOINT or "(not set)"
-    otel_service = Config.OTEL_SERVICE_NAME
 
     prometheus_enabled = Config.PROMETHEUS_ENABLED
     prom_remote_write = Config.PROMETHEUS_REMOTE_WRITE_URL or "(not set)"
@@ -76,11 +66,7 @@ def _log_telemetry_startup_status() -> None:
         "=" * W,
         f"  {'Signal':<14} {'Status':<10} Detail",
         "  " + "-" * (W - 2),
-        f"  {'Pyroscope':<14} {_status(pyroscope_enabled):<10} server={pyroscope_addr}",
-        f"  {'  tags':<14} {'':10} service_name=gatewayz-backend | env={os.getenv('RAILWAY_ENVIRONMENT', 'local')} | endpoint+method+provider+model",
         f"  {'Loki':<14} {_status(loki_enabled):<10} push={loki_push}",
-        f"  {'Tempo/OTLP':<14} {_status(tempo_enabled):<10} endpoint={tempo_endpoint}",
-        f"  {'  service':<14} {'':10} otel_service_name={otel_service}",
         f"  {'Prometheus':<14} {_status(prometheus_enabled):<10} scrape=/metrics | remote_write={prom_remote_write}",
         f"  {'Sentry':<14} {_status(sentry_enabled):<10} env={sentry_env}",
         "  " + "-" * (W - 2),
@@ -88,12 +74,8 @@ def _log_telemetry_startup_status() -> None:
 
     # Highlight any signals that are enabled but missing a required endpoint
     warnings = []
-    if pyroscope_enabled and pyroscope_addr == "(not set)":
-        warnings.append("  WARN: PYROSCOPE_ENABLED=true but PYROSCOPE_SERVER_ADDRESS is not set")
     if loki_enabled and loki_push == "(not set)":
         warnings.append("  WARN: LOKI_ENABLED=true but LOKI_PUSH_URL is not set")
-    if tempo_enabled and tempo_endpoint == "(not set)":
-        warnings.append("  WARN: TEMPO_ENABLED=true but TEMPO_OTLP_HTTP_ENDPOINT is not set")
 
     for w in warnings:
         lines.append(w)
@@ -267,84 +249,11 @@ async def lifespan(app):
         # No manual initialization needed - removed legacy initialize_fal_cache_from_catalog() call
         logger.debug("Fal.ai cache will initialize on-demand via Redis")
 
-        # Initialize FastAPI instrumentation synchronously (must complete before serving)
-        # This instruments middleware which cannot be safely modified after app starts
-        try:
-            init_tempo_otlp_fastapi(app)
-        except Exception as e:
-            logger.warning(f"FastAPI instrumentation warning: {e}")
-
-        # Initialize Pyroscope continuous profiling.
-        # Starts a background sampling thread that captures CPU/memory flamegraphs
-        # every 10 ms and pushes them to the self-hosted Pyroscope service every 15 s.
-        # Gated by PYROSCOPE_ENABLED=true — does nothing when the env var is absent,
-        # so local and test environments are never affected.
-        # Must run AFTER OTel instrumentation so the asyncio event loop is ready.
-        try:
-            from src.services.pyroscope_config import init_pyroscope
-
-            init_pyroscope()
-        except Exception as e:
-            logger.warning(f"Pyroscope initialisation warning: {e}")
-
         # Log a comprehensive telemetry status banner so Railway logs immediately
         # show which signals are active and which endpoints they push to.
         # This makes it trivial to spot misconfiguration (missing env vars, etc.)
         # without having to trace through individual service init log lines.
         _log_telemetry_startup_status()
-
-        # Initialize Tempo/OpenTelemetry OTLP exporter in background with retry
-        # Uses exponential backoff to handle Railway timing issues where Tempo
-        # may not be ready when the backend starts
-        async def init_tempo_exporter_background():
-            from src.config.opentelemetry_config import OpenTelemetryConfig
-
-            max_retries = 5
-            base_delay = 2.0  # Start with 2 seconds
-
-            for attempt in range(1, max_retries + 1):
-                try:
-                    # Check if already initialized (e.g., via on_startup event)
-                    if OpenTelemetryConfig._initialized:
-                        logger.info("Tempo/OTLP tracing already initialized")
-                        return
-
-                    success = OpenTelemetryConfig.initialize()
-                    if success:
-                        logger.info(
-                            f"Tempo/OTLP tracing initialized (attempt {attempt}/{max_retries})"
-                        )
-                        return
-                    else:
-                        # Initialization returned False (endpoint not reachable, etc.)
-                        if attempt < max_retries:
-                            delay = base_delay * (2 ** (attempt - 1))  # Exponential backoff
-                            logger.info(
-                                f"Tempo/OTLP initialization attempt {attempt}/{max_retries} failed, "
-                                f"retrying in {delay:.1f}s..."
-                            )
-                            await asyncio.sleep(delay)
-                        else:
-                            logger.warning(
-                                f"Tempo/OTLP initialization failed after {max_retries} attempts. "
-                                f"Tracing will be disabled. Use POST /api/instrumentation/otel/initialize "
-                                f"to manually retry."
-                            )
-                except Exception as e:
-                    if attempt < max_retries:
-                        delay = base_delay * (2 ** (attempt - 1))
-                        logger.warning(
-                            f"Tempo/OTLP initialization attempt {attempt}/{max_retries} error: {e}, "
-                            f"retrying in {delay:.1f}s..."
-                        )
-                        await asyncio.sleep(delay)
-                    else:
-                        logger.warning(
-                            f"Tempo/OTLP initialization failed after {max_retries} attempts: {e}. "
-                            f"Use POST /api/instrumentation/otel/initialize to manually retry."
-                        )
-
-        _create_background_task(init_tempo_exporter_background(), name="init_tempo_exporter")
 
         # Initialize Arize OTEL for LLM observability in background
         async def init_arize_background():
@@ -781,7 +690,7 @@ async def lifespan(app):
 
     _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
 
-    # Initialize analytics services (Statsig, PostHog, Braintrust)
+    # Initialize analytics services (Statsig, PostHog)
     try:
         logger.info("   Initializing analytics services...")
 
@@ -792,17 +701,6 @@ async def lifespan(app):
         from src.services.posthog_service import posthog_service
         posthog_service.initialize()
         logger.info("   PostHog analytics initialized")
-
-        try:
-            from src.services.braintrust_service import initialize_braintrust
-            if initialize_braintrust(project="Gatewayz Backend"):
-                logger.info("   Braintrust tracing initialized (async_flush=False)")
-            else:
-                logger.warning(
-                    "   Braintrust tracing not available (check BRAINTRUST_API_KEY)"
-                )
-        except Exception as bt_e:
-            logger.warning(f"    Braintrust initialization warning: {bt_e}")
 
     except Exception as analytics_e:
         logger.warning(f"    Analytics initialization warning: {analytics_e}")
@@ -882,16 +780,6 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
-
-        # Flush final Pyroscope profile data before the process exits.
-        # The sampler buffers ~15 s of flamegraph data in memory; without an
-        # explicit shutdown that data is lost when the container stops.
-        try:
-            from src.services.pyroscope_config import shutdown_pyroscope
-
-            shutdown_pyroscope()
-        except Exception as e:
-            logger.warning(f"Pyroscope shutdown warning: {e}")
 
         # Shutdown analytics services (migrated from @app.on_event("shutdown"))
         try:

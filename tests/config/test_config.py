@@ -281,8 +281,8 @@ class TestConfigMonitoring:
 
         assert config.Config.PROMETHEUS_SCRAPE_ENABLED is True
 
-    def test_tempo_enabled_by_default(self, monkeypatch):
-        """Test Tempo is enabled by default when env var is not set"""
+    def test_tempo_disabled_by_default(self, monkeypatch):
+        """Test Tempo is disabled by default (cost reduction)."""
         from src.config import config
 
         monkeypatch.delenv("TEMPO_ENABLED", raising=False)
@@ -290,8 +290,7 @@ class TestConfigMonitoring:
 
         importlib.reload(config)
 
-        # Default in config.py is "true" when TEMPO_ENABLED is unset
-        assert config.Config.TEMPO_ENABLED is True
+        assert config.Config.TEMPO_ENABLED is False
 
     def test_tempo_enabled(self, monkeypatch):
         """Test Tempo can be enabled"""

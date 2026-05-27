@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any
 
-from src.services.pyroscope_config import tag_wrapper
+from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 

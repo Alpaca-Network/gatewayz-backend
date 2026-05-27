@@ -16,17 +16,18 @@ redis==5.0.1
 anyio>=4.0.0  # Updated: FastAPI 0.115+ supports anyio 4.x
 stripe==13.0.1
 tenacity==8.2.3
-google-cloud-aiplatform==1.62.0
 google-auth==2.28.0
 
 # Provider SDKs - Pinned to specific versions to prevent pip backtracking
-# Clarifai requires fsspec==2024.6.1, which conflicts with huggingface-hub's looser constraint
 fsspec==2024.6.1
 cerebras-cloud-sdk==1.0.0
-# Clarifai pinned to avoid backtracking through 50+ versions (issue: complex dependency tree with fsspec, rich, schema)
-clarifai==11.1.0
-huggingface-hub==0.23.0
-novita-client==0.5.0
+
+# Heavy provider SDKs — install via `pip install -e .[providers]` for Railway/full deploy.
+# Excluded from base requirements to keep Vercel bundle small.
+# google-cloud-aiplatform==1.62.0
+# clarifai==11.1.0
+# huggingface-hub==0.23.0
+# novita-client==0.5.0
 
 # tiktoken - Accurate BPE token counting for billing (recommended, graceful fallback if absent)
 # Significantly improves streaming token estimation accuracy when providers don't return usage data.
@@ -40,8 +41,6 @@ tiktoken>=0.7.0
 # Analytics
 statsig-python-core==0.10.2
 posthog==6.7.8
-# Braintrust pinned to prevent version resolution issues
-braintrust==0.1.0
 prometheus-client==0.21.0
 python-snappy==0.7.0
 protobuf==5.29.4
@@ -49,11 +48,6 @@ sentry-sdk[fastapi]>=2.20.0
 
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
-
-# Continuous profiling — pushes CPU/memory flamegraphs to Grafana Cloud Pyroscope.
-# Requires PYROSCOPE_ENABLED=true + PYROSCOPE_SERVER_ADDRESS env vars (see pyroscope_config.py).
-# If the package is absent the profiler silently stays disabled; nothing else breaks.
-pyroscope-io>=0.8.7
 
 # OpenTelemetry - Pinned to prevent dependency resolution backtracking
 # packaging==24.0 (removed)

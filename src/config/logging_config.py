@@ -379,9 +379,15 @@ def configure_logging() -> bool:
     Returns:
         bool: True if Loki integration was enabled, False otherwise
     """
+    import os
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    _default_level = "WARNING" if _env == "production" else "INFO"
+    _level_name = os.getenv("LOG_LEVEL", _default_level).upper()
+    _level = getattr(logging, _level_name, logging.INFO)
+
     # Get root logger
     root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(_level)
 
     # Clear existing handlers
     root_logger.handlers.clear()
@@ -392,7 +398,7 @@ def configure_logging() -> bool:
 
     # Console handler (always enabled)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(_level)
 
     # Use simple format for console in development, JSON in production
     if Config.IS_DEVELOPMENT:
