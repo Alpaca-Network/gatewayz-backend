@@ -14,6 +14,7 @@ from src.db.model_health import record_model_call
 from src.db.users import deduct_credits, get_user, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
+from src.security.inference_gates import enforce_subscription_status_gate
 from src.services.providers.fal_image_client import make_fal_image_request
 from src.services.providers.image_generation_client import (
     make_deepinfra_image_request,
@@ -251,6 +252,11 @@ async def generate_images(
                     }
                 else:
                     raise HTTPException(status_code=401, detail="Invalid API key")
+
+            # Block expired/canceled/past_due/etc users (uses image-specific pricing).
+            # TODO: model_has_pricing covers chat models only; add image-pricing variant
+            # before enabling REQUIRE_MODEL_PRICING here.
+            enforce_subscription_status_gate(user, request_id=request_id)
 
             # Validate prompt
             if not isinstance(req.prompt, str) or not req.prompt.strip():

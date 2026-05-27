@@ -127,7 +127,12 @@ from src.services.health_routing import (
     should_use_health_based_routing,
 )
 from src.services.model_transformations import detect_provider_from_model_id, transform_model_id
-from src.services.pricing import calculate_cost_async, get_model_pricing_async
+from src.security.inference_gates import (
+    enforce_anonymous_gate,
+    enforce_model_pricing_gate,
+    enforce_subscription_status_gate,
+)
+from src.services.pricing import calculate_cost_async, get_model_pricing_async, model_has_pricing
 from src.services.provider_failover import (
     build_provider_failover_chain,
     enforce_model_failover_rules,
@@ -1450,6 +1455,16 @@ async def chat_completions(
         extra={"request_id": request_id},
     )
 
+    # Abuse-control gates (anonymous + unpriced models). Centralized helpers so
+    # /v1/images and /v1/audio can adopt the same policy.
+    enforce_anonymous_gate(is_anonymous, request_id=request_id, model_id=req.model)
+    await enforce_model_pricing_gate(
+        req.model,
+        request_id=request_id,
+        api_key_mask=mask_key(api_key) if api_key else "anonymous",
+    )
+
+
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
 
@@ -1559,6 +1574,8 @@ async def chat_completions(
                         "Invalid API key or user not found for key %s", mask_key(api_key)
                     )
                     raise APIExceptions.invalid_api_key()
+
+                enforce_subscription_status_gate(user, request_id=request_id)
 
                 # Track API key ID lookup results
                 if api_key_id is None:
