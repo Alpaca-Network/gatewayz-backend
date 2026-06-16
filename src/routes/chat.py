@@ -193,33 +193,6 @@ def log_activity(*args, **kwargs):
     return activity_module.log_activity(*args, **kwargs)
 
 
-def validate_and_adjust_max_tokens(optional: dict, model: str) -> None:
-    """
-    Validate and adjust max_tokens for models with minimum token requirements.
-
-    Google Gemini models require max_tokens >= 16. This function automatically
-    adjusts the value if it's below the minimum to prevent API errors.
-
-    Args:
-        optional: Dictionary of optional parameters (modified in-place)
-        model: The model ID being used
-    """
-    if "max_tokens" not in optional or optional["max_tokens"] is None:
-        return
-
-    model_lower = model.lower()
-
-    # Check if this is a Gemini model that requires min tokens >= 16
-    if "gemini" in model_lower or "google" in model_lower:
-        min_tokens = 16
-        if optional["max_tokens"] < min_tokens:
-            logger.warning(
-                f"Adjusting max_tokens from {optional['max_tokens']} to {min_tokens} "
-                f"for Gemini model {model} (minimum requirement)"
-            )
-            optional["max_tokens"] = min_tokens
-
-
 def get_provider_from_model(*args, **kwargs):
     return activity_module.get_provider_from_model(*args, **kwargs)
 
@@ -255,36 +228,6 @@ AUTO_ROUTE_MODEL_PREFIX = "router"
 
 # Code router constants
 CODE_ROUTER_PREFIX = "router:code"
-
-
-def _get_auto_route_default_model() -> str:
-    from src.db.system_config import get_config
-
-    return get_config("auto_route_default_model", "openai/gpt-4o-mini")
-
-
-def _get_code_router_default_model() -> str:
-    from src.db.system_config import get_config
-
-    return get_config("code_router_default_model", "zai/glm-4.7")
-
-
-def mask_key(k: str) -> str:
-    return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
-
-
-def is_free_model(model_id: str) -> bool:
-    """Check if the model is a free model (OpenRouter free models end with :free suffix).
-
-    Args:
-        model_id: The model identifier (e.g., "google/gemini-2.0-flash-exp:free")
-
-    Returns:
-        True if the model is free, False otherwise
-    """
-    if not model_id:
-        return False
-    return model_id.endswith(":free")
 
 
 def validate_trial_with_free_model_bypass(
@@ -378,10 +321,6 @@ def validate_trial_with_free_model_bypass(
     return trial
 
 
-async def _to_thread(func, *args, **kwargs):
-    return await asyncio.to_thread(func, *args, **kwargs)
-
-
 # Post-processing functions extracted to src/handlers/post_processing.py
 # Re-exported here so existing patches at src.routes.chat.* continue to work.
 from src.handlers.post_processing import (  # noqa: F401
@@ -390,6 +329,14 @@ from src.handlers.post_processing import (  # noqa: F401
     _handle_credits_and_usage_with_fallback,
     _process_stream_completion_background,
     _record_inference_metrics_and_health,
+)
+from src.routes.chat_helpers import (  # noqa: F401
+    _get_auto_route_default_model,
+    _get_code_router_default_model,
+    _to_thread,
+    is_free_model,
+    mask_key,
+    validate_and_adjust_max_tokens,
 )
 
 
