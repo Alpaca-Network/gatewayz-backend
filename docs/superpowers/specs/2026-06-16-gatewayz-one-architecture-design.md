@@ -147,12 +147,28 @@ Enablement becomes `providers.tier` + `is_active`, seeded once — not code.
 
 Net: ~31 routable entries → ~13 active real providers; the rest one DB flag away; tooling removed.
 
+## 8.1 Architecture cleanup (bounded)
+
+The cleanup is **enlarged beyond the provider layer to exactly the debt the unification cuts through** — and no further. Scope test: "are we already editing this to deliver the new architecture?"
+
+**In scope (rides along with Phase 0–1; measured against current tree):**
+- **Decompose `chat.py` (3,291 lines)** — inference, history injection, web search, and persistence are tangled in one route. The canonical contract + handler split breaks it into focused units (gateway → router → dispatch → context → settle).
+- **Thin the fat provider clients** (`google_vertex` 1,784, `simplismart` 699, `cloudflare_workers_ai` 688, `nosana` 676, `alibaba_cloud` 603…) into adapters implementing only `{request, stream, process}`; pricing/health/routing logic moves out.
+- **Collapse the 5 rate-limit modules** (`anonymous_rate_limiter`, `auth_rate_limiting`, `endpoint_rate_limiter`, `rate_limiting`, `rate_limiting_fallback`) into one limiter owned by the edge gateway.
+- **Finish de-hardcoding** — retire `manual_pricing.json` (referenced across ~11 files) and `DEFAULT_*_MODELS` constants in favor of the DB registry + projection.
+- **Purge the zombie trial system** — "removed," yet `trial` is still referenced across ~57 files. Pure dead weight; delete on the Phase 0 low-risk pass.
+
+**Out of scope (the unification does not touch these — leave alone to avoid an infinite refactor):**
+- Observability stack internals (the 12 metrics services / 7 health monitors) beyond wiring them as the events sink.
+- Pydantic schema redesign beyond de-duplicating obviously overlapping models.
+- Any subsystem not on the control/data-plane path.
+
 ## 9. Build order — each phase is its own spec → plan → implementation
 
 | Phase | Sub-project | Unlocks | Risk |
 |---|---|---|---|
-| **0** | **Canonical contract + adapter interface** — one request/response schema; collapse provider clients to thin `{request,stream,process}` adapters; delete tooling-as-providers | everything | low (no behavior change) |
-| **1** | **Registry & projection** — DB source of truth, retire `ENABLED_PROVIDERS`, seed tiers, Redis projection + sync pipeline; provider cleanup | router, multi-region | med |
+| **0** | **Canonical contract + adapter interface** — one request/response schema; collapse provider clients to thin `{request,stream,process}` adapters; delete tooling-as-providers; **decompose `chat.py`**; **purge zombie trial code** (§8.1) | everything | low (no behavior change) |
+| **1** | **Registry & projection** — DB source of truth, retire `ENABLED_PROVIDERS`, seed tiers, Redis projection + sync pipeline; provider cleanup; **collapse 5 rate-limiters → 1**; **finish de-hardcoding** (§8.1) | router, multi-region | med |
 | **2** | **Smart Router policy engine** — scored candidate ranking + margin floor + failover chain | profitability, smart routing | med |
 | **3** | **Billing ledger + reconciliation** — optimistic reserve → async settle → double-entry ledger | profitable at scale | high (money) |
 | **4** | **Context & Memory service** — thread store + user memory + budgeted injection | cross-chat context | med |
