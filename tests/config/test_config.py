@@ -171,7 +171,6 @@ class TestConfigProviderKeys:
             "NEAR_API_KEY": "near_key",
             "VERCEL_AI_GATEWAY_API_KEY": "vercel_key",
             "HELICONE_API_KEY": "helicone_key",
-            "AI_SDK_API_KEY": "ai_sdk_key",
             "AIHUBMIX_API_KEY": "aihubmix_key",
             "FAL_API_KEY": "fal_key",
             "ANANNAS_API_KEY": "anannas_key",

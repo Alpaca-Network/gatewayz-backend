@@ -209,9 +209,6 @@ class Config:
     # Helicone AI Gateway Configuration
     HELICONE_API_KEY = os.environ.get("HELICONE_API_KEY")
 
-    # Vercel AI SDK Configuration
-    AI_SDK_API_KEY = os.environ.get("AI_SDK_API_KEY")
-
     # AiHubMix Configuration
     AIHUBMIX_API_KEY = os.environ.get("AIHUBMIX_API_KEY")
     AIHUBMIX_APP_CODE = os.environ.get("AIHUBMIX_APP_CODE")

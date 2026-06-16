@@ -25,9 +25,6 @@ os.environ.setdefault(
 os.environ.setdefault("ADMIN_API_KEY", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 os.environ.setdefault("ENCRYPTION_KEY", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 os.environ.setdefault(
-    "AI_SDK_API_KEY", "sk-xxx-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-)
-os.environ.setdefault(
     "STRIPE_SECRET_KEY", "sk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 )
 os.environ.setdefault(
