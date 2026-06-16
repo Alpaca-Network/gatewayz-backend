@@ -46,6 +46,8 @@ Comprehensive check of Sentry and Railway logs for backend errors in the last 24
 
 ### Issue #1: Unsafe `.data[0]` Access Patterns - **CRITICAL SEVERITY** 🔴
 
+> **⚠️ CORRECTION (added 2026-06-16):** The root-cause analysis below is **factually wrong**. In Python an empty list `[]` is **falsy**, not truthy — so `if result.data:` does **not** enter its body when `.data == []`; it skips it, which already prevents the `IndexError`. The original `if result.data: value = result.data[0]` pattern was therefore already safe for the empty-result case. The `and len(result.data) > 0` additions made here are **logically redundant** (`if x and len(x) > 0` ≡ `if x` for any list `x`) — harmless, but noise. The "29 additional files to audit" backlog (Issue #3B) rests on the same incorrect premise and should be treated as a **non-issue**; do not run further `and len() > 0` sweeps for empty-result safety. A *genuinely* unsafe shape is a bare `result.data[0]` with **no** preceding `if result.data:` guard — a 2026-06-16 audit of all 167 `.data[0]` sites found exactly one such case (`src/db/coupons.py`, since fixed). The later report `BACKEND_ERRORS_CHECK_2026-01-02.md` already states the correct fact (`[]` is falsy).
+
 **Discovery Method**: Comprehensive codebase analysis via search agent
 
 **Problem**:
