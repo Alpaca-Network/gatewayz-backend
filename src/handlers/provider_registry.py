@@ -14,6 +14,8 @@ import logging
 
 from fastapi import HTTPException
 
+from src.services.providers.base import ProviderRouting
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -250,7 +252,7 @@ globals().update(_loaded_functions)
 
 # Provider routing registry - maps provider names (with hyphens) to their functions.
 # This eliminates the need for massive if-elif chains (~750 lines reduced to ~50 lines).
-PROVIDER_ROUTING = {
+PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     "featherless": {
         "request": _loaded_functions.get("make_featherless_request_openai"),
         "process": _loaded_functions.get("process_featherless_response"),
