@@ -128,6 +128,8 @@ def get_audio_cost(model: str, duration_minutes: float) -> tuple[float, float, b
             f"cost_per_minute={cost_per_minute}"
         )
 
+    # Apply the standard cost-plus markup (same revenue margin as chat).
+    cost_per_minute = cost_per_minute * Config.PRICING_MARKUP
     total_cost = cost_per_minute * duration_minutes
     return total_cost, cost_per_minute, is_fallback
 

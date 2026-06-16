@@ -114,8 +114,12 @@ def get_image_cost(
     config_result = get_image_pricing(provider, model)
     if config_result is not None:
         config_price, config_is_fallback = config_result
-        total_cost = config_price * num_images
-        return total_cost, config_price, config_is_fallback
+        # Apply the standard cost-plus markup (same revenue margin as chat).
+        cost_per_image = config_price * Config.PRICING_MARKUP
+        total_cost = cost_per_image * num_images
+        # 4-tuple to match the documented signature and the call sites that
+        # unpack 4 values; config prices are flat per-image (resolution mult 1.0).
+        return total_cost, cost_per_image, config_is_fallback, 1.0
 
     # --- Tier 2+: hardcoded fallback (deprecated) ---
     logger.warning(
@@ -151,7 +155,8 @@ def get_image_cost(
     else:
         resolution_multiplier = DEFAULT_RESOLUTION_MULTIPLIER
 
-    cost_per_image = base_cost_per_image * resolution_multiplier
+    # Apply the standard cost-plus markup (same revenue margin as chat).
+    cost_per_image = base_cost_per_image * resolution_multiplier * Config.PRICING_MARKUP
     total_cost = cost_per_image * num_images
     return total_cost, cost_per_image, is_fallback, resolution_multiplier
 
