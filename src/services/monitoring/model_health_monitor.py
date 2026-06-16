@@ -11,33 +11,18 @@ import os
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from enum import Enum
 from typing import Any
 
 from src.config import Config
+from src.models.health_models import HealthStatus, ProviderStatus
 from src.utils.sentry_context import capture_model_health_error
 
 logger = logging.getLogger(__name__)
 
 
-class HealthStatus(str, Enum):  # noqa: UP042
-    """Health status enumeration"""
-
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    UNHEALTHY = "unhealthy"
-    UNKNOWN = "unknown"
-    MAINTENANCE = "maintenance"
-
-
-class ProviderStatus(str, Enum):  # noqa: UP042
-    """Provider status enumeration"""
-
-    ONLINE = "online"
-    OFFLINE = "offline"
-    DEGRADED = "degraded"
-    MAINTENANCE = "maintenance"
-    UNKNOWN = "unknown"
+# HealthStatus and ProviderStatus are now the single canonical definitions in
+# src.models.health_models (imported above). The byte-identical local copies
+# that used to live here were removed to eliminate enum drift.
 
 
 @dataclass
