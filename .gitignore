@@ -6,6 +6,9 @@ venv
 .idea
 .claude
 
+# graphify-generated knowledge graph (large; regenerate with /graphify)
+graphify-out/
+
 # GCP credentials - NEVER commit these!
 .secrets/
 *-service-account.json
