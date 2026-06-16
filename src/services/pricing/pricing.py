@@ -1069,7 +1069,23 @@ def model_has_pricing(model_id: str) -> bool:
     except Exception as e:
         logger.warning(f"model_has_pricing: lookup failed for {model_id}: {e}")
         return False
-    return bool(pricing.get("found")) and pricing.get("source", "default") != "default"
+    if not pricing.get("found") or pricing.get("source", "default") == "default":
+        return False
+    # A "priced" row whose prompt AND completion are both 0 is not real pricing:
+    # serving it means paying the upstream provider while billing the user $0.
+    # Genuine free models are handled by the :free branch above and, at the
+    # admission gate, by an explicit is_free exemption — so reaching here with
+    # $0 indicates a misconfigured PAID model and must be rejected.
+    prompt_price = float(pricing.get("prompt", 0) or 0)
+    completion_price = float(pricing.get("completion", 0) or 0)
+    if prompt_price == 0 and completion_price == 0:
+        logger.warning(
+            "model_has_pricing: %s has a pricing row but both prompt and completion "
+            "prices are 0 — treating as unpriced (refusing to serve a paid model for free).",
+            model_id,
+        )
+        return False
+    return True
 
 
 def calculate_cost_split(
