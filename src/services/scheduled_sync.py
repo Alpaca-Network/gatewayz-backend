@@ -27,6 +27,11 @@ logger = logging.getLogger(__name__)
 # Global scheduler instance
 _scheduler: AsyncIOScheduler | None = None
 
+# Separate scheduler instance for the lightweight price-only refresh.
+# Kept independent from _scheduler so the (currently disabled) full sync and the
+# price refresh can be enabled/disabled and started/stopped independently.
+_price_scheduler: AsyncIOScheduler | None = None
+
 # Track last sync status for health monitoring
 _last_sync_status: dict[str, Any] = {
     "last_run_time": None,
@@ -37,6 +42,18 @@ _last_sync_status: dict[str, Any] = {
     "failed_runs": 0,
     "last_duration_seconds": None,
     "last_models_synced": 0,
+}
+
+# Track last price-refresh status (mirrors _last_sync_status).
+_last_price_refresh_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_success_time": None,
+    "last_error": None,
+    "total_runs": 0,
+    "successful_runs": 0,
+    "failed_runs": 0,
+    "last_duration_seconds": None,
+    "last_prices_updated": 0,
 }
 
 
@@ -347,4 +364,157 @@ def trigger_manual_sync() -> dict[str, Any]:
         "success": True,
         "message": "Manual sync triggered - check logs for progress",
         "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
+# ============================================================================
+# Lightweight price-only refresh scheduler
+# ============================================================================
+
+
+async def run_scheduled_price_refresh():
+    """
+    Run the lightweight, price-only refresh job.
+
+    Called by APScheduler at PRICE_REFRESH_INTERVAL_MINUTES. Unlike the full
+    sync, this only updates prices for models that already exist in the DB and
+    never rebuilds/warms the catalog cache. The synchronous I/O runs in a worker
+    thread so the event loop is never blocked.
+    """
+    from src.services.price_refresh import refresh_all_prices
+
+    start_time = datetime.now(UTC)
+    _last_price_refresh_status["last_run_time"] = start_time
+    _last_price_refresh_status["total_runs"] += 1
+
+    logger.info("Starting scheduled price-only refresh")
+
+    try:
+        result = await asyncio.to_thread(refresh_all_prices, dry_run=False)
+
+        end_time = datetime.now(UTC)
+        duration = (end_time - start_time).total_seconds()
+        _last_price_refresh_status["last_duration_seconds"] = duration
+
+        if result.get("success"):
+            _last_price_refresh_status["successful_runs"] += 1
+            _last_price_refresh_status["last_success_time"] = end_time
+            _last_price_refresh_status["last_error"] = None
+            _last_price_refresh_status["last_prices_updated"] = result.get("prices_updated", 0)
+            logger.info(
+                "Price refresh SUCCESSFUL in %.2fs | updated=%s unchanged=%s "
+                "checked=%s failed=%s",
+                duration,
+                result.get("prices_updated", 0),
+                result.get("prices_unchanged", 0),
+                result.get("providers_checked", 0),
+                result.get("providers_failed", 0),
+            )
+        else:
+            # success=False means at least one provider failed; the rest still ran.
+            _last_price_refresh_status["failed_runs"] += 1
+            _last_price_refresh_status["last_error"] = str(result.get("errors"))
+            _last_price_refresh_status["last_prices_updated"] = result.get("prices_updated", 0)
+            logger.warning(
+                "Price refresh completed with %s provider failure(s) in %.2fs | "
+                "updated=%s errors=%s",
+                result.get("providers_failed", 0),
+                duration,
+                result.get("prices_updated", 0),
+                result.get("errors"),
+            )
+
+    except Exception as e:
+        end_time = datetime.now(UTC)
+        duration = (end_time - start_time).total_seconds()
+        _last_price_refresh_status["failed_runs"] += 1
+        _last_price_refresh_status["last_error"] = str(e)
+        _last_price_refresh_status["last_duration_seconds"] = duration
+        logger.exception(f"Price refresh EXCEPTION after {duration:.2f}s: {e}")
+
+
+def start_price_refresh_scheduler():
+    """
+    Start the APScheduler for the lightweight price-only refresh.
+
+    Called during application startup (in app lifespan). Only starts if
+    ENABLE_PRICE_REFRESH is enabled. Independent of ENABLE_SCHEDULED_MODEL_SYNC.
+    """
+    global _price_scheduler
+
+    if not Config.ENABLE_PRICE_REFRESH:
+        logger.info("Price refresh DISABLED: ENABLE_PRICE_REFRESH=false")
+        return
+
+    interval_minutes = Config.PRICE_REFRESH_INTERVAL_MINUTES
+
+    logger.info(
+        "Starting lightweight price-only refresh scheduler (interval: %s minutes)",
+        interval_minutes,
+    )
+
+    try:
+        _price_scheduler = AsyncIOScheduler()
+        _price_scheduler.add_job(
+            run_scheduled_price_refresh,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="price_refresh",
+            name="Price Refresh Job",
+            replace_existing=True,
+            max_instances=1,  # Prevent overlapping runs
+            coalesce=True,  # Combine missed runs
+        )
+        _price_scheduler.start()
+        logger.info(
+            "✅ Price refresh scheduler started (next run in %s minutes)", interval_minutes
+        )
+    except Exception as e:
+        logger.error(f"❌ Failed to start price refresh scheduler: {e}")
+        logger.exception(e)
+
+
+def stop_price_refresh_scheduler():
+    """Stop the price-refresh APScheduler gracefully (called during shutdown)."""
+    global _price_scheduler
+
+    if _price_scheduler is None:
+        return
+
+    logger.info("Stopping price refresh scheduler...")
+
+    try:
+        _price_scheduler.shutdown(wait=True)
+        logger.info("✅ Price refresh scheduler stopped successfully")
+    except Exception as e:
+        logger.error(f"❌ Error stopping price refresh scheduler: {e}")
+    finally:
+        _price_scheduler = None
+
+
+def get_price_refresh_status() -> dict[str, Any]:
+    """Get the current status of the price-refresh job (for health monitoring)."""
+    total_runs = _last_price_refresh_status["total_runs"]
+    successful_runs = _last_price_refresh_status["successful_runs"]
+    success_rate = (successful_runs / total_runs * 100) if total_runs > 0 else 0
+
+    return {
+        "enabled": Config.ENABLE_PRICE_REFRESH,
+        "interval_minutes": Config.PRICE_REFRESH_INTERVAL_MINUTES,
+        "last_run_time": (
+            _last_price_refresh_status["last_run_time"].isoformat()
+            if _last_price_refresh_status["last_run_time"]
+            else None
+        ),
+        "last_success_time": (
+            _last_price_refresh_status["last_success_time"].isoformat()
+            if _last_price_refresh_status["last_success_time"]
+            else None
+        ),
+        "total_runs": total_runs,
+        "successful_runs": successful_runs,
+        "failed_runs": _last_price_refresh_status["failed_runs"],
+        "success_rate": round(success_rate, 1),
+        "last_error": _last_price_refresh_status["last_error"],
+        "last_duration_seconds": _last_price_refresh_status["last_duration_seconds"],
+        "last_prices_updated": _last_price_refresh_status["last_prices_updated"],
     }

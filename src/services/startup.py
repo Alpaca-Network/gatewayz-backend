@@ -619,6 +619,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start scheduled model sync: {e}")
         # Don't fail startup if scheduled sync fails to start
 
+    # Start lightweight price-only refresh (independent of the full sync above)
+    try:
+        from src.services.scheduled_sync import start_price_refresh_scheduler
+
+        start_price_refresh_scheduler()
+        logger.info("Price refresh service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start price refresh scheduler: {e}")
+        # Don't fail startup if price refresh fails to start
+
     # ---------------------------------------------------------------------------
     # Additional startup work (migrated from @app.on_event("startup"))
     # ---------------------------------------------------------------------------
@@ -723,6 +733,15 @@ async def lifespan(app):
         logger.info("Scheduled model sync service stopped")
     except Exception as e:
         logger.warning(f"Scheduled model sync shutdown warning: {e}")
+
+    # Stop lightweight price-only refresh
+    try:
+        from src.services.scheduled_sync import stop_price_refresh_scheduler
+
+        stop_price_refresh_scheduler()
+        logger.info("Price refresh service stopped")
+    except Exception as e:
+        logger.warning(f"Price refresh shutdown warning: {e}")
 
     # Cancel any pending background tasks
     if _background_tasks:

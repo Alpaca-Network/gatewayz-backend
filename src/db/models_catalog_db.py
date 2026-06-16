@@ -990,6 +990,119 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
         logger.error(f"Failed to sync pricing to model_pricing table: {e}")
 
 
+def get_models_pricing_by_provider(provider_id: int) -> list[dict[str, Any]]:
+    """
+    Lightweight read of pricing-relevant fields for all ACTIVE models of a provider.
+
+    Used by the price-only refresh job (src/services/price_refresh.py) to compare
+    freshly-fetched prices against what's currently stored without pulling the full
+    model rows. Returns only id, provider_model_id and metadata (which holds
+    pricing_raw) — NOT the joined providers row or every column.
+
+    Args:
+        provider_id: Provider's database ID
+
+    Returns:
+        List of dicts with keys: id, provider_model_id, metadata.
+        Returns [] on error (never None), per this module's error contract.
+    """
+    try:
+        supabase = get_client_for_query(read_only=True)
+
+        all_rows: list[dict[str, Any]] = []
+        page_size = SUPABASE_PAGE_SIZE
+        offset = 0
+        deadline = time.monotonic() + DB_QUERY_TIMEOUT_SECONDS
+
+        while True:
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_models_pricing_by_provider: wall-clock deadline of "
+                    f"{DB_QUERY_TIMEOUT_SECONDS}s exceeded after {len(all_rows)} models "
+                    f"(provider_id={provider_id}); returning partial results"
+                )
+                break
+
+            batch = (
+                supabase.table("models")
+                .select("id, provider_model_id, metadata")
+                .eq("provider_id", provider_id)
+                .eq("is_active", True)
+                .range(offset, offset + page_size - 1)
+                .execute()
+            ).data or []
+
+            if not batch:
+                break
+
+            all_rows.extend(batch)
+
+            if len(batch) < page_size:
+                break
+
+            offset += page_size
+
+        return all_rows
+    except Exception as e:
+        logger.error(f"Error fetching pricing rows for provider_id={provider_id}: {e}")
+        return []
+
+
+def update_model_pricing_only(
+    model_id: int, pricing_raw: dict[str, Any], existing_metadata: dict[str, Any] | None = None
+) -> bool:
+    """
+    Update ONLY the pricing for a single existing model.
+
+    This writes pricing in BOTH places the billing read path consults:
+    1. ``models.metadata.pricing_raw`` (read by pricing_lookup Source 2 and the
+       unique-models catalog query)
+    2. the ``model_pricing`` table (read by pricing_lookup Source 1 — the primary
+       billing source) via the existing ``_sync_pricing_to_model_pricing`` helper,
+       which applies the same per-token guard/normalization used during full sync.
+
+    It does NOT touch any non-pricing column. The existing metadata is preserved
+    and only its ``pricing_raw`` key is replaced.
+
+    Args:
+        model_id: The model's database primary key.
+        pricing_raw: Dict with per-token pricing keys (prompt, completion, image,
+            request) as strings/numbers — already normalized to per-token.
+        existing_metadata: The model's current metadata (so non-pricing keys are
+            preserved). If None, a metadata dict with only pricing_raw is written.
+
+    Returns:
+        True if the update succeeded, False otherwise.
+    """
+    try:
+        supabase = get_client_for_query(read_only=False)
+
+        merged_metadata = dict(existing_metadata) if isinstance(existing_metadata, dict) else {}
+        merged_metadata["pricing_raw"] = pricing_raw
+
+        # Serialize Decimals to JSON-compatible types before writing.
+        serialized_metadata = _serialize_model_data({"metadata": merged_metadata})["metadata"]
+
+        response = (
+            supabase.table("models")
+            .update({"metadata": serialized_metadata})
+            .eq("id", model_id)
+            .execute()
+        )
+
+        if not response.data:
+            logger.warning(f"update_model_pricing_only: no row updated for model_id={model_id}")
+            return False
+
+        # Propagate into the model_pricing table using the same logic as full sync.
+        # The updated row already carries metadata.pricing_raw, so reuse it directly.
+        _sync_pricing_to_model_pricing(supabase, response.data)
+        return True
+    except Exception as e:
+        logger.error(f"Error updating pricing for model_id={model_id}: {e}")
+        return False
+
+
 def flush_models_table() -> dict[str, Any]:
     """
     Flush (delete all records from) the models table

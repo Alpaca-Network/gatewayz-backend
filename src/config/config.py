@@ -476,6 +476,29 @@ class Config:
         if s.strip()
     }
 
+    # Lightweight price-only refresh (src/services/price_refresh.py).
+    # Independent of ENABLE_SCHEDULED_MODEL_SYNC: this job only keeps PRICES
+    # current (it never inserts/deactivates models, touches non-pricing columns,
+    # or rebuilds the catalog cache).
+    # DEFAULT OFF (deliberate): the full sync currently never persists
+    # metadata.pricing_raw (transform_normalized_model_to_db_schema computes
+    # pricing then discards it), so the FIRST run would not just refresh prices
+    # but POPULATE them — shifting the billing source from curated
+    # manual_pricing.json to raw fetched provider prices. Run
+    # refresh_all_prices(dry_run=True) to review the impact, then enable in prod
+    # via ENABLE_PRICE_REFRESH=true.
+    ENABLE_PRICE_REFRESH: bool = os.environ.get("ENABLE_PRICE_REFRESH", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    # How often to run the price-only refresh (in minutes). Default 360 (6h) —
+    # prices change slowly, and this keeps provider API load minimal.
+    PRICE_REFRESH_INTERVAL_MINUTES: int = int(
+        os.environ.get("PRICE_REFRESH_INTERVAL_MINUTES", "360")
+    )
+
     # Enabled providers — only these providers will be loaded, routed to,
     # shown in the catalog, and synced.  Comma-separated slugs using the
     # hyphenated gateway names (e.g. "openrouter,openai,anthropic").
