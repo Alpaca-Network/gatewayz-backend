@@ -418,6 +418,23 @@ def transform_normalized_model_to_db_schema(
         if architecture_str:
             metadata["architecture_str"] = architecture_str
 
+        # Persist the normalized per-token pricing into metadata.pricing_raw.
+        # Both the billing read path (pricing_lookup Source 2) and
+        # _sync_pricing_to_model_pricing (which populates the model_pricing table
+        # consulted by billing Source 1) read metadata.pricing_raw. Without this,
+        # the `pricing` computed above was discarded — leaving model_pricing
+        # unpopulated and billing falling back to manual_pricing.json. Stored as
+        # stringified per-token values; unknown (None) fields are omitted so a
+        # known price is never overwritten with a guessed zero. (Matches the shape
+        # produced by price_refresh._extract_normalized_pricing.)
+        pricing_raw = {
+            field: str(pricing[field])
+            for field in ("prompt", "completion", "image", "request")
+            if pricing[field] is not None
+        }
+        if pricing_raw:
+            metadata["pricing_raw"] = pricing_raw
+
         # NOTE: Both provider_model_id and model_name were extracted at the beginning of this function
         # - provider_model_id (lines 201-209): Provider's UNIQUE API identifier
         #   (e.g., "openai/gpt-4", "gemini-1.5-pro-preview")
