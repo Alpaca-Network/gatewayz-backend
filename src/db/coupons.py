@@ -386,22 +386,18 @@ def redeem_coupon(
         if not update_result.data:
             raise Exception("Failed to update user balance")
 
-        # Step 4: Increment coupon usage
-        client.table("coupons").update(
-            {
-                "times_used": client.table("coupons")
-                .select("times_used")
-                .eq("id", coupon_id)
-                .execute()
-                .data[0]["times_used"]
-                + 1
-            }
-        ).eq("id", coupon_id).execute()
-
-        # Better approach: use RPC or raw SQL for atomic increment
-        client.rpc(
-            "increment", {"row_id": coupon_id, "x": 1}
-        ).execute()  # If you have this function
+        # Step 4: Increment coupon usage (single, guarded read-then-update).
+        # NOTE: this previously did a manual +1 AND also called a generic
+        # `increment` RPC that does not exist in any migration — so the RPC
+        # raised on every redemption (caught below as SYSTEM_ERROR), or would
+        # have double-counted times_used had the function existed. The nested
+        # `.execute().data[0]` was also unguarded and could IndexError if the
+        # coupon row was missing. Collapsed to one guarded increment.
+        current_usage = (
+            client.table("coupons").select("times_used").eq("id", coupon_id).execute()
+        )
+        times_used = (current_usage.data[0].get("times_used") or 0) if current_usage.data else 0
+        client.table("coupons").update({"times_used": times_used + 1}).eq("id", coupon_id).execute()
 
         # Step 5: Record redemption
         redemption_data = {
