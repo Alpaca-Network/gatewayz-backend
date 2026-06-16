@@ -33,7 +33,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
-from src.services.pricing import calculate_cost, calculate_cost_split
+from src.services.pricing import calculate_cost, calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,67 @@ logger = logging.getLogger(__name__)
 # from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
 # Mirrors the same constant in src/routes/chat.py (anonymous user path).
 _MAX_STREAM_DURATION = int(os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
+
+
+def _loss_proof_cost_split(
+    requested_model: str,
+    provider_model_id: str | None,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> tuple[float, float, float]:
+    """Cost split that never bills below the provider that actually served the request.
+
+    The gateway is cost-plus (PRICING_MARKUP is applied on top of upstream cost).
+    Pricing is resolved per canonical ``model_id`` via a ``.limit(1)`` lookup that can
+    match an arbitrary provider row for a multi-provider model. When the provider
+    selector / failover routes the request to a *different, pricier* provider than the
+    one whose price was matched, billing by ``requested_model`` alone can charge below
+    what we actually pay upstream — a per-request loss.
+
+    This computes the requested-model cost and, only when the SERVED provider model has
+    real (non-default, non-zero) pricing, takes the higher of the two. Effect:
+      • never bill below the served provider's actual cost  → no gateway loss
+      • never bill below the requested model's advertised rate → no customer under-bill
+      • identical to the old behaviour whenever served == requested or the served
+        provider has no distinct real price (falls back to requested-model cost).
+
+    NOTE (billing behaviour): during a failover to a pricier provider this charges the
+    higher served rate (cost-plus). If the product contract is a flat per-model price
+    with the gateway absorbing failover variance, swap this back to a plain
+    ``calculate_cost_split(requested_model, ...)`` and instead enforce
+    catalog_price >= max(provider cost) in the pricing data.
+    """
+    base = calculate_cost_split(requested_model, prompt_tokens, completion_tokens)
+    if not provider_model_id or provider_model_id == requested_model:
+        return base
+    try:
+        served_pricing = get_model_pricing(provider_model_id)
+        has_real_price = served_pricing.get("source", "default") != "default" and (
+            float(served_pricing.get("prompt", 0) or 0) > 0
+            or float(served_pricing.get("completion", 0) or 0) > 0
+        )
+        if has_real_price:
+            served = calculate_cost_split(
+                provider_model_id, prompt_tokens, completion_tokens
+            )
+            if served[0] > base[0]:
+                logger.info(
+                    "[Pricing] Failover re-price: served provider model %r cost $%.6f "
+                    "exceeds requested %r cost $%.6f — billing the higher (cost-plus, no loss).",
+                    provider_model_id,
+                    served[0],
+                    requested_model,
+                    base[0],
+                )
+                return served
+    except Exception as e:
+        # Any failure (high-value guard, unresolved id, etc.) → keep the safe base cost.
+        logger.warning(
+            "[Pricing] Failover re-price check failed for %r (kept requested-model cost): %s",
+            provider_model_id,
+            e,
+        )
+    return base
 
 
 class ChatInferenceHandler:
@@ -754,9 +815,13 @@ class ChatInferenceHandler:
 
             total_tokens = prompt_tokens + completion_tokens
 
-            # Step 5: Calculate cost (single pricing lookup, returns split)
+            # Step 5: Calculate cost (loss-proof: never bill below the served provider)
             cost, input_cost, output_cost = await asyncio.to_thread(
-                calculate_cost_split, request.model, prompt_tokens, completion_tokens
+                _loss_proof_cost_split,
+                request.model,
+                provider_model_id,
+                prompt_tokens,
+                completion_tokens,
             )
 
             logger.debug(
@@ -1044,8 +1109,13 @@ class ChatInferenceHandler:
                 )
 
             # Step 7: Calculate cost and charge user after stream completes
+            # (loss-proof: never bill below the provider that actually served)
             cost, input_cost, output_cost = await asyncio.to_thread(
-                calculate_cost_split, request.model, prompt_tokens, completion_tokens
+                _loss_proof_cost_split,
+                request.model,
+                provider_model_id,
+                prompt_tokens,
+                completion_tokens,
             )
 
             logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")

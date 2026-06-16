@@ -38,6 +38,18 @@ async def enforce_model_pricing_gate(
 
     from src.services.pricing import model_has_pricing
 
+    # Free models legitimately have no/zero pricing — exempt them so the
+    # zero-price rejection in model_has_pricing only blocks PAID models whose
+    # price is missing or zero (which would otherwise be served at a loss).
+    # Covers both the `:free` suffix convention and the DB `is_free` flag.
+    try:
+        from src.services.cache.model_capabilities_cache import is_free_model
+
+        if model_id and await asyncio.to_thread(is_free_model, model_id):
+            return
+    except Exception:  # noqa: BLE001 - free-check is best-effort; fall through on any error
+        pass
+
     try:
         has_pricing = await asyncio.to_thread(model_has_pricing, model_id)
     except ValueError as e:
