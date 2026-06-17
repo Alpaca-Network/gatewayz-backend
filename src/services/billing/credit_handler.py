@@ -501,6 +501,42 @@ async def handle_credits_and_usage(
                 f"Failed to update rate limit usage after successful deduction for user {user.get('id')}: {e}"
             )
 
+        # Phase 3 (Gatewayz One §6.D) SHADOW dual-write: mirror this completed
+        # deduction as a settled double-entry in the credit ledger so it can be
+        # reconciled against the live system before any cutover. Flag-gated (off by
+        # default). The store call never raises and runs its Supabase I/O off-thread;
+        # on the non-streaming path it is awaited, so when enabled it adds the ledger
+        # write to request latency (acceptable for the shadow phase — streaming
+        # backgrounds it via the _with_fallback task).
+        #
+        # Skip exactly the cases deduct_credits itself bypasses (admin tier, and
+        # sub-$0.000001 amounts) — otherwise the shadow would record revenue for money
+        # that was never actually deducted, diverging from the live system.
+        # TODO(cutover): derive the allowance/purchased split from the amount
+        # deduct_credits actually spent (it re-reads fresh balances) instead of this
+        # request's in-memory snapshot, which can be stale under concurrency. The
+        # REVENUE total stays correct (= cost); only the debit split can drift.
+        try:
+            from src.config import Config
+
+            if (
+                Config.CREDIT_LEDGER_SHADOW_ENABLED
+                and user
+                and float(cost or 0) >= 0.000001
+                and user.get("tier") != "admin"
+            ):
+                from src.services.billing.credit_ledger_store import record_shadow_settlement
+
+                await record_shadow_settlement(
+                    ref=request_id,
+                    user_id=user.get("id"),
+                    cost=cost,
+                    allowance=user.get("subscription_allowance") or 0,
+                    purchased=user.get("purchased_credits") or 0,
+                )
+        except Exception as e:
+            logger.warning("credit_ledger shadow dual-write failed (non-fatal): %s", e)
+
     return cost
 
 

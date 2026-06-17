@@ -292,6 +292,87 @@ class TestHandleCreditsAndUsage:
         mock_rate_limit.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch("src.services.billing.credit_ledger_store.record_shadow_settlement")
+    @patch("src.services.pricing.calculate_cost_async")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.services.credit_handler._record_credit_metrics")
+    async def test_shadow_dual_write_skipped_when_flag_off(
+        self,
+        mock_metrics,
+        mock_rate_limit,
+        mock_record_usage,
+        mock_deduct,
+        mock_calc_cost,
+        mock_shadow,
+        mock_user,
+        mock_trial_inactive,
+    ):
+        """With CREDIT_LEDGER_SHADOW_ENABLED off (default), the shadow write must
+        never be attempted — the headline no-op guarantee."""
+        from src.config import Config
+
+        mock_calc_cost.return_value = 0.05
+        with patch.object(Config, "CREDIT_LEDGER_SHADOW_ENABLED", False):
+            cost = await handle_credits_and_usage(
+                api_key="test_key",
+                user=mock_user,
+                model="gpt-4",
+                trial=mock_trial_inactive,
+                total_tokens=1000,
+                prompt_tokens=500,
+                completion_tokens=500,
+                elapsed_ms=1000,
+                request_id="req-flagoff",
+            )
+
+        assert cost == 0.05
+        mock_deduct.assert_called_once()
+        mock_shadow.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("src.services.billing.credit_ledger_store.record_shadow_settlement")
+    @patch("src.services.pricing.calculate_cost_async")
+    @patch("src.db.users.deduct_credits")
+    @patch("src.db.users.record_usage")
+    @patch("src.db.rate_limits.update_rate_limit_usage")
+    @patch("src.services.credit_handler._record_credit_metrics")
+    async def test_shadow_dual_write_failure_never_breaks_billing(
+        self,
+        mock_metrics,
+        mock_rate_limit,
+        mock_record_usage,
+        mock_deduct,
+        mock_calc_cost,
+        mock_shadow,
+        mock_user,
+        mock_trial_inactive,
+    ):
+        """With the flag on, a shadow-write error must NOT propagate into billing:
+        the deduction still happens and the cost is returned unchanged."""
+        from src.config import Config
+
+        mock_calc_cost.return_value = 0.05
+        mock_shadow.side_effect = RuntimeError("ledger down")
+        with patch.object(Config, "CREDIT_LEDGER_SHADOW_ENABLED", True):
+            cost = await handle_credits_and_usage(
+                api_key="test_key",
+                user=mock_user,
+                model="gpt-4",
+                trial=mock_trial_inactive,
+                total_tokens=1000,
+                prompt_tokens=500,
+                completion_tokens=500,
+                elapsed_ms=1000,
+                request_id="req-flagon",
+            )
+
+        assert cost == 0.05  # billing unaffected by the shadow failure
+        mock_deduct.assert_called_once()  # authoritative deduction still happened
+        mock_shadow.assert_called_once()  # shadow was attempted (paid, non-admin, >threshold)
+
+    @pytest.mark.asyncio
     @patch("src.services.pricing.calculate_cost_async")
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")

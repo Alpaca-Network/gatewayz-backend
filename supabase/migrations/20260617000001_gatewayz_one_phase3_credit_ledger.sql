@@ -27,8 +27,15 @@ CREATE TABLE IF NOT EXISTS public.credit_ledger (
     CONSTRAINT credit_ledger_one_sided CHECK ((debit = 0) OR (credit = 0))
 );
 
-CREATE INDEX IF NOT EXISTS idx_credit_ledger_ref
-    ON public.credit_ledger (ref);
+-- (ref, account, state) is UNIQUE: at most one line per account per lifecycle
+-- state for a given ref. This is the DB backstop for the application-level
+-- idempotency check in credit_ledger_store — concurrent same-ref writes (HTTP /
+-- streaming retries) that both pass the app-level SELECT will collide here, so a
+-- duplicate settlement is rejected at the DB. The leading `ref` column also serves
+-- ref lookups. `state` is included so the future reserve→settle→release flow can
+-- append one row per state for the same (ref, account) without a false collision.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_ledger_ref_account_state
+    ON public.credit_ledger (ref, account, state);
 CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_time
     ON public.credit_ledger (user_id, created_at);
 
