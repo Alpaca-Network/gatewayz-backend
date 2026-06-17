@@ -207,5 +207,81 @@ def test_reconcile_rows_one_call_path():
     assert report.total_drift == Decimal("0")
 
 
+# --------------------------------------------------------------------------- #
+# reconcile_window — I/O runner with a mocked Supabase client
+# --------------------------------------------------------------------------- #
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+
+class _Query:
+    def __init__(self, table, store):
+        self.table_name = table
+        self.store = store
+
+    def select(self, *a, **k):
+        return self
+
+    def gte(self, *a, **k):
+        return self
+
+    def lt(self, *a, **k):
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def range(self, start, end):
+        self._start = start
+        return self
+
+    def execute(self):
+        rows = self.store.get(self.table_name, [])
+        # _fetch_all pages via range(); return all on first page, empty after.
+        if getattr(self, "_start", 0) and self.table_name in ("credit_ledger", "usage_records"):
+            return _Resp([])
+        return _Resp(rows)
+
+
+class _Client:
+    def __init__(self, store):
+        self.store = store
+
+    def table(self, name):
+        return _Query(name, self.store)
+
+
+def test_reconcile_window_mocked(monkeypatch):
+    import sys
+    import types
+
+    from src.services.billing import ledger_reconciliation as lr
+
+    store = {
+        "credit_ledger": _settled("r1", 1, "0.03", "0") + _settled("r2", 2, "0.10", "0"),
+        "usage_records": [
+            {"user_id": 1, "cost": "0.03"},
+            {"user_id": 2, "cost": "0.10"},
+            {"user_id": 99, "cost": "0.50"},  # admin → excluded
+        ],
+        "users": [{"id": 99}],  # tier == 'admin'
+    }
+    fake_mod = types.ModuleType("src.config.supabase_config")
+    fake_mod.get_supabase_client = lambda: _Client(store)
+    monkeypatch.setitem(sys.modules, "src.config.supabase_config", fake_mod)
+
+    report, admin_count = lr.reconcile_window("2026-01-01T00:00:00+00:00", "2030-01-01T00:00:00+00:00")
+    assert admin_count == 1
+    assert report.ok
+    assert report.total_drift == Decimal("0")
+    assert report.ledger_ref_count == 2
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

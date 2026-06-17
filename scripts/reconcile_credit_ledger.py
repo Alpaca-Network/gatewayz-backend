@@ -36,14 +36,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config.supabase_config import get_supabase_client  # noqa: E402
 from src.services.billing.ledger_reconciliation import (  # noqa: E402
     DEFAULT_MIN_COST,
     DEFAULT_TOLERANCE,
-    reconcile_rows,
+    reconcile_window,
 )
 
-_PAGE = 1000
 _REL_RE = re.compile(r"^(\d+)\s*([dh])$")  # "3d", "12h"
 
 
@@ -57,39 +55,6 @@ def _parse_when(value: str, *, now: datetime) -> str:
     # Absolute: normalize a trailing 'Z' to +00:00 so fromisoformat accepts it.
     iso = value.strip().replace("Z", "+00:00")
     return datetime.fromisoformat(iso).astimezone(UTC).isoformat()
-
-
-def _fetch_all(table: str, time_col: str, since: str, until: str) -> list[dict]:
-    """Page through every row of ``table`` in [since, until) (Supabase caps at 1000)."""
-    client = get_supabase_client()
-    rows: list[dict] = []
-    start = 0
-    while True:
-        resp = (
-            client.table(table)
-            .select("*")
-            .gte(time_col, since)
-            .lt(time_col, until)
-            .order(time_col)
-            .range(start, start + _PAGE - 1)
-            .execute()
-        )
-        batch = getattr(resp, "data", None) or []
-        rows.extend(batch)
-        if len(batch) < _PAGE:
-            return rows
-        start += _PAGE
-
-
-def _admin_user_ids() -> frozenset:
-    """User ids the shadow path skips (tier == 'admin'). Empty set on any failure."""
-    try:
-        client = get_supabase_client()
-        resp = client.table("users").select("id").eq("tier", "admin").execute()
-        return frozenset(r["id"] for r in (getattr(resp, "data", None) or []) if r.get("id") is not None)
-    except Exception as e:  # column/table differences shouldn't break reconciliation
-        print(f"warning: could not resolve admin user ids ({e}); not excluding any", file=sys.stderr)
-        return frozenset()
 
 
 def _render(report, since: str, until: str, admin_count: int) -> str:
@@ -155,22 +120,14 @@ def main() -> int:
     since = _parse_when(args.since, now=now)
     until = _parse_when(args.until, now=now) if args.until else now.isoformat()
 
-    ledger_rows = _fetch_all("credit_ledger", "created_at", since, until)
-    usage_rows = _fetch_all("usage_records", "timestamp", since, until)
-    admins = _admin_user_ids()
-
-    report = reconcile_rows(
-        ledger_rows,
-        usage_rows,
-        min_cost=args.min_cost,
-        exclude_user_ids=admins,
-        tolerance=args.tolerance,
+    report, admin_count = reconcile_window(
+        since, until, tolerance=args.tolerance, min_cost=args.min_cost
     )
 
     if args.json:
-        print(json.dumps(_to_jsonable(report, since, until, len(admins)), indent=2))
+        print(json.dumps(_to_jsonable(report, since, until, admin_count), indent=2))
     else:
-        print(_render(report, since, until, len(admins)))
+        print(_render(report, since, until, admin_count))
 
     return 0 if report.ok else 1
 

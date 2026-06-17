@@ -136,6 +136,19 @@ class Config:
     CREDIT_LEDGER_SHADOW_ENABLED = os.environ.get(
         "CREDIT_LEDGER_SHADOW_ENABLED", "true" if IS_PRODUCTION else "false"
     ).lower() in {"1", "true", "yes"}
+    # Scheduled credit-ledger reconciliation (shadow vs live). Defaults to follow the
+    # shadow flag — there is nothing to reconcile until shadow is accruing. Read-only:
+    # it fetches the recent window, compares, and logs (drift logs at ERROR so it is
+    # alertable). It never mutates billing.
+    ENABLE_LEDGER_RECONCILIATION = os.environ.get(
+        "ENABLE_LEDGER_RECONCILIATION", str(CREDIT_LEDGER_SHADOW_ENABLED)
+    ).lower() in {"1", "true", "yes"}
+    LEDGER_RECONCILIATION_INTERVAL_MINUTES = int(
+        os.environ.get("LEDGER_RECONCILIATION_INTERVAL_MINUTES", "360")
+    )
+    LEDGER_RECONCILIATION_WINDOW_HOURS = int(
+        os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
+    )
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
 
