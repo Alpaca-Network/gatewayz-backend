@@ -13,7 +13,12 @@
 --   * user_memory (NEW)            — portable, model-agnostic per-user memory
 --                      (see src/services/context_assembly.py).
 --   * chat threading — conversation_id + rolling summary on existing chat tables.
---   All statements are idempotent. New tables have RLS ENABLED with no permissive
+--   All statements are idempotent AND guarded: the ALTERs on pre-existing tables
+--   (providers, models_catalog, chat_sessions) are wrapped in to_regclass() checks
+--   that skip cleanly (RAISE NOTICE) if the table is absent — models_catalog in
+--   particular is created by the app/sync code, not a migration, so it can be
+--   missing on a freshly-provisioned DB. This makes the migration safe to run
+--   against any environment. New tables have RLS ENABLED with no permissive
 --   policies, so only the backend's service_role (which bypasses RLS) can touch
 --   them — matching the repo's locked-down posture (2026-05-27 hardening).
 -- REVIEW NOTES:
@@ -24,45 +29,48 @@
 -- ============================================================================
 -- Part 1: providers — tiering + routing metadata
 -- ============================================================================
-ALTER TABLE public.providers
-    ADD COLUMN IF NOT EXISTS tier text NOT NULL DEFAULT 'niche';
-ALTER TABLE public.providers
-    ADD COLUMN IF NOT EXISTS region_affinity text;
-ALTER TABLE public.providers
-    ADD COLUMN IF NOT EXISTS async_streaming boolean NOT NULL DEFAULT false;
-ALTER TABLE public.providers
-    ADD COLUMN IF NOT EXISTS auth_type text;
-ALTER TABLE public.providers
-    ADD COLUMN IF NOT EXISTS base_url text;
-
+-- Guarded: skip cleanly if public.providers is absent (resilient across envs).
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'providers_tier_valid'
-    ) THEN
+    IF to_regclass('public.providers') IS NULL THEN
+        RAISE NOTICE 'public.providers not found — skipping provider tiering columns';
+        RETURN;
+    END IF;
+
+    ALTER TABLE public.providers ADD COLUMN IF NOT EXISTS tier text NOT NULL DEFAULT 'niche';
+    ALTER TABLE public.providers ADD COLUMN IF NOT EXISTS region_affinity text;
+    ALTER TABLE public.providers ADD COLUMN IF NOT EXISTS async_streaming boolean NOT NULL DEFAULT false;
+    ALTER TABLE public.providers ADD COLUMN IF NOT EXISTS auth_type text;
+    ALTER TABLE public.providers ADD COLUMN IF NOT EXISTS base_url text;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'providers_tier_valid') THEN
         ALTER TABLE public.providers
-            ADD CONSTRAINT providers_tier_valid
-            CHECK (tier IN ('core', 'aggregator', 'niche'));
+            ADD CONSTRAINT providers_tier_valid CHECK (tier IN ('core', 'aggregator', 'niche'));
     END IF;
 END$$;
 
 -- ============================================================================
 -- Part 2: models_catalog — canonical registry fields
 -- ============================================================================
-ALTER TABLE public.models_catalog
-    ADD COLUMN IF NOT EXISTS canonical_id text;
-ALTER TABLE public.models_catalog
-    ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '{}'::jsonb;
-ALTER TABLE public.models_catalog
-    ADD COLUMN IF NOT EXISTS modality text;
-ALTER TABLE public.models_catalog
-    ADD COLUMN IF NOT EXISTS context_length integer;
-ALTER TABLE public.models_catalog
-    ADD COLUMN IF NOT EXISTS deprecated_at timestamptz;
+-- Guarded: models_catalog is created by the app/sync code (NOT by a migration), so
+-- it may be absent on a DB that has not run the sync yet. Skip cleanly if so — the
+-- columns get added the next time this migration is (re-)run after the table exists.
+DO $$
+BEGIN
+    IF to_regclass('public.models_catalog') IS NULL THEN
+        RAISE NOTICE 'public.models_catalog not found — skipping canonical registry columns (table is created by app/sync code)';
+        RETURN;
+    END IF;
 
-CREATE INDEX IF NOT EXISTS idx_models_catalog_canonical
-    ON public.models_catalog (canonical_id)
-    WHERE deprecated_at IS NULL;
+    ALTER TABLE public.models_catalog ADD COLUMN IF NOT EXISTS canonical_id text;
+    ALTER TABLE public.models_catalog ADD COLUMN IF NOT EXISTS capabilities jsonb NOT NULL DEFAULT '{}'::jsonb;
+    ALTER TABLE public.models_catalog ADD COLUMN IF NOT EXISTS modality text;
+    ALTER TABLE public.models_catalog ADD COLUMN IF NOT EXISTS context_length integer;
+    ALTER TABLE public.models_catalog ADD COLUMN IF NOT EXISTS deprecated_at timestamptz;
+
+    CREATE INDEX IF NOT EXISTS idx_models_catalog_canonical
+        ON public.models_catalog (canonical_id) WHERE deprecated_at IS NULL;
+END$$;
 
 -- ============================================================================
 -- Part 3: model_provider_offers (NEW) — the router's scoring join
@@ -132,11 +140,17 @@ ALTER TABLE public.user_memory ENABLE ROW LEVEL SECURITY;
 -- ============================================================================
 -- Part 6: chat threading — conversation id + rolling summary
 -- ============================================================================
-ALTER TABLE public.chat_sessions
-    ADD COLUMN IF NOT EXISTS conversation_id uuid;
-ALTER TABLE public.chat_sessions
-    ADD COLUMN IF NOT EXISTS rolling_summary text;
+-- Guarded: skip cleanly if public.chat_sessions is absent.
+DO $$
+BEGIN
+    IF to_regclass('public.chat_sessions') IS NULL THEN
+        RAISE NOTICE 'public.chat_sessions not found — skipping chat threading columns';
+        RETURN;
+    END IF;
 
-CREATE INDEX IF NOT EXISTS idx_chat_sessions_conversation
-    ON public.chat_sessions (conversation_id)
-    WHERE conversation_id IS NOT NULL;
+    ALTER TABLE public.chat_sessions ADD COLUMN IF NOT EXISTS conversation_id uuid;
+    ALTER TABLE public.chat_sessions ADD COLUMN IF NOT EXISTS rolling_summary text;
+
+    CREATE INDEX IF NOT EXISTS idx_chat_sessions_conversation
+        ON public.chat_sessions (conversation_id) WHERE conversation_id IS NOT NULL;
+END$$;
