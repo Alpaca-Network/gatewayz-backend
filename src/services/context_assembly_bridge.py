@@ -89,22 +89,17 @@ def _resolve_budget(model: str | None, token_budget: int | None, ratio: float, d
 
 
 def _load_user_memory(user_id, limit: int = _DEFAULT_MEMORY_LIMIT) -> list[MemoryItem]:
-    """Best-effort load of portable per-user memory (Phase 1 user_memory). [] on failure."""
+    """Best-effort load of portable per-user memory (cached). [] on failure.
+
+    Delegates to :mod:`src.db.user_memory`, which serves reads from a short TTL
+    cache so the chat hot path doesn't pay a DB round-trip per request.
+    """
     if user_id is None:
         return []
     try:
-        from src.config.supabase_config import get_supabase_client
+        from src.db.user_memory import get_memories
 
-        client = get_supabase_client()
-        resp = (
-            client.table("user_memory")
-            .select("content,salience,kind")
-            .eq("user_id", user_id)
-            .order("salience", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        rows = getattr(resp, "data", None) or []
+        rows = get_memories(user_id, limit)
         return [
             MemoryItem(
                 content=r["content"],

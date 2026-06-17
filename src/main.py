@@ -541,6 +541,7 @@ def create_app() -> FastAPI:
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
+        ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
     ]
 
     loaded_count = 0
