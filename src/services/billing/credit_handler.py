@@ -501,6 +501,26 @@ async def handle_credits_and_usage(
                 f"Failed to update rate limit usage after successful deduction for user {user.get('id')}: {e}"
             )
 
+        # Phase 3 (Gatewayz One §6.D) SHADOW dual-write: mirror this completed
+        # deduction as a settled double-entry in the credit ledger so the ledger can
+        # be reconciled against the live system before any cutover. Flag-gated (off by
+        # default) and fully non-blocking — a failure here must never affect billing.
+        try:
+            from src.config import Config
+
+            if Config.CREDIT_LEDGER_SHADOW_ENABLED and user:
+                from src.services.billing.credit_ledger_store import record_shadow_settlement
+
+                await record_shadow_settlement(
+                    ref=request_id,
+                    user_id=user.get("id"),
+                    cost=cost,
+                    allowance=user.get("subscription_allowance") or 0,
+                    purchased=user.get("purchased_credits") or 0,
+                )
+        except Exception as e:
+            logger.warning("credit_ledger shadow dual-write failed (non-fatal): %s", e)
+
     return cost
 
 

@@ -123,6 +123,13 @@ class Config:
     # Abuse / Cost Controls
     # Anonymous (unauthenticated) inference is off by default. Set to "true" to allow.
     ANONYMOUS_ENABLED = os.environ.get("ANONYMOUS_ENABLED", "false").lower() in {"1", "true", "yes"}
+    # Phase 3 credit ledger (Gatewayz One §6.D), SHADOW dual-write. Off by default.
+    # When true, a settled double-entry is recorded in public.credit_ledger alongside
+    # the authoritative deduction (non-blocking) so the ledger can be reconciled before
+    # any cutover. Requires the credit_ledger migration to be applied first.
+    CREDIT_LEDGER_SHADOW_ENABLED = os.environ.get(
+        "CREDIT_LEDGER_SHADOW_ENABLED", "false"
+    ).lower() in {"1", "true", "yes"}
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
     # Subscription statuses that may NOT call the API (comma-separated).
