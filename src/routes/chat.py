@@ -351,6 +351,7 @@ def _fallback_get_user(api_key: str):
     return None
 
 
+from src.routes.chat_context import inject_conversation_history
 from src.routes.chat_streaming import stream_generator  # noqa: F401
 
 
@@ -669,52 +670,9 @@ async def chat_completions(
             messages = [m.model_dump() for m in req.messages]
 
         # === 2.1) Inject conversation history if session_id provided ===
-        # Chat history is only available for authenticated users
-        # Validate session_id is within PostgreSQL integer range (-2147483648 to 2147483647)
-        if session_id and not is_anonymous:
-            # Validate session_id is within valid PostgreSQL integer range
-            if session_id < -2147483648 or session_id > 2147483647:
-                logger.warning(
-                    "Invalid session_id %s: out of PostgreSQL integer range. Ignoring session history.",
-                    sanitize_for_logging(str(session_id)),
-                )
-                session_id = None  # Ignore invalid session_id
-
-        if session_id and not is_anonymous:
-            try:
-                # Fetch the session with its message history
-                session = await _to_thread(get_chat_session, session_id, user["id"])
-
-                if session and session.get("messages"):
-                    # Transform DB messages to OpenAI format and prepend to current messages
-                    history_messages = [
-                        {"role": msg["role"], "content": msg["content"]}
-                        for msg in session["messages"]
-                    ]
-
-                    # Prepend history to incoming messages
-                    messages = history_messages + messages
-
-                    logger.info(
-                        "Injected %d messages from session %s",
-                        len(history_messages),
-                        sanitize_for_logging(str(session_id)),
-                    )
-                else:
-                    logger.debug(
-                        "No history found for session %s or session doesn't exist",
-                        sanitize_for_logging(str(session_id)),
-                    )
-
-            except Exception as e:
-                # Don't fail the request if history fetch fails
-                logger.warning(
-                    "Failed to fetch chat history for session %s: %s",
-                    sanitize_for_logging(str(session_id)),
-                    sanitize_for_logging(str(e)),
-                )
-        elif session_id and is_anonymous:
-            logger.debug("Ignoring session_id for anonymous request")
+        messages, session_id = await inject_conversation_history(
+            session_id, is_anonymous, user, messages
+        )
 
         # === 2.1.5) Auto Web Search - start search in parallel to hide latency ===
         web_search_task = None  # Will hold the async task if search is triggered
