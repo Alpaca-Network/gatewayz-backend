@@ -156,8 +156,11 @@ class Config:
     # Fraction of a model's context window reserved for the assembled prompt
     # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
     CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
-    # Fallback token budget when a model's context length is unknown.
-    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "8192"))
+    # Assumed budget when a model's context length is unknown. Deliberately large
+    # so an unknown window does NOT cause aggressive truncation — when we can't tell
+    # a model's real window, we pass the turns through (no worse than today) rather
+    # than risk dropping context that would have fit.
+    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "1000000"))
 
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
