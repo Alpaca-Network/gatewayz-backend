@@ -196,6 +196,19 @@ async def prepare_upstream_request(
                     f"✓ Health check passed for model '{effective_model}' on '{primary_provider}'"
                 )
 
+        # Gatewayz One Phase 2 — smart-router reordering (flag-gated, off by default).
+        # Reorders the chain by the policy-based router using the Phase 1 offers
+        # projection; never drops a provider. No-ops to the original chain when the
+        # projection has no offers for this model, so it is safe to enable early.
+        from src.config import Config
+
+        if Config.SMART_ROUTER_ENABLED and provider_chain:
+            from src.services.smart_router_bridge import reorder_provider_chain
+
+            provider_chain = reorder_provider_chain(
+                effective_model, provider_chain, policy=Config.SMART_ROUTER_POLICY
+            )
+
         model = effective_model
 
     # Diagnostic logging for tools parameter

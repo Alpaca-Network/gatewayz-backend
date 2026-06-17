@@ -138,6 +138,26 @@ class Config:
     ).lower() in {"1", "true", "yes"}
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
+
+    # Gatewayz One Phase 2 — smart router. When true, the live provider failover
+    # chain is REORDERED by the policy-based smart router using the Phase 1
+    # model_provider_offers projection. Off by default; no-ops (exact passthrough)
+    # when the offers table has no rows for the model, so it is safe to enable
+    # before the projection is populated. Never drops a provider from the chain.
+    SMART_ROUTER_ENABLED = os.environ.get("SMART_ROUTER_ENABLED", "false").lower() in {"1", "true", "yes"}
+    # Default routing policy when no per-key routing_policies row applies.
+    SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "balanced").strip().lower()
+
+    # Gatewayz One Phase 4 — context assembly. When true, conversation messages are
+    # reassembled within a per-request token budget (system + memory + rolling
+    # summary + most-recent turns, oldest-first dropping) before the upstream call.
+    # Off by default; exact passthrough when disabled.
+    CONTEXT_ASSEMBLY_ENABLED = os.environ.get("CONTEXT_ASSEMBLY_ENABLED", "false").lower() in {"1", "true", "yes"}
+    # Fraction of a model's context window reserved for the assembled prompt
+    # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
+    CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
+    # Fallback token budget when a model's context length is unknown.
+    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "8192"))
     # Subscription statuses that may NOT call the API (comma-separated).
     # Includes both American (Stripe) and British spellings of cancel*, plus all
     # Stripe failure states: past_due (charge failed), unpaid (multiple failures),
