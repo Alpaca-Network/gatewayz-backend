@@ -6,7 +6,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 
 from src.config import Config
 from src.db.api_keys import increment_api_key_usage
@@ -23,6 +23,7 @@ from src.services.providers.image_generation_client import (
 )
 from src.services.pricing_lookup import get_image_pricing
 from src.utils.ai_tracing import AIRequestType, AITracer
+from src.utils.rate_limit_guard import enforce_request_rate_limit
 from src.utils.performance_tracker import PerformanceTracker
 
 # Initialize logging
@@ -165,6 +166,7 @@ def get_image_cost(
 async def generate_images(
     req: ImageGenerationRequest,
     background_tasks: BackgroundTasks,
+    request: Request,
     api_key: str = Depends(get_api_key),
 ):
     """
@@ -222,6 +224,10 @@ async def generate_images(
     }
     ```
     """
+    # Per-API-key rate limit (image generation is a direct, per-call cost).
+    # Mirrors the guard in routes/chat.py; fails open if the limiter is unavailable.
+    await enforce_request_rate_limit(api_key, request=request)
+
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/images/generations")
 
