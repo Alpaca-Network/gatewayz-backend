@@ -136,3 +136,93 @@ def offer_summary(offers: list[dict]) -> dict:
         "multi_provider_models": len(multi),
         "max_providers_for_one_model": max(by_canonical.values()) if by_canonical else 0,
     }
+
+
+def filter_multi_provider(offers: list[dict]) -> list[dict]:
+    """Keep only offers for models served by more than one gateway (pure)."""
+    counts: dict[str, int] = {}
+    for o in offers:
+        counts[o["canonical_id"]] = counts.get(o["canonical_id"], 0) + 1
+    return [o for o in offers if counts[o["canonical_id"]] > 1]
+
+
+# --------------------------------------------------------------------------- #
+# I/O shell (used by the CLI and the scheduled-sync hook). Kept thin; the pure
+# transform above is what carries the unit-tested logic.
+# --------------------------------------------------------------------------- #
+
+_PAGE = 1000
+_UPSERT_BATCH = 500
+_MODEL_COLS = (
+    "id,provider_id,provider_model_id,pricing_original_prompt,"
+    "success_rate,average_response_time_ms,is_active,modality"
+)
+
+
+def _providers_by_id(client) -> dict:
+    resp = client.table("providers").select("id,slug,name").execute()
+    out: dict = {}
+    for p in getattr(resp, "data", None) or []:
+        out[p["id"]] = p
+        out[str(p["id"])] = p  # tolerate int/str provider_id
+    return out
+
+
+def _fetch_active_models(client, limit: int | None) -> list[dict]:
+    rows: list[dict] = []
+    start = 0
+    while True:
+        resp = (
+            client.table("models")
+            .select(_MODEL_COLS)
+            .eq("is_active", True)
+            .range(start, start + _PAGE - 1)
+            .execute()
+        )
+        batch = getattr(resp, "data", None) or []
+        rows.extend(batch)
+        if limit and len(rows) >= limit:
+            return rows[:limit]
+        if len(batch) < _PAGE:
+            return rows
+        start += _PAGE
+
+
+def _upsert_offers(client, offers: list[dict]) -> int:
+    from datetime import UTC, datetime
+
+    stamp = datetime.now(UTC).isoformat()
+    written = 0
+    for i in range(0, len(offers), _UPSERT_BATCH):
+        batch = [dict(o, updated_at=stamp) for o in offers[i : i + _UPSERT_BATCH]]
+        client.table("model_provider_offers").upsert(
+            batch, on_conflict="canonical_id,provider_slug"
+        ).execute()
+        written += len(batch)
+    return written
+
+
+def refresh_offers_projection(
+    *, only_multi: bool = False, dry_run: bool = False, limit: int | None = None
+) -> dict:
+    """Fetch the catalog, build offers, and upsert them. Returns {summary, offers}.
+
+    The single entry point for both ``scripts/project_model_provider_offers.py`` and
+    the scheduled-sync hook. Idempotent (upserts on the unique key).
+    """
+    from src.config.supabase_config import get_supabase_client
+
+    client = get_supabase_client()
+    providers = _providers_by_id(client)
+    models = _fetch_active_models(client, limit)
+    offers = build_offer_rows(models, providers)
+    if only_multi:
+        offers = filter_multi_provider(offers)
+
+    summary = offer_summary(offers)
+    summary["models_scanned"] = len(models)
+    summary["dry_run"] = dry_run
+    summary["only_multi"] = only_multi
+    if not dry_run:
+        summary["rows_written"] = _upsert_offers(client, offers)
+    return {"summary": summary, "offers": offers}
