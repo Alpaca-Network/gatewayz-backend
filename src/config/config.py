@@ -123,12 +123,18 @@ class Config:
     # Abuse / Cost Controls
     # Anonymous (unauthenticated) inference is off by default. Set to "true" to allow.
     ANONYMOUS_ENABLED = os.environ.get("ANONYMOUS_ENABLED", "false").lower() in {"1", "true", "yes"}
-    # Phase 3 credit ledger (Gatewayz One §6.D), SHADOW dual-write. Off by default.
+    # Phase 3 credit ledger (Gatewayz One §6.D), SHADOW dual-write.
     # When true, a settled double-entry is recorded in public.credit_ledger alongside
-    # the authoritative deduction (non-blocking) so the ledger can be reconciled before
-    # any cutover. Requires the credit_ledger migration to be applied first.
+    # the authoritative deduction (non-blocking, off-thread, never raises) so the
+    # ledger can be reconciled against live billing before any cutover. The shadow
+    # write only adds records — it never touches the authoritative balances — so it
+    # is safe to run in production. Requires the credit_ledger migration (applied).
+    #
+    # Default: ON in production (the deploy env where reconciliation data must
+    # accrue), OFF everywhere else (tests/dev unaffected). An explicit
+    # CREDIT_LEDGER_SHADOW_ENABLED env var overrides the per-env default either way.
     CREDIT_LEDGER_SHADOW_ENABLED = os.environ.get(
-        "CREDIT_LEDGER_SHADOW_ENABLED", "false"
+        "CREDIT_LEDGER_SHADOW_ENABLED", "true" if IS_PRODUCTION else "false"
     ).lower() in {"1", "true", "yes"}
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
