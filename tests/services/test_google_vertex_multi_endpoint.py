@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import httpx
 
-from src.services.providers.google_vertex_client import _fetch_models_from_vertex_api
+from src.services.providers.google_vertex_catalog import _fetch_models_from_vertex_api
 
 
 class TestGoogleVertexMultiEndpoint:

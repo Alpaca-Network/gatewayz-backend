@@ -31,7 +31,7 @@ from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
 from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
-from src.services.providers.google_vertex_client import fetch_models_from_google_vertex
+from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_client import fetch_models_from_groq
 from src.services.providers.helicone_client import fetch_models_from_helicone
 from src.services.huggingface_models import fetch_models_from_huggingface_api
