@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 
-from src.db.chat_history import get_chat_session
+from src.db.chat_history import get_chat_session, save_chat_message
 from src.routes.chat_helpers import _to_thread
 from src.utils.security_validators import sanitize_for_logging
 
@@ -79,3 +79,74 @@ async def inject_conversation_history(
         )
 
     return messages, session_id
+
+
+async def persist_conversation_turn(
+    session_id: int | None,
+    is_anonymous: bool,
+    user: dict | None,
+    messages: list[dict],
+    model: str,
+    processed: dict,
+    total_tokens: int,
+) -> None:
+    """Save the last user turn and the assistant response to the session thread.
+
+    Authenticated-only; non-fatal on error. Counterpart to
+    :func:`inject_conversation_history`. Extracted verbatim from the
+    chat_completions handler (Step 5).
+    """
+    if not session_id or is_anonymous:
+        return
+
+    # Re-validate session_id in case it was modified during request processing
+    if session_id < _PG_INT_MIN or session_id > _PG_INT_MAX:
+        logger.warning(
+            "Invalid session_id %s during history save: out of PostgreSQL integer range. "
+            "Skipping history save.",
+            sanitize_for_logging(str(session_id)),
+        )
+        return
+
+    try:
+        session = await _to_thread(get_chat_session, session_id, user["id"])
+        if session:
+            # save last user turn in this call
+            last_user = None
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    last_user = m
+                    break
+            if last_user:
+                await _to_thread(
+                    save_chat_message,
+                    session_id,
+                    "user",
+                    last_user.get("content", ""),
+                    model,
+                    0,
+                    user["id"],
+                )
+
+            # Safely extract assistant content (handle None values in choices)
+            choices = processed.get("choices") or [{}]
+            first_choice = choices[0] if choices else {}
+            message = first_choice.get("message") or {}
+            assistant_content = message.get("content", "")
+            if assistant_content:
+                await _to_thread(
+                    save_chat_message,
+                    session_id,
+                    "assistant",
+                    assistant_content,
+                    model,
+                    total_tokens,
+                    user["id"],
+                )
+        else:
+            logger.warning("Session %s not found for user %s", session_id, user["id"])
+    except Exception as e:
+        logger.error(
+            f"Failed to save chat history for session {session_id}, user {user['id']}: {e}",
+            exc_info=True,
+        )
