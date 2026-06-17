@@ -6,7 +6,6 @@ import importlib.machinery
 import sys
 
 _PROVIDER_MODULES = {
-    "ai_sdk_client",
     "aihubmix_client",
     "aimo_client",
     "akash_client",

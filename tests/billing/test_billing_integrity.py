@@ -50,15 +50,27 @@ def test_chat_imports_pricing_for_precheck():
 
 
 def test_pricing_precheck_before_provider_dispatch():
-    """Pricing pre-check must appear BEFORE provider dispatch in chat.py."""
+    """Pricing pre-check must appear BEFORE provider dispatch in chat.py.
+
+    NOTE: the Step-3 provider-dispatch loop (``PROVIDER_ROUTING[attempt_provider]``)
+    was extracted from chat.py into chat_dispatch.py (Gatewayz One Phase 0d). The
+    invariant is unchanged — the pricing pre-check still runs before chat_completions
+    *invokes* the dispatch helpers — so this anchors on the ``await dispatch_*`` call
+    site and verifies the registry dispatch genuinely moved (not deleted).
+    """
     source = Path("src/routes/chat.py").read_text()
     precheck_pos = source.find("await get_model_pricing_async(req.model)")
-    dispatch_pos = source.find("PROVIDER_ROUTING[attempt_provider]")
+    dispatch_pos = source.find("await dispatch_")
     assert precheck_pos > 0, "get_model_pricing_async pre-check not found"
+    assert dispatch_pos > 0, "provider dispatch invocation not found"
     assert precheck_pos < dispatch_pos, (
         f"Pricing pre-check (pos {precheck_pos}) must appear before "
-        f"provider dispatch (pos {dispatch_pos})"
+        f"provider dispatch invocation (pos {dispatch_pos})"
     )
+    dispatch_src = Path("src/routes/chat_dispatch.py").read_text()
+    assert (
+        "PROVIDER_ROUTING[attempt_provider]" in dispatch_src
+    ), "registry-based provider dispatch should live in chat_dispatch.py"
 
 
 def test_pricing_precheck_returns_422():
@@ -92,17 +104,22 @@ def test_streaming_background_task_only_after_done_event():
     must be called AFTER yield create_done_sse(). The function is defined
     earlier in the file, but the asyncio.create_task() call inside the
     generator must follow the [DONE] yield.
+
+    NOTE: stream_generator was extracted from chat.py into chat_streaming.py
+    (Gatewayz One Phase 0d); this asserts on its new home.
     """
-    source = Path("src/routes/chat.py").read_text()
-    # Find the LAST yield of [DONE] — the main streaming generator's final yield
-    done_pos = source.rfind("yield create_done_sse()")
-    assert done_pos > 0, "yield create_done_sse() not found"
-    # The create_task call that schedules background processing should follow it
-    task_call_pos = source.find("asyncio.create_task(", done_pos)
-    assert task_call_pos > 0, "asyncio.create_task() not found after final done yield"
-    assert task_call_pos > done_pos, (
-        f"asyncio.create_task (pos {task_call_pos}) must appear after "
-        f"the final yield create_done_sse() (pos {done_pos})"
+    source = Path("src/routes/chat_streaming.py").read_text()
+    # The background post-processing task must be scheduled AFTER a [DONE] event is
+    # yielded, so the client receives [DONE] before any post-stream DB work begins.
+    # (Anchor on the background-task call, then require a [DONE] yield before it —
+    # robust to later error-path [DONE] yields that have no trailing task.)
+    task_call_pos = source.find("_process_stream_completion_background(")
+    assert task_call_pos > 0, "_process_stream_completion_background scheduling not found"
+    done_pos = source.rfind("yield create_done_sse()", 0, task_call_pos)
+    assert done_pos > 0, "no 'yield create_done_sse()' precedes the background task"
+    assert done_pos < task_call_pos, (
+        f"yield create_done_sse() (pos {done_pos}) must precede the background "
+        f"task scheduling (pos {task_call_pos})"
     )
 
 

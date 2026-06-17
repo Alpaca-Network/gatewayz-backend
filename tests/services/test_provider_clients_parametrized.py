@@ -322,7 +322,6 @@ ALL_PROVIDER_MODULES = [
     "src.services.aimo_client",
     "src.services.nebius_client",
     "src.services.alpaca_network_client",
-    "src.services.ai_sdk_client",
     "src.services.clarifai_client",
     "src.services.anannas_client",
 ]

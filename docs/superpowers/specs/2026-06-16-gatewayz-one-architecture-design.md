@@ -138,14 +138,19 @@ Redis projection (per region, derived, disposable): `registry`, `price_table`, `
 
 Enablement becomes `providers.tier` + `is_active`, seeded once — not code.
 
-- **Delete as provider adapters (tooling, not inference)**: `helicone`, `notdiamond`, `code_router`, `ai_sdk`, `anthropic_transformer`. Helicone's observability value is already covered by Sentry/Arize/OTel.
-- **Drop**: `clarifai` — zero unique models, pure reseller of frontier/open models already reached directly.
+- **Delete (verified safe — not inference sources)**: `helicone` (gateway, zero unique models; observability already covered by Sentry/Arize/OTel) and `ai_sdk` (an exported `AISDKChatAdapter` + client never instantiated — dead code).
+- **Drop**: `clarifai` — zero unique models, pure reseller; also remove its 31 seeded model-mapping rows.
+- **KEEP — mislabeled as tooling in the original draft (2026-06-16 audit correction):**
+  - `notdiamond` — a *live* routing feature behind `POST /general-router` (7 passing tests, Prometheus metrics).
+  - `code_router` — *live* intelligent routing wired into `chat.py` (`model: "router:code:*"`), 6 endpoints, CM-04 + 13 tests.
+  - `anthropic_transformer` — NOT a provider; a shared utility (`extract_message_with_tools()`) imported by 30+ provider clients. Deleting it breaks nearly all dispatch.
+  - `notdiamond`/`code_router` are exactly the ad-hoc routing the **Phase 2 Smart Router absorbs/evolves**, not Phase-0 deletions.
 - **`tier=core`, active**: `openrouter, openai, anthropic, groq, cerebras, together, fireworks, deepinfra, google-vertex, xai, alibaba-cloud, zai`.
 - **`tier=aggregator`, keep ONE active as overflow/failover, rest inactive**: `vercel-ai-gateway, onerouter, aihubmix, anannas`.
 - **`tier=niche`, inactive by default, flip on by demand**: `nebius, chutes, featherless, huggingface, near, morpheus, simplismart, sybil, nosana, canopywave, akash, cloudflare-workers-ai`; `alpaca-network` (own network — active).
 - **`cohere`**: has unique models (Command/rerank/embed) but routing adapter is unfinished — either complete it or leave inactive; no longer half-wired.
 
-Net: ~31 routable entries → ~13 active real providers; the rest one DB flag away; tooling removed.
+Net: ~31 routable entries → ~13 active real providers; the rest one DB flag away. Only genuine non-inference code (`helicone`, `ai_sdk`, `clarifai`) is deleted; real routing features (`notdiamond`, `code_router`) are kept for the Phase 2 router to absorb.
 
 ## 8.1 Architecture cleanup (bounded)
 
@@ -156,7 +161,7 @@ The cleanup is **enlarged beyond the provider layer to exactly the debt the unif
 - **Thin the fat provider clients** (`google_vertex` 1,784, `simplismart` 699, `cloudflare_workers_ai` 688, `nosana` 676, `alibaba_cloud` 603…) into adapters implementing only `{request, stream, process}`; pricing/health/routing logic moves out.
 - **Collapse the 5 rate-limit modules** (`anonymous_rate_limiter`, `auth_rate_limiting`, `endpoint_rate_limiter`, `rate_limiting`, `rate_limiting_fallback`) into one limiter owned by the edge gateway.
 - **Finish de-hardcoding** — retire `manual_pricing.json` (referenced across ~11 files) and `DEFAULT_*_MODELS` constants in favor of the DB registry + projection.
-- **Purge the zombie trial system** — "removed," yet `trial` is still referenced across ~57 files. Pure dead weight; delete on the Phase 0 low-risk pass.
+- **Purge only the *verified-dead* trial code** — a 2026-06-16 audit found the trial system is **not** dead weight: partner-trial onboarding (Redbeard 14-day Pro, wired into `auth.py` signup), the free-model bypass (`chat.py:1608`, runs on every authenticated request), and trial usage tracking (`credit_handler.py`) are all **live**. Phase 0 deletes only the genuinely-dead files (`src/utils/trial_utils.py` + the `ai_sdk` adapter/client) whose sole importers are their own tests. Full trial removal (incl. partner trials) is a separate **product decision**, parked out of Phase 0.
 
 **Out of scope (the unification does not touch these — leave alone to avoid an infinite refactor):**
 - Observability stack internals (the 12 metrics services / 7 health monitors) beyond wiring them as the events sink.
@@ -167,7 +172,7 @@ The cleanup is **enlarged beyond the provider layer to exactly the debt the unif
 
 | Phase | Sub-project | Unlocks | Risk |
 |---|---|---|---|
-| **0** | **Canonical contract + adapter interface** — one request/response schema; collapse provider clients to thin `{request,stream,process}` adapters; delete tooling-as-providers; **decompose `chat.py`**; **purge zombie trial code** (§8.1) | everything | low (no behavior change) |
+| **0** | **Canonical contract + adapter interface** — one request/response schema; collapse provider clients to thin `{request,stream,process}` adapters; delete verified-dead code (`helicone`, `ai_sdk`, `clarifai`, dead trial files); **decompose `chat.py`**; purge verified-dead trial code only (§8.1) | everything | low (no behavior change) |
 | **1** | **Registry & projection** — DB source of truth, retire `ENABLED_PROVIDERS`, seed tiers, Redis projection + sync pipeline; provider cleanup; **collapse 5 rate-limiters → 1**; **finish de-hardcoding** (§8.1) | router, multi-region | med |
 | **2** | **Smart Router policy engine** — scored candidate ranking + margin floor + failover chain | profitability, smart routing | med |
 | **3** | **Billing ledger + reconciliation** — optimistic reserve → async settle → double-entry ledger | profitable at scale | high (money) |

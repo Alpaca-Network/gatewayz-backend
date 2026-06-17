@@ -9,17 +9,19 @@ API Documentation: https://platform.openai.com/docs/api-reference
 """
 
 import logging
+from typing import Any, Iterator
 
 import httpx
 
 from src.config import Config
+from src.services.connection_pool import get_openai_pooled_client
+from src.services.model_catalog_cache import cache_gateway_catalog
 
 # NOTE: extract_message_with_tools is a provider-agnostic utility for OpenAI-compatible
 # responses. It lives in anthropic_transformer.py for historical reasons but is used
 # across all provider clients. Consider moving to a shared module in a future refactor.
 from src.services.providers.anthropic_transformer import extract_message_with_tools
-from src.services.connection_pool import get_openai_pooled_client
-from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.providers.base import ProviderAdapter
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -138,6 +140,30 @@ def process_openai_response(response):
     except Exception as e:
         logger.error(f"Failed to process OpenAI response: {e}")
         raise
+
+
+class OpenAIProviderAdapter:
+    """Reference implementation of the canonical :class:`ProviderAdapter`.
+
+    Object-form wrapper over this module's three contract functions. Pure
+    delegation — adds no behavior. Serves as the pattern future providers and
+    the fat-client thinning effort (0c-2) follow. The live dispatch path still
+    uses the module-level functions via ``PROVIDER_ROUTING``; this class is
+    additive.
+    """
+
+    def request(self, messages: list[dict[str, Any]], model: str, **params: Any) -> Any:
+        return make_openai_request(messages, model, **params)
+
+    def stream(self, messages: list[dict[str, Any]], model: str, **params: Any) -> Iterator[Any]:
+        return make_openai_request_stream(messages, model, **params)
+
+    def process(self, response: Any) -> dict[str, Any]:
+        return process_openai_response(response)
+
+
+# Static check that the reference adapter satisfies the protocol at import time.
+_REFERENCE_ADAPTER: ProviderAdapter = OpenAIProviderAdapter()
 
 
 # ============================================================================
