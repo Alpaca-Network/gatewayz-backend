@@ -1,6 +1,6 @@
 # Phase 5 — Multi-Region Deploy Plan (Gatewayz One)
 
-**Status:** plan only — no infra changes. The selection core (`src/services/region_router.py`) is built + tested; this is the rollout from single-region to active-active.
+**Status:** rollout phase 1 (inventory + wire) **DONE in code** — no infra/traffic change yet. The selection core (`src/services/region_router.py`) is built + tested; it is now wired to runtime config via `src/services/region_service.py` and the serving region is surfaced as the `X-Gatewayz-Region` response header (`src/middleware/region_middleware.py`). Single region still serves all traffic until `MULTI_REGION_ENABLED=true` + real infra. Phases 2–5 below remain owner/infra-driven.
 
 ## Current state
 - **Gateway (data plane):** stateless FastAPI app (Vercel `api/index.py` / Railway/Docker `start.sh`), single region.
@@ -26,7 +26,7 @@ client ─ GeoDNS/anycast ─┤                              ├─ Supabase (p
 | **Provider affinity** | Some providers are region-locked | Use `providers.region_affinity` (Phase 1) to bias `select_regions`/failover per region. |
 
 ## Rollout phases (each independently reversible)
-1. **Inventory + wire (no traffic change).** Feed real `Region` inventory (from config/registry) into `region_router`; expose `primary_region`/`select_regions` behind a flag; log the selected region as a header. Single region still serves all traffic. Tests: selection eligibility/ordering (already covered) + wiring.
+1. **Inventory + wire (no traffic change). ✅ DONE.** `region_service.py` feeds the config inventory (`GATEWAY_REGION` / `GATEWAY_REGIONS` / `GATEWAY_HOME_REGION`, gated by `MULTI_REGION_ENABLED`) into `region_router`; `RegionHeaderMiddleware` stamps `X-Gatewayz-Region` (+ `-Selected`) on every response; `region_status()` exposes the wiring. Single region still serves all traffic (flag off). Tested: `tests/services/test_region_service.py` (+ existing `region_router` selection tests).
 2. **Passive second region.** Deploy the gateway to region B pointed at the same Supabase primary + its own Redis. Health-check only; no user traffic. Verify catalog/inference parity.
 3. **Read-routed.** GeoDNS/anycast sends nearest-region traffic for **read/inference** paths; billing-affecting writes pinned to the home region (`select_regions(home=user_home)`). Watch latency + error budgets.
 4. **Active-active billing.** Only after the Phase 3 ledger is the billing source of truth (atomic reserve/settle handles concurrent debits). Then drop the home-region pin; both regions accept billing writes.
