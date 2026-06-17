@@ -6,6 +6,7 @@ import pytest
 
 from src.services.model_offers_projection import (
     build_offer_rows,
+    filter_multi_provider,
     normalized_cost_per_1k,
     offer_summary,
 )
@@ -123,6 +124,18 @@ def test_provider_id_int_key_resolves():
     rows = build_offer_rows([_model(provider_id=98)], PROVIDERS)
     assert len(rows) == 1
     assert rows[0]["provider_slug"] == "onerouter"
+
+
+def test_filter_multi_provider_keeps_only_shared_models():
+    models = [
+        _model(id="1", provider_id="98", provider_model_id="shared"),
+        _model(id="2", provider_id="110", provider_model_id="shared"),
+        _model(id="3", provider_id="88", provider_model_id="solo"),
+    ]
+    offers = build_offer_rows(models, PROVIDERS)
+    multi = filter_multi_provider(offers)
+    assert {o["canonical_id"] for o in multi} == {"shared"}
+    assert len(multi) == 2
 
 
 def test_summary_empty():

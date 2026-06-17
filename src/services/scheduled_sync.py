@@ -111,6 +111,22 @@ async def warm_caches_after_sync(changed_providers: list[str]) -> None:
     logger.info("Cache warming complete after sync")
 
 
+async def refresh_offers_projection_after(reason: str) -> None:
+    """Best-effort refresh of model_provider_offers after a sync (Phase 1 pipeline).
+
+    Keeps the smart router's offer set fresh as the catalog/prices change. Runs the
+    blocking projection in a worker thread; never raises (a failure must not affect
+    the sync that triggered it).
+    """
+    try:
+        from src.services.model_offers_projection import refresh_offers_projection
+
+        result = await asyncio.to_thread(refresh_offers_projection)
+        logger.info("Offers projection refreshed after %s: %s", reason, result["summary"])
+    except Exception as e:
+        logger.warning("Offers projection refresh failed after %s (non-fatal): %s", reason, e)
+
+
 async def run_scheduled_model_sync():
     """
     Run the scheduled model sync job with incremental change detection.
@@ -173,6 +189,12 @@ async def run_scheduled_model_sync():
                     name="post_sync_cache_warm",
                 )
                 logger.info(f"Cache warming task queued for {len(changed)} changed providers")
+
+            # Refresh the smart router's offer projection from the updated catalog.
+            asyncio.create_task(
+                refresh_offers_projection_after("model sync"),
+                name="post_sync_offers_projection",
+            )
 
         else:
             # Failed
@@ -410,6 +432,13 @@ async def run_scheduled_price_refresh():
                 result.get("providers_checked", 0),
                 result.get("providers_failed", 0),
             )
+            # Prices feed the smart router's upstream_cost — re-project offers when
+            # any price actually changed.
+            if result.get("prices_updated", 0) > 0:
+                asyncio.create_task(
+                    refresh_offers_projection_after("price refresh"),
+                    name="post_price_refresh_offers_projection",
+                )
         else:
             # success=False means at least one provider failed; the rest still ran.
             _last_price_refresh_status["failed_runs"] += 1
