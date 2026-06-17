@@ -158,6 +158,27 @@ class Config:
     CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
     # Fallback token budget when a model's context length is unknown.
     CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "8192"))
+
+    # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
+    # traffic change). The region_router selection core is fed from these. Until
+    # MULTI_REGION_ENABLED is true the inventory is just this single region, so all
+    # traffic is served locally and selection is a no-op — this only exposes the
+    # serving region (X-Gatewayz-Region header / health) for observability.
+    # The name of the region THIS instance runs as (Railway injects RAILWAY_REPLICA_REGION).
+    GATEWAY_REGION = (
+        os.environ.get("GATEWAY_REGION")
+        or os.environ.get("RAILWAY_REPLICA_REGION")
+        or "primary"
+    )
+    # Region inventory: comma-separated "name" or "name:latency_ms" (e.g.
+    # "us-east:10,eu-west:80"). Empty → single region (GATEWAY_REGION). Only consulted
+    # when MULTI_REGION_ENABLED is true.
+    GATEWAY_REGIONS = os.environ.get("GATEWAY_REGIONS", "").strip()
+    # The home region for a user's billing-affecting writes (Phase 5 rollout step 3
+    # pins these to one region until the ledger is the billing source of truth).
+    GATEWAY_HOME_REGION = os.environ.get("GATEWAY_HOME_REGION", "").strip() or GATEWAY_REGION
+    # Master switch for multi-region behavior. Off by default (single region).
+    MULTI_REGION_ENABLED = os.environ.get("MULTI_REGION_ENABLED", "false").lower() in {"1", "true", "yes"}
     # Subscription statuses that may NOT call the API (comma-separated).
     # Includes both American (Stripe) and British spellings of cancel*, plus all
     # Stripe failure states: past_due (charge failed), unpaid (multiple failures),

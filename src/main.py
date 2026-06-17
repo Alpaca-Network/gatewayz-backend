@@ -276,6 +276,12 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     logger.info("  🆔 [4] Request ID middleware enabled (unique ID for all requests)")
 
+    # Region header — stamps X-Gatewayz-Region (Phase 5 rollout 1, observability only)
+    from src.middleware.region_middleware import RegionHeaderMiddleware
+
+    app.add_middleware(RegionHeaderMiddleware)
+    logger.info("  🌍 Region header middleware enabled (region: %s)", Config.GATEWAY_REGION)
+
     # [3] Concurrency — global admission gate; queues or sheds excess requests
     from src.middleware.concurrency_middleware import ConcurrencyMiddleware
 
