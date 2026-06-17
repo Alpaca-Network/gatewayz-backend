@@ -629,6 +629,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start price refresh scheduler: {e}")
         # Don't fail startup if price refresh fails to start
 
+    # Start scheduled credit-ledger reconciliation (Phase 3 shadow vs live)
+    try:
+        from src.services.scheduled_sync import start_ledger_reconciliation_scheduler
+
+        start_ledger_reconciliation_scheduler()
+        logger.info("Ledger reconciliation service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start ledger reconciliation scheduler: {e}")
+        # Don't fail startup if reconciliation fails to start
+
     # ---------------------------------------------------------------------------
     # Additional startup work (migrated from @app.on_event("startup"))
     # ---------------------------------------------------------------------------
@@ -742,6 +752,15 @@ async def lifespan(app):
         logger.info("Price refresh service stopped")
     except Exception as e:
         logger.warning(f"Price refresh shutdown warning: {e}")
+
+    # Stop scheduled credit-ledger reconciliation
+    try:
+        from src.services.scheduled_sync import stop_ledger_reconciliation_scheduler
+
+        stop_ledger_reconciliation_scheduler()
+        logger.info("Ledger reconciliation service stopped")
+    except Exception as e:
+        logger.warning(f"Ledger reconciliation shutdown warning: {e}")
 
     # Cancel any pending background tasks
     if _background_tasks:

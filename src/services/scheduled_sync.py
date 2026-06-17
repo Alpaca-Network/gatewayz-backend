@@ -31,6 +31,7 @@ _scheduler: AsyncIOScheduler | None = None
 # Kept independent from _scheduler so the (currently disabled) full sync and the
 # price refresh can be enabled/disabled and started/stopped independently.
 _price_scheduler: AsyncIOScheduler | None = None
+_recon_scheduler: AsyncIOScheduler | None = None
 
 # Track last sync status for health monitoring
 _last_sync_status: dict[str, Any] = {
@@ -547,3 +548,108 @@ def get_price_refresh_status() -> dict[str, Any]:
         "last_duration_seconds": _last_price_refresh_status["last_duration_seconds"],
         "last_prices_updated": _last_price_refresh_status["last_prices_updated"],
     }
+
+
+# ============================================================================
+# Credit-ledger reconciliation (Gatewayz One Phase 3, item 4) — scheduled,
+# read-only. Compares the shadow ledger against live billing over a recent
+# window and logs the result; drift logs at ERROR so it is alertable. It never
+# mutates billing.
+# ============================================================================
+
+_last_recon_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_ok": None,
+    "last_total_drift": None,
+    "last_ledger_refs": None,
+}
+
+
+async def run_scheduled_ledger_reconciliation():
+    """Reconcile the shadow credit ledger vs live billing over the recent window."""
+    from datetime import timedelta
+
+    from src.services.billing.ledger_reconciliation import reconcile_window
+
+    now = datetime.now(UTC)
+    since = (now - timedelta(hours=Config.LEDGER_RECONCILIATION_WINDOW_HOURS)).isoformat()
+    until = now.isoformat()
+    _last_recon_status["last_run_time"] = now
+
+    try:
+        report, admin_count = await asyncio.to_thread(reconcile_window, since, until)
+        _last_recon_status["last_ok"] = report.ok
+        _last_recon_status["last_total_drift"] = str(report.total_drift)
+        _last_recon_status["last_ledger_refs"] = report.ledger_ref_count
+
+        if report.ledger_ref_count == 0:
+            logger.info(
+                "Ledger reconciliation: no ledger rows in last %sh (shadow not yet accruing)",
+                Config.LEDGER_RECONCILIATION_WINDOW_HOURS,
+            )
+        elif report.ok:
+            logger.info(
+                "✅ Ledger reconciliation OK | refs=%s revenue=%s usage=%s drift=%s (±%s)",
+                report.ledger_ref_count,
+                report.total_ledger_revenue,
+                report.total_usage_cost,
+                report.total_drift,
+                report.tolerance,
+            )
+        else:
+            offenders = [u for u in report.per_user if not u.within_tolerance]
+            logger.error(
+                "❌ Ledger reconciliation DRIFT | refs=%s drift=%s unbalanced=%s "
+                "users_over_tolerance=%s (admins excluded=%s)",
+                report.ledger_ref_count,
+                report.total_drift,
+                len(report.unbalanced_refs),
+                len(offenders),
+                admin_count,
+            )
+    except Exception as e:
+        logger.warning("Ledger reconciliation failed (non-fatal): %s", e)
+
+
+def start_ledger_reconciliation_scheduler():
+    """Start the APScheduler for credit-ledger reconciliation (app lifespan)."""
+    global _recon_scheduler
+
+    if not Config.ENABLE_LEDGER_RECONCILIATION:
+        logger.info("Ledger reconciliation DISABLED: ENABLE_LEDGER_RECONCILIATION=false")
+        return
+
+    interval_minutes = Config.LEDGER_RECONCILIATION_INTERVAL_MINUTES
+    logger.info("Starting credit-ledger reconciliation scheduler (interval: %s min)", interval_minutes)
+    try:
+        _recon_scheduler = AsyncIOScheduler()
+        _recon_scheduler.add_job(
+            run_scheduled_ledger_reconciliation,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="ledger_reconciliation",
+            name="Credit Ledger Reconciliation Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _recon_scheduler.start()
+        logger.info("✅ Ledger reconciliation scheduler started (next run in %s min)", interval_minutes)
+    except Exception as e:
+        logger.error("❌ Failed to start ledger reconciliation scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_ledger_reconciliation_scheduler():
+    """Stop the reconciliation APScheduler gracefully (called during shutdown)."""
+    global _recon_scheduler
+
+    if _recon_scheduler is None:
+        return
+    logger.info("Stopping ledger reconciliation scheduler...")
+    try:
+        _recon_scheduler.shutdown(wait=True)
+        logger.info("✅ Ledger reconciliation scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping ledger reconciliation scheduler: %s", e)
+    finally:
+        _recon_scheduler = None

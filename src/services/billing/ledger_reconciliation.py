@@ -244,6 +244,75 @@ def reconcile_rows(
     )
 
 
+# --------------------------------------------------------------------------- #
+# I/O runner — shared by the CLI (scripts/reconcile_credit_ledger.py) and the
+# scheduled reconciliation job (src/services/scheduled_sync.py). The pure
+# functions above carry the unit-tested logic; this only fetches + delegates.
+# --------------------------------------------------------------------------- #
+
+_PAGE = 1000
+
+
+def _fetch_all(client, table: str, time_col: str, since: str, until: str) -> list[dict]:
+    """Page through every row of ``table`` in [since, until) (Supabase caps at 1000)."""
+    rows: list[dict] = []
+    start = 0
+    while True:
+        resp = (
+            client.table(table)
+            .select("*")
+            .gte(time_col, since)
+            .lt(time_col, until)
+            .order(time_col)
+            .range(start, start + _PAGE - 1)
+            .execute()
+        )
+        batch = getattr(resp, "data", None) or []
+        rows.extend(batch)
+        if len(batch) < _PAGE:
+            return rows
+        start += _PAGE
+
+
+def admin_user_ids(client) -> frozenset:
+    """User ids the shadow path skips (tier == 'admin'). Empty set on any failure."""
+    try:
+        resp = client.table("users").select("id").eq("tier", "admin").execute()
+        return frozenset(
+            r["id"] for r in (getattr(resp, "data", None) or []) if r.get("id") is not None
+        )
+    except Exception:
+        return frozenset()
+
+
+def reconcile_window(
+    since: str,
+    until: str,
+    *,
+    tolerance: Decimal = DEFAULT_TOLERANCE,
+    min_cost: Decimal = DEFAULT_MIN_COST,
+) -> tuple[ReconciliationReport, int]:
+    """Fetch ledger + usage in [since, until) and reconcile. Returns (report, admin_count).
+
+    Reads from the project the gateway is configured against (service-role key
+    required — the ledger table is RLS-locked).
+    """
+    from src.config.supabase_config import get_supabase_client
+
+    client = get_supabase_client()
+    ledger_rows = _fetch_all(client, "credit_ledger", "created_at", since, until)
+    usage_rows = _fetch_all(client, "usage_records", "timestamp", since, until)
+    admins = admin_user_ids(client)
+    report = reconcile_rows(
+        ledger_rows,
+        usage_rows,
+        min_cost=min_cost,
+        exclude_user_ids=admins,
+        tolerance=tolerance,
+    )
+    return report, len(admins)
+
+
 # Account-name re-exports so callers/tests need only this module.
 __all__ = [
     "ALLOWANCE",
