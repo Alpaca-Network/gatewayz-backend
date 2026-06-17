@@ -806,6 +806,21 @@ async def chat_completions(
                     "Auto web search failed, continuing without augmentation: %s", str(e)
                 )
 
+        # Gatewayz One Phase 4 — context assembly (flag-gated, off by default).
+        # Reassemble the final messages within the model's token budget (system +
+        # per-user memory + rolling summary + most-recent turns, oldest dropped
+        # first). Exact passthrough when disabled; never raises.
+        if Config.CONTEXT_ASSEMBLY_ENABLED:
+            from src.services.context_assembly_bridge import apply_context_budget
+
+            messages = apply_context_budget(
+                messages,
+                model=model,
+                budget_ratio=Config.CONTEXT_ASSEMBLY_BUDGET_RATIO,
+                default_budget=Config.CONTEXT_ASSEMBLY_DEFAULT_BUDGET,
+                user_id=(user or {}).get("id") if not is_anonymous else None,
+            )
+
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
             return await dispatch_streaming(
