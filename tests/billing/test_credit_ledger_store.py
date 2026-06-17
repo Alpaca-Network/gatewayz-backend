@@ -104,3 +104,17 @@ def test_record_shadow_settlement_empty_ref_is_noop():
         )
     assert ok is False
     get_client.assert_not_called()  # bails before touching the DB
+
+
+def test_record_shadow_settlement_oversized_cost_is_noop():
+    # cost exceeds allowance+purchased -> split_charge raises InsufficientBalance,
+    # which the shadow path must swallow (return False, never raise, never insert).
+    client = _mock_client(existing_data=[])
+    with patch("src.config.supabase_config.get_supabase_client", return_value=client):
+        ok = asyncio.run(
+            record_shadow_settlement(
+                ref="req-over", user_id=7, cost="10.00", allowance="1.00", purchased="0.50"
+            )
+        )
+    assert ok is False
+    client.table.return_value.insert.assert_not_called()
