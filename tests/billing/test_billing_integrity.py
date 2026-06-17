@@ -50,15 +50,27 @@ def test_chat_imports_pricing_for_precheck():
 
 
 def test_pricing_precheck_before_provider_dispatch():
-    """Pricing pre-check must appear BEFORE provider dispatch in chat.py."""
+    """Pricing pre-check must appear BEFORE provider dispatch in chat.py.
+
+    NOTE: the Step-3 provider-dispatch loop (``PROVIDER_ROUTING[attempt_provider]``)
+    was extracted from chat.py into chat_dispatch.py (Gatewayz One Phase 0d). The
+    invariant is unchanged — the pricing pre-check still runs before chat_completions
+    *invokes* the dispatch helpers — so this anchors on the ``await dispatch_*`` call
+    site and verifies the registry dispatch genuinely moved (not deleted).
+    """
     source = Path("src/routes/chat.py").read_text()
     precheck_pos = source.find("await get_model_pricing_async(req.model)")
-    dispatch_pos = source.find("PROVIDER_ROUTING[attempt_provider]")
+    dispatch_pos = source.find("await dispatch_")
     assert precheck_pos > 0, "get_model_pricing_async pre-check not found"
+    assert dispatch_pos > 0, "provider dispatch invocation not found"
     assert precheck_pos < dispatch_pos, (
         f"Pricing pre-check (pos {precheck_pos}) must appear before "
-        f"provider dispatch (pos {dispatch_pos})"
+        f"provider dispatch invocation (pos {dispatch_pos})"
     )
+    dispatch_src = Path("src/routes/chat_dispatch.py").read_text()
+    assert (
+        "PROVIDER_ROUTING[attempt_provider]" in dispatch_src
+    ), "registry-based provider dispatch should live in chat_dispatch.py"
 
 
 def test_pricing_precheck_returns_422():
