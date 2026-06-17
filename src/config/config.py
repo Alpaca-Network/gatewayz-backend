@@ -169,6 +169,13 @@ class Config:
     # Fraction of a model's context window reserved for the assembled prompt
     # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
     CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
+    # Phase 4 — heuristic user-memory capture. When on, durable self-stated facts
+    # ("my name is…", "I prefer…", "remember that…") are extracted from a user's
+    # messages and saved to user_memory (post-response background task) so the
+    # context assembler can recall them. High-precision + capped; off by default.
+    MEMORY_CAPTURE_ENABLED = os.environ.get("MEMORY_CAPTURE_ENABLED", "false").lower() in {"1", "true", "yes"}
+    MEMORY_MAX_PER_USER = int(os.environ.get("MEMORY_MAX_PER_USER", "100"))
+
     # Assumed budget when a model's context length is unknown. Deliberately large
     # so an unknown window does NOT cause aggressive truncation — when we can't tell
     # a model's real window, we pass the turns through (no worse than today) rather
