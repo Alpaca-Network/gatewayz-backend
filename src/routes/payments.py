@@ -29,6 +29,7 @@ from src.schemas.payments import (
 from src.security import deps as security_deps
 from src.security.deps import security as bearer_security
 from src.services.payments import StripeService
+from src.utils.rate_limit_guard import enforce_request_rate_limit
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,30 @@ router = APIRouter(prefix="/api/stripe", tags=["Stripe Payments"])
 
 # Initialize Stripe service
 stripe_service = StripeService()
+
+
+def _assert_stripe_object_owner(
+    metadata: Any, current_user: dict[str, Any], *, object_label: str, object_id: str
+) -> None:
+    """Reject access to a Stripe object the caller does not own (prevents IDOR).
+
+    Checkout sessions and payment intents are created with ``metadata.user_id``
+    set to the owning user. Stripe object IDs are not enumerable, but they are
+    not an access control either (they leak via URLs, logs, referrers), so we
+    must verify ownership before returning financial details. Returns 404 (not
+    403) so we don't confirm the existence of another user's object.
+    """
+    owner_id = (metadata or {}).get("user_id")
+    caller_id = current_user.get("id")
+    if owner_id is None or str(owner_id) != str(caller_id):
+        logger.warning(
+            "Blocked cross-user %s access (caller=%s, owner=%s, id=%s)",
+            object_label,
+            sanitize_for_logging(str(caller_id)),
+            sanitize_for_logging(str(owner_id)),
+            sanitize_for_logging(str(object_id)),
+        )
+        raise HTTPException(status_code=404, detail=f"{object_label} not found")
 
 
 async def _execute_user_override(override, request: Request):
@@ -201,6 +226,10 @@ async def create_checkout_session(
         "cancel_url": "https://your-app.com/payment/cancel"
     }
     """
+    # Per-API-key rate limit to curb rapid Stripe object creation / abuse.
+    # Runs before the try/except so a 429 is not re-wrapped as a 500.
+    await enforce_request_rate_limit(current_user.get("api_key"))
+
     try:
         user_id = current_user["id"]
         logger.info(
@@ -253,19 +282,26 @@ async def get_checkout_session(
     """
     try:
         session = stripe_service.retrieve_checkout_session(session_id)
-
-        return {
-            "session_id": session["id"],
-            "payment_status": session["payment_status"],
-            "status": session["status"],
-            "amount_total": session["amount_total"],
-            "currency": session["currency"],
-            "customer_email": session["customer_email"],
-        }
-
     except Exception as e:
         logger.error(f"Error retrieving checkout session: {e}")
         raise HTTPException(status_code=404, detail=str(e))
+
+    # Authorization: ensure the session belongs to the caller (prevent IDOR).
+    _assert_stripe_object_owner(
+        session.get("metadata"),
+        current_user,
+        object_label="Checkout session",
+        object_id=session_id,
+    )
+
+    return {
+        "session_id": session["id"],
+        "payment_status": session["payment_status"],
+        "status": session["status"],
+        "amount_total": session["amount_total"],
+        "currency": session["currency"],
+        "customer_email": session["customer_email"],
+    }
 
 
 # ==================== Payment Intents ====================
@@ -296,6 +332,9 @@ async def create_payment_intent(
         "automatic_payment_methods": true
     }
     """
+    # Per-API-key rate limit to curb rapid Stripe object creation / abuse.
+    await enforce_request_rate_limit(current_user.get("api_key"))
+
     try:
         user_id = current_user["id"]
 
@@ -338,19 +377,26 @@ async def get_payment_intent(
     """
     try:
         intent = stripe_service.retrieve_payment_intent(payment_intent_id)
-
-        return {
-            "payment_intent_id": intent["id"],
-            "status": intent["status"],
-            "amount": intent["amount"],
-            "currency": intent["currency"],
-            "customer": intent["customer"],
-            "payment_method": intent["payment_method"],
-        }
-
     except Exception as e:
         logger.error(f"Error retrieving payment intent: {e}")
         raise HTTPException(status_code=404, detail=str(e))
+
+    # Authorization: ensure the intent belongs to the caller (prevent IDOR).
+    _assert_stripe_object_owner(
+        intent.get("metadata"),
+        current_user,
+        object_label="Payment intent",
+        object_id=payment_intent_id,
+    )
+
+    return {
+        "payment_intent_id": intent["id"],
+        "status": intent["status"],
+        "amount": intent["amount"],
+        "currency": intent["currency"],
+        "customer": intent["customer"],
+        "payment_method": intent["payment_method"],
+    }
 
 
 # ==================== Credit Packages ====================

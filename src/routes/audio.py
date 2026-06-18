@@ -18,7 +18,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
 from src.config import Config
@@ -28,6 +28,7 @@ from src.security.inference_gates import enforce_subscription_status_gate
 from src.security.deps import get_api_key
 from src.services.connection_pool import get_openai_pooled_client
 from src.utils.ai_tracing import AIRequestType, AITracer
+from src.utils.rate_limit_guard import enforce_request_rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +231,7 @@ async def _deduct_audio_credits(
 
 @router.post("/transcriptions")
 async def create_transcription(
+    request: Request,
     file: UploadFile = File(..., description="Audio file to transcribe"),
     model: str = Form(
         default="whisper-1",
@@ -284,6 +286,9 @@ async def create_transcription(
 
     flac, m4a, mp3, mp4, mpeg, mpga, ogg, wav, webm
     """
+    # Per-API-key rate limit (transcription is billed per minute of audio).
+    await enforce_request_rate_limit(api_key, request=request)
+
     request_id = str(uuid.uuid4())[:8]
 
     # Validate content type - only accept known supported formats
@@ -511,6 +516,7 @@ async def create_transcription(
 
 @router.post("/transcriptions/base64")
 async def create_transcription_base64(
+    request: Request,
     audio_data: str = Form(..., description="Base64-encoded audio data"),
     content_type: str = Form(
         default="audio/webm", description="MIME type of the audio (e.g., 'audio/webm', 'audio/wav')"
@@ -542,6 +548,9 @@ async def create_transcription_base64(
     Extract just the base64 part after the comma:
     `GkXfo59ChoEBQv...`
     """
+    # Per-API-key rate limit (transcription is billed per minute of audio).
+    await enforce_request_rate_limit(api_key, request=request)
+
     request_id = str(uuid.uuid4())[:8]
 
     # Handle data URL format

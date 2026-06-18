@@ -12,7 +12,12 @@ from typing import Any
 
 import stripe
 
-from src.db.payments import create_payment, get_payment_by_stripe_intent, update_payment_status
+from src.db.payments import (
+    create_payment,
+    get_payment,
+    get_payment_by_stripe_intent,
+    update_payment_status,
+)
 from src.db.subscription_products import get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
 from src.db.webhook_events import is_event_processed, record_processed_event
@@ -658,16 +663,6 @@ class StripeService:
             except (AttributeError, ValueError, TypeError, KeyError):
                 pass
 
-            # Record event as processed immediately after duplicate check to ensure
-            # idempotency even if handlers raise exceptions. This prevents duplicate
-            # processing when Stripe retries the webhook.
-            record_processed_event(
-                event_id=event["id"],
-                event_type=event["type"],
-                user_id=user_id,
-                metadata={"stripe_account": event.get("account")},
-            )
-
             # One-time payment events
             if event["type"] == "checkout.session.completed":
                 self._handle_checkout_completed(event["data"]["object"])
@@ -687,6 +682,20 @@ class StripeService:
                 self._handle_invoice_paid(event["data"]["object"])
             elif event["type"] == "invoice.payment_failed":
                 self._handle_invoice_payment_failed(event["data"]["object"])
+
+            # Record the event as processed ONLY after its handler succeeded.
+            # If a handler raises, we deliberately do NOT record the event so that
+            # Stripe's automatic retry re-runs it. The credit-granting handlers are
+            # idempotent (they skip already-completed payments), so an at-least-once
+            # retry cannot double-credit. This replaces the previous
+            # "mark-before-handler" behaviour, which silently dropped credit grants
+            # whenever a handler hit a transient DB/Stripe error.
+            record_processed_event(
+                event_id=event["id"],
+                event_type=event["type"],
+                user_id=user_id,
+                metadata={"stripe_account": event.get("account")},
+            )
 
             return WebhookProcessingResult(
                 success=True,
@@ -844,6 +853,20 @@ class StripeService:
                     f"(session_id={session_id}, user_id={user_id}, "
                     f"payment_id={payment_id}, credits_cents={credits_cents})"
                 )
+
+            # Idempotency guard: if this payment was already completed (e.g. a
+            # Stripe webhook retry, or a duplicate delivery), do NOT add credits
+            # again. add_credits_to_user is not idempotent on its own, so this
+            # check is what makes the handler safe to re-run.
+            existing_payment = get_payment(payment_id) if payment_id is not None else None
+            if existing_payment and str(existing_payment.get("status", "")).lower() == "completed":
+                logger.info(
+                    "Checkout session %s already completed (payment_id=%s); "
+                    "skipping duplicate credit grant",
+                    session_id,
+                    payment_id,
+                )
+                return
 
             amount_dollars = float(Decimal(credits_cents) / 100)  # Convert cents to dollars
 
@@ -1271,6 +1294,17 @@ class StripeService:
         try:
             payment = get_payment_by_stripe_intent(payment_intent.id)
             if payment:
+                # Idempotency guard: skip duplicate credit grants on webhook
+                # retries / duplicate deliveries (add_credits_to_user is not
+                # idempotent on its own).
+                if str(payment.get("status", "")).lower() == "completed":
+                    logger.info(
+                        "Payment intent %s already completed (payment_id=%s); "
+                        "skipping duplicate credit grant",
+                        payment_intent.id,
+                        payment["id"],
+                    )
+                    return
                 update_payment_status(payment_id=payment["id"], status="completed")
                 # Add credits and log transaction
                 amount = payment.get("amount_usd", payment.get("amount", 0))

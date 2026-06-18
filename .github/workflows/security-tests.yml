@@ -1,0 +1,77 @@
+name: Security Hardening Tests
+
+on:
+  pull_request:
+    branches: [main, staging, develop]
+    paths:
+      - "src/**"
+      - "tests/security/**"
+      - ".github/workflows/security-tests.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/security/**"
+  workflow_dispatch:
+
+concurrency:
+  group: security-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  security-tests:
+    name: Security Hardening Tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run hardening unit tests
+        env:
+          TESTING: "true"
+          APP_ENV: "testing"
+          SUPABASE_URL: "https://test.supabase.co"
+          SUPABASE_KEY: "test-key"
+          OPENROUTER_API_KEY: "test-key"
+          ENCRYPTION_KEY: "test-encryption-key-32-bytes!!"
+          ADMIN_API_KEY: "test-admin-key"
+          API_GATEWAY_SALT: "test-salt-minimum-sixteen-chars-long"
+          STRIPE_SECRET_KEY: "sk_test_fake"
+          STRIPE_WEBHOOK_SECRET: "whsec_test_fake"
+          SENTRY_DSN: ""
+          PROMETHEUS_ENABLED: "false"
+        run: |
+          pytest tests/security/test_vibe_audit_hardening.py -v --tb=short
+
+      - name: Run live RLS lockdown check (skips unless anon key is configured)
+        env:
+          # Provide these repo/environment secrets to actively verify that the
+          # Supabase anon key cannot read sensitive tables. Without them the test
+          # skips, so this step is safe to keep enabled everywhere.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          pytest tests/security/test_rls_anon_lockdown.py -v --tb=short -rs

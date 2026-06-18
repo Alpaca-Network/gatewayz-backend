@@ -6,6 +6,7 @@ Updated: 2025-10-12 - Force restart to clear LRU cache
 """
 
 import logging
+import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -849,6 +850,19 @@ async def get_rate_limit_status(api_key: str, config: RateLimitConfig) -> dict[s
     return await limiter.get_rate_limit_status(api_key, config)
 
 
+def _fail_open_allowed() -> bool:
+    """Whether rate-limit primitives should fail OPEN when Redis is unavailable.
+
+    Defaults to True (favour availability: a Redis blip should not take down the
+    whole API). Set ``RATE_LIMIT_FAIL_CLOSED=true`` to fail CLOSED instead —
+    denying requests during a Redis outage so abuse protection is preserved at
+    the cost of availability. Operators should pick the trade-off that fits the
+    deployment; multi-instance setups in particular leak limits while failing
+    open because in-memory fallback buckets are per-instance.
+    """
+    return os.getenv("RATE_LIMIT_FAIL_CLOSED", "false").lower() != "true"
+
+
 def sliding_window_check(
     key: str, limit: int, window_seconds: int
 ) -> tuple[bool, int, int | None]:
@@ -857,18 +871,24 @@ def sliding_window_check(
     Returns:
         (allowed, remaining, retry_after_seconds)
         retry_after_seconds is None when allowed.
-        Fails open (allowed=True, remaining=limit) if Redis is unavailable.
+        On Redis unavailability the behaviour is governed by
+        ``RATE_LIMIT_FAIL_CLOSED`` (default: fail open, allowed=True).
     """
     from src.config.redis_config import get_redis_client
 
     try:
         r = get_redis_client()
     except Exception as e:
-        logger.warning("sliding_window_check: Redis client unavailable (%s); failing open", e)
-        return True, limit, None
+        if _fail_open_allowed():
+            logger.warning("sliding_window_check: Redis client unavailable (%s); failing open", e)
+            return True, limit, None
+        logger.warning("sliding_window_check: Redis client unavailable (%s); failing closed", e)
+        return False, 0, window_seconds
 
     if r is None:
-        return True, limit, None
+        if _fail_open_allowed():
+            return True, limit, None
+        return False, 0, window_seconds
 
     now_ms = int(time.time() * 1000)
     window_ms = window_seconds * 1000
@@ -897,8 +917,11 @@ def sliding_window_check(
 
         return True, max(0, limit - count - 1), None
     except Exception as e:
-        logger.warning("sliding_window_check: Redis op failed (%s); failing open", e)
-        return True, limit, None
+        if _fail_open_allowed():
+            logger.warning("sliding_window_check: Redis op failed (%s); failing open", e)
+            return True, limit, None
+        logger.warning("sliding_window_check: Redis op failed (%s); failing closed", e)
+        return False, 0, window_seconds
 
 
 PREMIUM_CONFIG = RateLimitConfig(
