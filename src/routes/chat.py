@@ -371,23 +371,27 @@ async def chat_completions(
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
+            # Resolve client IP for ALL requests (anonymous and authenticated).
+            # Used by the streaming dispatch, anonymous rate limiting, and audit
+            # logging. This MUST be bound unconditionally — previously it was only
+            # set inside the `is_anonymous` branch, so authenticated streaming
+            # requests hit `UnboundLocalError: client_ip` in dispatch_streaming and
+            # every streamed chat returned a 500.
+            client_ip = "unknown"
+            if request:
+                # Parse X-Forwarded-For header with defensive bounds checking
+                forwarded_for = request.headers.get("X-Forwarded-For", "")
+                if forwarded_for:
+                    parts = forwarded_for.split(",")
+                    if parts:  # Defensive check (split always returns at least [''])
+                        client_ip = parts[0].strip()
+                if not client_ip:
+                    client_ip = request.headers.get("X-Real-IP", "")
+                if not client_ip and hasattr(request, "client") and request.client:
+                    client_ip = request.client.host or "unknown"
+
             if is_anonymous:
                 # Anonymous user - validate model whitelist and rate limits
-                # Get client IP for rate limiting
-                client_ip = "unknown"
-                if request:
-                    # Parse X-Forwarded-For header with defensive bounds checking
-                    forwarded_for = request.headers.get("X-Forwarded-For", "")
-                    if forwarded_for:
-                        parts = forwarded_for.split(",")
-                        if parts:  # Defensive check (split always returns at least [''])
-                            client_ip = parts[0].strip()
-
-                    if not client_ip:
-                        client_ip = request.headers.get("X-Real-IP", "")
-                    if not client_ip and hasattr(request, "client") and request.client:
-                        client_ip = request.client.host or "unknown"
-
                 # Validate anonymous request (model whitelist + rate limit)
                 anon_validation = await _to_thread(validate_anonymous_request, client_ip, req.model)
                 if not anon_validation["allowed"]:
