@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 import httpx
 from fastapi import HTTPException
@@ -77,9 +78,7 @@ def _get_failover_priority() -> tuple[str, ...]:
         ]
         if prioritized:
             prioritized.sort()
-            return tuple(
-                slug for _, slug in prioritized if is_provider_enabled(slug)
-            )
+            return tuple(slug for _, slug in prioritized if is_provider_enabled(slug))
     except Exception as exc:
         logger.warning("Failed to load failover priority from DB: %s", exc)
     return tuple(p for p in FALLBACK_PROVIDER_PRIORITY if is_provider_enabled(p))
@@ -648,9 +647,34 @@ def map_provider_error(
             status_code=503, detail=f"Provider '{provider}' service unavailable for model '{model}'"
         )
 
-    # Final fallback - include provider and model for better error tracking
+    # Final fallback. Before defaulting to 502, best-effort extract the upstream
+    # HTTP status from the message: some provider clients re-raise upstream errors
+    # as plain exceptions whose text preserves the status (e.g. the OpenAI SDK's
+    # "Error code: 429 - {...}"). A rate limit must surface as a retryable 429 with
+    # Retry-After, not a misleading 502 (this is why OpenRouter free-tier models
+    # appeared "broken" in the model selector).
+    msg = str(exc)
+    code_match = re.search(r"Error code:\s*(\d{3})", msg)
+    parsed_status = int(code_match.group(1)) if code_match else None
+    is_rate_limited = (
+        parsed_status == 429 or "rate limit" in msg.lower() or "too many requests" in msg.lower()
+    )
+    if is_rate_limited:
+        return HTTPException(
+            status_code=429,
+            detail=(
+                f"Provider '{provider}' rate limit exceeded for model '{model}'. "
+                "Please retry shortly."
+            ),
+            headers={"Retry-After": "30"},
+        )
+    if parsed_status == 404:
+        return HTTPException(
+            status_code=404, detail=f"Model {model} not found or unavailable on {provider}"
+        )
+
     return HTTPException(
-        status_code=502, detail=f"Provider '{provider}' error for model '{model}': {str(exc)}"
+        status_code=502, detail=f"Provider '{provider}' error for model '{model}': {msg}"
     )
 
 

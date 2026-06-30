@@ -82,9 +82,7 @@ def _loss_proof_cost_split(
             or float(served_pricing.get("completion", 0) or 0) > 0
         )
         if has_real_price:
-            served = calculate_cost_split(
-                provider_model_id, prompt_tokens, completion_tokens
-            )
+            served = calculate_cost_split(provider_model_id, prompt_tokens, completion_tokens)
             if served[0] > base[0]:
                 logger.info(
                     "[Pricing] Failover re-price: served provider model %r cost $%.6f "
@@ -122,7 +120,10 @@ class ChatInferenceHandler:
     """
 
     def __init__(
-        self, api_key: str | None, background_tasks: Any | None = None, request: Request | None = None
+        self,
+        api_key: str | None,
+        background_tasks: Any | None = None,
+        request: Request | None = None,
     ):
         """
         Initialize the handler with user context.
@@ -141,7 +142,9 @@ class ChatInferenceHandler:
         self.request_id = str(uuid.uuid4())
         self.start_time = time.monotonic()
 
-        logger.debug(f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}")
+        logger.debug(
+            f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
+        )
 
     async def _initialize_user_context(self) -> None:
         """
@@ -191,9 +194,7 @@ class ChatInferenceHandler:
 
         self.trial = {"is_valid": True, "is_trial": False}
 
-        logger.debug(
-            f"[ChatHandler] User context loaded: user_id={self.user.get('id')}"
-        )
+        logger.debug(f"[ChatHandler] User context loaded: user_id={self.user.get('id')}")
 
     async def _check_credit_sufficiency(
         self,
@@ -382,7 +383,31 @@ class ChatInferenceHandler:
                     exc_info=True,
                 )
 
-                # Create detailed provider error
+                # Surface upstream rate limits (e.g. OpenRouter free-tier 429) as a
+                # retryable 429 with Retry-After instead of a generic 502 — otherwise
+                # rate-limited models look "broken" in the model selector.
+                from src.services.provider_failover import map_provider_error
+
+                mapped = map_provider_error(provider_name, model_id, e)
+                if mapped.status_code == 429:
+                    retry_after = None
+                    if mapped.headers and "Retry-After" in mapped.headers:
+                        try:
+                            retry_after = int(mapped.headers["Retry-After"])
+                        except (TypeError, ValueError):
+                            retry_after = None
+                    error_response = DetailedErrorFactory.rate_limit_exceeded(
+                        limit_type="provider_rate_limit",
+                        retry_after=retry_after,
+                        request_id=self.request_id,
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail=error_response.dict(exclude_none=True),
+                        headers=mapped.headers,
+                    ) from e
+
+                # Other provider errors keep the existing 502 provider-error contract.
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
                     model=model_id,
