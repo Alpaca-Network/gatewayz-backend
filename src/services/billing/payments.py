@@ -1406,6 +1406,15 @@ class StripeService:
             SubscriptionCheckoutResponse with session_id and checkout URL
         """
         try:
+            # Validate price_id up front. A missing/blank price_id otherwise reaches Stripe
+            # and surfaces as an opaque 500 — the frontend "Get Started" button then silently
+            # no-ops. Fail fast with a 400 (ValueError) and an actionable message instead.
+            if not request.price_id or not str(request.price_id).strip():
+                raise ValueError(
+                    "price_id is required to start a subscription checkout. "
+                    "Ensure the pricing tier is configured with a valid Stripe price ID."
+                )
+
             # Get user details
             user = get_user_by_id(user_id)
             if not user:
@@ -1503,6 +1512,12 @@ class StripeService:
 
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating subscription checkout: {e}")
+            # Client-fixable Stripe errors (HTTP 4xx) — e.g. an invalid/unknown price_id, or a
+            # test/live mode mismatch — should surface as a 400 with the real reason, not a
+            # generic 500. Genuine Stripe outages (5xx/network) stay as 500.
+            http_status = getattr(e, "http_status", None)
+            if http_status and 400 <= http_status < 500:
+                raise ValueError(f"Stripe rejected the checkout request: {str(e)}") from e
             raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
