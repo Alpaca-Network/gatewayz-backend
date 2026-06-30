@@ -526,7 +526,7 @@ def create_app() -> FastAPI:
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links
-        # ("ranking", "Model Ranking"),  # Removed — feature deprecated
+        ("ranking", "Model Ranking"),  # Re-enabled — frontend model dropdowns depend on /ranking/models
         ("activity", "Activity Tracking"),
         ("coupons", "Coupon Management"),
         ("referral", "Referral System"),
