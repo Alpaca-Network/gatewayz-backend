@@ -143,7 +143,7 @@ def get_plan_id_by_tier(tier: str) -> int | None:
         result = (
             client.table("plans")
             .select("id")
-            .ilike("name", f"%{tier}%")
+            .eq("tier", tier)
             .eq("is_active", True)
             .limit(1)
             .execute()

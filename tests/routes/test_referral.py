@@ -103,7 +103,7 @@ class TestReferralStats:
             "pending_bonuses": 2,
             "remaining_uses": 95,
             "max_uses": 100,
-            "total_earned": 150.0,
+            "total_earned": 0.0,
             "current_balance": 100.0,
             "referred_by_code": None,
             "referrals": [],
@@ -115,7 +115,7 @@ class TestReferralStats:
             data = response.json()
             assert data["referral_code"] == "TEST123"
             assert data["total_uses"] == 5
-            assert data["total_earned"] == 150.0
+            assert data["total_earned"] == 0.0
             assert "invite_link" in data
             # Invite link should contain the referral code and a valid URL structure
             assert "TEST123" in data["invite_link"]
@@ -252,34 +252,30 @@ class TestSelfReferralPrevention:
 
 
 class TestReferralRewards:
-    """Test referral reward distribution"""
+    """Test referral reward policy (referrals no longer pay out)"""
 
     def test_referrer_reward_calculation(self):
-        """Calculate referrer reward correctly"""
-        signup_bonus = 10.0  # $10 for referee
-        referrer_bonus = 10.0  # $10 for referrer
+        """Referrals grant no credits to either party"""
+        signup_bonus = 0.0  # referee receives no referral credits
+        referrer_bonus = 0.0  # referrer receives no referral credits
 
-        assert signup_bonus == 10.0
-        assert referrer_bonus == 10.0
+        assert signup_bonus == 0.0
+        assert referrer_bonus == 0.0
 
     def test_first_purchase_bonus(self):
-        """Additional bonus on first purchase"""
+        """One-time $5 bonus on a user's first top-up of $5+ (unrelated to referrals)"""
         first_purchase_bonus = 5.0  # $5 additional
 
         assert first_purchase_bonus == 5.0
 
     def test_total_referral_earnings(self):
-        """Calculate total referral earnings"""
+        """Total referral earnings are always 0 (referrals do not pay out)"""
         num_referrals = 5
-        bonus_per_referral = 10.0
-        first_purchase_bonuses = 3
-        first_purchase_bonus_amount = 5.0
+        bonus_per_referral = 0.0
 
-        total = (num_referrals * bonus_per_referral) + (
-            first_purchase_bonuses * first_purchase_bonus_amount
-        )
+        total = num_referrals * bonus_per_referral
 
-        assert total == 65.0  # (5 * 10) + (3 * 5)
+        assert total == 0.0
 
 
 class TestReferralLimits:
@@ -329,20 +325,20 @@ class TestReferralAnalytics:
             "pending_bonuses": 0,
             "remaining_uses": 98,
             "max_uses": 100,
-            "total_earned": 20.0,
+            "total_earned": 0.0,
             "current_balance": 100.0,
             "referred_by_code": None,
             "referrals": [
                 {
                     "username": "referred_user1",
                     "signup_date": "2025-01-01",
-                    "bonus_earned": 10.0,
+                    "bonus_earned": 0,
                     "has_made_purchase": True,
                 },
                 {
                     "username": "referred_user2",
                     "signup_date": "2025-01-02",
-                    "bonus_earned": 10.0,
+                    "bonus_earned": 0,
                     "has_made_purchase": False,
                 },
             ],

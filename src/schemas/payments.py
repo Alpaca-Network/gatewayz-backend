@@ -176,8 +176,8 @@ class CreateCheckoutSessionRequest(BaseModel):
     @field_validator("amount")
     @classmethod
     def validate_amount(cls, v):
-        if v < 50:  # Minimum $0.50
-            raise ValueError("Amount must be at least $0.50 (50 cents)")
+        if v < 500:  # Minimum $5.00
+            raise ValueError("Amount must be at least $5.00 (500 cents)")
         if v > 99999999:  # Maximum ~$1M
             raise ValueError("Amount exceeds maximum allowed")
         return v

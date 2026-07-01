@@ -41,7 +41,11 @@ class ReferralStatsResponse(BaseModel):
     pending_bonuses: int
     remaining_uses: int
     max_uses: int
-    total_earned: float
+    total_earned: float = Field(
+        0.0,
+        description="Total credits earned from referrals. Referrals no longer grant credits, "
+        "so this is 0 for referrals completed under the current policy.",
+    )
     current_balance: float
     referred_by_code: str | None
     referrals: list
@@ -59,7 +63,7 @@ async def get_my_referral_stats(api_key: str = Depends(get_api_key)):
     - Your unique referral code
     - Shareable invite link
     - How many people have used your code
-    - How much you've earned from referrals
+    - How many referrals have completed (referrals are tracked for attribution only and do not grant credits)
     - Remaining uses available
     """
     try:
@@ -189,7 +193,7 @@ async def get_my_referral_code(api_key: str = Depends(get_api_key)):
         return {
             "referral_code": referral_code,
             "invite_link": invite_link,
-            "share_message": f"Get $10 in free AI credits on gatewayz: {invite_link}",
+            "share_message": f"Join me on gatewayz - unified access to 100+ AI models: {invite_link}",
         }
 
     except HTTPException:

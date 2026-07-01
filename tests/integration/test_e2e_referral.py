@@ -22,7 +22,6 @@ from src.main import app
 from src.services.referral import (
     MAX_REFERRAL_USES,
     MIN_PURCHASE_AMOUNT,
-    REFERRAL_BONUS,
 )
 
 
@@ -158,7 +157,7 @@ class TestEndToEndReferralFlow:
         1. Alice creates account and gets referral code
         2. Bob signs up with Alice's referral code
         3. Bob makes first purchase of $10+
-        4. Both users receive $10 bonus
+        4. Referral attribution is recorded but NO credits are granted
         5. Referral record is created and completed
         """
         # Mock email notifications to always succeed
@@ -205,7 +204,7 @@ class TestEndToEndReferralFlow:
         pending_referral = pending_referrals.data[0]
         assert pending_referral["referrer_id"] == alice["user_id"]
         assert pending_referral["referral_code"] == alice_referral_code
-        assert float(pending_referral["bonus_amount"]) == REFERRAL_BONUS
+        assert float(pending_referral["bonus_amount"]) == 0  # referrals no longer pay out
         print("✓ Pending referral record created")
 
         # Verify Bob's referred_by_code is set
@@ -240,10 +239,10 @@ class TestEndToEndReferralFlow:
         alice_credits = float(alice_after.data[0]["credits"])
         bob_credits = float(bob_after.data[0]["credits"])
 
-        assert alice_credits == REFERRAL_BONUS  # Alice got $10
-        assert (
-            bob_credits == REFERRAL_BONUS
-        )  # Bob got $10 (not including purchase amount in this test)
+        # Per product policy, referrals no longer grant any credits. Both users
+        # start at $0 and applying the referral records attribution only.
+        assert alice_credits == 0  # No referral credits granted to referrer
+        assert bob_credits == 0  # No referral credits granted to referee
         print(f"✓ Alice credits: ${alice_credits}, Bob credits: ${bob_credits}")
 
         # Step 5: Verify referral record is now completed
@@ -285,13 +284,14 @@ class TestEndToEndReferralFlow:
             .execute()
         )
 
-        assert len(alice_transactions.data) >= 1  # At least one transaction for referral bonus
-        assert len(bob_transactions.data) >= 1  # At least one transaction for referral bonus
-        print("✓ Credit transactions recorded")
+        # No referral credits are granted, so no referral credit transactions exist
+        assert len(alice_transactions.data) == 0
+        assert len(bob_transactions.data) == 0
+        print("✓ No referral credit transactions (no credits granted)")
 
-        # Verify email notifications were called
-        assert mock_bonus_notification.called
-        print("✓ Complete referral flow SUCCESS")
+        # Bonus notifications are not sent because no bonus is granted
+        assert not mock_bonus_notification.called
+        print("✓ Referral attribution recorded without granting credits")
 
     def test_referral_stats_accuracy(self, supabase_client, test_users, client):
         """Test that referral stats are accurate after multiple referrals"""
@@ -342,7 +342,7 @@ class TestEndToEndReferralFlow:
         assert stats_after["total_uses"] == 3  # Still 3 signups
         assert stats_after["completed_bonuses"] == 2  # 2 completed purchases
         assert stats_after["pending_bonuses"] == 1  # 1 still pending
-        assert stats_after["total_earned"] == 2 * REFERRAL_BONUS  # $20 earned
+        assert stats_after["total_earned"] == 0  # referrals no longer pay out
         assert len(stats_after["referrals"]) == 3  # All 3 users in list
 
         # Verify referral details
@@ -560,8 +560,10 @@ class TestEndToEndReferralFlow:
         alice_credits = (
             supabase_client.table("users").select("credits").eq("id", alice["user_id"]).execute()
         )
-        assert float(alice_credits.data[0]["credits"]) == REFERRAL_BONUS  # Only $10, not $20
-        print("✓ Alice received only one bonus")
+        # Referrals grant no credits; the second attempt is still rejected, and
+        # Alice's balance stays at $0 regardless.
+        assert float(alice_credits.data[0]["credits"]) == 0
+        print("✓ Second referral attempt rejected; no credits granted")
 
 
 class TestReferralEdgeCases:

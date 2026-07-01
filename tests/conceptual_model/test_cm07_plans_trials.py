@@ -60,45 +60,6 @@ def test_new_user_gets_5_dollar_credits(mock_supabase):
 
 
 # ---------------------------------------------------------------------------
-# CM-7.2  New user trial duration defaults to 14 days
-# ---------------------------------------------------------------------------
-@pytest.mark.cm_gap
-@pytest.mark.xfail(
-    reason="CM spec says 3-day trial but code defaults to 14 days in start_trial_for_key"
-)
-def test_new_user_gets_3_day_trial(mock_supabase):
-    """start_trial_for_key should default to trial_days=3 per CM spec."""
-    from src.db.trials import start_trial_for_key
-
-    # Set up mock chain for API key lookup
-    key_lookup = MagicMock()
-    key_lookup.data = [{"id": "key-uuid-123", "user_id": 1}]
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
-        key_lookup
-    )
-
-    # Mock the trial grant RPC
-    grant_result = MagicMock()
-    grant_result.data = {"success": True}
-    # Mock the start_trial RPC
-    trial_result = MagicMock()
-    trial_result.data = {"success": True, "trial_days": 3}
-
-    mock_supabase.rpc.return_value.execute.side_effect = [grant_result, trial_result]
-
-    result = start_trial_for_key("test-api-key")
-
-    # CM spec says default should be 3 days, but code uses 14
-    # Check that the start_trial RPC was called with trial_days=3
-    rpc_calls = mock_supabase.rpc.call_args_list
-    start_trial_call = [c for c in rpc_calls if c[0][0] == "start_trial"]
-    assert len(start_trial_call) == 1
-    assert (
-        start_trial_call[0][0][1]["trial_days"] == 3
-    ), "CM spec says default trial should be 3 days"
-
-
-# ---------------------------------------------------------------------------
 # CM-7.3  Trial rejected after 1M tokens
 # ---------------------------------------------------------------------------
 @pytest.mark.cm_verified

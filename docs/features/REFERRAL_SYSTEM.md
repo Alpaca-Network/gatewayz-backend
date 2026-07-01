@@ -2,15 +2,16 @@
 
 ## Overview
 
-The referral system allows users to invite friends and earn rewards. When a referred user makes their first purchase of $10 or more, both the referrer and referee receive a $10 bonus.
+The referral system allows users to invite friends and tracks who referred whom. Referrals are used for attribution and analytics only — **they do not grant any credits to the referrer or the referee.**
+
+> **Policy note:** Referrals no longer pay out. Neither party receives credits. The system only records the referral relationship (validates the code, marks the referral `completed`, and links `referred_by_code`). The only credit bonus anywhere in the product is a one-time $5 bonus on a user's first top-up of $5 or more, which is unrelated to referrals.
 
 ## Key Features
 
-- **$10 Minimum Purchase**: Referral bonus requires a minimum purchase of $10
-- **$10 Bonus**: Both users (referrer and referee) receive $10 when conditions are met
+- **Attribution Only**: Referrals record who referred whom; no credits are granted to either party
 - **10 Uses Per Code**: Each referral code can be used by up to 10 different users
-- **First Purchase Only**: Referral bonus applies only on the referee's first purchase
-- **Automatic Credit Addition**: Bonus credits are automatically added via webhook after payment
+- **First Purchase Marks Completion**: A referral is marked `completed` when the referee makes their first purchase of $10 or more (this only updates tracking status — no credits are added)
+- **$10 Minimum Purchase to Complete**: A referral completes only if the referee's first purchase is at least $10
 
 ## How It Works
 
@@ -22,11 +23,12 @@ The referral system allows users to invite friends and earn rewards. When a refe
    - Is this Bob's first purchase? ✓
    - Did Bob use a referral code? ✓
    - Is purchase >= $10? ✓
-5. Apply bonus:
-   - Bob gets $10 (payment) + $10 (bonus) = $20 total
-   - Alice gets $10 (bonus) = $10 total
+5. Record referral completion:
+   - Bob gets $10 (payment) — no referral bonus
+   - Alice gets nothing — referrals do not pay out
+   - The referral row is marked "completed" for attribution
 6. Mark Bob's first purchase complete
-7. Create referral record for tracking
+7. Referral record kept for tracking only
 ```
 
 ## Database Schema
@@ -49,9 +51,9 @@ The referral system allows users to invite friends and earn rewards. When a refe
 - referrer_id (integer) -- User who owns the referral code
 - referred_user_id (integer) -- User who used the code
 - referral_code (string) -- The code that was used
-- bonus_amount (numeric) -- Amount of bonus given (default $10)
-- status (string) -- 'completed'
-- completed_at (timestamp) -- When bonus was applied
+- bonus_amount (numeric) -- Legacy column; always 0 for new referrals (referrals no longer pay out; DB default of 10.00 is unused)
+- status (string) -- 'pending' or 'completed'
+- completed_at (timestamp) -- When the referral was marked completed
 ```
 
 ## API Endpoints
@@ -129,7 +131,7 @@ curl -X GET http://localhost:8000/referral/stats \
   "total_uses": 2,
   "remaining_uses": 8,
   "max_uses": 10,
-  "total_earned": 20.0,
+  "total_earned": 0.0,
   "current_balance": 20.0,
   "referred_by_code": null,
   "referrals": [
@@ -137,17 +139,19 @@ curl -X GET http://localhost:8000/referral/stats \
       "user_id": 5,
       "username": "bob",
       "used_at": "2025-10-12T00:00:00Z",
-      "bonus_earned": 10.0
+      "bonus_earned": 0
     },
     {
       "user_id": 6,
       "username": "charlie",
       "used_at": "2025-10-12T00:10:00Z",
-      "bonus_earned": 10.0
+      "bonus_earned": 0
     }
   ]
 }
 ```
+
+> `total_earned` and `bonus_earned` are always `0` — referrals do not grant credits. These fields are retained for backward compatibility with existing API consumers.
 
 ### 4. Validate Referral Code
 
@@ -216,7 +220,7 @@ curl -X POST http://localhost:8000/api/stripe/checkout-session \
 **Notes**:
 - Amount is in cents (1000 = $10.00)
 - User must complete payment at the returned URL
-- Referral bonus is automatically applied via webhook after successful payment
+- The referral is marked completed via webhook after successful payment (no credits are granted)
 
 ## Complete Testing Flow
 
@@ -255,7 +259,7 @@ curl -X POST http://localhost:8000/auth/register \
 # Save Bob's API key from response
 BOB_API_KEY="gw_live_..."
 
-# 4. CHECK ALICE'S STATS (should show 0 uses, no earnings yet)
+# 4. CHECK ALICE'S STATS (should show 0 uses)
 curl -X GET http://localhost:8000/referral/stats \
   -H "Authorization: Bearer $ALICE_API_KEY"
 
@@ -272,31 +276,32 @@ curl -X POST http://localhost:8000/api/stripe/checkout-session \
 # Open the URL from the response in a browser
 # Use test card: 4242 4242 4242 4242
 
-# 7. VERIFY ALICE'S STATS (should show 1 use, $10 earned)
+# 7. VERIFY ALICE'S STATS (should show 1 use, referral completed, $0 earned)
 curl -X GET http://localhost:8000/referral/stats \
   -H "Authorization: Bearer $ALICE_API_KEY"
 
 # Expected response:
 # {
 #   "total_uses": 1,
-#   "total_earned": 10.0,
-#   "current_balance": 10.0,
+#   "completed_bonuses": 1,
+#   "total_earned": 0.0,
+#   "current_balance": 0.0,
 #   "referrals": [
 #     {
 #       "user_id": 2,
 #       "username": "bob",
-#       "bonus_earned": 10.0
+#       "bonus_earned": 0
 #     }
 #   ]
 # }
 
-# 8. VERIFY BOB'S STATS (should show $20 total: $10 payment + $10 bonus)
+# 8. VERIFY BOB'S STATS (should show $10 from his own payment; no referral bonus)
 curl -X GET http://localhost:8000/referral/stats \
   -H "Authorization: Bearer $BOB_API_KEY"
 
 # Expected response:
 # {
-#   "current_balance": 20.0,
+#   "current_balance": 10.0,
 #   "referred_by_code": "ABC12345",
 #   ...
 # }
@@ -304,7 +309,9 @@ curl -X GET http://localhost:8000/referral/stats \
 
 ## Business Rules
 
-### When Referral Bonus is Applied
+> Referrals never grant credits. The conditions below determine when a referral is marked **completed** (for attribution), not when any bonus is paid — no bonus is ever paid.
+
+### When a Referral is Marked Completed
 
 The system checks these conditions when a user makes a purchase:
 
@@ -315,7 +322,7 @@ The system checks these conditions when a user makes a purchase:
 5. ✅ **Not Self-Referral**: User cannot use their own referral code
 6. ✅ **No Code Switching**: User cannot use a different referral code than the one they registered with
 
-### When Referral Bonus is NOT Applied
+### When a Referral is NOT Marked Completed
 
 - ❌ Purchase is less than $10.00
 - ❌ User has already made a first purchase
@@ -324,7 +331,7 @@ The system checks these conditions when a user makes a purchase:
 - ❌ User tries to use their own referral code
 - ❌ User tries to use a different referral code after registration
 
-## Webhook Flow (Automatic Bonus Application)
+## Webhook Flow (Automatic Referral Completion)
 
 When a payment completes, Stripe sends a webhook to your backend:
 
@@ -332,12 +339,11 @@ When a payment completes, Stripe sends a webhook to your backend:
 1. Stripe → POST /api/stripe/webhook
 2. Webhook handler validates signature
 3. For 'checkout.session.completed' events:
-   a. Add payment credits to user
-   b. Check if referral bonus conditions are met
+   a. Add payment credits to user (the amount they paid for)
+   b. Check if referral completion conditions are met
    c. If yes:
-      - Add $10 to referee (user who made purchase)
-      - Add $10 to referrer (user who owns the code)
-      - Create referral record
+      - Mark the referral record 'completed' (attribution only)
+      - No credits are added to the referee or referrer
       - Mark user's first purchase as complete
    d. If no:
       - Just mark first purchase as complete
@@ -454,7 +460,7 @@ const getReferralStats = async (apiKey: string) => {
   const data = await response.json();
 
   // Display to user:
-  // - Total earnings: data.total_earned
+  // - Total referrals used: data.total_uses (data.total_earned is always 0 — referrals do not pay out)
   // - Current balance: data.current_balance
   // - Remaining uses: data.remaining_uses
   // - Referrals list: data.referrals
@@ -513,8 +519,8 @@ These values are defined in `src/services/referral.py`:
 ```python
 REFERRAL_CODE_LENGTH = 8           # 8-character codes
 MAX_REFERRAL_USES = 10             # Each code can be used 10 times
-MIN_PURCHASE_AMOUNT = 10.0         # $10 minimum purchase
-REFERRAL_BONUS = 10.0              # $10 bonus for both users
+MIN_PURCHASE_AMOUNT = 10.0         # $10 minimum purchase for a referral to complete
+REFERRAL_BONUS = 10.0              # Legacy constant; referrals no longer grant any credits (kept for back-compat/tests)
 ```
 
 ## Security Notes
@@ -555,6 +561,7 @@ DELETE FROM referrals WHERE referred_user_id = USER_ID;
 
 ## Changelog
 
+- **2026-07-01**: Referrals no longer grant credits to either party. `apply_referral_bonus()` now records attribution only; `bonus_amount` is stamped as `0`; `total_earned`/`bonus_earned` always report `0`. Referral bonus notification emails no longer promise credits.
 - **2025-10-12**: Consolidated `balance` column into `credits` column
 - **2025-10-12**: Fixed referral bonus application logic
 - **2025-10-12**: Changed default user credits from $10 to $0

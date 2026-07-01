@@ -6,7 +6,6 @@ from typing import Any
 
 from src.config.supabase_config import get_supabase_client
 from src.constants import SETTINGS_CREDITS_URL
-from src.db.credit_transactions import add_credits
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +25,11 @@ def send_referral_signup_notification(
             <p><strong>{referee_username}</strong> just signed up using your referral code!</p>
 
             <div class="highlight-box" style="background-color: #f0f9ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0;">
-                <h3 style="margin-bottom: 12px; color: #1e40af;">What's Next?</h3>
-                <p style="margin-bottom: 8px;">When <strong>{referee_username}</strong> makes their first purchase of $10 or more, you'll both receive:</p>
-                <ul style="margin-left: 20px;">
-                    <li><strong>$10 in credits</strong> added to your account</li>
-                    <li>Email notification confirming the bonus</li>
-                </ul>
+                <h3 style="margin-bottom: 12px; color: #1e40af;">Thanks for spreading the word!</h3>
+                <p style="margin-bottom: 8px;">We've linked <strong>{referee_username}</strong> to your referral code.</p>
             </div>
 
-            <p>Keep sharing your referral code to earn more credits!</p>
+            <p>Keep sharing your referral code with friends!</p>
         """
 
         from src.services.professional_email_templates import email_templates
@@ -55,10 +50,9 @@ Hi {referrer_username},
 
 {referee_username} just signed up using your referral code!
 
-What's Next?
-When {referee_username} makes their first purchase of $10 or more, you'll both receive $10 in credits and an email notification.
+Thanks for spreading the word - we've linked {referee_username} to your referral code.
 
-Keep sharing your referral code to earn more credits!
+Keep sharing your referral code with friends!
 
 Best regards,
 The AI Gateway Team
@@ -112,28 +106,14 @@ def send_referral_bonus_notification(
         from src.enhanced_notification_service import enhanced_notification_service
 
         # Send notification to referrer
-        referrer_subject = "You earned $10 from your referral! - AI Gateway"
+        referrer_subject = "Your referral was completed! - AI Gateway"
 
         referrer_content = f"""
-            <h2>💰 Congratulations!</h2>
+            <h2>🎉 Nice work!</h2>
             <p>Hi <strong>{referrer_username}</strong>,</p>
-            <p>Great news! <strong>{referee_username}</strong> just made their first purchase, and you've earned your referral bonus!</p>
+            <p>Great news! <strong>{referee_username}</strong> just made their first purchase. Thanks for the referral!</p>
 
-            <div class="success-box" style="background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; margin: 20px 0;">
-                <h3 style="margin-bottom: 12px; color: #15803d;">Referral Bonus Applied</h3>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <div class="label">Bonus Amount</div>
-                        <div class="value" style="font-size: 24px; color: #22c55e; font-weight: bold;">$10.00</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="label">New Balance</div>
-                        <div class="value" style="font-size: 20px; color: #1e40af;">${referrer_new_balance:.2f}</div>
-                    </div>
-                </div>
-            </div>
-
-            <p>Keep sharing your referral code to earn more credits!</p>
+            <p>Keep sharing your referral code with friends!</p>
 
             <div style="text-align: center; margin: 30px 0;">
                 <a href="{SETTINGS_CREDITS_URL}" style="display: inline-block; background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Your Balance</a>
@@ -143,8 +123,8 @@ def send_referral_bonus_notification(
         from src.services.professional_email_templates import email_templates
 
         referrer_html = email_templates.get_base_template().format(
-            subject="Referral Bonus Earned!",
-            header_subtitle="Your credits have been added",
+            subject="Referral Completed!",
+            header_subtitle="Your referral just made their first purchase",
             content=referrer_content,
             app_name="AI Gateway",
             app_url="https://gatewayz.ai",
@@ -152,16 +132,13 @@ def send_referral_bonus_notification(
             email=referrer_email,
         )
 
-        referrer_text = f"""Referral Bonus Earned - AI Gateway
+        referrer_text = f"""Referral Completed - AI Gateway
 
 Hi {referrer_username},
 
-Great news! {referee_username} just made their first purchase, and you've earned your referral bonus!
+Great news! {referee_username} just made their first purchase. Thanks for the referral!
 
-Bonus Amount: $10.00
-New Balance: ${referrer_new_balance:.2f}
-
-Keep sharing your referral code to earn more credits!
+Keep sharing your referral code with friends!
 
 View your balance: {SETTINGS_CREDITS_URL}
 
@@ -177,28 +154,12 @@ The AI Gateway Team
         )
 
         # Send notification to referee
-        referee_subject = "Welcome bonus applied - $10 in credits! - AI Gateway"
+        referee_subject = "Thanks for your first purchase! - AI Gateway"
 
         referee_content = f"""
-            <h2>🎉 Welcome Bonus Applied!</h2>
+            <h2>🎉 Thank you!</h2>
             <p>Hi <strong>{referee_username}</strong>,</p>
-            <p>Thank you for your purchase! Your referral bonus has been applied.</p>
-
-            <div class="success-box" style="background-color: #f0fdf4; border-left: 4px solid #22c55e; padding: 16px; margin: 20px 0;">
-                <h3 style="margin-bottom: 12px; color: #15803d;">Welcome Bonus</h3>
-                <div class="info-grid">
-                    <div class="info-item">
-                        <div class="label">Bonus Amount</div>
-                        <div class="value" style="font-size: 24px; color: #22c55e; font-weight: bold;">$10.00</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="label">New Balance</div>
-                        <div class="value" style="font-size: 20px; color: #1e40af;">${referee_new_balance:.2f}</div>
-                    </div>
-                </div>
-            </div>
-
-            <p>This bonus was earned by using a referral code. Enjoy your credits!</p>
+            <p>Thank you for your purchase and for joining through a referral code.</p>
 
             <div style="text-align: center; margin: 30px 0;">
                 <a href="{SETTINGS_CREDITS_URL}" style="display: inline-block; background-color: #3b82f6; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Your Balance</a>
@@ -206,8 +167,8 @@ The AI Gateway Team
         """
 
         referee_html = email_templates.get_base_template().format(
-            subject="Welcome Bonus Applied!",
-            header_subtitle="Your credits have been added",
+            subject="Thanks for your purchase!",
+            header_subtitle="Welcome to AI Gateway",
             content=referee_content,
             app_name="AI Gateway",
             app_url="https://gatewayz.ai",
@@ -215,16 +176,11 @@ The AI Gateway Team
             email=referee_email,
         )
 
-        referee_text = f"""Welcome Bonus Applied - AI Gateway
+        referee_text = f"""Thanks for your purchase - AI Gateway
 
 Hi {referee_username},
 
-Thank you for your purchase! Your referral bonus has been applied.
-
-Bonus Amount: $10.00
-New Balance: ${referee_new_balance:.2f}
-
-This bonus was earned by using a referral code. Enjoy your credits!
+Thank you for your purchase and for joining through a referral code.
 
 View your balance: {SETTINGS_CREDITS_URL}
 
@@ -255,7 +211,7 @@ The AI Gateway Team
 REFERRAL_CODE_LENGTH = 8
 MAX_REFERRAL_USES = 10  # Each referral code can be used by 10 different users
 MIN_PURCHASE_AMOUNT = 10.0  # $10 minimum
-REFERRAL_BONUS = 10.0  # $10 bonus for both users
+REFERRAL_BONUS = 10.0  # Legacy constant; referrals no longer grant any credits (kept for back-compat/tests)
 
 
 def generate_referral_code() -> str:
@@ -368,9 +324,13 @@ def apply_referral_bonus(
     user_id: int, referral_code: str, purchase_amount: float
 ) -> tuple[bool, str | None, dict[str, Any]] | None:
     """
-    Apply referral bonus to both user and referrer after a qualifying purchase.
+    Record a referral relationship after a qualifying purchase.
 
-    Returns: (success, error_message, bonus_data)
+    Per product policy, no free credits are granted for referrals. This function
+    validates the referral code and marks the referral record as completed (for
+    attribution/analytics) but does NOT credit the referee or the referrer.
+
+    Returns: (success, error_message, bonus_data) where bonus amounts are always 0.
     """
     try:
         client = get_supabase_client()
@@ -393,8 +353,6 @@ def apply_referral_bonus(
         user_result = client.table("users").select("*").eq("id", user_id).execute()
         if not user_result.data:
             return False, "User not found", None
-
-        user = user_result.data[0]
 
         # Check if there's already a pending referral record from signup
         existing_referral = (
@@ -423,7 +381,7 @@ def apply_referral_bonus(
                 "referrer_id": referrer["id"],
                 "referred_user_id": user_id,
                 "referral_code": referral_code,
-                "bonus_amount": REFERRAL_BONUS,
+                "bonus_amount": 0,
                 "status": "completed",
                 "completed_at": datetime.now(UTC).isoformat(),
             }
@@ -433,84 +391,26 @@ def apply_referral_bonus(
             if not referral_result.data:
                 return False, "Failed to create referral record", None
 
-        # Add credits to both users using the credit transaction system
-        # Add $10 to the new user (referee)
-        referee_success = add_credits(
-            user["api_key"],
-            REFERRAL_BONUS,
-            f"Referral bonus - using code {referral_code}",
-            metadata={
-                "referral_code": referral_code,
-                "referrer_id": referrer["id"],
-                "type": "referral_bonus_referee",
-            },
-            user_id=user_id,  # Pass user_id directly to avoid stale data from API key lookup
-        )
-        logger.info(
-            f"Referee (user {user_id}) credit addition: {'SUCCESS' if referee_success else 'FAILED'}"
-        )
-
-        # Add $10 to the referrer
-        referrer_success = add_credits(
-            referrer["api_key"],
-            REFERRAL_BONUS,
-            f"Referral bonus - user referred by code {referral_code}",
-            metadata={
-                "referral_code": referral_code,
-                "referred_user_id": user_id,
-                "type": "referral_bonus_referrer",
-            },
-            user_id=referrer["id"],  # Pass user_id directly to avoid stale data from API key lookup
-        )
-        logger.info(
-            f"Referrer (user {referrer['id']}) credit addition: {'SUCCESS' if referrer_success else 'FAILED'}"
-        )
+        # Per policy, no free credits are granted for referrals. We only record
+        # the referral relationship for attribution/analytics; neither the referee
+        # nor the referrer receives any bonus credits here.
 
         # Update referred_by_code for the new user
         client.table("users").update({"referred_by_code": referral_code}).eq(
             "id", user_id
         ).execute()
 
-        # Note: Balances are already updated by add_credits() calls above
-        # No need to update them again here
-
         logger.info(
-            f"Applied referral bonus: ${REFERRAL_BONUS} to user {user_id} and "
-            f"${REFERRAL_BONUS} to referrer {referrer['id']}"
+            f"Recorded referral attribution for user {user_id} "
+            f"(referrer {referrer['id']}, code {referral_code}) - no credits granted"
         )
 
-        # Fetch fresh balance data after credits have been added
-        user_fresh = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
-        referrer_fresh = client.table("users").select("purchased_credits, subscription_allowance").eq("id", referrer["id"]).execute()
-
-        def _total_balance(row_list):
-            if not row_list:
-                return 0
-            row = row_list[0]
-            return float(row.get("purchased_credits", 0) or 0) + float(row.get("subscription_allowance", 0) or 0)
-
         bonus_data = {
-            "user_bonus": REFERRAL_BONUS,
-            "referrer_bonus": REFERRAL_BONUS,
-            "user_new_balance": _total_balance(user_fresh.data),
-            "referrer_new_balance": _total_balance(referrer_fresh.data),
+            "user_bonus": 0,
+            "referrer_bonus": 0,
             "referrer_username": referrer.get("username", "Unknown"),
             "referrer_email": referrer.get("email", "Unknown"),
         }
-
-        # Send email notifications to both users
-        try:
-            send_referral_bonus_notification(
-                referrer_id=referrer["id"],
-                referrer_email=referrer.get("email", ""),
-                referrer_username=referrer.get("username", "User"),
-                referrer_new_balance=bonus_data["referrer_new_balance"],
-                referee_username=user.get("username", "User"),
-                referee_email=user.get("email", ""),
-                referee_new_balance=bonus_data["user_new_balance"],
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send referral bonus notifications: {e}")
 
         return True, None, bonus_data
 
@@ -601,8 +501,8 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
                     ),  # Frontend expects completed_at
                     "reward": (bonus_info.get("bonus_earned", 0) if bonus_info else 0),
                     "reward_amount": (
-                        bonus_info.get("bonus_earned", 0) if bonus_info else REFERRAL_BONUS
-                    ),  # Frontend expects reward_amount, default to REFERRAL_BONUS for pending
+                        bonus_info.get("bonus_earned", 0) if bonus_info else 0
+                    ),  # Referrals no longer grant credits; kept for frontend field compatibility
                 }
             )
 
@@ -696,7 +596,7 @@ def track_referral_signup(
                 "referrer_id": referrer["id"],
                 "referred_user_id": referred_user_id,
                 "referral_code": referral_code,
-                "bonus_amount": REFERRAL_BONUS,
+                "bonus_amount": 0,
                 "status": "pending",
                 "created_at": datetime.now(UTC).isoformat(),
             }

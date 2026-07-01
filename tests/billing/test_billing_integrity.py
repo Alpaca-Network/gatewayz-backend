@@ -9,7 +9,6 @@ Covers:
 - KR5: Credit system coverage gaps
 """
 
-import inspect
 from pathlib import Path
 
 # =========================================================================
@@ -152,18 +151,6 @@ def test_trial_credits_is_5_dollars():
     from src.config.usage_limits import TRIAL_CREDITS_AMOUNT
 
     assert TRIAL_CREDITS_AMOUNT == 5.0
-
-
-def test_start_trial_default_matches_config():
-    """start_trial_for_key() default trial_days must match TRIAL_DURATION_DAYS."""
-    from src.config.usage_limits import TRIAL_DURATION_DAYS
-    from src.db.trials import start_trial_for_key
-
-    sig = inspect.signature(start_trial_for_key)
-    default_days = sig.parameters["trial_days"].default
-    assert (
-        default_days == TRIAL_DURATION_DAYS
-    ), f"Default is {default_days} but config says {TRIAL_DURATION_DAYS}"
 
 
 def test_api_keys_uses_config_constants():

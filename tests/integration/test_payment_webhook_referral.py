@@ -8,8 +8,8 @@ Flow tested:
 1. User with referred_by_code makes payment via Stripe
 2. Webhook receives checkout.session.completed event
 3. Credits are added to user account
-4. If first purchase >= $10, referral bonus is triggered
-5. Both users receive $10 bonus
+4. If first purchase >= $10, referral attribution is recorded (no credits granted)
+5. Neither user receives referral bonus credits
 6. has_made_first_purchase is set to true
 7. Referral record updated to "completed"
 """
@@ -211,15 +211,13 @@ class TestPaymentWebhookReferralIntegration:
         alice_credits_after = float(alice_after.data[0]["credits"])
         bob_credits_after = float(bob_after.data[0]["credits"])
 
-        # Alice should have $10 bonus
-        from src.services.referral import REFERRAL_BONUS
-
+        # Referrals no longer grant any credits to the referrer
         assert (
-            alice_credits_after == REFERRAL_BONUS
-        ), f"Expected ${REFERRAL_BONUS}, got ${alice_credits_after}"
+            alice_credits_after == 0
+        ), f"Expected $0 (no referral bonus), got ${alice_credits_after}"
 
-        # Bob should have payment + bonus
-        expected_bob_credits = payment_amount_dollars + REFERRAL_BONUS
+        # Bob should have his purchase credits only, no referral bonus
+        expected_bob_credits = payment_amount_dollars
         assert (
             bob_credits_after == expected_bob_credits
         ), f"Expected ${expected_bob_credits}, got ${bob_credits_after}"
@@ -251,9 +249,9 @@ class TestPaymentWebhookReferralIntegration:
         assert len(payments.data) >= 1
         print("✓ Payment record created")
 
-        # Step 8: Verify bonus notification was called
-        assert mock_notification.called
-        print("✓ Bonus notification sent")
+        # Step 8: No referral bonus notification is sent (no bonus is granted)
+        assert not mock_notification.called
+        print("✓ No referral bonus notification sent")
 
     @patch("src.services.payments.stripe.checkout.Session.retrieve")
     @patch("src.services.referral.send_referral_bonus_notification")

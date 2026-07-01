@@ -95,13 +95,36 @@ def test_credit_value_none_allowed():
     assert request.credit_value is None
 
 
+def test_amount_below_minimum_rejected():
+    """Test that a top-up amount below $5.00 (500 cents) is rejected."""
+    with pytest.raises(ValidationError) as exc_info:
+        CreateCheckoutSessionRequest(
+            amount=499,  # $4.99 - just below minimum
+            success_url="https://example.com/success",
+            cancel_url="https://example.com/cancel",
+        )
+
+    error = exc_info.value
+    assert "at least $5.00" in str(error)
+
+
+def test_amount_at_minimum_accepted():
+    """Test that a top-up amount of exactly $5.00 (500 cents) is accepted."""
+    request = CreateCheckoutSessionRequest(
+        amount=500,  # $5.00 - exact minimum
+        success_url="https://example.com/success",
+        cancel_url="https://example.com/cancel",
+    )
+    assert request.amount == 500
+
+
 def test_various_payment_amounts_with_valid_credits():
     """Test various payment amounts with valid credit values."""
     test_cases = [
         # (amount_cents, credit_value_dollars, description)
-        (50, 0.50, "minimum payment, exact credit"),
-        (50, 0.75, "minimum payment, 150% bonus"),
-        (100, 1.00, "1 dollar payment, exact credit"),
+        (500, 5.00, "minimum payment, exact credit"),
+        (500, 7.50, "minimum payment, 150% bonus"),
+        (600, 6.00, "6 dollar payment, exact credit"),
         (500, 6.00, "5 dollar payment, 120% bonus"),
         (1000, 15.00, "10 dollar payment, 150% bonus"),
         (2500, 50.00, "25 dollar payment, 200% bonus"),

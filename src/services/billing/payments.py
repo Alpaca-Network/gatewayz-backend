@@ -226,7 +226,7 @@ class StripeService:
 
         refreshed_session: Any | None = None
         try:
-            refreshed_session = stripe.checkout.Session.retrieve(session_id, expand=["metadata"])
+            refreshed_session = stripe.checkout.Session.retrieve(session_id)
             refreshed_metadata = self._metadata_to_dict(
                 self._get_stripe_object_value(refreshed_session, "metadata")
             )
@@ -265,7 +265,7 @@ class StripeService:
             return {}
 
         try:
-            intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["metadata"])
+            intent = stripe.PaymentIntent.retrieve(payment_intent_id)
             metadata = self._metadata_to_dict(self._get_stripe_object_value(intent, "metadata"))
             if metadata:
                 logger.info(
@@ -981,7 +981,7 @@ class StripeService:
                     f"Error clearing trial status for user {user_id}: {trial_error}", exc_info=True
                 )
 
-            # Check for referral bonus (first purchase of $10+)
+            # First top-up bonus + referral attribution (first purchase only)
             try:
                 from src.config.supabase_config import get_supabase_client
                 from src.services.referral import apply_referral_bonus, mark_first_purchase
@@ -994,10 +994,28 @@ class StripeService:
                     has_made_first_purchase = user.get("has_made_first_purchase", False)
                     referred_by_code = user.get("referred_by_code")
 
-                    # Apply referral bonus if:
-                    # 1. This is first purchase
-                    # 2. User was referred by someone
-                    # 3. Purchase is $10 or more
+                    # Grant the one-time first top-up bonus: a flat +$5 when the
+                    # user's FIRST one-time top-up is $5 or more. This is the only
+                    # exception to the "no free credits" policy and applies to all
+                    # users regardless of whether they were referred.
+                    if not has_made_first_purchase and amount_dollars >= 5.0:
+                        add_credits_to_user(
+                            user_id=user_id,
+                            credits=5.0,
+                            transaction_type="first_topup_bonus",
+                            description="First top-up bonus",
+                            metadata={
+                                "stripe_session_id": session_id,
+                                "trigger_amount": amount_dollars,
+                            },
+                        )
+                        logger.info(
+                            f"First top-up bonus applied! User {user_id} received $5 "
+                            f"(first top-up of ${amount_dollars})"
+                        )
+
+                    # Record referral attribution (no credits are granted here per
+                    # policy) if the user was referred and this is their first purchase.
                     if not has_made_first_purchase and referred_by_code and amount_dollars >= 10.0:
                         success, error_msg, bonus_data = apply_referral_bonus(
                             user_id=user_id,
@@ -1007,15 +1025,15 @@ class StripeService:
 
                         if success:
                             logger.info(
-                                f"Referral bonus applied! User {user_id} and referrer both received "
-                                f"${bonus_data['user_bonus']} (code: {referred_by_code})"
+                                f"Referral attribution recorded for user {user_id} "
+                                f"(code: {referred_by_code})"
                             )
                         else:
                             logger.warning(
-                                f"Failed to apply referral bonus for user {user_id}: {error_msg}"
+                                f"Failed to record referral attribution for user {user_id}: {error_msg}"
                             )
 
-                    # Mark first purchase regardless of referral
+                    # Mark first purchase regardless of referral/bonus
                     if not has_made_first_purchase:
                         mark_first_purchase(user_id)
 

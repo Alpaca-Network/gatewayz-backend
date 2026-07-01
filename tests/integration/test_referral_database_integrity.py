@@ -277,18 +277,26 @@ class TestConcurrentReferralUsage:
         successes = sum(1 for _, success, _ in results if success)
         print(f"✓ {successes}/{num_referees} concurrent bonuses applied")
 
-        # Verify Alice's credits reflect all bonuses
+        # Referrals grant no credits, so Alice's balance stays at $0 regardless
+        # of how many bonuses were "applied".
         alice_after = (
             supabase_client.table("users").select("credits").eq("id", alice["user_id"]).execute()
         )
         alice_credits = float(alice_after.data[0]["credits"])
 
-        from src.services.referral import REFERRAL_BONUS
+        assert alice_credits == 0, f"No referral credits should be granted, got ${alice_credits}"
 
-        expected_credits = successes * REFERRAL_BONUS
-
-        assert alice_credits >= expected_credits - 1  # Allow for slight timing issues
-        print(f"✓ Alice's credits: ${alice_credits} (expected ~${expected_credits})")
+        # The successful applications should still be reflected as completed
+        # referral records (attribution is preserved even though no credits are granted).
+        completed = (
+            supabase_client.table("referrals")
+            .select("id", count="exact")
+            .eq("referrer_id", alice["user_id"])
+            .eq("status", "completed")
+            .execute()
+        )
+        assert (completed.count or 0) == successes
+        print(f"✓ {successes} completed referral records, $0 credits granted")
 
 
 class TestReferralUsageLimits:
@@ -508,9 +516,10 @@ class TestDataIntegrity:
 class TestCreditTransactionIntegrity:
     """Test credit transaction integrity"""
 
-    def test_credit_transactions_created_for_bonuses(self, supabase_client, test_db_users):
+    def test_no_credit_transactions_for_referral(self, supabase_client, test_db_users):
         """
-        Test that credit transactions are created when bonuses are applied
+        Referrals grant no credits, so applying a referral must NOT create any
+        referral credit transactions for either the referrer or the referee.
         """
         alice = test_db_users("alice_tx", credits=0.0)
         alice_code = create_user_referral_code(alice["user_id"])
@@ -518,7 +527,7 @@ class TestCreditTransactionIntegrity:
         bob = test_db_users("bob_tx", credits=0.0, referred_by_code=alice_code)
         track_referral_signup(alice_code, bob["user_id"])
 
-        # Apply bonus
+        # Apply referral (records attribution only)
         apply_referral_bonus(user_id=bob["user_id"], referral_code=alice_code, purchase_amount=15.0)
 
         # Check Alice's transactions
@@ -529,13 +538,11 @@ class TestCreditTransactionIntegrity:
             .execute()
         )
 
-        assert len(alice_txs.data) >= 1
-        # Look for referral bonus transaction
         referral_txs = [
             tx for tx in alice_txs.data if "referral" in tx.get("description", "").lower()
         ]
-        assert len(referral_txs) >= 1
-        print(f"✓ Alice has {len(referral_txs)} referral bonus transaction(s)")
+        assert len(referral_txs) == 0, "No referral credit transaction should exist for referrer"
+        print("✓ Alice has no referral bonus transactions")
 
         # Check Bob's transactions
         bob_txs = (
@@ -545,12 +552,11 @@ class TestCreditTransactionIntegrity:
             .execute()
         )
 
-        assert len(bob_txs.data) >= 1
         referral_txs_bob = [
             tx for tx in bob_txs.data if "referral" in tx.get("description", "").lower()
         ]
-        assert len(referral_txs_bob) >= 1
-        print(f"✓ Bob has {len(referral_txs_bob)} referral bonus transaction(s)")
+        assert len(referral_txs_bob) == 0, "No referral credit transaction should exist for referee"
+        print("✓ Bob has no referral bonus transactions")
 
 
 if __name__ == "__main__":
