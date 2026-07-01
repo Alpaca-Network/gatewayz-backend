@@ -1,0 +1,43 @@
+name: Model Health Sweep (cron)
+
+# Runs an active inference sweep across every served catalog model and persists
+# FRESH per-model health verdicts. Models that CONSISTENTLY hard-fail
+# (dead / 404 / 5xx) are marked 'down' and hidden from the catalog; models that
+# merely rate-limit (429), time out, or have auth issues are never hidden.
+#
+# REQUIRED SECRET: ADMIN_API_KEY — an admin API key accepted by require_admin on
+# POST /admin/live-test/run. Set it in the repo's Actions secrets.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *" # every 6 hours
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Trigger persisted live model sweep
+        run: |
+          set -euo pipefail
+          if [ -z "${ADMIN_API_KEY:-}" ]; then
+            echo "::error::ADMIN_API_KEY secret is not set — cannot run the sweep."
+            exit 1
+          fi
+          # --max-time bounds the whole request; the sweep itself is bounded server-side.
+          http_code=$(curl -sS -o /tmp/sweep_response.json -w "%{http_code}" \
+            --max-time 2100 \
+            -X POST "https://api.gatewayz.ai/admin/live-test/run?persist=true" \
+            -H "Authorization: Bearer ${ADMIN_API_KEY}" \
+            -H "Content-Type: application/json")
+          echo "HTTP status: ${http_code}"
+          echo "----- response (truncated) -----"
+          head -c 2000 /tmp/sweep_response.json || true
+          echo
+          case "${http_code}" in
+            2*) echo "Sweep completed successfully." ;;
+            *)  echo "::error::Sweep failed with HTTP ${http_code}"; exit 1 ;;
+          esac
+        env:
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}

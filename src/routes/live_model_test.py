@@ -84,6 +84,7 @@ class LiveTestReport(BaseModel):
     by_provider: list[ProviderSummary] = []
     failures: list[ModelTestResult] = []
     results: list[ModelTestResult] = []
+    persistence: dict | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +290,15 @@ async def run_live_model_test(
     concurrency: int = Query(10, ge=1, le=20, description="Parallel requests"),
     timeout: float = Query(60.0, ge=5, le=120, description="Per-model timeout (s)"),
     skip_unhealthy: bool = Query(True, description="Skip models with health_status=down"),
+    persist: bool = Query(
+        False,
+        description=(
+            "Persist FRESH per-model health verdicts from this sweep. When true, "
+            "records precise call outcomes and marks consistently hard-failing "
+            "(dead/404/5xx) models 'down'. 429/timeout/auth never hide a model. "
+            "Default false (existing behavior unchanged)."
+        ),
+    ),
     admin_user: dict = Depends(require_admin),
 ) -> LiveTestReport:
     """
@@ -408,6 +418,18 @@ async def run_live_model_test(
         report.pass_rate,
         duration,
     )
+
+    # Optionally persist FRESH per-model health verdicts from this sweep.
+    # Defensive: persistence must never fail the endpoint.
+    if persist:
+        try:
+            from src.services.monitoring.model_health_sweep import persist_sweep_results
+
+            report.persistence = await persist_sweep_results(results)
+            logger.info("Live test persistence summary: %s", report.persistence)
+        except Exception as exc:
+            logger.error("Live test persistence failed: %s", exc)
+            report.persistence = {"error": str(exc)[:200]}
 
     return report
 

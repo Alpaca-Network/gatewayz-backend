@@ -150,14 +150,22 @@ class Config:
         os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
     )
     # Reject inference requests for models without a row in model_pricing.
-    REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {"1", "true", "yes"}
+    REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     # Gatewayz One Phase 2 — smart router. When true, the live provider failover
     # chain is REORDERED by the policy-based smart router using the Phase 1
     # model_provider_offers projection. Off by default; no-ops (exact passthrough)
     # when the offers table has no rows for the model, so it is safe to enable
     # before the projection is populated. Never drops a provider from the chain.
-    SMART_ROUTER_ENABLED = os.environ.get("SMART_ROUTER_ENABLED", "false").lower() in {"1", "true", "yes"}
+    SMART_ROUTER_ENABLED = os.environ.get("SMART_ROUTER_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     # Default routing policy when no per-key routing_policies row applies.
     SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "balanced").strip().lower()
 
@@ -165,7 +173,11 @@ class Config:
     # reassembled within a per-request token budget (system + memory + rolling
     # summary + most-recent turns, oldest-first dropping) before the upstream call.
     # Off by default; exact passthrough when disabled.
-    CONTEXT_ASSEMBLY_ENABLED = os.environ.get("CONTEXT_ASSEMBLY_ENABLED", "false").lower() in {"1", "true", "yes"}
+    CONTEXT_ASSEMBLY_ENABLED = os.environ.get("CONTEXT_ASSEMBLY_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     # Fraction of a model's context window reserved for the assembled prompt
     # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
     CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
@@ -173,14 +185,20 @@ class Config:
     # ("my name is…", "I prefer…", "remember that…") are extracted from a user's
     # messages and saved to user_memory (post-response background task) so the
     # context assembler can recall them. High-precision + capped; off by default.
-    MEMORY_CAPTURE_ENABLED = os.environ.get("MEMORY_CAPTURE_ENABLED", "false").lower() in {"1", "true", "yes"}
+    MEMORY_CAPTURE_ENABLED = os.environ.get("MEMORY_CAPTURE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     MEMORY_MAX_PER_USER = int(os.environ.get("MEMORY_MAX_PER_USER", "100"))
 
     # Assumed budget when a model's context length is unknown. Deliberately large
     # so an unknown window does NOT cause aggressive truncation — when we can't tell
     # a model's real window, we pass the turns through (no worse than today) rather
     # than risk dropping context that would have fit.
-    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "1000000"))
+    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(
+        os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "1000000")
+    )
 
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
@@ -189,9 +207,7 @@ class Config:
     # serving region (X-Gatewayz-Region header / health) for observability.
     # The name of the region THIS instance runs as (Railway injects RAILWAY_REPLICA_REGION).
     GATEWAY_REGION = (
-        os.environ.get("GATEWAY_REGION")
-        or os.environ.get("RAILWAY_REPLICA_REGION")
-        or "primary"
+        os.environ.get("GATEWAY_REGION") or os.environ.get("RAILWAY_REPLICA_REGION") or "primary"
     )
     # Region inventory: comma-separated "name" or "name:latency_ms" (e.g.
     # "us-east:10,eu-west:80"). Empty → single region (GATEWAY_REGION). Only consulted
@@ -201,7 +217,11 @@ class Config:
     # pins these to one region until the ledger is the billing source of truth).
     GATEWAY_HOME_REGION = os.environ.get("GATEWAY_HOME_REGION", "").strip() or GATEWAY_REGION
     # Master switch for multi-region behavior. Off by default (single region).
-    MULTI_REGION_ENABLED = os.environ.get("MULTI_REGION_ENABLED", "false").lower() in {"1", "true", "yes"}
+    MULTI_REGION_ENABLED = os.environ.get("MULTI_REGION_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     # Subscription statuses that may NOT call the API (comma-separated).
     # Includes both American (Stripe) and British spellings of cancel*, plus all
     # Stripe failure states: past_due (charge failed), unpaid (multiple failures),
@@ -583,6 +603,15 @@ class Config:
         if _raw_enabled.strip()
         else None  # None = all providers enabled
     )
+
+    # Health-gated catalog. When true, models whose models.health_status == 'down'
+    # are hidden from the served catalog. This is INERT until an active health sweep
+    # (see src/services/monitoring/model_health_sweep.py) actually marks a model
+    # 'down' — which only happens for models that CONSISTENTLY hard-fail
+    # (dead / 404 / 5xx). Models that merely rate-limit (429), time out, or have
+    # auth problems are NEVER hidden. Defaults ON but inert until fresh sweep data
+    # exists; set HEALTH_GATING_ENABLED=false to disable the filter entirely.
+    HEALTH_GATING_ENABLED: bool = os.getenv("HEALTH_GATING_ENABLED", "true").lower() == "true"
 
     # Pricing markup — multiplier applied on top of upstream provider cost.
     # 1.0 = pass-through (no profit), 1.25 = 25% margin, 1.30 = 30% margin.

@@ -85,6 +85,92 @@ DESC_GRADUATED_MODELS_ONLY = "Graduated models only"
 DESC_NON_GRADUATED_MODELS_ONLY = "Non-graduated models only"
 
 
+# ============================================================================
+# HEALTH GATING
+# Hide models that an active health sweep has marked 'down' (consistently
+# hard-failing / dead / 404 / 5xx). Feature-flagged and INERT until a sweep
+# actually marks a model down — 429 / timeout / auth failures never hide a model.
+# ============================================================================
+
+# Short-lived cache of the "down" model id-set so the gating filter doesn't hit
+# the DB on every catalog request. Kept small; refreshed on TTL expiry.
+_DOWN_MODEL_IDS_CACHE: dict[str, Any] = {"ids": None, "ts": 0.0}
+_DOWN_MODEL_IDS_TTL_SECONDS = 60.0
+
+
+def _get_down_model_id_set() -> set[str]:
+    """Return the set of identifiers (id / model_name / provider_model_id /
+    canonical_id) for models currently marked ``health_status == 'down'``.
+
+    Cached for a short TTL. Fails open (empty set) so gating can never break the
+    catalog. Only consulted for served models that lack an inline health_status.
+    """
+    now = time.monotonic()
+    cached = _DOWN_MODEL_IDS_CACHE.get("ids")
+    if cached is not None and (now - _DOWN_MODEL_IDS_CACHE["ts"]) < _DOWN_MODEL_IDS_TTL_SECONDS:
+        return cached
+
+    ids: set[str] = set()
+    try:
+        from src.db.models_catalog_db import get_models_by_health_status
+
+        for row in get_models_by_health_status("down") or []:
+            for key in (
+                row.get("provider_model_id"),
+                row.get("model_name"),
+                row.get("canonical_id"),
+                row.get("id"),
+            ):
+                if key:
+                    ids.add(str(key))
+    except Exception as e:
+        logger.debug(f"health gating: failed to load down-set (failing open): {e}")
+
+    _DOWN_MODEL_IDS_CACHE["ids"] = ids
+    _DOWN_MODEL_IDS_CACHE["ts"] = now
+    return ids
+
+
+def _apply_health_gating(models: list) -> list:
+    """Remove models marked ``health_status == 'down'`` from a served model list.
+
+    Guarded by ``Config.HEALTH_GATING_ENABLED``. Inert until a sweep marks a model
+    down. Fails open (returns the input unchanged) on any error.
+    """
+    from src.config.config import Config
+
+    if not getattr(Config, "HEALTH_GATING_ENABLED", False):
+        return models
+    if not models:
+        return models
+
+    try:
+        down_ids: set[str] | None = None
+        filtered: list = []
+        for m in models:
+            if not isinstance(m, dict):
+                filtered.append(m)
+                continue
+            health = str(m.get("health_status") or "").lower()
+            if health == "down":
+                continue
+            if health:
+                # Known and not 'down' → keep without a DB lookup.
+                filtered.append(m)
+                continue
+            # No inline health_status → consult the down-set (loaded lazily/once).
+            if down_ids is None:
+                down_ids = _get_down_model_id_set()
+            model_id = m.get("id")
+            if model_id and str(model_id) in down_ids:
+                continue
+            filtered.append(m)
+        return filtered
+    except Exception as e:
+        logger.warning(f"health gating failed, returning ungated models: {e}")
+        return models
+
+
 @router.get("/routers", tags=["routers"])
 async def get_intelligent_routers():
     """
@@ -760,6 +846,11 @@ async def get_models(
         cached_response = await get_cached_catalog_response(gateway_value, cache_params)
         if cached_response:
             logger.info(f"✅ Returning cached response for gateway={gateway_value}")
+            # Defense-in-depth: re-apply health gating to cached data in case the
+            # entry was cached before a model was marked 'down' (inert otherwise).
+            gated_data = _apply_health_gating(cached_response.get("data", []))
+            if len(gated_data) != len(cached_response.get("data", [])):
+                cached_response = {**cached_response, "data": gated_data}
             cached_json = _dumps_fast(cached_response)
             etag_data = json.dumps(cached_response.get("data", [])[:5], sort_keys=True)
             etag_value = hashlib.md5(etag_data.encode(), usedforsecurity=False).hexdigest()[:16]
@@ -961,6 +1052,17 @@ async def get_models(
                 logger.info(
                     f"Filtered to exclude private models: {original_count} -> {len(models)}"
                 )
+
+        # Health gating: drop models an active sweep marked 'down' BEFORE counting
+        # and paginating, so totals/pagination stay correct. Inert until a sweep
+        # marks a model down; 429/timeout/auth never hide a model.
+        _pre_gate_count = len(models)
+        models = _apply_health_gating(models)
+        if len(models) != _pre_gate_count:
+            logger.info(
+                f"Health gating removed {_pre_gate_count - len(models)} 'down' models "
+                f"({_pre_gate_count} -> {len(models)})"
+            )
 
         total_models = len(models)
         logger.info(f"Catalog response: {total_models} total models, gateway={gateway_value}")
