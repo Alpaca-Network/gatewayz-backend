@@ -407,11 +407,53 @@ class ChatInferenceHandler:
                         headers=mapped.headers,
                     ) from e
 
-                # Other provider errors keep the existing 502 provider-error contract.
+                # Provider account/key budget exhausted (e.g. an OpenRouter key hitting its
+                # weekly spend limit -> upstream 402). This is a gateway-side capacity issue,
+                # NOT the user's — show a friendly message, never leak the upstream key/URL,
+                # and fire a distinct Sentry alert so the team is notified to top up.
+                from src.utils.error_messages import (
+                    PROVIDER_CAPACITY_MESSAGE,
+                    is_provider_budget_error,
+                    sanitize_provider_error_for_user,
+                )
+
+                if mapped.status_code == 402 or is_provider_budget_error(str(e)):
+                    try:
+                        from src.utils.sentry_context import capture_provider_error
+
+                        capture_provider_error(
+                            e,
+                            provider=provider_name,
+                            model=model_id,
+                            request_id=self.request_id,
+                            endpoint="/v1/chat/completions",
+                            extra_context={
+                                "error_category": "provider_budget_exhausted",
+                                "alert": True,
+                            },
+                        )
+                    except Exception:
+                        logger.warning("Failed to capture provider-budget alert", exc_info=True)
+
+                    error_response = DetailedErrorFactory.provider_error(
+                        provider=provider_name,
+                        model=model_id,
+                        provider_message=PROVIDER_CAPACITY_MESSAGE,
+                        status_code=503,
+                        request_id=self.request_id,
+                    )
+                    raise HTTPException(
+                        status_code=error_response.error.status,
+                        detail=error_response.dict(exclude_none=True),
+                        headers={"Retry-After": "30"},
+                    ) from e
+
+                # Other provider errors keep the existing 502 provider-error contract,
+                # sanitized so we never leak upstream URLs/key ids to end users.
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
                     model=model_id,
-                    provider_message=str(e),
+                    provider_message=sanitize_provider_error_for_user(str(e)),
                     status_code=502,
                     request_id=self.request_id,
                 )

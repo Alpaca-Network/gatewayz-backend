@@ -11,7 +11,60 @@ Usage:
     suggestions = get_suggestions(ErrorCode.MODEL_NOT_FOUND)
 """
 
+import re
+
 from src.utils.error_codes import ErrorCode
+
+# User-facing, friendly message for provider account/key budget exhaustion (e.g. an
+# OpenRouter key hitting its weekly spend limit). Never expose the upstream key/URL.
+PROVIDER_CAPACITY_MESSAGE = (
+    "This model is temporarily unavailable due to a capacity limit on our side. "
+    "Please try a different model or try again shortly."
+)
+
+# Patterns that indicate an upstream provider ran out of budget/credits rather than a
+# problem with the user's own request. Matched case-insensitively against the raw error.
+_PROVIDER_BUDGET_PATTERNS = (
+    "requires more credits",
+    "can only afford",
+    "adjust the key",
+    "weekly limit",
+    "insufficient_quota",
+    "payment required",
+)
+
+_URL_RE = re.compile(r"https?://\S+")
+# Long hex tokens (32+ chars) are almost always secrets/key hashes (e.g. an OpenRouter
+# key id leaked in an error URL). Strip them from anything shown to end users.
+_HEX_SECRET_RE = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+
+
+def is_provider_budget_error(raw_error: str | None) -> bool:
+    """True if the raw provider error indicates the provider account/key is out of budget."""
+    if not raw_error:
+        return False
+    lowered = str(raw_error).lower()
+    if "error code: 402" in lowered or '"code": 402' in lowered or "'code': 402" in lowered:
+        return True
+    return any(pattern in lowered for pattern in _PROVIDER_BUDGET_PATTERNS)
+
+
+def sanitize_provider_error_for_user(raw_error: str | None, max_length: int = 200) -> str:
+    """Strip URLs and secret-like tokens from a provider error before showing it to a user.
+
+    Upstream providers (notably OpenRouter) embed dashboard URLs containing the API key id
+    directly in their error text. Passing that through leaks a credential-ish identifier to
+    end users, so we remove URLs and long hex tokens and truncate the result.
+    """
+    if not raw_error:
+        return ""
+    cleaned = _URL_RE.sub("[link removed]", str(raw_error))
+    cleaned = _HEX_SECRET_RE.sub("[redacted]", cleaned)
+    cleaned = cleaned.replace("\n", " ").replace("\r", " ").strip()
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length].rstrip() + "…"
+    return cleaned
+
 
 # Error message templates with placeholders
 ERROR_MESSAGES: dict[ErrorCode, str] = {

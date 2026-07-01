@@ -7,6 +7,11 @@ import re
 import httpx
 from fastapi import HTTPException
 
+from src.utils.error_messages import (
+    is_provider_budget_error,
+    sanitize_provider_error_for_user,
+)
+
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
 # translate into HTTP responses. Make these imports optional so the module
@@ -672,9 +677,22 @@ def map_provider_error(
         return HTTPException(
             status_code=404, detail=f"Model {model} not found or unavailable on {provider}"
         )
+    # Provider account/key out of budget (e.g. OpenRouter weekly key limit). Keep the 402
+    # status so failover logic still applies, but never surface the raw upstream message
+    # (it embeds the key id in a dashboard URL).
+    if parsed_status == 402 or is_provider_budget_error(msg):
+        return HTTPException(
+            status_code=402,
+            detail=f"Provider '{provider}' capacity limit reached for model '{model}'.",
+        )
 
+    # Default: sanitize the upstream message so we never leak URLs/key ids to end users.
     return HTTPException(
-        status_code=502, detail=f"Provider '{provider}' error for model '{model}': {msg}"
+        status_code=502,
+        detail=(
+            f"Provider '{provider}' error for model '{model}': "
+            f"{sanitize_provider_error_for_user(msg)}"
+        ),
     )
 
 
