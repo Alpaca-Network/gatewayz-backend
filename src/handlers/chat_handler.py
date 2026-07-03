@@ -38,6 +38,23 @@ from src.services.provider_selector import get_selector
 
 logger = logging.getLogger(__name__)
 
+
+def _rfield(obj: Any, name: str, default: Any = None) -> Any:
+    """Read a field from a provider response that may be an OpenAI-SDK object OR a plain dict.
+
+    Most provider clients return OpenAI-SDK objects (attribute access), but some —
+    notably Google Vertex — return OpenAI-*shaped* dicts (``{"choices": [...]}``).
+    This handler's extraction assumed attribute access only, so dict-returning
+    providers raised ``"Provider response missing choices"`` on the authenticated path.
+    Reading through this accessor makes extraction work for both shapes.
+    """
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(name, default)
+    return getattr(obj, name, default)
+
+
 # FREEZE FIX: Hard ceiling for streaming responses — prevents hung provider connections
 # from monopolizing the event loop indefinitely. Configured via MAX_STREAM_DURATION_SECONDS env var.
 # Mirrors the same constant in src/routes/chat.py (anonymous user path).
@@ -846,24 +863,26 @@ class ChatInferenceHandler:
             )
 
             # Step 4: Extract token usage from response
-            usage = getattr(provider_response, "usage", None)
+            # (_rfield handles both OpenAI-SDK objects and dict-shaped responses, e.g. Vertex.)
+            usage = _rfield(provider_response, "usage")
             if usage:
-                prompt_tokens = getattr(usage, "prompt_tokens", 0)
-                completion_tokens = getattr(usage, "completion_tokens", 0)
+                prompt_tokens = _rfield(usage, "prompt_tokens", 0) or 0
+                completion_tokens = _rfield(usage, "completion_tokens", 0) or 0
             else:
                 prompt_tokens = 0
                 completion_tokens = 0
 
             # Extract response content
-            if hasattr(provider_response, "choices") and provider_response.choices:
-                choice = provider_response.choices[0]
-                message = getattr(choice, "message", None)
+            choices = _rfield(provider_response, "choices")
+            if choices:
+                choice = choices[0]
+                message = _rfield(choice, "message")
                 if not message:
                     raise ValueError("Provider response missing message")
 
-                content = getattr(message, "content", "")
-                finish_reason = getattr(choice, "finish_reason", "stop")
-                tool_calls = getattr(message, "tool_calls", None)
+                content = _rfield(message, "content", "")
+                finish_reason = _rfield(choice, "finish_reason", "stop")
+                tool_calls = _rfield(message, "tool_calls")
             else:
                 raise ValueError("Provider response missing choices")
 
@@ -1104,25 +1123,28 @@ class ChatInferenceHandler:
                     chunk_count += 1
 
                     # Extract delta content
-                    if hasattr(provider_chunk, "choices") and provider_chunk.choices:
-                        choice = provider_chunk.choices[0]
-                        delta = getattr(choice, "delta", None)
+                    # (_rfield handles both OpenAI-SDK objects and dict-shaped chunks, e.g. Vertex.)
+                    choices = _rfield(provider_chunk, "choices")
+                    if choices:
+                        choice = choices[0]
+                        delta = _rfield(choice, "delta")
+                        chunk_finish_reason = _rfield(choice, "finish_reason")
 
-                        if delta:
-                            content = getattr(delta, "content", None)
-                            role = getattr(delta, "role", None)
-                            tool_calls = getattr(delta, "tool_calls", None)
-                            chunk_finish_reason = getattr(choice, "finish_reason", None)
+                        # Emit when the chunk carries a delta or a terminating finish_reason.
+                        # A finish-only chunk has an empty delta ({}) — must not be dropped.
+                        if delta is not None or chunk_finish_reason is not None:
+                            content = _rfield(delta, "content")
+                            role = _rfield(delta, "role")
+                            tool_calls = _rfield(delta, "tool_calls")
 
                             if content:
                                 accumulated_content += content
 
                             # Extract usage from final chunk if available
-                            if hasattr(provider_chunk, "usage") and provider_chunk.usage:
-                                prompt_tokens = getattr(provider_chunk.usage, "prompt_tokens", 0)
-                                completion_tokens = getattr(
-                                    provider_chunk.usage, "completion_tokens", 0
-                                )
+                            chunk_usage = _rfield(provider_chunk, "usage")
+                            if chunk_usage:
+                                prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
+                                completion_tokens = _rfield(chunk_usage, "completion_tokens", 0) or 0
 
                             # Yield internal chunk
                             internal_chunk = InternalStreamChunk(
