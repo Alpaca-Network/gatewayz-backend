@@ -371,6 +371,29 @@ def fetch_models_from_featherless():
 
         step_logger.success(raw_count=len(all_models), status_code=response.status_code)
 
+        # Raw count from the API BEFORE quality gating — used to detect a partial
+        # API response (the export backfill below), independent of how much the
+        # gate filters out.
+        raw_api_count = len(all_models)
+
+        # Quality gate on RAW models, BEFORE normalization. Featherless returns
+        # ~17k mostly-junk models (quants/merges/RP spam) in one ~50MB response;
+        # dropping them here — before the memory-heavy normalize + pricing
+        # enrichment step — is what keeps this fetch from OOMing on Railway.
+        if Config.MODEL_QUALITY_GATE_ENABLED:
+            from src.services.model_quality_gate import assess as assess_model_quality
+
+            all_models = [
+                m for m in all_models if m and assess_model_quality(m, "featherless").keep
+            ]
+            logger.info(
+                f"[FEATHERLESS] Quality gate: {raw_api_count} -> {len(all_models)} raw models "
+                f"(dropped {raw_api_count - len(all_models)})"
+            )
+
+        # Free the ~50MB raw payload before normalization multiplies memory.
+        del payload
+
         # Step 3: Normalize, filter, and combine with export catalog if needed
         step_logger.step(3, "Normalizing and filtering models", raw_count=len(all_models))
 
@@ -384,10 +407,12 @@ def fetch_models_from_featherless():
 
         filtered_count = len(all_models) - len(normalized_models)
 
-        # Load export catalog if API returned fewer than expected models
-        if len(normalized_models) < 6000:
+        # Load export catalog only if the API itself returned fewer than expected
+        # models (a partial response) — NOT merely because the quality gate
+        # filtered the catalog down, which is expected.
+        if raw_api_count < 6000:
             logger.info(
-                f"[FEATHERLESS] API returned {len(normalized_models)} models; loading extended catalog export for completeness"
+                f"[FEATHERLESS] API returned {raw_api_count} raw models; loading extended catalog export for completeness"
             )
             export_models = load_featherless_catalog_export()
             if export_models:
@@ -396,6 +421,14 @@ def fetch_models_from_featherless():
                 export_added = 0
 
                 for export_model in export_models:
+                    # Apply the same quality gate to export models so the backfill
+                    # doesn't re-introduce the junk the API gate just removed.
+                    if (
+                        Config.MODEL_QUALITY_GATE_ENABLED
+                        and not assess_model_quality(export_model, "featherless").keep
+                    ):
+                        continue
+
                     # Run export models through pricing enrichment to filter those without valid pricing
                     from src.services.pricing_lookup import enrich_model_with_pricing
 
