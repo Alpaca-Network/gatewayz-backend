@@ -36,19 +36,13 @@ MANUAL_LOGO_DB = {
     "alibaba": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/alibabacloud.svg",
     "ai21": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/ai21labs.svg",
     "inflection": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/inflection.svg",
-    "vercel": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/vercel.svg",
-    "helicone": "https://www.helicone.ai/favicon.ico",
-    "aihubmix": "https://aihubmix.com/favicon.ico",
-    "anannas": "https://api.anannas.ai/favicon.ico",
     "alpaca-network": "https://console.anyscale.com/favicon.ico",
-    "onerouter": "https://infron.ai/favicon.ico",
     "simplismart": "https://simplismart.ai/favicon.ico",
     # Gateway-slug entries (matching provider slugs in DB providers table)
     "openrouter": "https://openrouter.ai/favicon.ico",
     "groq": "https://groq.com/favicon.ico",
     "together": "https://together.ai/favicon.ico",
     "fireworks": "https://fireworks.ai/favicon.ico",
-    "vercel-ai-gateway": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/vercel.svg",
     "featherless": "https://featherless.ai/favicon.ico",
     "chutes": "https://chutes.ai/favicon.ico",
     "deepinfra": "https://deepinfra.com/favicon.ico",
@@ -68,7 +62,6 @@ MANUAL_LOGO_DB = {
     "cloudflare-workers-ai": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/cloudflare.svg",
     "morpheus": "https://mor.org/favicon.ico",
     "canopywave": "https://canopywave.io/favicon.ico",
-    "notdiamond": "https://notdiamond.ai/favicon.ico",
     # Additional model-developer slugs (appear as provider_slug derived from model IDs)
     "deepseek": "https://deepseek.com/favicon.ico",
     "qwen": "https://qwen.ai/favicon.ico",
@@ -348,13 +341,6 @@ def fetch_models_from_nebius():
 def fetch_models_from_novita():
     """Fetch models from Novita client"""
     from src.services.providers.novita_client import fetch_models_from_novita as _fetch
-
-    return _fetch()
-
-
-def fetch_models_from_onerouter():
-    """Fetch models from Infron AI client"""
-    from src.services.providers.onerouter_client import fetch_models_from_onerouter as _fetch
 
     return _fetch()
 

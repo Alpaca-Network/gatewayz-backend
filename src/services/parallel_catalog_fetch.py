@@ -40,7 +40,6 @@ _retry_after: dict[str, float] = {}
 # All supported providers
 ALL_PROVIDERS = [
     "openrouter",
-    "onerouter",
     "featherless",
     "deepinfra",
     "chutes",
@@ -56,10 +55,6 @@ ALL_PROVIDERS = [
     "aimo",
     "near",
     "fal",
-    "helicone",
-    "anannas",
-    "aihubmix",
-    "vercel-ai-gateway",
     "alibaba",
     "simplismart",
     "openai",

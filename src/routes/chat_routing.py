@@ -98,7 +98,7 @@ async def resolve_model_routing(
                 req.model = _get_auto_route_default_model()
 
     # === 2.4) General Router (if model="router:general" or "gatewayz-general") ===
-    # NotDiamond-powered intelligent routing for general-purpose prompts
+    # Intelligent routing for general-purpose prompts
     # Normalize model string to handle hyphenated aliases
     from src.services.general_router import normalize_model_string
 
@@ -122,7 +122,7 @@ async def resolve_model_routing(
                 is_general_router, router_mode = parse_general_router(normalized_model.lower())
 
                 if is_general_router:
-                    # Route using NotDiamond
+                    # Route using the general router
                     general_router_decision = await route_general_prompt(
                         messages=messages,
                         mode=router_mode,

@@ -6,12 +6,10 @@ import importlib.machinery
 import sys
 
 _PROVIDER_MODULES = {
-    "aihubmix_client",
     "aimo_client",
     "akash_client",
     "alibaba_cloud_client",
     "alpaca_network_client",
-    "anannas_client",
     "anthropic_client",
     "anthropic_transformer",
     "canopywave_client",
@@ -28,7 +26,6 @@ _PROVIDER_MODULES = {
     "fireworks_client",
     "google_vertex_client",
     "groq_client",
-    "helicone_client",
     "huggingface_client",
     "image_generation_client",
     "modelz_client",
@@ -36,15 +33,12 @@ _PROVIDER_MODULES = {
     "near_client",
     "nebius_client",
     "nosana_client",
-    "notdiamond_client",
     "novita_client",
-    "onerouter_client",
     "openai_client",
     "openrouter_client",
     "simplismart_client",
     "sybil_client",
     "together_client",
-    "vercel_ai_gateway_client",
     "xai_client",
     "zai_client",
 }

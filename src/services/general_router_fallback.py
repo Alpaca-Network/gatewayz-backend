@@ -1,7 +1,7 @@
 """
 Fallback logic for general router.
 
-Provides fallback model selection when NotDiamond is unavailable or fails.
+Provides fallback model selection when the external ML router is unavailable or fails.
 """
 
 import logging
@@ -37,7 +37,7 @@ def get_fallback_model(
     user_default: str | None = None,
 ) -> str:
     """
-    Get fallback model when NotDiamond unavailable.
+    Get fallback model when the external ML router is unavailable.
 
     Priority order:
     1. Mode-specific fallback

@@ -6,7 +6,7 @@ Standardizes pricing from various provider formats to per-token format.
 All pricing in the system is standardized to cost per single token (e.g., 0.000000055).
 This module handles conversion from different provider formats:
 - Per-1M tokens (most common): OpenRouter, DeepInfra, etc.
-- Per-1K tokens: AiHubMix
+- Per-1K tokens: some provider APIs
 - Per-token: Already normalized
 
 Created: 2026-01-19
@@ -280,8 +280,8 @@ def normalize_price_from_provider(
         >>> normalize_price_from_provider(0.055, "deepinfra")
         Decimal('0.000000055')  # DeepInfra uses per-1M
 
-        >>> normalize_price_from_provider(0.055, "aihubmix")
-        Decimal('0.000055')  # AiHubMix uses per-1K
+        >>> normalize_price_from_provider(0.055, "clarifai")
+        Decimal('0.000055')  # per-1K provider
     """
     provider_format = get_provider_format(provider_slug)
     return normalize_to_per_token(price, provider_format)

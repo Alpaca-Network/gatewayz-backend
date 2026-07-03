@@ -104,49 +104,9 @@ class TestGeneralRouterRoute:
     """Test GeneralRouter.route method."""
 
     @pytest.mark.asyncio
-    async def test_route_with_notdiamond_enabled(self):
-        """Test routing when NotDiamond is enabled and working."""
-        mock_client = MagicMock()
-        mock_client.enabled = True
-        mock_client.select_model = AsyncMock(
-            return_value={
-                "model_id": "openai/gpt-4o",
-                "provider": "openai",
-                "notdiamond_model": "gpt-4o",
-                "session_id": "nd_test_123",
-                "confidence": 0.95,
-                "latency_ms": 45.2,
-                "mode": "quality",
-            }
-        )
-
+    async def test_route_uses_fallback_quality(self):
+        """Router always uses heuristic fallback selection (quality mode)."""
         router = GeneralRouter()
-        router.notdiamond_client = mock_client
-        router.enabled = True
-
-        with patch(
-            "src.services.general_router.GeneralRouter._check_model_available",
-            return_value=True,
-        ):
-            result = await router.route(
-                messages=[{"role": "user", "content": "test"}], mode="quality"
-            )
-
-        assert result["model_id"] == "openai/gpt-4o"
-        assert result["provider"] == "openai"
-        assert result["mode"] == "quality"
-        assert result["confidence"] == 0.95
-        assert result["fallback_used"] is False
-
-    @pytest.mark.asyncio
-    async def test_route_with_notdiamond_disabled(self):
-        """Test routing when NotDiamond is disabled."""
-        mock_client = MagicMock()
-        mock_client.enabled = False
-
-        router = GeneralRouter()
-        router.notdiamond_client = mock_client
-        router.enabled = False
 
         result = await router.route(messages=[{"role": "user", "content": "test"}], mode="quality")
 
@@ -155,52 +115,14 @@ class TestGeneralRouterRoute:
         assert result["model_id"] == "openai/gpt-4o"  # quality mode fallback
 
     @pytest.mark.asyncio
-    async def test_route_with_unavailable_model(self):
-        """Test routing when NotDiamond recommends unavailable model."""
-        mock_client = MagicMock()
-        mock_client.enabled = True
-        mock_client.select_model = AsyncMock(
-            return_value={
-                "model_id": "unavailable/model",
-                "provider": "unavailable",
-                "notdiamond_model": "unavailable-model",
-                "session_id": "nd_test_123",
-                "confidence": 0.95,
-                "latency_ms": 45.2,
-                "mode": "quality",
-            }
-        )
-
+    async def test_route_uses_fallback_cost(self):
+        """Router always uses heuristic fallback selection (cost mode)."""
         router = GeneralRouter()
-        router.notdiamond_client = mock_client
-        router.enabled = True
-
-        with patch(
-            "src.services.general_router.GeneralRouter._check_model_available",
-            return_value=False,
-        ):
-            result = await router.route(
-                messages=[{"role": "user", "content": "test"}], mode="quality"
-            )
-
-        assert result["fallback_used"] is True
-        assert result["fallback_reason"] == "model_unavailable"
-
-    @pytest.mark.asyncio
-    async def test_route_with_notdiamond_exception(self):
-        """Test routing when NotDiamond throws exception."""
-        mock_client = MagicMock()
-        mock_client.enabled = True
-        mock_client.select_model = AsyncMock(side_effect=Exception("API error"))
-
-        router = GeneralRouter()
-        router.notdiamond_client = mock_client
-        router.enabled = True
 
         result = await router.route(messages=[{"role": "user", "content": "test"}], mode="cost")
 
         assert result["fallback_used"] is True
-        assert result["fallback_reason"] == "exception"
+        assert result["fallback_reason"] == "disabled"
         assert result["model_id"] == "openai/gpt-4o-mini"  # cost mode fallback
 
 
@@ -208,13 +130,12 @@ class TestRoutingMetadata:
     """Test routing metadata formatting."""
 
     def test_get_routing_metadata_success(self):
-        """Test metadata formatting for successful routing."""
+        """Test metadata formatting for successful (non-fallback) routing."""
         routing_result = {
             "model_id": "openai/gpt-4o",
             "provider": "openai",
             "mode": "quality",
             "routing_latency_ms": 45.2,
-            "notdiamond_session_id": "nd_test_123",
             "confidence": 0.95,
             "fallback_used": False,
         }
@@ -225,7 +146,6 @@ class TestRoutingMetadata:
         assert metadata["router_mode"] == "quality"
         assert metadata["selected_model"] == "openai/gpt-4o"
         assert metadata["routing_latency_ms"] == 45.2
-        assert metadata["notdiamond_session_id"] == "nd_test_123"
         assert metadata["confidence"] == 0.95
         assert metadata["fallback_used"] is False
 

@@ -656,7 +656,7 @@ def create_app() -> FastAPI:
         logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
 
     # ==================== General Router API Router ====================
-    # Load general router API endpoints for NotDiamond-powered routing
+    # Load general router API endpoints for intelligent routing
     try:
         from src.routes.general_router import router as general_router_router
 

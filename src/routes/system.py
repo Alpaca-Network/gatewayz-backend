@@ -19,9 +19,7 @@ from fastapi.responses import HTMLResponse
 from src.security.deps import require_admin
 
 # Import fetch_models functions from their respective client files
-from src.services.providers.aihubmix_client import fetch_models_from_aihubmix
 from src.services.providers.aimo_client import fetch_models_from_aimo
-from src.services.providers.anannas_client import fetch_models_from_anannas
 from src.services.providers.chutes_client import fetch_models_from_chutes
 from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
@@ -38,7 +36,6 @@ from src.services.providers.modelz_client import clear_modelz_cache
 from src.services.providers.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
 from src.services.providers.modelz_client import refresh_modelz_cache
 from src.services.providers.near_client import fetch_models_from_near
-from src.services.providers.onerouter_client import fetch_models_from_onerouter
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
 from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 from src.services.providers import (
@@ -77,9 +74,7 @@ def get_all_gateway_names() -> list[str]:
 
     # Fallback list if GATEWAY_CONFIG is not available
     return [
-        "aihubmix",
         "aimo",
-        "anannas",
         "cerebras",
         "chutes",
         "deepinfra",
@@ -91,7 +86,6 @@ def get_all_gateway_names() -> list[str]:
         "near",
         "nebius",
         "novita",
-        "onerouter",
         "openrouter",
         "together",
         "xai",
@@ -110,9 +104,7 @@ def get_cacheable_gateways() -> list[str]:
     # Map of gateway names to their fetch functions
     # Only include gateways that have fetch functions implemented
     fetch_function_map = {
-        "aihubmix": fetch_models_from_aihubmix,
         "aimo": fetch_models_from_aimo,
-        "anannas": fetch_models_from_anannas,
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
@@ -124,7 +116,6 @@ def get_cacheable_gateways() -> list[str]:
         "near": fetch_models_from_near,
         "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
-        "onerouter": fetch_models_from_onerouter,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
         "xai": fetch_models_from_xai,
@@ -141,9 +132,7 @@ def get_fetch_function(gateway: str):
     Note: deepinfra is excluded as it only supports on-demand fetching.
     """
     fetch_functions = {
-        "aihubmix": fetch_models_from_aihubmix,
         "aimo": fetch_models_from_aimo,
-        "anannas": fetch_models_from_anannas,
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
@@ -155,7 +144,6 @@ def get_fetch_function(gateway: str):
         "near": fetch_models_from_near,
         "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
-        "onerouter": fetch_models_from_onerouter,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
         "xai": fetch_models_from_xai,

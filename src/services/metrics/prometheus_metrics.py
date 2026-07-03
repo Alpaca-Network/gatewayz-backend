@@ -1883,20 +1883,6 @@ general_router_latency_seconds = get_or_create_metric(
     buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2),
 )
 
-general_router_notdiamond_calls_total = get_or_create_metric(
-    Counter,
-    "general_router_notdiamond_calls_total",
-    "NotDiamond API calls",
-    ["status", "mode"],
-)
-
-general_router_notdiamond_latency_seconds = get_or_create_metric(
-    Histogram,
-    "general_router_notdiamond_latency_seconds",
-    "NotDiamond API latency",
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1),
-)
-
 general_router_fallback_total = get_or_create_metric(
     Counter,
     "general_router_fallback_total",
@@ -1907,7 +1893,7 @@ general_router_fallback_total = get_or_create_metric(
 general_router_confidence = get_or_create_metric(
     Histogram,
     "general_router_confidence",
-    "NotDiamond confidence scores",
+    "General router confidence scores",
     ["mode"],
     buckets=(0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99, 1.0),
 )
@@ -1976,7 +1962,7 @@ def track_general_router_request(
         selected_model: Selected model ID
         provider: Provider name
         latency_seconds: Routing latency in seconds
-        confidence: NotDiamond confidence score
+        confidence: Routing confidence score
     """
     general_router_requests_total.labels(
         mode=mode,
@@ -1988,23 +1974,6 @@ def track_general_router_request(
 
     if confidence > 0:
         general_router_confidence.labels(mode=mode).observe(confidence)
-
-
-def track_notdiamond_api_call(status: str, mode: str, latency_seconds: float):
-    """
-    Track NotDiamond API call.
-
-    Args:
-        status: Call status (success, error)
-        mode: Routing mode
-        latency_seconds: API call latency in seconds
-    """
-    general_router_notdiamond_calls_total.labels(
-        status=status,
-        mode=mode,
-    ).inc()
-
-    general_router_notdiamond_latency_seconds.observe(latency_seconds)
 
 
 def track_general_router_fallback(reason: str, mode: str):

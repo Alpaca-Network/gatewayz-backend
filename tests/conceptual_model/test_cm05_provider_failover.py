@@ -63,27 +63,23 @@ class TestFailoverChain:
     """CM 5.1 - Failover chain configuration and status-code triggers."""
 
     @pytest.mark.cm_verified
-    def test_failover_chain_has_14_providers(self):
-        """CM-5.1.1: build_provider_failover_chain produces a chain with 14 providers."""
+    def test_failover_chain_has_10_providers(self):
+        """CM-5.1.1: build_provider_failover_chain produces a chain with 10 providers."""
         chain = build_provider_failover_chain("openrouter")
-        assert len(chain) == 14
+        assert len(chain) == 10
 
     @pytest.mark.cm_verified
     def test_failover_chain_ordered_by_reliability(self):
         """CM-5.1.2: build_provider_failover_chain preserves reliability ranking after initial."""
-        chain = build_provider_failover_chain("onerouter")
+        chain = build_provider_failover_chain("openrouter")
         expected_order = (
-            "onerouter",
+            "openrouter",
             "openai",
             "anthropic",
             "google-vertex",
-            "openrouter",
             "cerebras",
             "huggingface",
             "featherless",
-            "vercel-ai-gateway",
-            "aihubmix",
-            "anannas",
             "alibaba",
             "fireworks",
             "together",

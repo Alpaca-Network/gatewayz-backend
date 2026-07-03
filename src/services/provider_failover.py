@@ -48,17 +48,13 @@ except ImportError:  # pragma: no cover - handled gracefully below
     CerebrasRateLimitError = None
 
 FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
-    "onerouter",
     "openai",  # Native OpenAI - try first for openai/* models
     "anthropic",  # Native Anthropic - try first for anthropic/* models
     "google-vertex",
-    "openrouter",  # Fallback for OpenAI/Anthropic models
+    "openrouter",  # Primary router / fallback for OpenAI/Anthropic models
     "cerebras",
     "huggingface",
     "featherless",
-    "vercel-ai-gateway",
-    "aihubmix",
-    "anannas",
     "alibaba",
     "fireworks",
     "together",
@@ -129,7 +125,7 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     priority = _get_failover_priority()
     eligible = set(priority)
     if provider not in eligible:
-        return [provider] if provider else ["onerouter"]
+        return [provider] if provider else ["openrouter"]
 
     chain: list[str] = []
     if provider:
@@ -139,10 +135,10 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
         if candidate not in chain:
             chain.append(candidate)
 
-    # Always include onerouter as ultimate fallback if nothing else is available
-    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "onerouter"):
-        if "onerouter" not in chain:
-            chain.append("onerouter")
+    # Always include openrouter as ultimate fallback if nothing else is available
+    if not chain or (len(chain) == 1 and chain[0] == provider and provider != "openrouter"):
+        if "openrouter" not in chain:
+            chain.append("openrouter")
 
     return chain
 

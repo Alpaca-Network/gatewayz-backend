@@ -39,7 +39,6 @@ PROVIDER_ENV_VAR_MAP = {
     "groq": "GROQ_API_KEY",
     "together": "TOGETHER_API_KEY",
     "fireworks": "FIREWORKS_API_KEY",
-    "vercel-ai-gateway": "VERCEL_AI_GATEWAY_KEY",
     "featherless": "FEATHERLESS_API_KEY",
     "chutes": "CHUTES_API_KEY",
     "deepinfra": "DEEPINFRA_API_KEY",
@@ -52,14 +51,10 @@ PROVIDER_ENV_VAR_MAP = {
     "aimo": "AIMO_API_KEY",
     "near": "NEAR_API_KEY",
     "fal": "FAL_API_KEY",
-    "helicone": "HELICONE_API_KEY",
     "alpaca": "ALPACA_NETWORK_API_KEY",
     "alibaba": "ALIBABA_CLOUD_API_KEY",
     "clarifai": "CLARIFAI_API_KEY",
-    "onerouter": "ONEROUTER_API_KEY",
     "simplismart": "SIMPLISMART_API_KEY",
-    "aihubmix": "AIHUBMIX_API_KEY",
-    "anannas": "ANANNAS_API_KEY",
     "cloudflare-workers-ai": "CLOUDFLARE_WORKERS_AI_API_KEY",
 }
 

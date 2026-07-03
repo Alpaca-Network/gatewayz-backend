@@ -246,9 +246,6 @@ class Config:
     OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
     OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
-    # Infron AI Configuration (formerly OneRouter)
-    ONEROUTER_API_KEY = os.environ.get("ONEROUTER_API_KEY")
-
     # DeepInfra Configuration (for direct API access)
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
@@ -300,16 +297,6 @@ class Config:
     # Near AI Configuration
     NEAR_API_KEY = os.environ.get("NEAR_API_KEY")
 
-    # Vercel AI Gateway Configuration
-    VERCEL_AI_GATEWAY_API_KEY = os.environ.get("VERCEL_AI_GATEWAY_API_KEY")
-
-    # Helicone AI Gateway Configuration
-    HELICONE_API_KEY = os.environ.get("HELICONE_API_KEY")
-
-    # AiHubMix Configuration
-    AIHUBMIX_API_KEY = os.environ.get("AIHUBMIX_API_KEY")
-    AIHUBMIX_APP_CODE = os.environ.get("AIHUBMIX_APP_CODE")
-
     # Fal.ai Configuration
     FAL_API_KEY = os.environ.get("FAL_API_KEY")
 
@@ -318,9 +305,6 @@ class Config:
 
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-
-    # Anannas Configuration
-    ANANNAS_API_KEY = os.environ.get("ANANNAS_API_KEY")
 
     # Alpaca Network Configuration
     ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")
@@ -366,14 +350,6 @@ class Config:
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
 
-    # NotDiamond AI Router Configuration
-    NOTDIAMOND_API_KEY = os.environ.get("NOTDIAMOND_API_KEY", "")
-    NOTDIAMOND_TIMEOUT = int(os.environ.get("NOTDIAMOND_TIMEOUT", "10"))
-    NOTDIAMOND_ENABLED = os.environ.get("NOTDIAMOND_ENABLED", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
 
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")

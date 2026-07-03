@@ -14,10 +14,8 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.providers.aihubmix_client import fetch_models_from_aihubmix
 from src.services.providers.aimo_client import fetch_models_from_aimo
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
-from src.services.providers.anannas_client import fetch_models_from_anannas
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
 from src.services.providers.canopywave_client import fetch_models_from_canopywave
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
@@ -33,14 +31,12 @@ from src.services.providers.featherless_client import fetch_models_from_featherl
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_client import fetch_models_from_groq
-from src.services.providers.helicone_client import fetch_models_from_helicone
 from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.providers.modelz_client import fetch_models_from_modelz
 from src.services.providers.morpheus_client import fetch_models_from_morpheus
 from src.services.providers.near_client import fetch_models_from_near
 from src.services.providers.nebius_client import fetch_models_from_nebius
 from src.services.providers.novita_client import fetch_models_from_novita
-from src.services.providers.onerouter_client import fetch_models_from_onerouter
 from src.services.providers.openai_client import fetch_models_from_openai
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
 from src.services.pricing_normalization import (
@@ -51,7 +47,6 @@ from src.services.pricing_normalization import (
 from src.services.providers.simplismart_client import fetch_models_from_simplismart
 from src.services.providers.sybil_client import fetch_models_from_sybil
 from src.services.providers.together_client import fetch_models_from_together
-from src.services.providers.vercel_ai_gateway_client import fetch_models_from_vercel_ai_gateway
 from src.services.providers.xai_client import fetch_models_from_xai
 from src.services.providers.zai_client import fetch_models_from_zai
 
@@ -82,10 +77,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "aimo": fetch_models_from_aimo,
     "near": fetch_models_from_near,
     "fal": fetch_models_from_fal,
-    "vercel-ai-gateway": fetch_models_from_vercel_ai_gateway,
-    "aihubmix": fetch_models_from_aihubmix,
-    "helicone": fetch_models_from_helicone,
-    "anannas": fetch_models_from_anannas,
     "alibaba": fetch_models_from_alibaba,
     "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,
@@ -98,7 +89,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "anthropic": fetch_models_from_anthropic,
     "clarifai": fetch_models_from_clarifai,
     "simplismart": fetch_models_from_simplismart,
-    "onerouter": fetch_models_from_onerouter,
     "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
     "modelz": fetch_models_from_modelz,
     "cohere": fetch_models_from_cohere,
@@ -615,14 +605,6 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "base_url": "https://api.simplismart.ai/v1",
                 "api_key_env_var": "SIMPLISMART_API_KEY",
                 "site_url": "https://simplismart.ai",
-                "supports_streaming": True,
-            },
-            "onerouter": {
-                "name": "Infron AI",
-                "description": "Infron AI (formerly OneRouter) multi-provider gateway",
-                "base_url": "https://api.infron.ai/v1",
-                "api_key_env_var": "ONEROUTER_API_KEY",
-                "site_url": "https://infron.ai",
                 "supports_streaming": True,
             },
             "cloudflare-workers-ai": {

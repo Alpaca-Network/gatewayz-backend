@@ -491,7 +491,7 @@ class ChatInferenceHandler:
         Route streaming request to the appropriate provider client.
 
         Args:
-            provider_name: Provider to use (e.g., "openrouter", "cerebras", "groq", "onerouter")
+            provider_name: Provider to use (e.g., "openrouter", "cerebras", "groq", "together")
             model_id: Model identifier to use
             messages: Chat messages in OpenAI format
             **kwargs: Additional parameters (temperature, max_tokens, etc.)

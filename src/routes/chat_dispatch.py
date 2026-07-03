@@ -407,7 +407,7 @@ async def dispatch_non_streaming(
             # Wrap with AITracer for gen_ai.* telemetry + track duration for Prometheus
             inference_start = time.time()
             async with AITracer.trace_inference(
-                provider="onerouter",  # Will be updated after response
+                provider="openrouter",  # Will be updated after response
                 model=original_model,
                 request_type=AIRequestType.CHAT_COMPLETION,
                 operation_name=f"unified_handler/{original_model}",
@@ -419,7 +419,7 @@ async def dispatch_non_streaming(
                 processed = adapter.from_internal_response(internal_response)
 
                 # Extract values for postprocessing
-                provider = internal_response.provider_used or "onerouter"
+                provider = internal_response.provider_used or "openrouter"
                 model = internal_response.model or original_model
 
                 # Set trace attributes with actual values from response
@@ -478,7 +478,7 @@ async def dispatch_non_streaming(
 
         except Exception as exc:
             # Record error metric for model popularity tracking
-            error_provider = provider if "provider" in locals() else "onerouter"
+            error_provider = provider if "provider" in locals() else "openrouter"
             error_model = model if "model" in locals() else original_model
             model_inference_requests.labels(
                 provider=error_provider, model=error_model, status="error"

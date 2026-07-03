@@ -167,11 +167,6 @@ _fal_models_cache = _get_or_create_cache("fal")
 _google_vertex_models_cache = _get_or_create_cache("google-vertex")
 
 # Gateway and provider caches
-_vercel_ai_gateway_models_cache = _get_or_create_cache("vercel-ai-gateway")
-_helicone_models_cache = _get_or_create_cache("helicone")
-_aihubmix_models_cache = _get_or_create_cache("aihubmix")
-_anannas_models_cache = _get_or_create_cache("anannas")
-_onerouter_models_cache = _get_or_create_cache("onerouter")
 _cloudflare_workers_ai_models_cache = _get_or_create_cache("cloudflare-workers-ai")
 _clarifai_models_cache = _get_or_create_cache("clarifai")
 _openai_models_cache = _get_or_create_cache("openai")

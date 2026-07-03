@@ -1,7 +1,7 @@
 """
-General-Purpose Prompt Router (NotDiamond-Powered)
+General-Purpose Prompt Router
 
-Routes general prompts to optimal models using NotDiamond's ML-based selection.
+Routes general prompts to models using per-mode heuristic fallback selection.
 
 Modes:
 - router:general          - Balanced (default)
@@ -17,7 +17,6 @@ Hyphenated aliases:
 """
 
 import logging
-import time
 from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
@@ -96,19 +95,19 @@ def parse_router_model_string(model_string: str) -> tuple[bool, RouterMode]:
 
 
 class GeneralRouter:
-    """Routes general prompts using NotDiamond API."""
+    """Routes general prompts to a model using heuristic fallback selection.
+
+    The external ML router (NotDiamond) was removed; routing now always uses the
+    per-mode fallback model configuration.
+    """
 
     def __init__(self):
-        """Initialize general router with NotDiamond client."""
+        """Initialize general router with fallback model configuration."""
         from src.services.general_router_fallback import get_fallback_models
-        from src.services.providers.notdiamond_client import get_notdiamond_client
 
-        self.notdiamond_client = get_notdiamond_client()
         self.fallback_models = get_fallback_models()
-        self.enabled = self.notdiamond_client.enabled
-
-        if not self.enabled:
-            logger.info("NotDiamond client not enabled, general router will use fallback mode")
+        self.enabled = False
+        logger.info("General router using heuristic fallback mode")
 
     async def route(
         self,
@@ -132,64 +131,12 @@ class GeneralRouter:
                 "provider": "openai",
                 "mode": "quality",
                 "routing_latency_ms": 45.2,
-                "notdiamond_session_id": "nd_xxx",
-                "confidence": 0.95,
-                "fallback_used": False,
-                "selected_model_info": {...}
+                "fallback_used": True,
+                "fallback_reason": "disabled",
             }
         """
-        start_time = time.perf_counter()
-
-        # Check if NotDiamond is enabled
-        if not self.enabled:
-            logger.info("NotDiamond disabled, using fallback")
-            return self._use_fallback(mode, user_default_model, "disabled")
-
-        # Try NotDiamond routing
-        try:
-            nd_result = await self.notdiamond_client.select_model(
-                messages=messages,
-                mode=mode,
-            )
-
-            # Check if selected model is available in Gatewayz
-            model_available = await self._check_model_available(nd_result["model_id"])
-
-            if not model_available:
-                logger.warning(f"NotDiamond selected unavailable model: {nd_result['model_id']}")
-                return self._use_fallback(mode, user_default_model, "model_unavailable")
-
-            # Success - calculate total latency
-            routing_latency_ms = (time.perf_counter() - start_time) * 1000
-
-            result = {
-                "model_id": nd_result["model_id"],
-                "provider": nd_result["provider"],
-                "mode": mode,
-                "routing_latency_ms": routing_latency_ms,
-                "notdiamond_session_id": nd_result["session_id"],
-                "notdiamond_latency_ms": nd_result["latency_ms"],
-                "confidence": nd_result["confidence"],
-                "fallback_used": False,
-                "selected_model_info": {
-                    "notdiamond_model": nd_result["notdiamond_model"],
-                },
-            }
-
-            # Track metrics
-            self._track_routing_metrics(result)
-
-            logger.info(
-                f"General router selected {result['model_id']} "
-                f"(mode={mode}, confidence={result['confidence']:.2f}, "
-                f"time={routing_latency_ms:.2f}ms)"
-            )
-
-            return result
-
-        except Exception as e:
-            logger.warning(f"NotDiamond routing failed: {e}")
-            return self._use_fallback(mode, user_default_model, "exception")
+        # Routing always uses the per-mode heuristic fallback selection.
+        return self._use_fallback(mode, user_default_model, "disabled")
 
     def _use_fallback(
         self,
@@ -198,7 +145,7 @@ class GeneralRouter:
         reason: str,
     ) -> dict[str, Any]:
         """
-        Use fallback model when NotDiamond unavailable.
+        Select a model using the per-mode heuristic fallback.
 
         Args:
             mode: Routing mode
@@ -233,46 +180,6 @@ class GeneralRouter:
             "fallback_used": True,
             "fallback_reason": reason,
         }
-
-    async def _check_model_available(self, model_id: str) -> bool:
-        """
-        Check if model is available in Gatewayz catalog.
-
-        Args:
-            model_id: Gatewayz model ID
-
-        Returns:
-            True if model is available, False otherwise
-        """
-        try:
-            from src.services.models import get_cached_models
-
-            models = get_cached_models()
-            return any(m.get("id") == model_id for m in models)
-        except Exception as e:
-            logger.warning(f"Failed to check model availability: {e}")
-            return True  # Assume available on error (fail open)
-
-    def _track_routing_metrics(self, result: dict[str, Any]) -> None:
-        """
-        Track routing metrics to Prometheus.
-
-        Args:
-            result: Routing result dict
-        """
-        try:
-            from src.services.prometheus_metrics import track_general_router_request
-
-            track_general_router_request(
-                mode=result["mode"],
-                selected_model=result["model_id"],
-                provider=result["provider"],
-                latency_seconds=result["routing_latency_ms"] / 1000,
-                confidence=result.get("confidence", 0),
-            )
-        except (ImportError, Exception) as e:
-            logger.debug(f"Failed to track metrics: {e}")
-
 
 # Module-level singleton
 _router: GeneralRouter | None = None
@@ -331,12 +238,7 @@ def get_routing_metadata(routing_result: dict[str, Any]) -> dict[str, Any]:
     }
 
     if not routing_result.get("fallback_used"):
-        metadata.update(
-            {
-                "notdiamond_session_id": routing_result.get("notdiamond_session_id"),
-                "confidence": routing_result.get("confidence"),
-            }
-        )
+        metadata["confidence"] = routing_result.get("confidence")
     else:
         metadata["fallback_reason"] = routing_result.get("fallback_reason")
 

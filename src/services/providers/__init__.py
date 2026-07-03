@@ -32,7 +32,6 @@ from src.services._providers_legacy import (  # noqa: E402, F401
     fetch_models_from_xai,
     fetch_models_from_nebius,
     fetch_models_from_novita,
-    fetch_models_from_onerouter,
     fetch_models_from_morpheus,
     fetch_models_from_simplismart,
 )

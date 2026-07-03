@@ -36,9 +36,6 @@ OPENROUTER_AUTO_FALLBACKS = {
     "fireworks": "meta-llama/llama-3.3-70b",
     "together": "meta-llama/llama-3.3-70b",
     "google-vertex": "gemini-2.5-flash",  # Updated from retired gemini-1.5-pro
-    "vercel-ai-gateway": "openai/gpt-4o-mini",
-    "aihubmix": "openai/gpt-4o-mini",
-    "anannas": "openai/gpt-4o-mini",
     "alibaba-cloud": "qwen/qwen-plus",
     "simplismart": "meta-llama/Llama-3.3-70B-Instruct",
 }
@@ -259,13 +256,6 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
     if provider_lower == "morpheus" and model_id.startswith("morpheus/"):
         stripped = model_id[len("morpheus/") :]
         logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
-        model_id = stripped
-
-    # Special handling for Infron AI: strip 'onerouter/' prefix if present
-    # Infron AI API expects just the model name without the provider prefix
-    if provider_lower == "onerouter" and model_id.startswith("onerouter/"):
-        stripped = model_id[len("onerouter/") :]
-        logger.info(f"Stripped 'onerouter/' prefix: '{model_id}' -> '{stripped}' for Infron AI")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -573,10 +563,6 @@ def detect_provider_from_model_id(
         "hug",
         "chutes",
         "google-vertex",
-        "vercel-ai-gateway",
-        "helicone",
-        "aihubmix",
-        "anannas",
         "near",
         "alpaca-network",
         "alibaba-cloud",
@@ -585,7 +571,6 @@ def detect_provider_from_model_id(
         "groq",
         "cloudflare-workers-ai",
         "morpheus",
-        "onerouter",
         "simplismart",
     ]:
         mapping = get_provider_mappings(provider)
@@ -617,25 +602,13 @@ def detect_provider_from_model_id(
         if org == "cerebras":
             return "cerebras"
 
-        # Anannas models (e.g., "anannas/openai/gpt-4o")
-        if org == "anannas":
-            return "anannas"
-
         # OpenRouter models (e.g., "openrouter/auto")
         if org == "openrouter":
             return "openrouter"
 
-        # Helicone models (e.g., "helicone/gpt-4o-mini")
-        if org == "helicone":
-            return "helicone"
-
         # Morpheus models (e.g., "morpheus/llama-3.1-8b")
         if org == "morpheus":
             return "morpheus"
-
-        # Infron AI models (e.g., "onerouter/claude-3-5-sonnet", "onerouter/gpt-4")
-        if org == "onerouter":
-            return "onerouter"
 
         # Z-AI / Zhipu AI GLM models (e.g., "z-ai/glm-4-flash", "z-ai/glm-4.6")
         # These are hosted on OpenRouter with the z-ai/ prefix

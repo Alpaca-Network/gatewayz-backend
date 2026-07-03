@@ -21,9 +21,6 @@ FOREIGN_PROVIDER_NAMESPACES = {
     "openrouter",
     "cerebras",
     "featherless",
-    "vercel-ai-gateway",
-    "aihubmix",
-    "anannas",
     "alibaba-cloud",
     "fireworks",
     "together",
@@ -34,7 +31,6 @@ FOREIGN_PROVIDER_NAMESPACES = {
     "chutes",
     "alpaca-network",
     "clarifai",
-    "helicone",
     "portkey",
     "gatewayz",
 }

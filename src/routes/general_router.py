@@ -37,7 +37,7 @@ async def get_general_router_settings_options() -> dict[str, Any]:
                 "type": "boolean",
                 "default": True,
                 "label": "Use General Router",
-                "description": "Enable NotDiamond-powered model selection for general tasks",
+                "description": "Enable general router model selection for general tasks",
             },
             "optimization_mode": {
                 "type": "select",
@@ -94,35 +94,18 @@ async def get_general_router_settings_options() -> dict[str, Any]:
 @router.get("/models", response_model=dict[str, Any])
 async def get_available_models() -> dict[str, Any]:
     """
-    Get models available for NotDiamond routing.
+    Get models used by the general router.
 
-    Returns list of NotDiamond candidate models with Gatewayz mappings.
+    Returns the per-mode fallback model configuration the router selects from.
     """
-    from src.services.providers.notdiamond_client import get_notdiamond_client
+    from src.services.general_router_fallback import get_fallback_models
 
-    client = get_notdiamond_client()
-    if not client.enabled:
-        return {
-            "success": False,
-            "error": "NotDiamond client not enabled",
-            "models": [],
-        }
+    fallback_models = get_fallback_models()
 
-    candidate_models = client.model_mappings.get("candidate_models", [])
-    mappings = client.model_mappings.get("mappings", {})
-
-    models = []
-    for nd_model in candidate_models:
-        if nd_model in mappings:
-            mapping = mappings[nd_model]
-            models.append(
-                {
-                    "notdiamond_id": nd_model,
-                    "gatewayz_id": mapping["gatewayz_id"],
-                    "provider": mapping["provider"],
-                    "available_on": mapping.get("available_on", []),
-                }
-            )
+    models = [
+        {"mode": mode, "gatewayz_id": model_id}
+        for mode, model_id in fallback_models.items()
+    ]
 
     return {
         "success": True,
@@ -175,7 +158,7 @@ async def get_general_router_stats() -> dict[str, Any]:
         return {
             "success": True,
             "stats": {
-                "notdiamond_enabled": router_instance.enabled,
+                "router_enabled": router_instance.enabled,
                 "fallback_models": router_instance.fallback_models,
             },
         }

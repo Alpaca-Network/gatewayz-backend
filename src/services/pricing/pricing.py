@@ -120,7 +120,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
          - Cloudflare: "@cf/org/model" -> "org/model"
          - Google:     "@google/models/X" -> "google/X"
          - HuggingFace suffixes: ":hf-inference", ":openai", ":anthropic"
-         - Onerouter version suffixes: "@latest", "@20240620", etc.
+         - Version suffixes: "@latest", "@20240620", etc.
       3. Model alias resolution via apply_model_alias().
 
     The returned ID is suitable for cache keys and database queries.
@@ -226,7 +226,7 @@ def normalize_model_id_for_pricing(model_id: str) -> str:
             )
             break
 
-    # 2f. Onerouter / version suffixes: "@latest", "@20240620", etc.
+    # 2f. Version suffixes: "@latest", "@20240620", etc.
     # IMPORTANT: Only strip if the part after @ matches known version patterns
     # to avoid incorrectly stripping "@" from model names like "user@model".
     if "@" in normalized:

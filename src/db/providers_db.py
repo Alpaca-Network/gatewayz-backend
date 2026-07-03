@@ -35,11 +35,7 @@ _FALLBACK_PROVIDER_SLUGS: list[str] = [
     "aimo",
     "near",
     "fal",
-    "helicone",
-    "anannas",
-    "aihubmix",
     "alibaba",
-    "onerouter",
     "google-vertex",
     "cloudflare-workers-ai",
     "clarifai",
@@ -49,7 +45,6 @@ _FALLBACK_PROVIDER_SLUGS: list[str] = [
     "sybil",
     "canopywave",
     "morpheus",
-    "vercel-ai-gateway",
 ]
 
 

@@ -81,13 +81,8 @@ _huggingface_models_cache = _CacheWrapper("huggingface")
 _aimo_models_cache = _CacheWrapper("aimo")
 _near_models_cache = _CacheWrapper("near")
 _fal_models_cache = _CacheWrapper("fal")
-_aihubmix_models_cache = _CacheWrapper("aihubmix")
-_anannas_models_cache = _CacheWrapper("anannas")
-_onerouter_models_cache = _CacheWrapper("onerouter")
 _google_vertex_models_cache = _CacheWrapper("google-vertex")
 _cloudflare_workers_ai_models_cache = _CacheWrapper("cloudflare-workers-ai")
-_vercel_ai_gateway_models_cache = _CacheWrapper("vercel-ai-gateway")
-_helicone_models_cache = _CacheWrapper("helicone")
 _openai_models_cache = _CacheWrapper("openai")
 _anthropic_models_cache = _CacheWrapper("anthropic")
 _clarifai_models_cache = _CacheWrapper("clarifai")
@@ -235,33 +230,6 @@ GATEWAY_CONFIG = {
         "min_expected_models": 50,
         "header_type": "bearer",
     },
-    "aihubmix": {
-        "name": "AiHubMix",
-        "url": "https://aihubmix.com/v1/models",
-        "api_key_env": "AIHUBMIX_API_KEY",
-        "api_key": Config.AIHUBMIX_API_KEY,
-        "cache": _aihubmix_models_cache,
-        "min_expected_models": 5,
-        "header_type": "aihubmix",
-    },
-    "anannas": {
-        "name": "Anannas",
-        "url": "https://api.anannas.ai/v1/models",
-        "api_key_env": "ANANNAS_API_KEY",
-        "api_key": Config.ANANNAS_API_KEY,
-        "cache": _anannas_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "onerouter": {
-        "name": "Infron AI",
-        "url": "https://api.infron.ai/v1/models",
-        "api_key_env": "ONEROUTER_API_KEY",
-        "api_key": Config.ONEROUTER_API_KEY,
-        "cache": _onerouter_models_cache,
-        "min_expected_models": 100,
-        "header_type": "bearer",
-    },
     "google-vertex": {
         "name": "Google Vertex AI",
         "url": None,  # Google Vertex uses service account, not REST endpoint
@@ -278,24 +246,6 @@ GATEWAY_CONFIG = {
         "api_key": getattr(Config, "CLOUDFLARE_API_TOKEN", None),
         "cache": _cloudflare_workers_ai_models_cache,
         "min_expected_models": 10,
-        "header_type": "bearer",
-    },
-    "vercel-ai-gateway": {
-        "name": "Vercel AI Gateway",
-        "url": None,  # Vercel AI Gateway uses proxy, not direct endpoint
-        "api_key_env": "VERCEL_API_TOKEN",
-        "api_key": getattr(Config, "VERCEL_API_TOKEN", None),
-        "cache": _vercel_ai_gateway_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "helicone": {
-        "name": "Helicone",
-        "url": None,  # Helicone is a proxy/observability layer
-        "api_key_env": "HELICONE_API_KEY",
-        "api_key": getattr(Config, "HELICONE_API_KEY", None),
-        "cache": _helicone_models_cache,
-        "min_expected_models": 5,
         "header_type": "bearer",
     },
     "openai": {
@@ -441,13 +391,6 @@ def build_headers(gateway_config: dict[str, Any]) -> dict[str, str]:
     elif header_type == "google":
         # Google uses API key as query parameter, not header
         return {}
-    elif header_type == "aihubmix":
-        # AiHubMix uses Authorization header and APP-Code for referral code
-        headers = {"Authorization": f"Bearer {api_key}"}
-        app_code = os.environ.get("AIHUBMIX_APP_CODE")
-        if app_code:
-            headers["APP-Code"] = app_code
-        return headers
     else:
         return {}
 

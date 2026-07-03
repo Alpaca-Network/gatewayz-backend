@@ -10,7 +10,7 @@ returned in **per-token** format — i.e., cost per single token (e.g., 0.000000
 Source-specific raw formats are converted to per-token by pricing_normalization.py:
   - OpenRouter API  -> already per-token   (PricingFormat.PER_TOKEN)
   - manual_pricing.json (non-OpenRouter) -> per-1M tokens (PricingFormat.PER_1M_TOKENS)
-  - AiHubMix        -> per-1K tokens      (PricingFormat.PER_1K_TOKENS)
+  - per-1K provider APIs                  -> per-1K tokens (PricingFormat.PER_1K_TOKENS)
 
 If you add a new pricing source, use normalize_pricing_dict() with the correct
 PricingFormat constant before returning values from this module.
@@ -66,10 +66,8 @@ def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
 # These need cross-reference pricing from OpenRouter if no manual pricing exists
 # Models without valid pricing will be filtered out to avoid appearing as "free"
 GATEWAY_PROVIDERS = {
-    "aihubmix",
     "akash",
     "alibaba-cloud",
-    "anannas",
     "anthropic",  # Direct Anthropic API - needs cross-reference for model ID matching
     "clarifai",
     "cloudflare-workers-ai",
@@ -77,10 +75,7 @@ GATEWAY_PROVIDERS = {
     "featherless",
     "fireworks",
     "groq",
-    "helicone",
-    "onerouter",
     "together",
-    "vercel-ai-gateway",
 }
 
 # Pricing lookup tier order (checked in sequence, first match wins)
@@ -294,7 +289,7 @@ def _get_cross_reference_pricing(
     """
     Get pricing for a gateway provider model by cross-referencing OpenRouter's catalog.
 
-    Gateway providers (AiHubMix, Helicone, Anannas, Vercel) route to underlying providers
+    Gateway providers route to underlying providers
     like OpenAI, Anthropic, Google etc. This function extracts the underlying model ID
     and looks up its pricing from the OpenRouter pricing index.
 

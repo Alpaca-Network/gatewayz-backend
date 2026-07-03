@@ -58,7 +58,7 @@ async def prepare_upstream_request(
         req_provider_missing = req.provider is None or (
             isinstance(req.provider, str) and not req.provider
         )
-        provider = (req.provider or "onerouter").lower()
+        provider = (req.provider or "openrouter").lower()
 
         # Normalize provider aliases
         if provider == "hug":
@@ -145,7 +145,7 @@ async def prepare_upstream_request(
                             f"Auto-detected provider '{provider}' for model {original_model} (transformed to {transformed})"
                         )
                         break
-                # Otherwise default to onerouter (already set)
+                # Otherwise default to openrouter (already set)
 
         # Use the routed model (from code router or other routing logic) instead of original
         # This ensures that routing decisions are actually applied downstream

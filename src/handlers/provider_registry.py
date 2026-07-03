@@ -129,26 +129,6 @@ PROVIDER_FUNCTIONS = {
         "process_near_response",
         "make_near_request_openai_stream",
     ],
-    "vercel_ai_gateway": [
-        "make_vercel_ai_gateway_request_openai",
-        "process_vercel_ai_gateway_response",
-        "make_vercel_ai_gateway_request_openai_stream",
-    ],
-    "helicone": [
-        "make_helicone_request_openai",
-        "process_helicone_response",
-        "make_helicone_request_openai_stream",
-    ],
-    "aihubmix": [
-        "make_aihubmix_request_openai",
-        "process_aihubmix_response",
-        "make_aihubmix_request_openai_stream",
-    ],
-    "anannas": [
-        "make_anannas_request_openai",
-        "process_anannas_response",
-        "make_anannas_request_openai_stream",
-    ],
     "alpaca_network": [
         "make_alpaca_network_request_openai",
         "process_alpaca_network_response",
@@ -178,11 +158,6 @@ PROVIDER_FUNCTIONS = {
         "make_morpheus_request_openai",
         "process_morpheus_response",
         "make_morpheus_request_openai_stream",
-    ],
-    "onerouter": [
-        "make_onerouter_request_openai",
-        "process_onerouter_response",
-        "make_onerouter_request_openai_stream",
     ],
     "simplismart": [
         "make_simplismart_request_openai",
@@ -303,26 +278,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_google_vertex_response"),
         "stream": _loaded_functions.get("make_google_vertex_request_openai_stream"),
     },
-    "vercel-ai-gateway": {
-        "request": _loaded_functions.get("make_vercel_ai_gateway_request_openai"),
-        "process": _loaded_functions.get("process_vercel_ai_gateway_response"),
-        "stream": _loaded_functions.get("make_vercel_ai_gateway_request_openai_stream"),
-    },
-    "helicone": {
-        "request": _loaded_functions.get("make_helicone_request_openai"),
-        "process": _loaded_functions.get("process_helicone_response"),
-        "stream": _loaded_functions.get("make_helicone_request_openai_stream"),
-    },
-    "aihubmix": {
-        "request": _loaded_functions.get("make_aihubmix_request_openai"),
-        "process": _loaded_functions.get("process_aihubmix_response"),
-        "stream": _loaded_functions.get("make_aihubmix_request_openai_stream"),
-    },
-    "anannas": {
-        "request": _loaded_functions.get("make_anannas_request_openai"),
-        "process": _loaded_functions.get("process_anannas_response"),
-        "stream": _loaded_functions.get("make_anannas_request_openai_stream"),
-    },
     "alpaca-network": {
         "request": _loaded_functions.get("make_alpaca_network_request_openai"),
         "process": _loaded_functions.get("process_alpaca_network_response"),
@@ -352,11 +307,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "request": _loaded_functions.get("make_morpheus_request_openai"),
         "process": _loaded_functions.get("process_morpheus_response"),
         "stream": _loaded_functions.get("make_morpheus_request_openai_stream"),
-    },
-    "onerouter": {
-        "request": _loaded_functions.get("make_onerouter_request_openai"),
-        "process": _loaded_functions.get("process_onerouter_response"),
-        "stream": _loaded_functions.get("make_onerouter_request_openai_stream"),
     },
     "simplismart": {
         "request": _loaded_functions.get("make_simplismart_request_openai"),
