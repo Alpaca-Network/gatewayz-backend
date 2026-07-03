@@ -770,11 +770,22 @@ def sync_provider_models(
         )
 
         # Transform to database schema
+        from src.config.config import Config
+        from src.services.model_quality_gate import assess as assess_model_quality
+
         transform_start = time.time()
         db_models = []
         skipped = 0
+        filtered = 0
         for model in normalized_models:
             try:
+                # Quality gate: drop obvious junk (quant/merge/RP spam) before upsert.
+                if Config.MODEL_QUALITY_GATE_ENABLED:
+                    verdict = assess_model_quality(model, provider_slug)
+                    if not verdict.keep:
+                        filtered += 1
+                        continue
+
                 db_model = transform_normalized_model_to_db_schema(
                     model, provider["id"], provider_slug
                 )
@@ -810,6 +821,7 @@ def sync_provider_models(
             f"[{provider_slug.upper()}] Transformation completed | "
             f"Transformed: {len(db_models)} | "
             f"Skipped: {skipped} | "
+            f"Filtered (quality gate): {filtered} | "
             f"Duration: {metrics['transform_duration']:.2f}s | "
             f"Rate: {len(db_models) / metrics['transform_duration']:.0f} models/sec"
         )
@@ -936,6 +948,7 @@ def sync_provider_models(
             "models_fetched": len(normalized_models),
             "models_transformed": len(db_models),
             "models_skipped": skipped,
+            "models_filtered": filtered,
             "models_synced": models_synced,
             "dry_run": dry_run,
             "metrics": metrics,

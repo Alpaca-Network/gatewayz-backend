@@ -546,6 +546,12 @@ class Config:
         if s.strip()
     }
 
+    # Catalog quality gate — drop obvious junk (quant/merge/RP spam) at ingestion.
+    # Provider-agnostic; conservative high-precision rules (see model_quality_gate.py).
+    MODEL_QUALITY_GATE_ENABLED: bool = os.environ.get(
+        "MODEL_QUALITY_GATE_ENABLED", "true"
+    ).lower() in {"1", "true", "yes"}
+
     # Lightweight price-only refresh (src/services/price_refresh.py).
     # Independent of ENABLE_SCHEDULED_MODEL_SYNC: this job only keeps PRICES
     # current (it never inserts/deactivates models, touches non-pricing columns,
