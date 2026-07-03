@@ -2062,6 +2062,43 @@ async def get_all_models(
     )
 
 
+@router.get("/models/by-category/{category}", tags=["models"])
+async def get_models_by_category_api(
+    category: str,
+    limit: int = Query(200, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    include_inactive: bool = Query(
+        False, description="Include inactive/deprecated models (admin/debug)"
+    ),
+):
+    """
+    List models carrying a derived category tag.
+
+    Categories are auto-assigned from provider/model data
+    (cheapest, fastest, largest, smartest, reasoning, vision, free, coding,
+    long-context, balanced, flagship, mid, budget) — see
+    src/services/model_categorizer.py. This is the DB-backed candidate filter
+    the router uses to narrow model choice.
+    """
+    from src.db.models_catalog_db import get_models_by_category
+    from src.services.model_categorizer import DEFAULT_RULES, TIER_CATEGORIES
+
+    valid = {r.category for r in DEFAULT_RULES} | set(TIER_CATEGORIES)
+    tag = category.strip().lower()
+    if tag not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown category {category!r}. Valid: {sorted(valid)}",
+        )
+
+    models = get_models_by_category(tag, limit=limit, include_inactive=include_inactive)
+    models = _apply_health_gating(models)
+    return {
+        "category": tag,
+        "data": models,
+        "returned": len(models),
+    }
+
+
 @router.get("/models/trending", tags=["statistics"])
 async def get_trending_models_api(
     gateway: str | None = Query("all", description="Gateway filter or 'all'"),

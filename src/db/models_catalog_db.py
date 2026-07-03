@@ -886,6 +886,9 @@ def bulk_upsert_models(
             logger.info(f"Upserted {len(all_upserted)} models total")
             # Sync pricing from metadata.pricing_raw into model_pricing table
             _sync_pricing_to_model_pricing(supabase, all_upserted)
+            # Derive category tags (cheapest/fastest/largest/…) from the fresh
+            # pricing + model fields and write them back to models.categories.
+            _sync_categories(supabase, all_upserted)
 
         return all_upserted
     except Exception as e:
@@ -988,6 +991,114 @@ def _sync_pricing_to_model_pricing(supabase, upserted_models: list[dict[str, Any
     except Exception as e:
         # Non-fatal: pricing sync failure shouldn't block model sync
         logger.error(f"Failed to sync pricing to model_pricing table: {e}")
+
+
+def _sync_categories(supabase, upserted_models: list[dict[str, Any]]) -> None:
+    """
+    Derive category tags for the just-upserted models and write them to
+    models.categories. Runs AFTER pricing sync so blended-price tags use the
+    normalized model_pricing values.
+
+    Pulls three inputs per model: the model row (already in hand), its normalized
+    per-token price (from model_pricing), and its quality priors (from
+    model_quality_scores keyed by canonical_id). Missing inputs never guess a
+    tag — see src/services/model_categorizer. Non-fatal: never blocks sync.
+    """
+    from src.services.model_categorizer import (
+        compute_categories,
+        load_rules,
+        reduce_quality_scores,
+        signals_from_model_row,
+    )
+
+    try:
+        model_ids = [m["id"] for m in upserted_models if m.get("id")]
+        if not model_ids:
+            return
+
+        rules = load_rules(supabase)
+
+        # 1. Normalized per-token pricing, keyed by model id.
+        pricing_by_id: dict[Any, dict[str, float]] = {}
+        for i in range(0, len(model_ids), 500):
+            chunk = model_ids[i : i + 500]
+            resp = (
+                supabase.table("model_pricing")
+                .select("model_id, price_per_input_token, price_per_output_token")
+                .in_("model_id", chunk)
+                .execute()
+            )
+            for row in resp.data or []:
+                pricing_by_id[row["model_id"]] = {
+                    "in": _to_float(row.get("price_per_input_token")),
+                    "out": _to_float(row.get("price_per_output_token")),
+                }
+
+        # 2. Quality priors, keyed by canonical_id → {task_type: score}.
+        canonical_ids = sorted(
+            {m.get("canonical_id") for m in upserted_models if m.get("canonical_id")}
+        )
+        quality_by_canonical: dict[str, dict[str, float]] = defaultdict(dict)
+        for i in range(0, len(canonical_ids), 500):
+            chunk = canonical_ids[i : i + 500]
+            if not chunk:
+                continue
+            resp = (
+                supabase.table("model_quality_scores")
+                .select("model_id, task_type, score")
+                .in_("model_id", chunk)
+                .execute()
+            )
+            for row in resp.data or []:
+                score = _to_float(row.get("score"))
+                if score is not None:
+                    quality_by_canonical[row["model_id"]][row["task_type"]] = score
+
+        # 3. Compute tags, then group ids by identical tag-set so we issue one
+        #    UPDATE per distinct set (a few dozen) instead of one per model.
+        ids_by_tagset: dict[tuple[str, ...], list[Any]] = defaultdict(list)
+        for model in upserted_models:
+            mid = model.get("id")
+            if not mid:
+                continue
+            price = pricing_by_id.get(mid, {})
+            overall, code = reduce_quality_scores(
+                quality_by_canonical.get(model.get("canonical_id") or "", {})
+            )
+            sig = signals_from_model_row(
+                model,
+                input_price_per_token=price.get("in"),
+                output_price_per_token=price.get("out"),
+                quality_overall=overall,
+                quality_code=code,
+            )
+            ids_by_tagset[tuple(compute_categories(sig, rules))].append(mid)
+
+        updated = 0
+        for tagset, ids in ids_by_tagset.items():
+            for i in range(0, len(ids), 500):
+                chunk = ids[i : i + 500]
+                supabase.table("models").update({"categories": list(tagset)}).in_(
+                    "id", chunk
+                ).execute()
+                updated += len(chunk)
+
+        logger.info(
+            f"Categorized {updated} models into {len(ids_by_tagset)} distinct tag-sets"
+        )
+    except Exception as e:
+        # Non-fatal: categorization failure shouldn't block model sync
+        logger.error(f"Failed to sync model categories: {e}")
+
+
+def _to_float(value: Any) -> float | None:
+    """Parse a numeric/str value to float, or None."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def get_models_pricing_by_provider(provider_id: int) -> list[dict[str, Any]]:
@@ -1201,6 +1312,40 @@ def flush_providers_table() -> dict[str, Any]:
 
 
 @with_retry(**_CATALOG_DB_RETRY)
+def get_models_by_category(
+    category: str, limit: int = 200, include_inactive: bool = False
+) -> list[dict[str, Any]]:
+    """
+    Get models carrying a given derived category tag (cheapest/fastest/…).
+
+    Reads models whose `categories` array contains `category` (PostgREST
+    `contains` → SQL `@>`, served by the GIN index on models.categories).
+    This is the DB-backed primitive the router will use to narrow candidates.
+
+    Args:
+        category: a single tag, e.g. 'fastest'
+        limit: max rows to return
+        include_inactive: include inactive/deprecated models (default False)
+
+    Returns:
+        List of model dicts (with provider info). [] on error.
+    """
+    try:
+        supabase = get_client_for_query(read_only=True)
+        query = (
+            supabase.table("models")
+            .select("*, providers!inner(*)")
+            .contains("categories", [category])
+        )
+        if not include_inactive:
+            query = query.eq("is_active", True).is_("deprecated_at", "null")
+        response = query.limit(limit).execute()
+        return response.data or []
+    except Exception as e:
+        logger.error(f"Error fetching models for category {category!r}: {e}")
+        return []
+
+
 def get_all_models_for_catalog(include_inactive: bool = False) -> list[dict[str, Any]]:
     """
     Get ALL models from database optimized for catalog building.
