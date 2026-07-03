@@ -27,8 +27,9 @@ from src.db.models_catalog_db import _sync_categories
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("backfill_model_categories")
 
-# Columns the categorizer needs off the models row.
-_SELECT = "id, canonical_id, context_length, latency_tier, is_reasoning, is_free, modality, architecture"
+# Columns the categorizer needs off the models row. (`architecture` is a
+# provider-fetch-only field, not a column on the models table — omit it.)
+_SELECT = "id, canonical_id, context_length, latency_tier, is_reasoning, is_free, modality"
 _PAGE = 500
 
 
