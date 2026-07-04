@@ -114,11 +114,17 @@ class TestPaymentFailureDowngrade:
 
     def test_invoice_payment_failed_non_subscription(self, stripe_service):
         """Test that non-subscription invoices are skipped"""
-        # Mock invoice without subscription
+        # Mock invoice without subscription. Explicitly null the Basil-era
+        # locations too (parent / lines) so the subscription resolver finds
+        # nothing — otherwise Mock would auto-vivify parent.subscription_details.
+        # NB: ``parent`` is a reserved Mock constructor kwarg, so it must be
+        # assigned after construction rather than passed in.
         mock_invoice = Mock(
             id="in_test_no_sub_123",
             subscription=None,
         )
+        mock_invoice.parent = None
+        mock_invoice.lines = None
 
         # Should not raise exception, just skip
         stripe_service._handle_invoice_payment_failed(mock_invoice)

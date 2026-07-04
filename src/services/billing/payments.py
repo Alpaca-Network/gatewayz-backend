@@ -131,6 +131,107 @@ class StripeService:
             return None
 
     @staticmethod
+    def _get_stripe_field(obj: Any, key: str) -> Any:
+        """Read a field from a Stripe object or dict, preferring item access.
+
+        Stripe objects subclass ``dict``, so attribute-based access (as used by
+        :meth:`_get_stripe_object_value`) returns the built-in method for keys
+        that shadow dict methods — notably ``items`` — instead of the field
+        value. This prefers ``__getitem__`` so ``obj["items"]`` returns the
+        subscription's items collection, falling back to attribute access for
+        plain (non-subscriptable) objects.
+        """
+        if obj is None:
+            return None
+        try:
+            return obj[key]
+        except (KeyError, TypeError, IndexError):
+            pass
+        return getattr(obj, key, None)
+
+    def _get_subscription_period_end(self, subscription: Any) -> int | None:
+        """Return a subscription's current_period_end (unix seconds) or None.
+
+        In Stripe's "Basil" API generation (2025-08-27.basil and later, incl.
+        2025-09-30.clover) ``current_period_end`` was removed from the
+        Subscription object and now lives on each subscription *item*. This
+        reads the legacy top-level field first, then falls back to the items.
+        """
+        period_end = self._get_stripe_field(subscription, "current_period_end")
+        if period_end:
+            return period_end
+        items = self._get_stripe_field(subscription, "items")
+        items_data = self._get_stripe_field(items, "data") if items else None
+        if items_data:
+            for item in items_data:
+                item_end = self._get_stripe_field(item, "current_period_end")
+                if item_end:
+                    return item_end
+        return None
+
+    def _get_subscription_period_start(self, subscription: Any) -> int | None:
+        """Return a subscription's current_period_start (unix seconds) or None.
+
+        Basil-safe counterpart to :meth:`_get_subscription_period_end` — the
+        period bounds moved from the Subscription to its items in the 2025-08+
+        API generation.
+        """
+        period_start = self._get_stripe_field(subscription, "current_period_start")
+        if period_start:
+            return period_start
+        items = self._get_stripe_field(subscription, "items")
+        items_data = self._get_stripe_field(items, "data") if items else None
+        if items_data:
+            for item in items_data:
+                item_start = self._get_stripe_field(item, "current_period_start")
+                if item_start:
+                    return item_start
+        return None
+
+    def _get_invoice_subscription_id(self, invoice: Any) -> str | None:
+        """Return the subscription id an invoice belongs to, or None.
+
+        In the "Basil" API generation the top-level ``invoice.subscription``
+        field was removed. The subscription now lives under
+        ``invoice.parent.subscription_details.subscription`` (and per-line under
+        ``lines.data[].parent.subscription_item_details.subscription``). This
+        checks the legacy field first, then the Basil locations.
+        """
+
+        def _as_id(value: Any) -> str | None:
+            if not value:
+                return None
+            if isinstance(value, str):
+                return value
+            return self._get_stripe_object_value(value, "id")
+
+        sub_id = _as_id(self._get_stripe_object_value(invoice, "subscription"))
+        if sub_id:
+            return sub_id
+
+        parent = self._get_stripe_object_value(invoice, "parent")
+        if parent:
+            details = self._get_stripe_object_value(parent, "subscription_details")
+            sub_id = _as_id(self._get_stripe_object_value(details, "subscription")) if details else None
+            if sub_id:
+                return sub_id
+
+        lines = self._get_stripe_object_value(invoice, "lines")
+        lines_data = self._get_stripe_object_value(lines, "data") if lines else None
+        if lines_data:
+            for line in lines_data:
+                line_parent = self._get_stripe_object_value(line, "parent")
+                item_details = (
+                    self._get_stripe_object_value(line_parent, "subscription_item_details")
+                    if line_parent
+                    else None
+                )
+                sub_id = _as_id(self._get_stripe_object_value(item_details, "subscription")) if item_details else None
+                if sub_id:
+                    return sub_id
+        return None
+
+    @staticmethod
     def _coerce_to_int(value: Any) -> int | None:
         """
         Convert Stripe values (str, Decimal, float) into an int representation.
@@ -174,7 +275,7 @@ class StripeService:
 
         # If tier is missing or defaulted to basic, try to determine from subscription items
         if not tier or tier == "basic":
-            items = self._get_stripe_object_value(subscription, "items")
+            items = self._get_stripe_field(subscription, "items")
             if items:
                 items_data = self._get_stripe_object_value(items, "data")
                 if items_data and len(items_data) > 0:
@@ -731,6 +832,19 @@ class StripeService:
                 f"Checkout completed: session_id={session_id}, metadata_keys={list(metadata.keys())}"
             )
             logger.debug(f"Full metadata: {metadata}")
+
+            # Subscription checkouts are handled entirely by the subscription
+            # lifecycle webhooks (customer.subscription.created / invoice.paid),
+            # which grant the recurring monthly allowance. Processing them here as a
+            # one-time top-up would incorrectly add the subscription's first charge
+            # as purchased credits (double grant).
+            session_mode = self._get_stripe_object_value(session, "mode")
+            if session_mode == "subscription":
+                logger.info(
+                    f"Checkout session {session_id} is a subscription (mode=subscription); "
+                    f"skipping one-time credit grant (handled by subscription webhooks)."
+                )
+                return
 
             # Backfill metadata from the related payment intent if session metadata is absent/incomplete
             required_metadata_keys = ("user_id", "payment_id", "credits_cents")
@@ -1657,8 +1771,9 @@ class StripeService:
             }
 
             # Add subscription end date if available
-            if subscription.current_period_end:
-                update_data["subscription_end_date"] = subscription.current_period_end
+            period_end = self._get_subscription_period_end(subscription)
+            if period_end:
+                update_data["subscription_end_date"] = period_end
 
             client.table("users").update(update_data).eq("id", user_id).execute()
 
@@ -1673,8 +1788,9 @@ class StripeService:
                 # Create new plan assignment for the subscription period
                 start_date = datetime.now(UTC)
                 # Use subscription period end if available, otherwise 1 month
-                if subscription.current_period_end:
-                    end_date = datetime.fromtimestamp(subscription.current_period_end, tz=UTC)
+                period_end = self._get_subscription_period_end(subscription)
+                if period_end:
+                    end_date = datetime.fromtimestamp(period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -1785,8 +1901,9 @@ class StripeService:
                 "updated_at": datetime.now(UTC).isoformat(),
             }
 
-            if subscription.current_period_end:
-                update_data["subscription_end_date"] = subscription.current_period_end
+            period_end = self._get_subscription_period_end(subscription)
+            if period_end:
+                update_data["subscription_end_date"] = period_end
 
             # If subscription is canceled or past_due, potentially downgrade
             if status in ["canceled", "past_due", "unpaid"]:
@@ -1809,8 +1926,9 @@ class StripeService:
                     # Create new plan assignment for the updated subscription period
                     start_date = datetime.now(UTC)
                     # Use subscription period end if available, otherwise 1 month
-                    if subscription.current_period_end:
-                        end_date = datetime.fromtimestamp(subscription.current_period_end, tz=UTC)
+                    period_end = self._get_subscription_period_end(subscription)
+                    if period_end:
+                        end_date = datetime.fromtimestamp(period_end, tz=UTC)
                     else:
                         end_date = start_date + timedelta(days=30)
 
@@ -2049,8 +2167,10 @@ class StripeService:
         This distinction prevents double-crediting on upgrades/downgrades.
         """
         try:
-            # Get subscription from invoice
-            if not invoice.subscription:
+            # Get subscription from invoice (Basil-safe: subscription moved off the
+            # top-level invoice in Stripe's 2025-08+ API generation).
+            invoice_subscription_id = self._get_invoice_subscription_id(invoice)
+            if not invoice_subscription_id:
                 logger.info(f"Invoice {invoice.id} is not for a subscription, skipping")
                 return
 
@@ -2058,7 +2178,7 @@ class StripeService:
             billing_reason = getattr(invoice, "billing_reason", None)
             logger.info(
                 f"Processing invoice.paid: invoice_id={invoice.id}, "
-                f"billing_reason={billing_reason}, subscription={invoice.subscription}"
+                f"billing_reason={billing_reason}, subscription={invoice_subscription_id}"
             )
 
             # Skip allowance reset for proration invoices from upgrades/downgrades.
@@ -2073,7 +2193,7 @@ class StripeService:
                 )
                 return
 
-            subscription = stripe.Subscription.retrieve(invoice.subscription)
+            subscription = stripe.Subscription.retrieve(invoice_subscription_id)
 
             # Extract user_id with fallback strategies
             user_id = self._extract_user_id_from_subscription(subscription)
@@ -2153,11 +2273,12 @@ class StripeService:
     def _handle_invoice_payment_failed(self, invoice):
         """Handle invoice payment failed event - mark as past_due and downgrade tier"""
         try:
-            if not invoice.subscription:
+            invoice_subscription_id = self._get_invoice_subscription_id(invoice)
+            if not invoice_subscription_id:
                 logger.info(f"Invoice {invoice.id} is not for a subscription, skipping")
                 return
 
-            subscription = stripe.Subscription.retrieve(invoice.subscription)
+            subscription = stripe.Subscription.retrieve(invoice_subscription_id)
 
             # Extract user_id with fallback strategies
             user_id = self._extract_user_id_from_subscription(subscription)
@@ -2268,13 +2389,13 @@ class StripeService:
                 status=subscription.status,
                 tier=tier,
                 current_period_start=(
-                    datetime.fromtimestamp(subscription.current_period_start, tz=UTC)
-                    if subscription.current_period_start
+                    datetime.fromtimestamp(_sub_period_start, tz=UTC)
+                    if (_sub_period_start := self._get_subscription_period_start(subscription))
                     else None
                 ),
                 current_period_end=(
-                    datetime.fromtimestamp(subscription.current_period_end, tz=UTC)
-                    if subscription.current_period_end
+                    datetime.fromtimestamp(_sub_period_end, tz=UTC)
+                    if (_sub_period_end := self._get_subscription_period_end(subscription))
                     else None
                 ),
                 cancel_at_period_end=subscription.cancel_at_period_end,
@@ -2475,9 +2596,10 @@ class StripeService:
 
                 # Create new plan assignment
                 start_date = datetime.now(UTC)
-                if updated_subscription.current_period_end:
+                _upd_period_end = self._get_subscription_period_end(updated_subscription)
+                if _upd_period_end:
                     end_date = datetime.fromtimestamp(
-                        updated_subscription.current_period_end, tz=UTC
+                        _upd_period_end, tz=UTC
                     )
                 else:
                     end_date = start_date + timedelta(days=30)
@@ -2741,9 +2863,10 @@ class StripeService:
 
                 # Create new plan assignment
                 start_date = datetime.now(UTC)
-                if updated_subscription.current_period_end:
+                _upd_period_end = self._get_subscription_period_end(updated_subscription)
+                if _upd_period_end:
                     end_date = datetime.fromtimestamp(
-                        updated_subscription.current_period_end, tz=UTC
+                        _upd_period_end, tz=UTC
                     )
                 else:
                     end_date = start_date + timedelta(days=30)
@@ -2932,8 +3055,8 @@ class StripeService:
                 )
 
                 effective_date = (
-                    datetime.fromtimestamp(updated_subscription.current_period_end, tz=UTC)
-                    if updated_subscription.current_period_end
+                    datetime.fromtimestamp(_cancel_period_end, tz=UTC)
+                    if (_cancel_period_end := self._get_subscription_period_end(updated_subscription))
                     else None
                 )
 
