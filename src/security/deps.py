@@ -106,9 +106,12 @@ async def get_api_key(
     # Import Config here to avoid circular imports
     from src.config import Config
 
-    # In local/development environment, use a real development API key
-    # This allows proper tracking even in development mode
-    if Config.IS_DEVELOPMENT:
+    # In local/development environment with NO credentials, fall back to a dev
+    # API key so keyless local requests still work. When credentials ARE provided
+    # (e.g. a real signed-in user's key from the frontend), honor them instead —
+    # otherwise dev mode would hijack every request with a shared dev user and
+    # 401 real users (breaking sign-in with a re-auth loop).
+    if Config.IS_DEVELOPMENT and not credentials:
         from src.utils.dev_api_key import get_or_create_dev_api_key
 
         dev_key = get_or_create_dev_api_key()
@@ -299,8 +302,10 @@ async def get_optional_api_key(
     # Import Config here to avoid circular imports
     from src.config import Config
 
-    # In local/development environment, always return None to allow anonymous access
-    if Config.IS_DEVELOPMENT:
+    # In local/development environment with no credentials, allow anonymous
+    # access. When credentials ARE provided, validate them so a real signed-in
+    # user is recognized instead of being forced to anonymous.
+    if Config.IS_DEVELOPMENT and not credentials:
         return None
 
     if not credentials:

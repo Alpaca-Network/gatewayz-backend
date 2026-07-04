@@ -41,9 +41,14 @@ class StagingSecurityMiddleware:
             -d '{"model": "gpt-4", "messages": [{"role": "user", "content": "Hello"}]}'
     """
 
-    # Paths that bypass admin authentication (only /health in staging)
+    # Paths that bypass admin authentication in staging.
+    # /health: liveness probe.
+    # /api/stripe/webhook: Stripe webhooks authenticate via signature
+    #   (stripe.Webhook.construct_event with STRIPE_WEBHOOK_SECRET), not an
+    #   admin user API key — blocking them would break all payment processing.
     ALLOWED_PATHS = {
         "/health",
+        "/api/stripe/webhook",
     }
 
     def __init__(self, app: ASGIApp) -> None:
