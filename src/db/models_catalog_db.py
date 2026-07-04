@@ -1074,17 +1074,34 @@ def _sync_categories(supabase, upserted_models: list[dict[str, Any]]) -> None:
             )
             ids_by_tagset[tuple(compute_categories(sig, rules))].append(mid)
 
+        @with_retry(max_attempts=3)
+        def _update_chunk(chunk_ids: list[Any], tags: list[str]) -> None:
+            supabase.table("models").update({"categories": tags}).in_(
+                "id", chunk_ids
+            ).execute()
+
         updated = 0
+        failed = 0
         for tagset, ids in ids_by_tagset.items():
+            tags = list(tagset)
             for i in range(0, len(ids), 500):
                 chunk = ids[i : i + 500]
-                supabase.table("models").update({"categories": list(tagset)}).in_(
-                    "id", chunk
-                ).execute()
-                updated += len(chunk)
+                # Isolate + retry each chunk so one transient failure doesn't
+                # abort the remaining tag-sets (root cause of leftover un-tagged
+                # rows on the first backfill pass).
+                try:
+                    _update_chunk(chunk, tags)
+                    updated += len(chunk)
+                except Exception as chunk_err:  # noqa: BLE001
+                    failed += len(chunk)
+                    logger.error(
+                        f"category update failed for {len(chunk)} models "
+                        f"(tags={tags}): {chunk_err}"
+                    )
 
         logger.info(
-            f"Categorized {updated} models into {len(ids_by_tagset)} distinct tag-sets"
+            f"Categorized {updated} models into {len(ids_by_tagset)} distinct "
+            f"tag-sets ({failed} failed)"
         )
     except Exception as e:
         # Non-fatal: categorization failure shouldn't block model sync
