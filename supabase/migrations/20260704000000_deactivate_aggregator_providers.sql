@@ -45,7 +45,7 @@ DO $$
 BEGIN
     IF to_regclass('public.model_provider_offers') IS NOT NULL THEN
         DELETE FROM "public"."model_provider_offers"
-        WHERE "gateway" IN (
+        WHERE "provider_slug" IN (
             'vercel-ai-gateway', 'onerouter', 'aihubmix', 'anannas', 'helicone', 'notdiamond'
         );
     END IF;
