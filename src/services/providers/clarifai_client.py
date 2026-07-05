@@ -20,10 +20,10 @@ Model ID Format:
 import logging
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_clarifai_pooled_client
 from src.services.model_catalog_cache import cache_gateway_catalog
 from src.services.pricing_lookup import enrich_model_with_pricing
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 
 # Initialize logging
 logger = logging.getLogger(__name__)

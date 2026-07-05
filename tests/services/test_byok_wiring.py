@@ -85,10 +85,10 @@ def test_resolve_byok_key_never_raises(monkeypatch):
 @pytest.mark.parametrize(
     "is_byok,rate,cost,expected",
     [
-        (False, "0.05", 1.0, 1.0),   # not BYOK → full cost
-        (True, "0.0", 1.0, 0.0),     # BYOK, 0% fee → free routing
-        (True, "0.05", 1.0, 0.05),   # BYOK, 5% fee
-        (True, "0.10", 2.0, 0.20),   # BYOK, 10% fee
+        (False, "0.05", 1.0, 1.0),  # not BYOK → full cost
+        (True, "0.0", 1.0, 0.0),  # BYOK, 0% fee → free routing
+        (True, "0.05", 1.0, 0.05),  # BYOK, 5% fee
+        (True, "0.10", 2.0, 0.20),  # BYOK, 10% fee
     ],
 )
 def test_apply_byok_fee(monkeypatch, is_byok, rate, cost, expected):
@@ -138,8 +138,8 @@ def _install_recording_provider(monkeypatch):
 
 
 def test_call_provider_binds_customer_key_during_call(monkeypatch):
-    from src.config import Config
     import src.db.user_provider_keys as upk
+    from src.config import Config
 
     monkeypatch.setattr(Config, "BYOK_ENABLED", True)
     monkeypatch.setattr(upk, "get_decrypted_provider_key", lambda uid, slug: "sk-byok-live")
@@ -158,8 +158,8 @@ def test_call_provider_binds_customer_key_during_call(monkeypatch):
 
 
 def test_call_provider_no_key_is_not_byok(monkeypatch):
-    from src.config import Config
     import src.db.user_provider_keys as upk
+    from src.config import Config
 
     monkeypatch.setattr(Config, "BYOK_ENABLED", True)
     monkeypatch.setattr(upk, "get_decrypted_provider_key", lambda uid, slug: None)  # user has none
@@ -174,8 +174,8 @@ def test_call_provider_no_key_is_not_byok(monkeypatch):
 
 
 def test_call_provider_flag_off_ignores_stored_key(monkeypatch):
-    from src.config import Config
     import src.db.user_provider_keys as upk
+    from src.config import Config
 
     monkeypatch.setattr(Config, "BYOK_ENABLED", False)  # master switch off
     # Even though the user HAS a key, it must not be used.
@@ -193,8 +193,8 @@ def test_call_provider_flag_off_ignores_stored_key(monkeypatch):
 def test_call_provider_failure_leaves_is_byok_false_and_unbinds(monkeypatch):
     from fastapi import HTTPException
 
-    from src.config import Config
     import src.db.user_provider_keys as upk
+    from src.config import Config
 
     monkeypatch.setattr(Config, "BYOK_ENABLED", True)
     monkeypatch.setattr(upk, "get_decrypted_provider_key", lambda uid, slug: "sk-byok-live")
@@ -220,8 +220,8 @@ async def test_call_provider_stream_binds_at_creation_not_across_yields(monkeypa
     """Streaming: the key must be live when the stream is CREATED, but cleared
     before any chunk is yielded — a ContextVar.set() left active across an async-
     generator yield would leak into the caller's context."""
-    from src.config import Config
     import src.db.user_provider_keys as upk
+    from src.config import Config
 
     monkeypatch.setattr(Config, "BYOK_ENABLED", True)
     monkeypatch.setattr(upk, "get_decrypted_provider_key", lambda uid, slug: "sk-byok-stream")

@@ -171,9 +171,7 @@ def _refresh_provider_prices(provider_slug: str, dry_run: bool) -> dict[str, Any
             existing_by_pmid[pmid] = row
 
     for model in normalized_models:
-        provider_model_id = (
-            model.get("provider_model_id") or model.get("id") or model.get("slug")
-        )
+        provider_model_id = model.get("provider_model_id") or model.get("id") or model.get("slug")
         if not provider_model_id:
             continue
         provider_model_id = str(provider_model_id)
@@ -264,9 +262,7 @@ def refresh_all_prices(dry_run: bool = False) -> dict[str, Any]:
 
     provider_slugs = list(PROVIDER_FETCH_FUNCTIONS.keys())
 
-    logger.info(
-        f"Price refresh starting (dry_run={dry_run}) for {len(provider_slugs)} providers"
-    )
+    logger.info(f"Price refresh starting (dry_run={dry_run}) for {len(provider_slugs)} providers")
 
     for provider_slug in provider_slugs:
         try:

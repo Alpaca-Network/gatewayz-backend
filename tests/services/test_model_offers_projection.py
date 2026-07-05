@@ -37,6 +37,7 @@ def _model(**kw):
 # normalized_cost_per_1k — self-calibrating units
 # --------------------------------------------------------------------------- #
 
+
 def test_per_token_price_normalized_to_per_1k():
     # 5e-7 per token → $0.50/1M → per-1k = 0.0005
     assert normalized_cost_per_1k("0.0000005") == pytest.approx(0.0005)
@@ -58,6 +59,7 @@ def test_none_and_zero_and_garbage_return_none():
 # --------------------------------------------------------------------------- #
 # build_offer_rows
 # --------------------------------------------------------------------------- #
+
 
 def test_basic_offer_built():
     rows = build_offer_rows([_model()], PROVIDERS)

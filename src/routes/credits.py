@@ -696,7 +696,10 @@ async def get_credits_summary_endpoint(
 
             # Get user info
             user_result = (
-                client.table("users").select("id, username, subscription_allowance, purchased_credits").eq("id", user_id).execute()
+                client.table("users")
+                .select("id, username, subscription_allowance, purchased_credits")
+                .eq("id", user_id)
+                .execute()
             )
             user_info = user_result.data[0] if user_result.data else None
 
@@ -704,7 +707,14 @@ async def get_credits_summary_endpoint(
                 "status": "success",
                 "user_id": user_id,
                 "user_info": user_info,
-                "current_balance": (float(user_info.get("subscription_allowance", 0) or 0) + float(user_info.get("purchased_credits", 0) or 0)) if user_info else 0,
+                "current_balance": (
+                    (
+                        float(user_info.get("subscription_allowance", 0) or 0)
+                        + float(user_info.get("purchased_credits", 0) or 0)
+                    )
+                    if user_info
+                    else 0
+                ),
                 "summary": summary,
                 "filters": {
                     "from_date": from_date,
@@ -715,11 +725,19 @@ async def get_credits_summary_endpoint(
         else:
             # Get system-wide summary
             # Get all users with their balances
-            users_result = client.table("users").select("id, subscription_allowance, purchased_credits").execute()
+            users_result = (
+                client.table("users")
+                .select("id, subscription_allowance, purchased_credits")
+                .execute()
+            )
             users = users_result.data or []
 
             total_users = len(users)
-            total_credits = sum(float(u.get("subscription_allowance", 0) or 0) + float(u.get("purchased_credits", 0) or 0) for u in users)
+            total_credits = sum(
+                float(u.get("subscription_allowance", 0) or 0)
+                + float(u.get("purchased_credits", 0) or 0)
+                for u in users
+            )
             avg_credits = total_credits / total_users if total_users > 0 else 0
 
             # Get transaction counts

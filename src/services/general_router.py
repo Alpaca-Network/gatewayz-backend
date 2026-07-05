@@ -181,6 +181,7 @@ class GeneralRouter:
             "fallback_reason": reason,
         }
 
+
 # Module-level singleton
 _router: GeneralRouter | None = None
 

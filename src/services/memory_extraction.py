@@ -21,12 +21,40 @@ logger = logging.getLogger(__name__)
 # Each pattern captures group(1) = the salient phrase. Applied to USER messages only.
 # (regex, fact template, salience, kind). Templates use {0} for the captured phrase.
 _PATTERNS: list[tuple[re.Pattern, str, float, str]] = [
-    (re.compile(r"\bmy name is ([A-Z][\w'’-]+(?:\s[A-Z][\w'’-]+){0,2})"), "User's name is {0}", 0.9, "identity"),
+    (
+        re.compile(r"\bmy name is ([A-Z][\w'’-]+(?:\s[A-Z][\w'’-]+){0,2})"),
+        "User's name is {0}",
+        0.9,
+        "identity",
+    ),
     (re.compile(r"\b(?:call me|i go by) ([A-Z][\w'’-]+)"), "User goes by {0}", 0.85, "identity"),
-    (re.compile(r"\bremember (?:that |this[:,]? )?([^.?!\n]{4,120})", re.IGNORECASE), "{0}", 0.85, "fact"),
-    (re.compile(r"\bI work (?:at|for|as)\s+([^.?!\n]{2,60})", re.IGNORECASE), "User works {0}", 0.7, "fact"),
-    (re.compile(r"\bI (?:prefer|like to use|always use|usually use|use)\s+([^.?!\n]{2,60})", re.IGNORECASE), "User prefers {0}", 0.6, "preference"),
-    (re.compile(r"\bI'?m (?:a |an )([a-z][^.?!\n]{2,50})", re.IGNORECASE), "User is a {0}", 0.55, "identity"),
+    (
+        re.compile(r"\bremember (?:that |this[:,]? )?([^.?!\n]{4,120})", re.IGNORECASE),
+        "{0}",
+        0.85,
+        "fact",
+    ),
+    (
+        re.compile(r"\bI work (?:at|for|as)\s+([^.?!\n]{2,60})", re.IGNORECASE),
+        "User works {0}",
+        0.7,
+        "fact",
+    ),
+    (
+        re.compile(
+            r"\bI (?:prefer|like to use|always use|usually use|use)\s+([^.?!\n]{2,60})",
+            re.IGNORECASE,
+        ),
+        "User prefers {0}",
+        0.6,
+        "preference",
+    ),
+    (
+        re.compile(r"\bI'?m (?:a |an )([a-z][^.?!\n]{2,50})", re.IGNORECASE),
+        "User is a {0}",
+        0.55,
+        "identity",
+    ),
 ]
 
 _MAX_CANDIDATES_PER_CALL = 5

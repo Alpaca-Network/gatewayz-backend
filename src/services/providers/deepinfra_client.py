@@ -4,8 +4,8 @@ import httpx
 from openai import OpenAI
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 
 # Initialize logging

@@ -1111,6 +1111,7 @@ def calculate_cost_split(
         completion_cost = float(completion_tokens) * float(pricing.get("completion", 0.0))
         # Apply the same markup the total received (preserve sum invariant).
         from src.config.config import Config
+
         markup = Config.PRICING_MARKUP
         return (total, prompt_cost * markup, completion_cost * markup)
     except Exception as e:

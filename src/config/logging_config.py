@@ -380,6 +380,7 @@ def configure_logging() -> bool:
         bool: True if Loki integration was enabled, False otherwise
     """
     import os
+
     _env = os.getenv("ENVIRONMENT", "development").lower()
     _default_level = "WARNING" if _env == "production" else "INFO"
     _level_name = os.getenv("LOG_LEVEL", _default_level).upper()

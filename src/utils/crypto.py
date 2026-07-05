@@ -77,9 +77,7 @@ def decrypt_api_key(token: str, key_version: int | None = None) -> str:
     if Fernet is None:
         raise RuntimeError("Cryptography library not available. Cannot decrypt.")
     if not isinstance(_KEYRING, dict) or not _KEYRING:
-        raise RuntimeError(
-            "No encryption keys configured. Set KEY_VERSION and KEYRING_<version>."
-        )
+        raise RuntimeError("No encryption keys configured. Set KEY_VERSION and KEYRING_<version>.")
 
     raw = token.encode("utf-8")
     versions = []

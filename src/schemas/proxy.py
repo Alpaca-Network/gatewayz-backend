@@ -516,8 +516,6 @@ class ToolDefinition(BaseModel):
         extra = "allow"
 
 
-
-
 # ============================================================================
 # Anthropic Messages API Response Schemas
 # ============================================================================
@@ -574,5 +572,3 @@ class ToolUseBlockResponse(BaseModel):
 
     class Config:
         extra = "allow"
-
-

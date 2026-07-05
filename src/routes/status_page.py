@@ -70,7 +70,8 @@ async def get_overall_status():
 
         # Get active incidents count
         incidents_response = (
-            get_db().table("model_health_incidents")
+            get_db()
+            .table("model_health_incidents")
             .select("id", count="exact")
             .eq("status", "active")
             .execute()
@@ -245,7 +246,8 @@ async def get_model_status(provider: str, model_id: str, gateway: str | None = Q
     """
     try:
         query = (
-            get_db().table("model_status_current")
+            get_db()
+            .table("model_status_current")
             .select("*")
             .eq("provider", provider)
             .eq("model", model_id)
@@ -387,7 +389,8 @@ async def get_model_uptime_history(
 
         # Query aggregated data
         query = (
-            get_db().table("model_health_aggregates")
+            get_db()
+            .table("model_health_aggregates")
             .select("*")
             .eq("provider", provider)
             .eq("model", model_id)
@@ -445,7 +448,8 @@ async def search_models(
         sanitized_q = q.replace(",", "").replace("(", "").replace(")", "").replace(".", "")
 
         query = (
-            get_db().table("model_status_current")
+            get_db()
+            .table("model_status_current")
             .select("*")
             .or_(f"model.ilike.%{sanitized_q}%,provider.ilike.%{sanitized_q}%")
             .limit(limit)
@@ -485,7 +489,8 @@ async def get_stats():
     try:
         # Get model counts by tier
         tier_counts_response = (
-            get_db().table("model_health_tracking")
+            get_db()
+            .table("model_health_tracking")
             .select("monitoring_tier", count="exact")
             .eq("is_enabled", True)
             .execute()
@@ -499,7 +504,8 @@ async def get_stats():
 
         # Get incident statistics
         incidents_response = (
-            get_db().table("model_health_incidents")
+            get_db()
+            .table("model_health_incidents")
             .select("severity,status", count="exact")
             .execute()
         )
@@ -510,7 +516,8 @@ async def get_stats():
         # Get check statistics from last 24h
         yesterday = datetime.now(UTC) - timedelta(hours=24)
         checks_response = (
-            get_db().table("model_health_history")
+            get_db()
+            .table("model_health_history")
             .select("status", count="exact")
             .gte("checked_at", yesterday.isoformat())
             .execute()

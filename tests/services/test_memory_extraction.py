@@ -18,6 +18,7 @@ def _user(text):
 # extract_candidate_facts (pure)
 # --------------------------------------------------------------------------- #
 
+
 def test_extracts_name():
     facts = me.extract_candidate_facts([_user("Hello, my name is Ada Lovelace.")])
     contents = [c for c, _, _ in facts]
@@ -56,7 +57,10 @@ def test_caps_candidates():
 
 
 def test_handles_multimodal_content():
-    msg = {"role": "user", "content": [{"type": "text", "text": "my name is Grace"}, {"type": "image"}]}
+    msg = {
+        "role": "user",
+        "content": [{"type": "text", "text": "my name is Grace"}, {"type": "image"}],
+    }
     facts = me.extract_candidate_facts([msg])
     assert any("Grace" in c for c, _, _ in facts)
 
@@ -68,6 +72,7 @@ def test_empty_messages():
 # --------------------------------------------------------------------------- #
 # capture_user_memory (I/O, mocked store)
 # --------------------------------------------------------------------------- #
+
 
 def _patch_store(monkeypatch, existing):
     store = {"rows": list(existing)}

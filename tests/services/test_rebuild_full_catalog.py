@@ -100,7 +100,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog") as mock_set_local,
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -130,7 +129,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog"),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -155,7 +153,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog"),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -173,7 +170,6 @@ class TestRebuildFullCatalogFromProviders:
                 "src.services.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
             ),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -202,7 +198,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog"),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -230,7 +225,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog"),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -257,7 +251,6 @@ class TestRebuildFullCatalogFromProviders:
             ),
             patch("src.services.local_memory_cache.set_local_catalog"),
         ):
-
             from src.services.model_catalog_cache import rebuild_full_catalog_from_providers
 
             result = rebuild_full_catalog_from_providers()
@@ -282,7 +275,6 @@ class TestRebuildIntegrationWithGetCachedFullCatalog:
             patch("src.services.local_memory_cache.set_local_catalog"),
             patch("src.services.local_memory_cache.get_local_catalog", return_value=(None, False)),
         ):
-
             from src.services.model_catalog_cache import get_cached_full_catalog
 
             result = get_cached_full_catalog()
@@ -305,7 +297,6 @@ class TestRebuildIntegrationWithGetCachedFullCatalog:
                 return_value=_make_models("openai", 5),
             ) as mock_rebuild,
         ):
-
             from src.services.model_catalog_cache import get_cached_full_catalog
 
             result = get_cached_full_catalog()

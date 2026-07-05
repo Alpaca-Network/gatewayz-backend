@@ -55,6 +55,4 @@ class TestGetPlanIdByTier:
 
         get_plan_id_by_tier("basic")
 
-        fake_supabase.table.return_value.select.return_value.eq.assert_called_with(
-            "tier", "basic"
-        )
+        fake_supabase.table.return_value.select.return_value.eq.assert_called_with("tier", "basic")

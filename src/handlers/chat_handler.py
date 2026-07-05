@@ -25,6 +25,8 @@ from src.schemas.internal.chat import (
 )
 from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
+from src.services.pricing import calculate_cost_split, get_model_pricing
+from src.services.provider_selector import get_selector
 
 # Providers with native async streaming use direct imports (currently OpenRouter).
 # All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
@@ -33,8 +35,6 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
-from src.services.pricing import calculate_cost_split, get_model_pricing
-from src.services.provider_selector import get_selector
 
 logger = logging.getLogger(__name__)
 
@@ -369,8 +369,8 @@ class ChatInferenceHandler:
         """
         from fastapi import HTTPException
 
-        from src.utils.profiling import tag_wrapper
         from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.profiling import tag_wrapper
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
@@ -588,8 +588,8 @@ class ChatInferenceHandler:
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
 
-        from src.utils.profiling import tag_wrapper
         from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.profiling import tag_wrapper
 
         # Bind the customer's BYOK key (if any) only around stream CREATION — the
         # key is consumed when the client/stream is built. It is reset before any
@@ -1240,7 +1240,9 @@ class ChatInferenceHandler:
                             chunk_usage = _rfield(provider_chunk, "usage")
                             if chunk_usage:
                                 prompt_tokens = _rfield(chunk_usage, "prompt_tokens", 0) or 0
-                                completion_tokens = _rfield(chunk_usage, "completion_tokens", 0) or 0
+                                completion_tokens = (
+                                    _rfield(chunk_usage, "completion_tokens", 0) or 0
+                                )
 
                             # Yield internal chunk
                             internal_chunk = InternalStreamChunk(

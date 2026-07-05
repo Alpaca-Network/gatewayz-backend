@@ -13,7 +13,6 @@ import types
 import pytest
 from fastapi import HTTPException
 
-
 # --------------------------------------------------------------------------- #
 # 1. Per-API-key rate-limit guard                                             #
 # --------------------------------------------------------------------------- #

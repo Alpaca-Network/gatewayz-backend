@@ -14,8 +14,8 @@ except ImportError:  # pragma: no cover
 
 from src.config import Config
 from src.config.redis_config import get_redis_manager
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.model_catalog_cache import cache_gateway_catalog, get_cached_gateway_catalog
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 

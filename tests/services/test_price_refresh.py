@@ -31,8 +31,8 @@ def _patch_common(monkeypatch, fetch_functions, update_mock):
     is sufficient. We also patch get_provider_format to a stable per-token value
     so normalization is deterministic in tests.
     """
-    import src.services.model_catalog_sync as mcs
     import src.db.models_catalog_db as mdb
+    import src.services.model_catalog_sync as mcs
 
     monkeypatch.setattr(mcs, "PROVIDER_FETCH_FUNCTIONS", fetch_functions, raising=True)
     monkeypatch.setattr(
@@ -59,7 +59,10 @@ class TestRefreshAllPrices:
 
         fetch = MagicMock(
             return_value=[
-                {"id": "vendor/model-a", "pricing": {"prompt": "0.000002", "completion": "0.000004"}}
+                {
+                    "id": "vendor/model-a",
+                    "pricing": {"prompt": "0.000002", "completion": "0.000004"},
+                }
             ]
         )
         # Stored price differs (prompt was 0.000001)
@@ -99,7 +102,10 @@ class TestRefreshAllPrices:
 
         fetch = MagicMock(
             return_value=[
-                {"id": "vendor/model-a", "pricing": {"prompt": "0.0000010", "completion": "0.000004"}}
+                {
+                    "id": "vendor/model-a",
+                    "pricing": {"prompt": "0.0000010", "completion": "0.000004"},
+                }
             ]
         )
         monkeypatch.setattr(
@@ -129,7 +135,10 @@ class TestRefreshAllPrices:
 
         fetch = MagicMock(
             return_value=[
-                {"id": "vendor/brand-new", "pricing": {"prompt": "0.000002", "completion": "0.000004"}}
+                {
+                    "id": "vendor/brand-new",
+                    "pricing": {"prompt": "0.000002", "completion": "0.000004"},
+                }
             ]
         )
         # DB has no matching model
@@ -154,7 +163,10 @@ class TestRefreshAllPrices:
 
         good_fetch = MagicMock(
             return_value=[
-                {"id": "vendor/model-a", "pricing": {"prompt": "0.000002", "completion": "0.000004"}}
+                {
+                    "id": "vendor/model-a",
+                    "pricing": {"prompt": "0.000002", "completion": "0.000004"},
+                }
             ]
         )
 
@@ -202,7 +214,10 @@ class TestRefreshAllPrices:
 
         fetch = MagicMock(
             return_value=[
-                {"id": "vendor/model-a", "pricing": {"prompt": "0.000002", "completion": "0.000004"}}
+                {
+                    "id": "vendor/model-a",
+                    "pricing": {"prompt": "0.000002", "completion": "0.000004"},
+                }
             ]
         )
         monkeypatch.setattr(
@@ -228,9 +243,7 @@ class TestRefreshAllPrices:
         import src.services.cache.model_catalog_cache as catalog_cache
 
         invalidate_spy = MagicMock()
-        monkeypatch.setattr(
-            catalog_cache, "invalidate_full_catalog", invalidate_spy, raising=True
-        )
+        monkeypatch.setattr(catalog_cache, "invalidate_full_catalog", invalidate_spy, raising=True)
 
         result = price_refresh.refresh_all_prices(dry_run=False)
 
@@ -244,7 +257,10 @@ class TestRefreshAllPrices:
 
         fetch = MagicMock(
             return_value=[
-                {"id": "vendor/model-a", "pricing": {"prompt": "0.000002", "completion": "0.000004"}}
+                {
+                    "id": "vendor/model-a",
+                    "pricing": {"prompt": "0.000002", "completion": "0.000004"},
+                }
             ]
         )
         monkeypatch.setattr(

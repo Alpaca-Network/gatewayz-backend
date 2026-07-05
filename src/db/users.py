@@ -768,7 +768,9 @@ def log_api_usage_transaction(
             return
 
         user_id = user["id"]
-        balance_before = float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)
+        balance_before = float(user.get("subscription_allowance", 0) or 0) + float(
+            user.get("purchased_credits", 0) or 0
+        )
         balance_after = balance_before - cost if not is_trial else balance_before
 
         # Log the transaction (negative amount for usage)
@@ -1549,9 +1551,7 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
         key_result = client.table("api_keys_new").select("user_id").eq("api_key", api_key).execute()
         if not key_result.data:
             # Fallback to legacy users table
-            user_result = (
-                client.table("users").select("id").eq("api_key", api_key).execute()
-            )
+            user_result = client.table("users").select("id").eq("api_key", api_key).execute()
             if not user_result.data:
                 return None
             user_id = user_result.data[0]["id"]
@@ -1559,11 +1559,18 @@ def get_user_usage_metrics(api_key: str) -> dict[str, Any]:
             user_id = key_result.data[0]["user_id"]
 
         # Get user credits
-        user_result = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
+        user_result = (
+            client.table("users")
+            .select("purchased_credits, subscription_allowance")
+            .eq("id", user_id)
+            .execute()
+        )
         if not user_result.data:
             return None
 
-        current_credits = float(user_result.data[0].get("purchased_credits", 0) or 0) + float(user_result.data[0].get("subscription_allowance", 0) or 0)
+        current_credits = float(user_result.data[0].get("purchased_credits", 0) or 0) + float(
+            user_result.data[0].get("subscription_allowance", 0) or 0
+        )
 
         # Use the database function to get usage metrics
         result = client.rpc("get_user_usage_metrics", {"user_api_key": api_key}).execute()
@@ -1642,7 +1649,10 @@ def get_admin_monitor_data() -> dict[str, Any]:
 
             # Then get user data for credit calculations (limited to avoid memory issues)
             users_result = (
-                client.table("users").select("id, purchased_credits, subscription_allowance, api_key").limit(10000).execute()
+                client.table("users")
+                .select("id, purchased_credits, subscription_allowance, api_key")
+                .limit(10000)
+                .execute()
             )
             users = users_result.data or []
         except Exception as e:

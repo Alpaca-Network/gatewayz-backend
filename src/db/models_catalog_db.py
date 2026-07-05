@@ -1076,9 +1076,7 @@ def _sync_categories(supabase, upserted_models: list[dict[str, Any]]) -> None:
 
         @with_retry(max_attempts=3)
         def _update_chunk(chunk_ids: list[Any], tags: list[str]) -> None:
-            supabase.table("models").update({"categories": tags}).in_(
-                "id", chunk_ids
-            ).execute()
+            supabase.table("models").update({"categories": tags}).in_("id", chunk_ids).execute()
 
         updated = 0
         failed = 0

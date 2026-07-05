@@ -53,8 +53,8 @@ Supported Speech-to-Text models (per audio minute):
 import logging
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_simplismart_pooled_client
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 
 # Initialize logging
 logger = logging.getLogger(__name__)

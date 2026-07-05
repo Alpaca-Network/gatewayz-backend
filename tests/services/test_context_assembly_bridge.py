@@ -8,10 +8,10 @@ from src.services.context_assembly_bridge import (
     split_messages,
 )
 
-
 # --------------------------------------------------------------------------- #
 # split_messages
 # --------------------------------------------------------------------------- #
+
 
 def test_split_separates_system_from_turns():
     msgs = [
@@ -52,6 +52,7 @@ def test_split_flattens_multimodal_system_content():
 # apply_context_budget
 # --------------------------------------------------------------------------- #
 
+
 def test_empty_messages_passthrough():
     assert apply_context_budget([]) == []
 
@@ -71,9 +72,9 @@ def test_ample_budget_no_memory_preserves_turn_order():
 
 def test_tight_budget_drops_oldest_turns():
     msgs = [
-        {"role": "user", "content": "x" * 400},   # ~100 tokens
-        {"role": "user", "content": "y" * 400},   # ~100 tokens
-        {"role": "user", "content": "z" * 40},    # ~10 tokens (newest)
+        {"role": "user", "content": "x" * 400},  # ~100 tokens
+        {"role": "user", "content": "y" * 400},  # ~100 tokens
+        {"role": "user", "content": "z" * 40},  # ~10 tokens (newest)
     ]
     out = apply_context_budget(msgs, token_budget=60, memory_items=[])
     contents = [m["content"] for m in out]

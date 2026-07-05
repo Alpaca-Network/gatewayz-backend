@@ -42,7 +42,6 @@ class TestCheckoutSessionMetadata:
             patch("stripe.checkout.Session.create") as mock_create_session,
             patch("src.services.payments.update_payment_status") as mock_update,
         ):
-
             # Setup mocks
             mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
             mock_create_payment.return_value = {"id": 100, "user_id": 1}
@@ -85,7 +84,6 @@ class TestCheckoutSessionMetadata:
             patch("stripe.checkout.Session.create") as mock_create_session,
             patch("src.services.payments.update_payment_status"),
         ):
-
             mock_get_user.return_value = {"id": 1, "email": "test@example.com"}
             mock_create_payment.return_value = {"id": 100, "user_id": 1}
 
@@ -126,7 +124,6 @@ class TestWebhookMetadataHandling:
             patch("src.services.payments.update_payment_status") as mock_update,
             patch("stripe.Webhook.construct_event") as mock_construct,
         ):
-
             mock_is_processed.return_value = False
 
             # Create a webhook event with credits_cents in metadata
@@ -170,7 +167,6 @@ class TestWebhookMetadataHandling:
             patch("src.services.payments.update_payment_status"),
             patch("stripe.Webhook.construct_event") as mock_construct,
         ):
-
             mock_is_processed.return_value = False
 
             # Create webhook event with old 'credits' field (backward compatibility)
@@ -215,7 +211,6 @@ class TestWebhookMetadataHandling:
             patch("src.services.payments.add_credits_to_user") as mock_add_credits,
             patch("stripe.Webhook.construct_event") as mock_construct,
         ):
-
             mock_is_processed.return_value = False
             mock_get_payment.return_value = None  # Simulate payment not found
             mock_add_credits.side_effect = Exception("Database error")

@@ -10,9 +10,10 @@ Two coordinated changes are covered:
 All lookups are mocked — no DB.
 """
 
+from unittest.mock import patch
+
 import pytest
 from fastapi import HTTPException
-from unittest.mock import patch
 
 from src.security.inference_gates import enforce_model_pricing_gate
 from src.services.pricing.pricing import model_has_pricing
@@ -25,6 +26,7 @@ def _pricing(prompt, completion, source="database", found=True):
 # --------------------------------------------------------------------------
 # model_has_pricing — zero-price rejection
 # --------------------------------------------------------------------------
+
 
 def test_rejects_zero_priced_row():
     with patch("src.services.pricing.pricing.get_model_pricing", return_value=_pricing(0.0, 0.0)):
@@ -60,22 +62,27 @@ def test_rejects_default_source():
 # enforce_model_pricing_gate — free-model exemption
 # --------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_gate_exempts_free_model_even_when_unpriced():
     # A free model (is_free=True) with NO real pricing must still be allowed
     # through — and model_has_pricing must not even be consulted.
-    with patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True), patch(
-        "src.services.cache.model_capabilities_cache.is_free_model", return_value=True
-    ), patch("src.services.pricing.model_has_pricing", return_value=False) as mhp:
+    with (
+        patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True),
+        patch("src.services.cache.model_capabilities_cache.is_free_model", return_value=True),
+        patch("src.services.pricing.model_has_pricing", return_value=False) as mhp,
+    ):
         await enforce_model_pricing_gate("provider/free-model")  # no raise
         mhp.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_gate_rejects_paid_unpriced_model():
-    with patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True), patch(
-        "src.services.cache.model_capabilities_cache.is_free_model", return_value=False
-    ), patch("src.services.pricing.model_has_pricing", return_value=False):
+    with (
+        patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True),
+        patch("src.services.cache.model_capabilities_cache.is_free_model", return_value=False),
+        patch("src.services.pricing.model_has_pricing", return_value=False),
+    ):
         with pytest.raises(HTTPException) as exc:
             await enforce_model_pricing_gate("provider/paid-model")
         assert exc.value.status_code == 400
@@ -83,9 +90,11 @@ async def test_gate_rejects_paid_unpriced_model():
 
 @pytest.mark.asyncio
 async def test_gate_allows_paid_priced_model():
-    with patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True), patch(
-        "src.services.cache.model_capabilities_cache.is_free_model", return_value=False
-    ), patch("src.services.pricing.model_has_pricing", return_value=True):
+    with (
+        patch("src.security.inference_gates.Config.REQUIRE_MODEL_PRICING", True),
+        patch("src.services.cache.model_capabilities_cache.is_free_model", return_value=False),
+        patch("src.services.pricing.model_has_pricing", return_value=True),
+    ):
         await enforce_model_pricing_gate("provider/paid-model")  # no raise
 
 

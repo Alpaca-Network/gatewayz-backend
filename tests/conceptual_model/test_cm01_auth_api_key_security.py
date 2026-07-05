@@ -150,7 +150,6 @@ class TestCM05EncryptedKeyNotPlaintextInDb:
             patch("src.db.api_keys.check_plan_entitlements", return_value={}),
             patch("src.db.api_keys.check_key_name_uniqueness", return_value=True),
         ):
-
             # Capture what gets inserted
             captured_payload = {}
             original_insert = mock_supabase.table.return_value.insert
