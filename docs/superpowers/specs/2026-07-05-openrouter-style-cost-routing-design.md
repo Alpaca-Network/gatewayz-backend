@@ -54,7 +54,29 @@ Per-request structured log/metric: chosen provider, upstream cost, billed price,
 - billing never bills below served cost; negative-margin provider rejected;
 - named-model passthrough unchanged; flag-off restores legacy behavior.
 
-## Out of scope for P1 (later phases)
-- P2: harden auto model-for-task (`router`/`auto`), fix degenerate `general_router`.
+## P2 — auto model-for-task (delivered)
+
+- **`auto` / `auto:<opt>` / `gatewayz/auto` aliases** added (`prompt_router.is_auto_route_request`),
+  OpenRouter-style ergonomics. `openrouter/auto` is deliberately NOT hijacked (real passthrough model).
+  `chat.py` now uses `is_auto_route_request` as the single trigger source of truth.
+- **Real capabilities registry** (`prompt_router.build_capabilities_registry`): replaces the stub that
+  gave every model fake uniform cost (`0.001`) and let audio models leak in. Now built from
+  `models` + `model_pricing` with REAL per-1k costs, real context lengths, and **modality gating**
+  (text required on both input and output) + a **name guard** for mislabeled non-chat families
+  (whisper/tts/embed/flux/…). Result: 745 chat-only models; auto-routing now selects sensibly
+  (coding→deepseek, simple→cheap glm) with zero non-chat leaks.
+- **Router timeout** raised from an unrealistic 2ms (which collapsed every request into a
+  gpt-4o-mini fail-open) to a configurable 50ms default (`ROUTER_TIMEOUT_MS`). Safe now that the
+  registry no longer contains wrong models; fail-open still catches genuine hangs.
+
+**Known caveat:** the first request after process start can still fail open
+(`timeout_after_health_check`) while the Redis health snapshot warms; subsequent requests route
+normally. Selection quality is functional but coarse — `model_selector.QUALITY_PRIORS` is keyed by
+specific model ids that may not all match catalog ids, so cost/policy dominates. Tuning priors is
+follow-on work.
+
+## Out of scope (later phases)
+- Fix degenerate `general_router` (still returns a static mode→model map).
+- Warm the router registry/health snapshot at startup to remove the first-request fail-open.
 - P3: OpenRouter-style provider preference knobs (`provider.sort/order/allow_fallbacks/max_price/only/ignore`, `:floor`/`:nitro`).
 - Unifying the 3 dispatch sinks (auth-stream / auth-nonstream / anon) into one selector.

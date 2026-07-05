@@ -30,9 +30,16 @@ from src.services.prompt_classifier_rules import classify_prompt
 
 logger = logging.getLogger(__name__)
 
-# Hard timeout for routing decision (milliseconds)
-# If exceeded, fail open to default model
-ROUTER_TIMEOUT_MS = 2.0
+# Hard timeout for the routing decision (milliseconds). If exceeded, fail open to
+# the default cheap model. The pipeline is in-memory (one Redis GET for the health
+# snapshot), so this only needs to cover a warm snapshot read + classification +
+# scoring. The old 2ms budget was so tight it fired on nearly every request —
+# collapsing "best model for the task" into an unconditional gpt-4o-mini fallback.
+# 50ms is imperceptible to users yet lets the router actually complete; fail-open
+# still catches a genuinely hung snapshot read. Override via ROUTER_TIMEOUT_MS.
+import os as _os
+
+ROUTER_TIMEOUT_MS = float(_os.environ.get("ROUTER_TIMEOUT_MS", "50.0"))
 
 # Default cheap model for fail-open
 DEFAULT_CHEAP_MODEL = "openai/gpt-4o-mini"
@@ -47,6 +54,140 @@ STABLE_FALLBACK_MODELS = [
     "anthropic/claude-3-haiku",
     "google/gemini-1.5-flash",
 ]
+
+
+# --------------------------------------------------------------------------- #
+# Capabilities registry — real, chat-only, cost-aware (pure builder + I/O shell)
+# --------------------------------------------------------------------------- #
+
+_CAPABILITY_MODEL_COLS = (
+    "provider_model_id,canonical_id,modality,context_length,"
+    "supports_function_calling,supports_vision,has_json_mode,"
+    "model_pricing(price_per_input_token,price_per_output_token)"
+)
+
+
+# Non-chat model families to exclude by name even when the catalog mislabels their
+# modality (observed: whisper rows duplicated as "text->text"). Defends the router
+# against dirty catalog data — these families never serve chat completions.
+_NON_CHAT_NAME_MARKERS = (
+    "whisper",
+    "tts",
+    "text-to-speech",
+    "embed",  # embedding models
+    "dall-e",
+    "dalle",
+    "stable-diffusion",
+    "flux",
+    "sdxl",
+    "clip",
+    "rerank",
+)
+
+
+def _looks_non_chat_by_name(model_id: str) -> bool:
+    """True if the model id names a known non-chat family (guards mislabeled data)."""
+    mid = model_id.lower()
+    return any(marker in mid for marker in _NON_CHAT_NAME_MARKERS)
+
+
+def _is_chat_modality(modality: str | None) -> bool:
+    """True if the model both accepts and returns text (a chat-completions model).
+
+    Modality is like ``"text->text"``, ``"text+image->text"``, ``"audio"``,
+    ``"text->image"``, ``"audio->text"``. A chat model must have text on BOTH the
+    input and output sides, which excludes:
+      * audio/image-only models (whisper ``"audio"``, ``"text->image"``), and
+      * transcription/generation models that only bridge modalities
+        (``"audio->text"`` speech-to-text, ``"text->audio"`` TTS).
+    """
+    if not modality:
+        return True  # unknown → assume chat rather than drop a usable model
+    m = str(modality).lower()
+    if "->" in m:
+        inp, out = m.split("->", 1)
+    else:
+        inp = out = m
+    return "text" in inp and "text" in out
+
+
+def _price_per_1k(model_pricing, field: str) -> float:
+    """Per-1k price for ``field`` from a model_pricing join (dict/list/None). 0.0 if absent."""
+    if not model_pricing:
+        return 0.0
+    row = model_pricing[0] if isinstance(model_pricing, list) else model_pricing
+    if not isinstance(row, dict):
+        return 0.0
+    try:
+        v = float(row.get(field) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return v * 1000.0 if v > 0 else 0.0
+
+
+def build_capabilities_registry(rows: list[dict]) -> dict[str, ModelCapabilities]:
+    """Project catalog rows → a chat-only, cost-aware capabilities registry (pure).
+
+    Skips non-chat models (audio/image output) and id-less rows. When the same
+    model id appears for multiple providers, keeps the cheapest input cost so
+    auto-routing scores against the best price we can serve it at.
+    """
+    registry: dict[str, ModelCapabilities] = {}
+    for r in rows:
+        model_id = r.get("provider_model_id") or r.get("canonical_id")
+        if not model_id:
+            continue
+        if _looks_non_chat_by_name(model_id):
+            continue
+        if not _is_chat_modality(r.get("modality")):
+            continue
+
+        cost_in = _price_per_1k(r.get("model_pricing"), "price_per_input_token")
+        existing = registry.get(model_id)
+        if existing is not None and existing.cost_per_1k_input <= cost_in:
+            continue  # keep the cheaper offer for this model id
+
+        modality = str(r.get("modality") or "").lower()
+        try:
+            max_context = int(r.get("context_length") or 0) or 128000
+        except (TypeError, ValueError):
+            max_context = 128000
+
+        registry[model_id] = ModelCapabilities(
+            model_id=model_id,
+            provider=model_id.split("/")[0] if "/" in model_id else "unknown",
+            tools=bool(r.get("supports_function_calling")),
+            json_mode=bool(r.get("has_json_mode")),
+            json_schema=False,
+            vision=bool(r.get("supports_vision")) or "image" in modality.split("->", 1)[0],
+            max_context=max_context,
+            tool_schema_adherence="medium",
+            cost_per_1k_input=cost_in,
+            cost_per_1k_output=_price_per_1k(r.get("model_pricing"), "price_per_output_token"),
+        )
+    return registry
+
+
+def _fetch_capability_rows() -> list[dict]:
+    """Fetch active chat-capable catalog rows with pricing. [] on failure (caller defaults)."""
+    from src.config.supabase_config import get_supabase_client
+
+    client = get_supabase_client()
+    rows: list[dict] = []
+    start = 0
+    while True:
+        resp = (
+            client.table("models")
+            .select(_CAPABILITY_MODEL_COLS)
+            .eq("is_active", True)
+            .range(start, start + 999)
+            .execute()
+        )
+        batch = getattr(resp, "data", None) or []
+        rows.extend(batch)
+        if len(batch) < 1000:
+            return rows
+        start += 1000
 
 
 def _get_stable_fallback_models() -> list[str]:
@@ -77,42 +218,26 @@ class PromptRouter:
         self._load_capabilities()
 
     def _load_capabilities(self) -> None:
-        """Load model capabilities from the DB-backed in-memory cache."""
+        """Load real model capabilities from the models + model_pricing catalog.
+
+        Builds the registry from the DB so auto-routing scores over REAL costs,
+        context lengths, and capability flags — and never selects a non-chat model
+        (audio/image output like whisper). Falls back to a minimal default set on
+        any failure so routing degrades gracefully rather than breaking.
+        """
         try:
-            from src.services.model_capabilities_cache import (
-                get_models_by_latency_tier,
-                has_json_mode,
-            )
-
-            # Build a capabilities registry from the cache.
-            # The registry is keyed by model_id and contains ModelCapabilities objects.
-            # We seed it with the models we know about from the latency tier cache.
-            model_ids = get_models_by_latency_tier(4)  # all tiers
-            populated = 0
-            for model_id in model_ids:
-                provider = model_id.split("/")[0] if "/" in model_id else "unknown"
-                self._capabilities_registry[model_id] = ModelCapabilities(
-                    model_id=model_id,
-                    provider=provider,
-                    tools=True,  # conservative: assume tools available unless known otherwise
-                    json_mode=has_json_mode(model_id),
-                    json_schema=False,
-                    vision="vision" in model_id or "vl" in model_id,
-                    max_context=128000,
-                    tool_schema_adherence="medium",
-                    cost_per_1k_input=0.001,
-                    cost_per_1k_output=0.002,
+            rows = _fetch_capability_rows()
+            registry = build_capabilities_registry(rows)
+            if registry:
+                self._capabilities_registry = registry
+                logger.info(
+                    "Loaded capabilities for %d chat models from catalog", len(registry)
                 )
-                populated += 1
-
-            if populated:
-                logger.info(f"Loaded capabilities for {populated} models from DB cache")
-            else:
-                logger.warning("DB capabilities cache empty; loading defaults")
-                self._load_default_capabilities()
+                return
+            logger.warning("Catalog capability rows empty; loading defaults")
         except Exception as e:
-            logger.error(f"Failed to load capabilities from DB cache: {e}")
-            self._load_default_capabilities()
+            logger.error("Failed to load capabilities from catalog: %s", e)
+        self._load_default_capabilities()
 
     def _load_default_capabilities(self) -> None:
         """Load minimal default capabilities for common models."""
@@ -431,15 +556,36 @@ def route_request(
     )
 
 
+# Aliases that mean "auto-route to the best model for the task". The canonical
+# trigger is the `router*` prefix; `auto` / `gatewayz/auto` are OpenRouter-style
+# ergonomic aliases. `openrouter/auto` is deliberately EXCLUDED — it is a real
+# passthrough model served by OpenRouter and must reach the provider unchanged.
+_AUTO_ROUTE_BARE_ALIASES = {"auto", "gatewayz/auto"}
+
+
+def _normalize_auto_route_model(model: str) -> str:
+    """Fold an `auto*` alias onto the equivalent `router*` string; else unchanged.
+
+    'auto' -> 'router', 'auto:price' -> 'router:price', 'gatewayz/auto' -> 'router'.
+    Anything not an auto alias is returned as-is (lower-cased for matching).
+    """
+    m = (model or "").lower().strip()
+    if m in _AUTO_ROUTE_BARE_ALIASES:
+        return "router"
+    if m.startswith("auto:"):
+        return "router:" + m[len("auto:"):]
+    return m
+
+
 def is_auto_route_request(model: str) -> bool:
     """Check if a model string indicates auto-routing.
 
-    Uses 'router' prefix to avoid confusion with OpenRouter's 'openrouter/auto' model.
+    Triggers on the `router*` prefix and the ergonomic `auto` / `auto:<opt>` /
+    `gatewayz/auto` aliases. Does NOT trigger on `openrouter/auto` (a real model).
     """
     if not model:
         return False
-    model_lower = model.lower()
-    return model_lower.startswith("router")
+    return _normalize_auto_route_model(model).startswith("router")
 
 
 def parse_auto_route_options(model: str) -> tuple[str, RouterOptimization]:
@@ -453,10 +599,11 @@ def parse_auto_route_options(model: str) -> tuple[str, RouterOptimization]:
         "router:price" -> ("small", PRICE)
         "router:quality" -> ("medium", QUALITY)
     """
-    if not model or not model.lower().startswith("router"):
+    normalized = _normalize_auto_route_model(model)
+    if not normalized.startswith("router"):
         return ("small", RouterOptimization.BALANCED)
 
-    parts = model.lower().split(":")
+    parts = normalized.split(":")
     if len(parts) == 1:
         return ("small", RouterOptimization.BALANCED)
 
