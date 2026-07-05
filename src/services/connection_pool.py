@@ -394,14 +394,29 @@ def get_provider_pooled_client(slug: str) -> OpenAI:
 # Provider-specific helper functions (thin wrappers for backward compat)
 # ---------------------------------------------------------------------------
 def get_openrouter_pooled_client() -> OpenAI:
-    """Get pooled client for OpenRouter."""
-    if not Config.OPENROUTER_API_KEY:
+    """Get pooled client for OpenRouter.
+
+    Honours a bring-your-own-key override bound for "openrouter" in the current
+    request context. get_pooled_client caches per api_key, so a customer key gets
+    its own pooled client with no cross-tenant leakage.
+    """
+    api_key = Config.OPENROUTER_API_KEY
+    try:
+        from src.services.byok import get_byok_key_for
+
+        byok = get_byok_key_for("openrouter")
+        if byok:
+            api_key = byok
+    except Exception:
+        pass
+
+    if not api_key:
         raise ValueError("OpenRouter API key not configured")
 
     return get_pooled_client(
         provider="openrouter",
         base_url="https://openrouter.ai/api/v1",
-        api_key=Config.OPENROUTER_API_KEY,
+        api_key=api_key,
         default_headers={
             "HTTP-Referer": Config.OPENROUTER_SITE_URL,
             "X-Title": Config.OPENROUTER_SITE_NAME,
