@@ -6,6 +6,7 @@ Handles all Stripe payment operations
 
 import logging
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -20,7 +21,7 @@ from src.db.payments import (
 )
 from src.db.subscription_products import get_tier_from_product_id
 from src.db.users import add_credits_to_user, get_user_by_id
-from src.db.webhook_events import is_event_processed, record_processed_event
+from src.db.webhook_events import claim_event, release_event
 from src.schemas.payments import (
     CancelSubscriptionRequest,
     CheckoutSessionResponse,
@@ -70,6 +71,15 @@ class StripeService:
         # Set Stripe API key
         stripe.api_key = self.api_key
 
+        # Pin the Stripe API version so webhook payload shapes are deterministic
+        # from the code side rather than riding on the account default (which
+        # Stripe can advance under us). This module's helpers are written for the
+        # "Basil" generation (2025-08-27.basil+), where period bounds and the
+        # invoice→subscription link moved onto sub-objects. Override via
+        # STRIPE_API_VERSION only after confirming the account + code agree.
+        self.api_version = os.getenv("STRIPE_API_VERSION", "2025-08-27.basil")
+        stripe.api_version = self.api_version
+
         # Configuration
         self.default_currency = StripeCurrency.USD
         self.min_amount = 50  # $0.50 minimum
@@ -108,6 +118,45 @@ class StripeService:
             return dict(metadata)
         except Exception:
             return {}
+
+    # Stable namespace for deriving credit-grant idempotency keys. The
+    # credit_transactions.request_id column is UUID-typed with a partial unique
+    # index, but Stripe identifiers (evt_/pi_/cs_) are not UUIDs — so we map each
+    # source id to a deterministic UUIDv5. The same Stripe id always yields the
+    # same key, making a grant idempotent across webhook retries / duplicate
+    # deliveries. Never change this namespace value or existing keys shift.
+    _GRANT_ID_NAMESPACE = uuid.UUID("6f9619ff-8b86-d011-b42d-00c04fc964ff")
+
+    @classmethod
+    def _grant_idempotency_key(cls, source: str) -> str:
+        """Derive a deterministic UUID idempotency key for a credit grant.
+
+        ``source`` is a namespaced Stripe identifier, e.g. ``"pi:pi_123"`` or
+        ``"cs:cs_456"``. Returns a string UUID suitable for the
+        credit_transactions.request_id unique index.
+        """
+        return str(uuid.uuid5(cls._GRANT_ID_NAMESPACE, f"grant:{source}"))
+
+    @staticmethod
+    def _apply_topup_fee(amount_dollars: float) -> tuple[float, float, float]:
+        """Compute the credit top-up fee split for a one-time payment.
+
+        Returns ``(fee_rate, topup_fee, credits_granted)``. When
+        ``CREDIT_TOPUP_FEE_RATE`` is 0 (the default) ``credits_granted`` equals
+        ``amount_dollars`` (no fee). The rate is clamped to [0.0, 0.5] and any
+        malformed value falls back to 0.0.
+
+        This is the single source of truth for the top-up fee so that BOTH
+        one-time payment paths — checkout sessions (``_handle_checkout_completed``)
+        and payment intents (``_handle_payment_succeeded``) — apply it identically.
+        """
+        try:
+            fee_rate = max(0.0, min(0.5, float(os.getenv("CREDIT_TOPUP_FEE_RATE", "0.0"))))
+        except (TypeError, ValueError):
+            fee_rate = 0.0
+        topup_fee = round(amount_dollars * fee_rate, 6)
+        credits_granted = round(amount_dollars - topup_fee, 6)
+        return fee_rate, topup_fee, credits_granted
 
     # ==================== Checkout Sessions ====================
 
@@ -742,17 +791,6 @@ class StripeService:
 
             logger.info(f"Processing webhook: {event['type']} (ID: {event['id']})")
 
-            # Check for duplicate event (idempotency)
-            if is_event_processed(event["id"]):
-                logger.warning(f"Duplicate webhook event detected, skipping: {event['id']}")
-                return WebhookProcessingResult(
-                    success=True,
-                    event_type=event["type"],
-                    event_id=event["id"],
-                    message=f"Event {event['id']} already processed (duplicate)",
-                    processed_at=datetime.now(UTC),
-                )
-
             # Extract user_id from event metadata if available
             user_id = None
             try:
@@ -764,40 +802,57 @@ class StripeService:
             except (AttributeError, ValueError, TypeError, KeyError):
                 pass
 
-            # One-time payment events
-            if event["type"] == "checkout.session.completed":
-                self._handle_checkout_completed(event["data"]["object"])
-            elif event["type"] == "payment_intent.succeeded":
-                self._handle_payment_succeeded(event["data"]["object"])
-            elif event["type"] == "payment_intent.payment_failed":
-                self._handle_payment_failed(event["data"]["object"])
-
-            # Subscription events
-            elif event["type"] == "customer.subscription.created":
-                self._handle_subscription_created(event["data"]["object"])
-            elif event["type"] == "customer.subscription.updated":
-                self._handle_subscription_updated(event["data"]["object"])
-            elif event["type"] == "customer.subscription.deleted":
-                self._handle_subscription_deleted(event["data"]["object"])
-            elif event["type"] == "invoice.paid":
-                self._handle_invoice_paid(event["data"]["object"])
-            elif event["type"] == "invoice.payment_failed":
-                self._handle_invoice_payment_failed(event["data"]["object"])
-
-            # Record the event as processed ONLY after its handler succeeded.
-            # If a handler raises, we deliberately do NOT record the event so that
-            # Stripe's automatic retry re-runs it. The credit-granting handlers are
-            # idempotent (they skip already-completed payments), so an at-least-once
-            # retry cannot double-credit. This replaces the previous
-            # "mark-before-handler" behaviour, which silently dropped credit grants
-            # whenever a handler hit a transient DB/Stripe error.
-            record_processed_event(
+            # Claim the event up front (insert-first idempotency). This closes the
+            # TOCTOU window the old check-then-record pair had: a concurrent
+            # duplicate delivery loses the INSERT race on the UNIQUE(event_id)
+            # constraint and is reported as a duplicate here.
+            claim = claim_event(
                 event_id=event["id"],
                 event_type=event["type"],
                 user_id=user_id,
                 metadata={"stripe_account": event.get("account")},
             )
+            if claim == "duplicate":
+                logger.warning(f"Duplicate webhook event detected, skipping: {event['id']}")
+                return WebhookProcessingResult(
+                    success=True,
+                    event_type=event["type"],
+                    event_id=event["id"],
+                    message=f"Event {event['id']} already processed (duplicate)",
+                    processed_at=datetime.now(UTC),
+                )
+            # claim == "unavailable" → dedup table down; fall through and process
+            # anyway (fail open). The credit-granting handlers are idempotent at the
+            # ledger level (request_id), so an at-least-once retry cannot double-credit.
 
+            try:
+                # One-time payment events
+                if event["type"] == "checkout.session.completed":
+                    self._handle_checkout_completed(event["data"]["object"])
+                elif event["type"] == "payment_intent.succeeded":
+                    self._handle_payment_succeeded(event["data"]["object"])
+                elif event["type"] == "payment_intent.payment_failed":
+                    self._handle_payment_failed(event["data"]["object"])
+
+                # Subscription events
+                elif event["type"] == "customer.subscription.created":
+                    self._handle_subscription_created(event["data"]["object"])
+                elif event["type"] == "customer.subscription.updated":
+                    self._handle_subscription_updated(event["data"]["object"])
+                elif event["type"] == "customer.subscription.deleted":
+                    self._handle_subscription_deleted(event["data"]["object"])
+                elif event["type"] == "invoice.paid":
+                    self._handle_invoice_paid(event["data"]["object"])
+                elif event["type"] == "invoice.payment_failed":
+                    self._handle_invoice_payment_failed(event["data"]["object"])
+            except Exception:
+                # Handler failed: release our claim so Stripe's automatic retry can
+                # re-process this event instead of it being permanently marked done.
+                if claim == "claimed":
+                    release_event(event["id"])
+                raise
+
+            # Success: the claim row stays as the permanent processed marker.
             return WebhookProcessingResult(
                 success=True,
                 event_type=event["type"],
@@ -993,10 +1048,19 @@ class StripeService:
                 metadata=metadata,
             )
 
+            # Credit top-up fee (OpenRouter-style monetization). When
+            # CREDIT_TOPUP_FEE_RATE > 0, withhold that fraction of the paid
+            # amount as revenue and grant the remainder as usable credits.
+            # Default 0.0 → credits_granted == amount_dollars (no change).
+            fee_rate, topup_fee, credits_granted = self._apply_topup_fee(amount_dollars)
+
             # Build transaction metadata including verification audit trail
             transaction_metadata = {
                 "stripe_session_id": session_id,
                 "stripe_payment_intent_id": payment_intent_id,
+                "amount_paid": amount_dollars,
+                "topup_fee_rate": fee_rate,
+                "topup_fee": topup_fee,
                 "amount_verification": {
                     "verified": verification_result.get("verified", False),
                     "severity": verification_result.get("severity", "unknown"),
@@ -1007,14 +1071,21 @@ class StripeService:
                 },
             }
 
-            # Add credits and log transaction
+            # Add credits and log transaction. The request_id makes this grant
+            # idempotent at the ledger level (keyed on the Stripe session), so even
+            # if the payment-status guard above is bypassed by a concurrent
+            # duplicate delivery, the credits are granted at most once.
             add_credits_to_user(
                 user_id=user_id,
-                credits=amount_dollars,
+                credits=credits_granted,
                 transaction_type="purchase",
-                description=f"Stripe checkout - ${amount_dollars}",
+                description=(
+                    f"Stripe checkout - ${amount_dollars}"
+                    + (f" (−${topup_fee} fee)" if topup_fee else "")
+                ),
                 payment_id=payment_id,
                 metadata=transaction_metadata,
+                request_id=self._grant_idempotency_key(f"cs:{session_id}"),
             )
 
             # Update payment
@@ -1025,7 +1096,10 @@ class StripeService:
                 stripe_session_id=session_id,
             )
 
-            logger.info(f"Checkout completed: Added {amount_dollars} credits to user {user_id}")
+            logger.info(
+                f"Checkout completed: paid ${amount_dollars}, fee ${topup_fee}, "
+                f"granted {credits_granted} credits to user {user_id}"
+            )
 
             # Clear trial status for the user when they purchase credits
             # This converts trial users to paid users (pay-per-use, NOT subscription)
@@ -1122,6 +1196,7 @@ class StripeService:
                                 "stripe_session_id": session_id,
                                 "trigger_amount": amount_dollars,
                             },
+                            request_id=self._grant_idempotency_key(f"bonus:{session_id}"),
                         )
                         logger.info(
                             f"First top-up bonus applied! User {user_id} received $5 "
@@ -1438,15 +1513,28 @@ class StripeService:
                     )
                     return
                 update_payment_status(payment_id=payment["id"], status="completed")
-                # Add credits and log transaction
-                amount = payment.get("amount_usd", payment.get("amount", 0))
+                # Add credits and log transaction. Apply the same top-up fee as the
+                # checkout path so the fee model is consistent across both one-time
+                # payment flows (previously the fee was only withheld on checkout
+                # sessions, letting payment-intent top-ups skip it).
+                amount = float(payment.get("amount_usd", payment.get("amount", 0)) or 0)
+                fee_rate, topup_fee, credits_granted = self._apply_topup_fee(amount)
                 add_credits_to_user(
                     user_id=payment["user_id"],
-                    credits=amount,
+                    credits=credits_granted,
                     transaction_type="purchase",
-                    description=f"Stripe payment - ${amount}",
+                    description=(
+                        f"Stripe payment - ${amount}"
+                        + (f" (−${topup_fee} fee)" if topup_fee else "")
+                    ),
                     payment_id=payment["id"],
-                    metadata={"stripe_payment_intent_id": payment_intent.id},
+                    metadata={
+                        "stripe_payment_intent_id": payment_intent.id,
+                        "amount_paid": amount,
+                        "topup_fee_rate": fee_rate,
+                        "topup_fee": topup_fee,
+                    },
+                    request_id=self._grant_idempotency_key(f"pi:{payment_intent.id}"),
                 )
                 logger.info(f"Payment succeeded: {payment_intent.id}")
         except Exception as e:
@@ -2073,7 +2161,11 @@ class StripeService:
             # canceled_at is when the user clicked "cancel", NOT when the subscription
             # actually ends. For scheduled cancellations (cancel_at_period_end=True),
             # the subscription remains active until current_period_end.
-            current_period_end = self._get_stripe_object_value(subscription, "current_period_end")
+            # Use the Basil-safe helper: in the 2025-08+ API generation the period
+            # bounds moved from the Subscription onto its items, so a direct read of
+            # current_period_end returns None and the effective_date would silently
+            # fall back to now().
+            current_period_end = self._get_subscription_period_end(subscription)
             if isinstance(current_period_end, (int, float)) and current_period_end > 0:
                 effective_date = datetime.fromtimestamp(current_period_end, tz=UTC).isoformat()
             else:

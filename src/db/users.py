@@ -501,6 +501,72 @@ def get_user_by_username(username: str) -> dict[str, Any] | None:
         return None
 
 
+def _atomic_add_credits_rpc(
+    client,
+    *,
+    user_id: int,
+    credits: float,
+    transaction_type: str,
+    description: str,
+    payment_id: int | None,
+    metadata: dict | None,
+    request_id: str | None,
+    created_by: str | None,
+) -> dict | None:
+    """Call the atomic_add_credits stored procedure.
+
+    Returns the parsed JSONB result dict on a definitive outcome (a real grant
+    or an idempotent no-op), or ``None`` when the RPC is unavailable/unusable so
+    the caller falls back to the legacy read-modify-write path. Raises
+    ``ValueError`` for business errors (e.g. user_not_found).
+    """
+    rpc_params = {
+        "p_user_id": user_id,
+        "p_credits": float(credits),
+        "p_transaction_type": transaction_type,
+        "p_description": description,
+        "p_target": "purchased",
+        "p_metadata": metadata or {},
+    }
+    if payment_id is not None:
+        rpc_params["p_payment_id"] = payment_id
+    if request_id:
+        rpc_params["p_request_id"] = str(request_id)
+    if created_by:
+        rpc_params["p_created_by"] = created_by
+
+    try:
+        rpc_result = client.rpc("atomic_add_credits", rpc_params).execute()
+    except Exception as rpc_exc:
+        # RPC not deployed yet, or a transport error -- fall back to legacy path.
+        logger.info(
+            "atomic_add_credits RPC unavailable for user %s (%s), using legacy path.",
+            sanitize_for_logging(str(user_id)),
+            type(rpc_exc).__name__,
+        )
+        return None
+
+    data = rpc_result.data
+    if isinstance(data, list) and data:
+        data = data[0]
+    if not isinstance(data, dict):
+        return None
+
+    if data.get("success") is True:
+        return data
+
+    error = data.get("error", "unknown_rpc_error")
+    if error == "user_not_found":
+        raise ValueError(f"User with ID {user_id} not found")
+    # Other RPC-level errors -- fall back to the legacy path rather than losing the grant.
+    logger.warning(
+        "atomic_add_credits RPC error '%s' for user %s; falling back to legacy path.",
+        error,
+        sanitize_for_logging(str(user_id)),
+    )
+    return None
+
+
 def add_credits_to_user(
     user_id: int,
     credits: float,
@@ -509,6 +575,7 @@ def add_credits_to_user(
     payment_id: int | None = None,
     metadata: dict | None = None,
     created_by: str | None = None,
+    request_id: str | None = None,
 ) -> None:
     """
     Add credits to user account by user ID and log the transaction.
@@ -523,6 +590,10 @@ def add_credits_to_user(
         payment_id: Optional payment ID if this is from a payment
         metadata: Optional metadata dictionary
         created_by: Optional identifier of who created the transaction (e.g. "admin:123")
+        request_id: Optional UUID idempotency key. When supplied, the grant is
+            applied at most once even under concurrent/duplicate delivery (e.g.
+            Stripe webhook retries), enforced by the unique index on
+            credit_transactions.request_id.
     """
     if credits <= 0:
         raise ValueError("Credits must be positive")
@@ -532,6 +603,45 @@ def add_credits_to_user(
 
         client = get_supabase_client()
 
+        # ---------------------------------------------------------------
+        # ATOMIC PATH: atomic_add_credits RPC performs the balance update and the
+        # ledger insert in one transaction under a row lock, and is idempotent on
+        # request_id. Falls back to the legacy read-modify-write below when the
+        # RPC isn't deployed yet.
+        # ---------------------------------------------------------------
+        atomic_result = _atomic_add_credits_rpc(
+            client,
+            user_id=user_id,
+            credits=credits,
+            transaction_type=transaction_type,
+            description=description,
+            payment_id=payment_id,
+            metadata=metadata,
+            request_id=request_id,
+            created_by=created_by,
+        )
+        if atomic_result is not None:
+            if atomic_result.get("idempotent"):
+                logger.info(
+                    "Idempotent skip: credit grant already applied (request_id=%s, user %s)",
+                    sanitize_for_logging(str(request_id)),
+                    sanitize_for_logging(str(user_id)),
+                )
+            else:
+                logger.info(
+                    "ATOMIC added %s credits to user %s. New balance: %s",
+                    sanitize_for_logging(str(credits)),
+                    sanitize_for_logging(str(user_id)),
+                    sanitize_for_logging(str(atomic_result.get("new_balance"))),
+                )
+            invalidate_user_cache_by_id(user_id)
+            return
+
+        # ---------------------------------------------------------------
+        # LEGACY PATH: non-atomic read-modify-write (pre-migration fallback).
+        # request_id is still forwarded to the ledger insert so the unique index
+        # rejects duplicates, though the balance update is not atomic with it.
+        # ---------------------------------------------------------------
         # Get current balances
         user_result = (
             client.table("users")
@@ -593,6 +703,7 @@ def add_credits_to_user(
                 "purchased_after": purchased_after,
             },
             created_by=created_by,
+            request_id=request_id,
         )
 
         logger.info(

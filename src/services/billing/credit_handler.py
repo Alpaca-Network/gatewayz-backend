@@ -201,6 +201,7 @@ async def handle_credits_and_usage(
     endpoint: str = "/v1/chat/completions",
     is_streaming: bool = False,
     request_id: str | None = None,
+    already_charged: bool = False,
 ) -> float:
     """
     Centralized credit/trial handling logic for all chat endpoints.
@@ -225,6 +226,11 @@ async def handle_credits_and_usage(
         endpoint: API endpoint for logging (default: /v1/chat/completions)
         is_streaming: Whether this is a streaming request (affects retry behavior)
         request_id: Optional UUID idempotency key to prevent duplicate deductions on retries
+        already_charged: When True, the caller (the unified ChatInferenceHandler)
+            has ALREADY deducted credits and recorded usage for this request, so
+            this function skips the paid-user deduction + usage record to avoid a
+            double charge. It still performs the route-owned bookkeeping the
+            handler does not do (rate-limit usage update, shadow-ledger write).
 
     Returns:
         float: Calculated cost in USD
@@ -361,6 +367,42 @@ async def handle_credits_and_usage(
                     "endpoint": endpoint,
                 },
             )
+    elif already_charged:
+        # The unified handler already deducted credits and recorded usage for this
+        # request (authenticated non-streaming path). Skip the duplicate deduction
+        # and usage record here — doing them again double-charges the user — but
+        # still run the route-owned bookkeeping below (rate-limit + shadow ledger).
+        latency = time.monotonic() - start_time
+        _record_credit_metrics("success", cost, endpoint, is_streaming, latency)
+
+        try:
+            await _to_thread(update_rate_limit_usage, api_key, total_tokens)
+        except Exception as e:
+            logger.warning(
+                f"Failed to update rate limit usage (already-charged path) for user {user.get('id')}: {e}"
+            )
+
+        try:
+            from src.config import Config
+
+            if (
+                Config.CREDIT_LEDGER_SHADOW_ENABLED
+                and user
+                and float(cost or 0) >= 0.000001
+                and user.get("tier") != "admin"
+            ):
+                from src.services.billing.credit_ledger_store import record_shadow_settlement
+
+                await record_shadow_settlement(
+                    ref=request_id,
+                    user_id=user.get("id"),
+                    cost=cost,
+                    allowance=user.get("subscription_allowance") or 0,
+                    purchased=user.get("purchased_credits") or 0,
+                )
+        except Exception as e:
+            logger.warning("credit_ledger shadow dual-write failed (non-fatal): %s", e)
+
     else:
         # Paid user - deduct credits with retry logic
         last_error = None
