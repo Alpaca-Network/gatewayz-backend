@@ -8,9 +8,9 @@ from src.services.pricing.pricing import *  # noqa: F401,F403
 from src.services.pricing.pricing import (  # noqa: F401  # explicit names for IDE support
     _default_pricing_tracker,
     _track_default_pricing_usage,
+    calculate_code_router_savings,
     calculate_cost,
     calculate_cost_async,
-    calculate_code_router_savings,
     clear_pricing_cache,
     get_default_pricing_stats,
     get_model_pricing,

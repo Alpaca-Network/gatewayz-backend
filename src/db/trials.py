@@ -5,8 +5,8 @@ from typing import Any
 
 from src.config.redis_config import get_redis_config
 from src.config.supabase_config import get_supabase_client
-from src.utils.profiling import tag_wrapper
 from src.utils.db_safety import DatabaseResultError, safe_get_first
+from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 

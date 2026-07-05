@@ -87,7 +87,10 @@ def test_add_then_get(client):
     um.add_memory(7, "likes Python", salience=0.9)
     um.add_memory(7, "prefers metric units", salience=0.4)
     items = um.get_memories(7, use_cache=False)
-    assert [i["content"] for i in items] == ["likes Python", "prefers metric units"]  # salience desc
+    assert [i["content"] for i in items] == [
+        "likes Python",
+        "prefers metric units",
+    ]  # salience desc
 
 
 def test_get_scoped_to_user(client):

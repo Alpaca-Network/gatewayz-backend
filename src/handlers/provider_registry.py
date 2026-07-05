@@ -43,9 +43,7 @@ def _safe_import_provider(provider_name: str, imports_list: list[str]) -> dict:
         logger.debug(f"Loaded {provider_name} provider client")
         return result
     except Exception as e:
-        error_msg = (
-            f"Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
-        )
+        error_msg = f"Failed to load {provider_name} provider client: {type(e).__name__}: {str(e)}"
         logger.error(error_msg)
         _provider_import_errors[provider_name] = str(e)
 

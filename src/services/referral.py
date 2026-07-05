@@ -211,7 +211,9 @@ The AI Gateway Team
 REFERRAL_CODE_LENGTH = 8
 MAX_REFERRAL_USES = 10  # Each referral code can be used by 10 different users
 MIN_PURCHASE_AMOUNT = 10.0  # $10 minimum
-REFERRAL_BONUS = 10.0  # Legacy constant; referrals no longer grant any credits (kept for back-compat/tests)
+REFERRAL_BONUS = (
+    10.0  # Legacy constant; referrals no longer grant any credits (kept for back-compat/tests)
+)
 
 
 def generate_referral_code() -> str:
@@ -514,7 +516,8 @@ def get_referral_stats(user_id: int) -> dict[str, Any] | None:
             "remaining_uses": remaining_uses,
             "max_uses": MAX_REFERRAL_USES,
             "total_earned": float(total_earned),
-            "current_balance": float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0),
+            "current_balance": float(user.get("subscription_allowance", 0) or 0)
+            + float(user.get("purchased_credits", 0) or 0),
             "referred_by_code": user.get("referred_by_code"),
             "referrals": referral_details,
         }

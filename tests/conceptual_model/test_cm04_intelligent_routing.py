@@ -222,7 +222,6 @@ class TestCodeRouterParsing:
             patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]),
             patch("src.services.code_router.get_classifier") as mock_classifier_fn,
         ):
-
             mock_classifier = MagicMock()
             mock_classifier.classify.return_value = {
                 "category": "code_generation",
@@ -313,7 +312,6 @@ class TestCodeRouterParsing:
             patch("src.services.code_router.get_baselines", return_value=mock_priors["baselines"]),
             patch("src.services.code_router.get_classifier") as mock_classifier_fn,
         ):
-
             mock_classifier = MagicMock()
             mock_classifier_fn.return_value = mock_classifier
 

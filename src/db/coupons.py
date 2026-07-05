@@ -359,7 +359,12 @@ def redeem_coupon(
         coupon_value = validation["coupon_value"]
 
         # Step 2: Get current user balance
-        user_result = client.table("users").select("purchased_credits, subscription_allowance").eq("id", user_id).execute()
+        user_result = (
+            client.table("users")
+            .select("purchased_credits, subscription_allowance")
+            .eq("id", user_id)
+            .execute()
+        )
 
         if not user_result.data:
             return {
@@ -380,7 +385,10 @@ def redeem_coupon(
 
         # Step 3: Update purchased_credits
         update_result = (
-            client.table("users").update({"purchased_credits": new_purchased}).eq("id", user_id).execute()
+            client.table("users")
+            .update({"purchased_credits": new_purchased})
+            .eq("id", user_id)
+            .execute()
         )
 
         if not update_result.data:
@@ -393,9 +401,7 @@ def redeem_coupon(
         # have double-counted times_used had the function existed. The nested
         # `.execute().data[0]` was also unguarded and could IndexError if the
         # coupon row was missing. Collapsed to one guarded increment.
-        current_usage = (
-            client.table("coupons").select("times_used").eq("id", coupon_id).execute()
-        )
+        current_usage = client.table("coupons").select("times_used").eq("id", coupon_id).execute()
         times_used = (current_usage.data[0].get("times_used") or 0) if current_usage.data else 0
         client.table("coupons").update({"times_used": times_used + 1}).eq("id", coupon_id).execute()
 

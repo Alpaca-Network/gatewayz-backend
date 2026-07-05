@@ -17,6 +17,20 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from src.security.deps import require_admin
+from src.services.huggingface_models import fetch_models_from_hug
+from src.services.model_catalog_cache import (
+    clear_models_cache,
+    clear_providers_cache,
+)
+from src.services.model_catalog_cache import get_gateway_cache_metadata as get_models_cache
+from src.services.model_catalog_cache import get_provider_cache_metadata as get_providers_cache
+from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
+from src.services.providers import (
+    fetch_models_from_cerebras,
+    fetch_models_from_nebius,
+    fetch_models_from_novita,
+    fetch_models_from_xai,
+)
 
 # Import fetch_models functions from their respective client files
 from src.services.providers.aimo_client import fetch_models_from_aimo
@@ -25,25 +39,17 @@ from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.groq_client import fetch_models_from_groq
-from src.services.huggingface_models import fetch_models_from_hug
-from src.services.model_catalog_cache import (
-    clear_models_cache,
-    clear_providers_cache,
+from src.services.providers.modelz_client import (
+    clear_modelz_cache,
 )
-from src.services.model_catalog_cache import get_gateway_cache_metadata as get_models_cache
-from src.services.model_catalog_cache import get_provider_cache_metadata as get_providers_cache
-from src.services.providers.modelz_client import clear_modelz_cache
-from src.services.providers.modelz_client import get_modelz_cache_status as get_modelz_cache_status_func
-from src.services.providers.modelz_client import refresh_modelz_cache
+from src.services.providers.modelz_client import (
+    get_modelz_cache_status as get_modelz_cache_status_func,
+)
+from src.services.providers.modelz_client import (
+    refresh_modelz_cache,
+)
 from src.services.providers.near_client import fetch_models_from_near
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
-from src.services.providers import (
-    fetch_models_from_cerebras,
-    fetch_models_from_nebius,
-    fetch_models_from_novita,
-    fetch_models_from_xai,
-)
 from src.services.providers.together_client import fetch_models_from_together
 
 # Initialize logging

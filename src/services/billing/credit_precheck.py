@@ -115,7 +115,9 @@ def calculate_affordable_max_tokens(
     if remaining <= 0:
         logger.debug(
             "User cannot afford output for %s: credits=%.6f, input_cost=%.6f",
-            model_id, user_credits, input_cost,
+            model_id,
+            user_credits,
+            input_cost,
         )
         return None
 
@@ -134,7 +136,10 @@ def calculate_affordable_max_tokens(
 
     logger.debug(
         "Affordable max_tokens for %s: %d (remaining=%.6f, rate=%.10f)",
-        model_id, affordable, remaining, effective_rate,
+        model_id,
+        affordable,
+        remaining,
+        effective_rate,
     )
     return affordable
 
@@ -184,7 +189,11 @@ def check_credit_sufficiency(
         capped_cost = calculate_cost(model_id, input_tokens, affordable)
         logger.info(
             "Credit cap: %s max_tokens %d→%d (credits=%.4f, capped_cost=%.6f)",
-            model_id, max_tokens, affordable, user_credits, capped_cost,
+            model_id,
+            max_tokens,
+            affordable,
+            user_credits,
+            capped_cost,
         )
         return {
             "allowed": True,
@@ -207,8 +216,8 @@ def check_credit_sufficiency(
         "suggestion": (
             f"Reduce max_tokens from {max_tokens} to lower the maximum cost, "
             f"or add ${shortfall:.4f} in credits."
-            ),
-        }
+        ),
+    }
 
 
 def estimate_and_check_credits(
@@ -250,7 +259,11 @@ def estimate_and_check_credits(
 
     # Check sufficiency (with affordability-based capping)
     check_result = check_credit_sufficiency(
-        user_credits, max_cost, model_id, max_output_tokens, is_trial,
+        user_credits,
+        max_cost,
+        model_id,
+        max_output_tokens,
+        is_trial,
         input_tokens=input_tokens,
     )
 

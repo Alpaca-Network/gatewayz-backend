@@ -205,8 +205,8 @@ async def lifespan(app):
 
         # Sync DB providers table with ENABLED_PROVIDERS env var
         try:
-            from src.utils.provider_filter import is_provider_enabled, get_enabled_providers
             from src.config.supabase_config import get_client_for_query
+            from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
 
             enabled = get_enabled_providers()
             if enabled is not None:
@@ -215,24 +215,32 @@ async def lifespan(app):
                 resp = supabase.table("providers").select("slug, is_active").execute()
                 all_providers = resp.data or []
                 to_deactivate = [
-                    p["slug"] for p in all_providers
+                    p["slug"]
+                    for p in all_providers
                     if p.get("is_active") and not is_provider_enabled(p["slug"])
                 ]
                 to_activate = [
-                    p["slug"] for p in all_providers
+                    p["slug"]
+                    for p in all_providers
                     if not p.get("is_active") and is_provider_enabled(p["slug"])
                 ]
                 for slug in to_deactivate:
-                    supabase.table("providers").update({"is_active": False}).eq("slug", slug).execute()
+                    supabase.table("providers").update({"is_active": False}).eq(
+                        "slug", slug
+                    ).execute()
                 for slug in to_activate:
-                    supabase.table("providers").update({"is_active": True}).eq("slug", slug).execute()
+                    supabase.table("providers").update({"is_active": True}).eq(
+                        "slug", slug
+                    ).execute()
                 if to_deactivate or to_activate:
                     logger.info(
                         f"  providers synced with ENABLED_PROVIDERS={','.join(sorted(enabled))} "
                         f"(activated: {to_activate or 'none'}, deactivated: {len(to_deactivate)} providers)"
                     )
                 else:
-                    logger.info(f"  providers already in sync with ENABLED_PROVIDERS={','.join(sorted(enabled))}")
+                    logger.info(
+                        f"  providers already in sync with ENABLED_PROVIDERS={','.join(sorted(enabled))}"
+                    )
         except Exception as e:
             logger.warning(f"Failed to sync providers with ENABLED_PROVIDERS: {e}")
 
@@ -647,6 +655,7 @@ async def lifespan(app):
     # Config.validate() checks additional fields and logs a summary)
     try:
         from src.config import Config as _Config
+
         _Config.validate()
         logger.info("  [OK] Configuration validated")
     except Exception as e:
@@ -655,7 +664,9 @@ async def lifespan(app):
     # Warn if admin key is missing in production (don't fail startup)
     try:
         import os as _os
+
         from src.config import Config as _Config2
+
         if _Config2.IS_PRODUCTION and not _os.environ.get("ADMIN_API_KEY"):
             logger.warning(
                 "  [WARN] ADMIN_API_KEY is not set in production. "
@@ -691,9 +702,7 @@ async def lifespan(app):
                 return
 
             client = get_supabase_client()
-            result = (
-                client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
-            )
+            result = client.table("users").select("id, role").eq("email", ADMIN_EMAIL).execute()
             if result.data:
                 user = result.data[0]
                 if user.get("role", "user") != UserRole.ADMIN:
@@ -715,10 +724,12 @@ async def lifespan(app):
         logger.info("   Initializing analytics services...")
 
         from src.services.statsig_service import statsig_service
+
         await statsig_service.initialize()
         logger.info("   Statsig analytics initialized")
 
         from src.services.posthog_service import posthog_service
+
         posthog_service.initialize()
         logger.info("   PostHog analytics initialized")
 

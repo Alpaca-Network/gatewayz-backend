@@ -118,12 +118,7 @@ def release_event(event_id: str) -> None:
     try:
 
         def _release(client):
-            return (
-                client.table("stripe_webhook_events")
-                .delete()
-                .eq("event_id", event_id)
-                .execute()
-            )
+            return client.table("stripe_webhook_events").delete().eq("event_id", event_id).execute()
 
         execute_with_retry(_release, max_retries=2, retry_delay=0.2)
         logger.info(f"Released webhook event claim after handler failure: {event_id}")

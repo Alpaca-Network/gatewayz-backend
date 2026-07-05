@@ -1442,19 +1442,23 @@ class TestFirstTopupBonus:
         session.currency = "usd"
         return session
 
-    def _mock_user_client(self, mock_get_supabase, *, has_made_first_purchase, referred_by_code=None):
+    def _mock_user_client(
+        self, mock_get_supabase, *, has_made_first_purchase, referred_by_code=None
+    ):
         mock_client = MagicMock()
         mock_get_supabase.return_value = mock_client
-        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = Mock(
-            data=[
-                {
-                    "id": 1,
-                    "subscription_status": "trial",
-                    "tier": "basic",
-                    "has_made_first_purchase": has_made_first_purchase,
-                    "referred_by_code": referred_by_code,
-                }
-            ]
+        mock_client.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+            Mock(
+                data=[
+                    {
+                        "id": 1,
+                        "subscription_status": "trial",
+                        "tier": "basic",
+                        "has_made_first_purchase": has_made_first_purchase,
+                        "referred_by_code": referred_by_code,
+                    }
+                ]
+            )
         )
         return mock_client
 

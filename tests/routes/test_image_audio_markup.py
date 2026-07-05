@@ -17,11 +17,13 @@ MARKUP = 2.0  # use a distinctive factor so markup application is unambiguous
 # get_image_cost — markup + 4-tuple arity
 # --------------------------------------------------------------------------
 
+
 def test_image_config_path_applies_markup_and_returns_4_tuple():
     # Tier 1: manual_pricing.json hit. Previously returned a 3-tuple (a bug,
     # since callers unpack 4). Now must return 4 values, markup applied.
-    with patch("src.routes.images.Config.PRICING_MARKUP", MARKUP), patch(
-        "src.routes.images.get_image_pricing", return_value=(0.04, False)
+    with (
+        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
+        patch("src.routes.images.get_image_pricing", return_value=(0.04, False)),
     ):
         result = get_image_cost("deepinfra", "some-model", num_images=2)
         assert len(result) == 4
@@ -34,8 +36,9 @@ def test_image_config_path_applies_markup_and_returns_4_tuple():
 
 def test_image_fallback_path_applies_markup():
     # Tier 2+: hardcoded fallback (get_image_pricing returns None).
-    with patch("src.routes.images.Config.PRICING_MARKUP", MARKUP), patch(
-        "src.routes.images.get_image_pricing", return_value=None
+    with (
+        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
+        patch("src.routes.images.get_image_pricing", return_value=None),
     ):
         total, per_image, is_fallback, res_mult = get_image_cost(
             "fal", "flux-pro", num_images=1
@@ -46,8 +49,9 @@ def test_image_fallback_path_applies_markup():
 
 
 def test_image_unknown_provider_applies_markup():
-    with patch("src.routes.images.Config.PRICING_MARKUP", MARKUP), patch(
-        "src.routes.images.get_image_pricing", return_value=None
+    with (
+        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
+        patch("src.routes.images.get_image_pricing", return_value=None),
     ):
         total, per_image, is_fallback, _ = get_image_cost("nobody", "x", num_images=1)
         # UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
@@ -58,6 +62,7 @@ def test_image_unknown_provider_applies_markup():
 # --------------------------------------------------------------------------
 # get_audio_cost — markup
 # --------------------------------------------------------------------------
+
 
 def test_audio_known_model_applies_markup():
     with patch("src.routes.audio.Config.PRICING_MARKUP", MARKUP):

@@ -17,8 +17,8 @@ from typing import Any
 import redis
 
 from src.db.rate_limits import get_rate_limit_config, update_rate_limit_config
-from src.utils.profiling import tag_wrapper
 from src.services.rate_limiting_fallback import get_fallback_rate_limit_manager
+from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -863,9 +863,7 @@ def _fail_open_allowed() -> bool:
     return os.getenv("RATE_LIMIT_FAIL_CLOSED", "false").lower() != "true"
 
 
-def sliding_window_check(
-    key: str, limit: int, window_seconds: int
-) -> tuple[bool, int, int | None]:
+def sliding_window_check(key: str, limit: int, window_seconds: int) -> tuple[bool, int, int | None]:
     """Redis-backed sliding window primitive.
 
     Returns:

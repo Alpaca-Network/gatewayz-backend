@@ -15,16 +15,16 @@ from src.db.users import deduct_credits, get_user, record_usage
 from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
 from src.security.inference_gates import enforce_subscription_status_gate
+from src.services.pricing_lookup import get_image_pricing
 from src.services.providers.fal_image_client import make_fal_image_request
 from src.services.providers.image_generation_client import (
     make_deepinfra_image_request,
     make_google_vertex_image_request,
     process_image_generation_response,
 )
-from src.services.pricing_lookup import get_image_pricing
 from src.utils.ai_tracing import AIRequestType, AITracer
-from src.utils.rate_limit_guard import enforce_request_rate_limit
 from src.utils.performance_tracker import PerformanceTracker
+from src.utils.rate_limit_guard import enforce_request_rate_limit
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -415,9 +415,12 @@ async def generate_images(
 
             # Calculate actual cost using the provider that was used (may differ from requested)
             # Resolution multiplier is applied based on requested size
-            total_cost, cost_per_image, used_fallback_pricing, resolution_multiplier = (
-                get_image_cost(actual_provider, model, req.n, size=req.size)
-            )
+            (
+                total_cost,
+                cost_per_image,
+                used_fallback_pricing,
+                resolution_multiplier,
+            ) = get_image_cost(actual_provider, model, req.n, size=req.size)
 
             # Audit log: resolution-adjusted pricing for billing transparency
             logger.info(
@@ -459,7 +462,9 @@ async def generate_images(
                 # This avoids stale data from the pre-request user lookup
                 updated_user = await loop.run_in_executor(executor, get_user, api_key)
                 if updated_user:
-                    actual_balance_after = float(updated_user.get("subscription_allowance", 0) or 0) + float(updated_user.get("purchased_credits", 0) or 0)
+                    actual_balance_after = float(
+                        updated_user.get("subscription_allowance", 0) or 0
+                    ) + float(updated_user.get("purchased_credits", 0) or 0)
 
                 await loop.run_in_executor(
                     executor,
@@ -499,7 +504,11 @@ async def generate_images(
                 "user_balance_after": (
                     actual_balance_after
                     if actual_balance_after is not None
-                    else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost  # Fallback to estimate if fetch failed
+                    else (
+                        float(user.get("subscription_allowance", 0) or 0)
+                        + float(user.get("purchased_credits", 0) or 0)
+                    )
+                    - total_cost  # Fallback to estimate if fetch failed
                 ),
                 "user_api_key": f"{api_key[:10]}...",
                 "images_generated": req.n,

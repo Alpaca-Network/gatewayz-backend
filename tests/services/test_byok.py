@@ -10,8 +10,8 @@ from cryptography.fernet import Fernet
 
 from src.services.byok import byok_routing_fee, resolve_provider_key
 
-
 # --- routing fee -----------------------------------------------------------
+
 
 def test_fee_disabled_by_default(monkeypatch):
     monkeypatch.delenv("BYOK_ROUTING_FEE_RATE", raising=False)
@@ -40,6 +40,7 @@ def test_fee_malformed_falls_back_to_zero(monkeypatch):
 
 
 # --- key resolution priority ----------------------------------------------
+
 
 def test_byok_key_preferred_over_platform(monkeypatch):
     monkeypatch.setattr(
@@ -76,6 +77,7 @@ def test_anonymous_user_uses_platform_key(monkeypatch):
 
 
 # --- crypto round-trip (BYOK requires REVERSIBLE encryption) ---------------
+
 
 def test_encrypt_decrypt_round_trip(monkeypatch):
     key = Fernet.generate_key().decode()

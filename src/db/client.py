@@ -4,9 +4,8 @@ Database client facade.
 Preferred import point for database access. Routes and services should import
 from here rather than from src.config.supabase_config directly.
 """
+
 from src.config.supabase_config import (
-    execute_with_retry,
-    get_initialization_status,
     get_supabase_client,
 )
 

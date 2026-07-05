@@ -23,15 +23,15 @@ _spec.loader.exec_module(_mod)
 
 # Re-export every public symbol
 from src.services._providers_legacy import (  # noqa: E402, F401
-    get_cached_providers,
-    fetch_providers_from_openrouter,
-    get_provider_logo_from_services,
-    get_provider_info,
     enhance_providers_with_logos_and_sites,
     fetch_models_from_cerebras,
-    fetch_models_from_xai,
+    fetch_models_from_morpheus,
     fetch_models_from_nebius,
     fetch_models_from_novita,
-    fetch_models_from_morpheus,
     fetch_models_from_simplismart,
+    fetch_models_from_xai,
+    fetch_providers_from_openrouter,
+    get_cached_providers,
+    get_provider_info,
+    get_provider_logo_from_services,
 )

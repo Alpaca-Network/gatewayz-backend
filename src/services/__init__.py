@@ -147,7 +147,7 @@ class _RelocatedModuleFinder(importlib.abc.MetaPathFinder):
         if not fullname.startswith(self._PREFIX):
             return None
         # e.g. fullname = "src.services.prometheus_metrics"
-        remainder = fullname[len(self._PREFIX):]
+        remainder = fullname[len(self._PREFIX) :]
         # Only handle single-level names (not "src.services.metrics.prometheus_metrics")
         if "." in remainder:
             return None

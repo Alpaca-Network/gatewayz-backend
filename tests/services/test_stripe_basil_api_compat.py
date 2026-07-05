@@ -47,6 +47,7 @@ class _AttrObj:
 # _get_subscription_period_end / _get_subscription_period_start
 # --------------------------------------------------------------------------
 
+
 def test_period_end_legacy_top_level(stripe_service):
     sub = {"current_period_end": 1234567890, "items": {"data": []}}
     assert stripe_service._get_subscription_period_end(sub) == 1234567890
@@ -85,8 +86,11 @@ def test_period_start_legacy_top_level(stripe_service):
 # _get_invoice_subscription_id
 # --------------------------------------------------------------------------
 
+
 def test_invoice_subscription_legacy_string(stripe_service):
-    assert stripe_service._get_invoice_subscription_id({"subscription": "sub_legacy"}) == "sub_legacy"
+    assert (
+        stripe_service._get_invoice_subscription_id({"subscription": "sub_legacy"}) == "sub_legacy"
+    )
 
 
 def test_invoice_subscription_legacy_object(stripe_service):
@@ -103,11 +107,7 @@ def test_invoice_subscription_basil_parent(stripe_service):
 def test_invoice_subscription_basil_lines(stripe_service):
     # Basil fallback: subscription under a line item's parent details.
     inv = {
-        "lines": {
-            "data": [
-                {"parent": {"subscription_item_details": {"subscription": "sub_line"}}}
-            ]
-        }
+        "lines": {"data": [{"parent": {"subscription_item_details": {"subscription": "sub_line"}}}]}
     }
     assert stripe_service._get_invoice_subscription_id(inv) == "sub_line"
 
@@ -122,15 +122,20 @@ def test_invoice_subscription_none_for_one_time(stripe_service):
 # _handle_checkout_completed: subscription-mode guard (#4)
 # --------------------------------------------------------------------------
 
+
 def test_checkout_completed_skips_subscription_mode(stripe_service):
     """A mode=subscription checkout must NOT be credited as a one-time top-up."""
     session = {"id": "cs_test_sub", "mode": "subscription", "metadata": {"user_id": "3"}}
 
-    with patch.object(
-        stripe_service, "_hydrate_checkout_session_metadata", return_value=(session, {"user_id": "3"})
-    ), patch("src.db.users.add_credits_to_user") as add_credits, patch(
-        "src.services.billing.payments.add_credits_to_user", MagicMock()
-    ) as add_credits2:
+    with (
+        patch.object(
+            stripe_service,
+            "_hydrate_checkout_session_metadata",
+            return_value=(session, {"user_id": "3"}),
+        ),
+        patch("src.db.users.add_credits_to_user") as add_credits,
+        patch("src.services.billing.payments.add_credits_to_user", MagicMock()) as add_credits2,
+    ):
         result = stripe_service._handle_checkout_completed(session)
 
     # Handler returns without granting any credits.
@@ -146,8 +151,11 @@ def test_checkout_completed_payment_mode_not_skipped(stripe_service):
     # Force an early, identifiable failure *after* the guard so we can assert the
     # guard did not short-circuit a payment-mode session.
     sentinel = RuntimeError("proceeded past subscription guard")
-    with patch.object(
-        stripe_service, "_hydrate_checkout_session_metadata", return_value=(session, {})
-    ), patch.object(stripe_service, "_coerce_to_int", side_effect=sentinel):
+    with (
+        patch.object(
+            stripe_service, "_hydrate_checkout_session_metadata", return_value=(session, {})
+        ),
+        patch.object(stripe_service, "_coerce_to_int", side_effect=sentinel),
+    ):
         with pytest.raises(RuntimeError, match="proceeded past subscription guard"):
             stripe_service._handle_checkout_completed(session)

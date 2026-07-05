@@ -87,7 +87,11 @@ def add_memory(user_id, content: str, *, kind: str = "fact", salience: float = 0
     )
     _invalidate(user_id)
     rows = getattr(resp, "data", None) or []
-    return rows[0] if rows else {"user_id": user_id, "content": content, "kind": kind, "salience": salience}
+    return (
+        rows[0]
+        if rows
+        else {"user_id": user_id, "content": content, "kind": kind, "salience": salience}
+    )
 
 
 def delete_memory(memory_id, user_id) -> bool:

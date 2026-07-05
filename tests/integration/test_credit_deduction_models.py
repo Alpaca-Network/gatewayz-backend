@@ -114,7 +114,6 @@ class TestCreditDeductionForOpenAIModels:
             patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
         ):
-
             mock_cost.return_value = 0.0125
             mock_to_thread.return_value = None
 
@@ -218,7 +217,6 @@ class TestCreditDeductionForAnthropicModels:
             patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
         ):
-
             mock_cost.return_value = 0.0525
             mock_to_thread.return_value = None
 
@@ -282,7 +280,6 @@ class TestTrialUserCreditHandling:
             patch("src.db.trials.track_trial_usage", return_value=None),
             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
         ):
-
             # Make to_thread call the function directly
             async def call_func(func, *args, **kwargs):
                 return func(*args, **kwargs)
@@ -345,7 +342,6 @@ class TestTrialOverrideForPaidUsers:
             patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
         ):
-
             mock_cost.return_value = 0.05
 
             async def call_func(func, *args, **kwargs):

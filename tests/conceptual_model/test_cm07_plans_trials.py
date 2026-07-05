@@ -358,7 +358,6 @@ def test_team_has_higher_rate_limits_than_dev(mock_supabase):
         patch("src.db.plans.is_admin_tier_user", return_value=False),
         patch("src.db.plans.get_user_plan") as mock_get_plan,
     ):
-
         # First call for Dev user, second for Team user
         mock_get_plan.side_effect = [dev_plan_data, team_plan_data]
 
