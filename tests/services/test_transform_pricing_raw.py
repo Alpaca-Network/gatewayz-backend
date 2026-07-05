@@ -13,8 +13,39 @@ unnormalized and the assertions are deterministic (no DB/registry dependency).
 from decimal import Decimal
 from unittest.mock import patch
 
-from src.services.model_catalog_sync import transform_normalized_model_to_db_schema
+from src.services.model_catalog_sync import (
+    safe_decimal,
+    transform_normalized_model_to_db_schema,
+)
 from src.utils.pricing_normalization import PricingFormat
+
+
+def test_safe_decimal_parses_scientific_notation():
+    # Many provider APIs (deepinfra, groq, cerebras, featherless, ...) emit
+    # per-token prices as scientific-notation strings. These must parse, not
+    # get silently nulled — a null price makes the model unservable.
+    assert safe_decimal("5e-07") == Decimal("5e-07")
+    assert safe_decimal("2.9999999999999997e-06") == Decimal("2.9999999999999997e-06")
+    assert safe_decimal("0.0000005") == Decimal("5e-07")
+    assert safe_decimal("$0.5") == Decimal("0.5")
+    assert safe_decimal("1,234.5") == Decimal("1234.5")
+    assert safe_decimal("free") is None
+    assert safe_decimal("") is None
+    assert safe_decimal(None) is None
+
+
+def test_scientific_notation_pricing_lands_in_pricing_raw():
+    result = _transform(
+        {
+            "id": "vendor/sci-model",
+            "name": "Sci Model",
+            "pricing": {"prompt": "5e-07", "completion": "3e-06"},
+        }
+    )
+    assert result is not None
+    pricing_raw = result["metadata"]["pricing_raw"]
+    assert Decimal(pricing_raw["prompt"]) == Decimal("5e-07")
+    assert Decimal(pricing_raw["completion"]) == Decimal("3e-06")
 
 
 def _transform(model):
