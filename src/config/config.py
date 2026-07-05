@@ -600,6 +600,24 @@ class Config:
     # This is the primary revenue lever for inference requests.
     PRICING_MARKUP: float = float(os.environ.get("PRICING_MARKUP", "1.25"))
 
+    # BYOK routing fee — fraction charged as revenue when a request is served
+    # using a customer's own provider key (bring-your-own-key). Inference cost
+    # is paid on the customer's upstream account, so we bill only this routing
+    # fee (fraction of the computed upstream cost) instead of debiting credits.
+    # 0.0 = disabled (default); 0.05 = 5% routing fee. See Phase 5 in
+    # docs/BUSINESS_PIVOT_DIRECT_SUPPLY.md.
+    BYOK_ROUTING_FEE_RATE: float = float(os.environ.get("BYOK_ROUTING_FEE_RATE", "0.0"))
+
+    # Master switch for bring-your-own-key routing. Off by default: when disabled
+    # the inference path does no per-request BYOK lookup, so there is zero added
+    # latency. Enable to let users serve requests on their own stored provider
+    # keys (billed at BYOK_ROUTING_FEE_RATE instead of full credit cost).
+    BYOK_ENABLED: bool = os.environ.get("BYOK_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
     # No separate pricing sync configuration needed

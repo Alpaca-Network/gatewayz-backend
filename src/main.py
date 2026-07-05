@@ -542,6 +542,7 @@ def create_app() -> FastAPI:
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
+        ("user_provider_keys", "BYOK Provider Keys"),  # Bring-your-own-key management (pivot Phase 5)
     ]
 
     loaded_count = 0
