@@ -53,6 +53,4 @@ class TestParseAutoRouteOptions:
         )
 
     def test_gatewayz_auto_bare(self):
-        assert parse_auto_route_options("gatewayz/auto") == parse_auto_route_options(
-            "router"
-        )
+        assert parse_auto_route_options("gatewayz/auto") == parse_auto_route_options("router")

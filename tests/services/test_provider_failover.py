@@ -51,6 +51,7 @@ def _pin_full_provider_roster():
     ):
         yield
 
+
 # Try to import OpenAI SDK exceptions (same pattern as the module)
 try:
     from openai import (

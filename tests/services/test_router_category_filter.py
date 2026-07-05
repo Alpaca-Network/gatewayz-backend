@@ -30,9 +30,7 @@ class TestFilterByCategory:
 
     def test_multiple_tags_require_all(self):
         # Only models with BOTH cheapest AND fastest.
-        assert filter_by_category(CANDIDATES, REGISTRY, ("cheapest", "fastest")) == [
-            "a/cheap-fast"
-        ]
+        assert filter_by_category(CANDIDATES, REGISTRY, ("cheapest", "fastest")) == ["a/cheap-fast"]
 
     def test_sparse_tag_can_return_empty(self):
         # Caller is responsible for the empty-guard.

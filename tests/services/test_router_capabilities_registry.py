@@ -40,19 +40,27 @@ def test_chat_model_included_with_real_cost():
 
 def test_audio_output_model_excluded():
     # whisper: modality "audio" → not a chat model
-    reg = build_capabilities_registry([_row(provider_model_id="openai/whisper-large-v3", modality="audio")])
+    reg = build_capabilities_registry(
+        [_row(provider_model_id="openai/whisper-large-v3", modality="audio")]
+    )
     assert reg == {}
 
 
 def test_image_output_model_excluded():
-    reg = build_capabilities_registry([_row(provider_model_id="black-forest/flux", modality="text->image")])
+    reg = build_capabilities_registry(
+        [_row(provider_model_id="black-forest/flux", modality="text->image")]
+    )
     assert reg == {}
 
 
 def test_transcription_and_tts_excluded():
     # audio->text (speech-to-text, e.g. whisper) and text->audio (TTS) are not chat
-    stt = build_capabilities_registry([_row(provider_model_id="openai/whisper-large-v3", modality="audio->text")])
-    tts = build_capabilities_registry([_row(provider_model_id="openai/tts-1", modality="text->audio")])
+    stt = build_capabilities_registry(
+        [_row(provider_model_id="openai/whisper-large-v3", modality="audio->text")]
+    )
+    tts = build_capabilities_registry(
+        [_row(provider_model_id="openai/tts-1", modality="text->audio")]
+    )
     assert stt == {}
     assert tts == {}
 
@@ -66,10 +74,16 @@ def test_multimodal_text_output_included():
 
 def test_dedup_keeps_cheapest_across_providers():
     rows = [
-        _row(provider_model_id="meta/llama", canonical_id="meta/llama",
-             model_pricing={"price_per_input_token": 9e-07}),
-        _row(provider_model_id="meta/llama", canonical_id="meta/llama",
-             model_pricing={"price_per_input_token": 2e-07}),
+        _row(
+            provider_model_id="meta/llama",
+            canonical_id="meta/llama",
+            model_pricing={"price_per_input_token": 9e-07},
+        ),
+        _row(
+            provider_model_id="meta/llama",
+            canonical_id="meta/llama",
+            model_pricing={"price_per_input_token": 2e-07},
+        ),
     ]
     reg = build_capabilities_registry(rows)
     assert reg["meta/llama"].cost_per_1k_input == pytest.approx(0.0002)
@@ -88,10 +102,15 @@ def test_inactive_or_idless_rows_skipped():
 
 def test_mislabeled_whisper_excluded_by_name():
     # Dirty catalog: whisper duplicated as "text->text" — name guard still drops it.
-    reg = build_capabilities_registry([
-        _row(provider_model_id="openai/whisper-large-v3", canonical_id="openai/whisper-large-v3",
-             modality="text->text"),
-    ])
+    reg = build_capabilities_registry(
+        [
+            _row(
+                provider_model_id="openai/whisper-large-v3",
+                canonical_id="openai/whisper-large-v3",
+                modality="text->text",
+            ),
+        ]
+    )
     assert reg == {}
 
 

@@ -61,6 +61,7 @@ def test_none_and_zero_and_garbage_return_none():
 # cost_per_1k_from_model — real pricing lives in the model_pricing join
 # --------------------------------------------------------------------------- #
 
+
 def test_cost_from_model_pricing_join_dict():
     # model_pricing values are per-token; per-1k = value * 1000
     m = _model(model_pricing={"price_per_input_token": 1.4e-06})
@@ -88,12 +89,13 @@ def test_falls_back_to_legacy_column_when_no_join():
 
 
 def test_zero_or_missing_join_price_falls_through():
-    assert cost_per_1k_from_model(
-        _model(model_pricing={"price_per_input_token": 0.0}, pricing_original_prompt=None)
-    ) is None
-    assert cost_per_1k_from_model(
-        _model(model_pricing={}, pricing_original_prompt=None)
-    ) is None
+    assert (
+        cost_per_1k_from_model(
+            _model(model_pricing={"price_per_input_token": 0.0}, pricing_original_prompt=None)
+        )
+        is None
+    )
+    assert cost_per_1k_from_model(_model(model_pricing={}, pricing_original_prompt=None)) is None
 
 
 def test_offer_built_from_model_pricing_join():
@@ -109,10 +111,18 @@ def test_offer_built_from_model_pricing_join():
 
 def test_dedup_keeps_cheapest_across_join_prices():
     models = [
-        _model(id="1", provider_id="98", pricing_original_prompt=None,
-               model_pricing={"price_per_input_token": 9e-07}),
-        _model(id="2", provider_id="98", pricing_original_prompt=None,
-               model_pricing={"price_per_input_token": 4e-07}),
+        _model(
+            id="1",
+            provider_id="98",
+            pricing_original_prompt=None,
+            model_pricing={"price_per_input_token": 9e-07},
+        ),
+        _model(
+            id="2",
+            provider_id="98",
+            pricing_original_prompt=None,
+            model_pricing={"price_per_input_token": 4e-07},
+        ),
     ]
     rows = build_offer_rows(models, PROVIDERS)
     assert len(rows) == 1
@@ -143,16 +153,25 @@ def test_same_model_different_casing_groups_across_providers():
     # The core arbitrage win: two providers naming one model differently must
     # land in ONE group so the router can compare their prices.
     models = [
-        _model(id="1", provider_id="98", provider_model_id="Qwen/Qwen2.5-72B-Instruct",
-               pricing_original_prompt="0.0000009"),
-        _model(id="2", provider_id="110", provider_model_id="qwen/qwen-2.5-72b-instruct",
-               pricing_original_prompt="0.0000004"),
+        _model(
+            id="1",
+            provider_id="98",
+            provider_model_id="Qwen/Qwen2.5-72B-Instruct",
+            pricing_original_prompt="0.0000009",
+        ),
+        _model(
+            id="2",
+            provider_id="110",
+            provider_model_id="qwen/qwen-2.5-72b-instruct",
+            pricing_original_prompt="0.0000004",
+        ),
     ]
     rows = build_offer_rows(models, PROVIDERS)
-    assert len({o["canonical_id"] for o in rows}) == 1          # one group
+    assert len({o["canonical_id"] for o in rows}) == 1  # one group
     assert {o["native_id"] for o in rows} == {
-        "Qwen/Qwen2.5-72B-Instruct", "qwen/qwen-2.5-72b-instruct",
-    }                                                            # native ids preserved
+        "Qwen/Qwen2.5-72B-Instruct",
+        "qwen/qwen-2.5-72b-instruct",
+    }  # native ids preserved
     assert offer_summary(rows)["multi_provider_models"] == 1
 
 
@@ -160,10 +179,18 @@ def test_alias_map_merges_across_orgs():
     from src.services.model_canonicalization import offer_group_key
 
     models = [
-        _model(id="1", provider_id="98", provider_model_id="z-ai/glm-4.7",
-               pricing_original_prompt="0.0000009"),
-        _model(id="2", provider_id="110", provider_model_id="zai-org/GLM-4.7",
-               pricing_original_prompt="0.0000004"),
+        _model(
+            id="1",
+            provider_id="98",
+            provider_model_id="z-ai/glm-4.7",
+            pricing_original_prompt="0.0000009",
+        ),
+        _model(
+            id="2",
+            provider_id="110",
+            provider_model_id="zai-org/GLM-4.7",
+            pricing_original_prompt="0.0000004",
+        ),
     ]
     alias_map = {"zai-org/glm-4.7": "z-ai/glm-4.7"}
     rows = build_offer_rows(models, PROVIDERS, alias_map)

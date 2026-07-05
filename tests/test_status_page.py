@@ -88,7 +88,9 @@ async def test_get_overall_status(mock_supabase, client, mock_supabase_data):
     # Mock provider health data
     mock_response = MagicMock()
     mock_response.data = mock_supabase_data["providers"]
-    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = (
+        mock_response
+    )
 
     # Mock incidents count
     mock_incidents = MagicMock()
@@ -456,7 +458,9 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
     # Mock provider health data
     mock_response = MagicMock()
     mock_response.data = inconsistent_providers
-    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = (
+        mock_response
+    )
 
     # Mock incidents count
     mock_incidents = MagicMock()
@@ -547,7 +551,9 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = providers_with_gateways
-    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = (
+        mock_response
+    )
 
     mock_incidents = MagicMock()
     mock_incidents.count = 0
@@ -581,7 +587,9 @@ async def test_empty_providers_returns_zero_gateways(mock_supabase, client):
     """Test that empty provider data returns zero gateway metrics."""
     mock_response = MagicMock()
     mock_response.data = []
-    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = (
+        mock_response
+    )
 
     response = client.get("/v1/status/")
 
@@ -614,7 +622,9 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = all_unhealthy_providers
-    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = (
+        mock_response
+    )
 
     mock_incidents = MagicMock()
     mock_incidents.count = 5

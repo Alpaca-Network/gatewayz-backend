@@ -31,7 +31,7 @@ _SEP_RE = re.compile(r"[-_.]")
 def _strip_rehost_prefix(mid: str) -> str:
     for p in _REHOST_PREFIXES:
         if mid.startswith(p):
-            return mid[len(p):]
+            return mid[len(p) :]
     return mid
 
 
@@ -84,7 +84,9 @@ def load_alias_map() -> dict[str, str]:
         return {}
 
 
-def suspicious_merges(model_rows: list[dict], alias_map: dict[str, str] | None = None) -> list[dict]:
+def suspicious_merges(
+    model_rows: list[dict], alias_map: dict[str, str] | None = None
+) -> list[dict]:
     """Flag offer groups whose members disagree on a hard attribute.
 
     Different context windows (>2x) within one group usually means the key

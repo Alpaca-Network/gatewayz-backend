@@ -85,7 +85,9 @@ class TestRebuildFullCatalogFromProviders:
                 "src.services.cache.model_catalog_cache.get_cached_provider_catalog",
                 side_effect=_provider_catalog_side_effect,
             ),
-            patch("src.services.cache.model_catalog_cache.get_model_catalog_cache") as mock_cache_cls,
+            patch(
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache"
+            ) as mock_cache_cls,
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
             mock_cache_cls.return_value = MagicMock()
@@ -111,7 +113,8 @@ class TestRebuildFullCatalogFromProviders:
                 side_effect=_provider_catalog_side_effect,
             ),
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=mock_cache
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=mock_cache,
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog") as mock_set_local,
         ):
@@ -140,7 +143,8 @@ class TestRebuildFullCatalogFromProviders:
                 side_effect=_side_effect,
             ),
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=MagicMock(),
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
@@ -162,9 +166,13 @@ class TestRebuildFullCatalogFromProviders:
 
         with (
             patch("src.config.supabase_config.get_client_for_query", return_value=mock_client),
-            patch("src.services.cache.model_catalog_cache.get_cached_provider_catalog", return_value=[]),
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=mock_cache
+                "src.services.cache.model_catalog_cache.get_cached_provider_catalog",
+                return_value=[],
+            ),
+            patch(
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=mock_cache,
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
@@ -182,7 +190,8 @@ class TestRebuildFullCatalogFromProviders:
         with (
             patch("src.config.supabase_config.get_client_for_query", return_value=mock_client),
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=MagicMock(),
             ),
         ):
             from src.services.cache.model_catalog_cache import rebuild_full_catalog_from_providers
@@ -209,7 +218,8 @@ class TestRebuildFullCatalogFromProviders:
                 side_effect=_provider_catalog_side_effect,
             ) as mock_fetch,
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=MagicMock(),
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
@@ -236,7 +246,8 @@ class TestRebuildFullCatalogFromProviders:
                 side_effect=_side_effect,
             ),
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=MagicMock(),
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
@@ -262,7 +273,8 @@ class TestRebuildFullCatalogFromProviders:
                 return_value=_make_models("huggingface", 3),
             ) as mock_fetch,
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=MagicMock()
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=MagicMock(),
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
         ):
@@ -285,10 +297,14 @@ class TestRebuildIntegrationWithGetCachedFullCatalog:
 
         with (
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=mock_cache
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=mock_cache,
             ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
-            patch("src.services.cache.local_memory_cache.get_local_catalog", return_value=(None, False)),
+            patch(
+                "src.services.cache.local_memory_cache.get_local_catalog",
+                return_value=(None, False),
+            ),
         ):
             from src.services.cache.model_catalog_cache import get_cached_full_catalog
 
@@ -303,9 +319,13 @@ class TestRebuildIntegrationWithGetCachedFullCatalog:
 
         with (
             patch(
-                "src.services.cache.model_catalog_cache.get_model_catalog_cache", return_value=mock_cache
+                "src.services.cache.model_catalog_cache.get_model_catalog_cache",
+                return_value=mock_cache,
             ),
-            patch("src.services.cache.local_memory_cache.get_local_catalog", return_value=(None, False)),
+            patch(
+                "src.services.cache.local_memory_cache.get_local_catalog",
+                return_value=(None, False),
+            ),
             patch("src.services.cache.local_memory_cache.set_local_catalog"),
             patch(
                 "src.services.cache.model_catalog_cache.rebuild_full_catalog_from_providers",

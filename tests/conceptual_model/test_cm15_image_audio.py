@@ -68,9 +68,7 @@ class TestCM1502ImageGenerationInsufficientCredits402:
             ),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await generate_images(
-                    mock_req, MagicMock(), MagicMock(), api_key="gw_test_key"
-                )
+                await generate_images(mock_req, MagicMock(), MagicMock(), api_key="gw_test_key")
             assert (
                 exc_info.value.status_code == 402
             ), f"Expected 402 for insufficient credits, got {exc_info.value.status_code}"

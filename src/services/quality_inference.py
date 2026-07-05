@@ -93,7 +93,7 @@ _CODER_MARKERS = ("coder", "-code", "code-", "codestral", "starcoder", "deepseek
 class QualitySignals:
     """Normalized inputs for one model. Any field may be None/False if unknown."""
 
-    name: str | None = None            # display name or id — parsed for size/variant
+    name: str | None = None  # display name or id — parsed for size/variant
     is_reasoning: bool = False
     context_length: int | None = None  # small nudge; not a primary driver
 

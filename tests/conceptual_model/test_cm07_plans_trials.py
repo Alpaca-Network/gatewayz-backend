@@ -15,7 +15,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException
 
-
 # ---------------------------------------------------------------------------
 # CM-7.1  New user gets $5.00 credits — REMOVED (trial system removed).
 # The trial system was intentionally removed; new users no longer receive

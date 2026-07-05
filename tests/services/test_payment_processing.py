@@ -678,9 +678,7 @@ class TestWebhooks:
         stripe_service._handle_checkout_completed(webhook_session)
 
         mock_session_retrieve.assert_called_once_with("cs_missing_everything")
-        mock_payment_intent_retrieve.assert_called_once_with(
-            "pi_metadata_source"
-        )
+        mock_payment_intent_retrieve.assert_called_once_with("pi_metadata_source")
 
         mock_add_credits.assert_called_once()
         add_kwargs = mock_add_credits.call_args[1]
