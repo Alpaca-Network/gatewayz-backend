@@ -49,6 +49,7 @@ async def _handle_credits_and_usage(
     elapsed_ms: int,
     is_streaming: bool = False,
     request_id: str | None = None,
+    already_charged: bool = False,
 ) -> float:
     """
     Centralized credit/trial handling logic.
@@ -59,6 +60,9 @@ async def _handle_credits_and_usage(
     Args:
         is_streaming: Whether this is a streaming request (affects retry behavior)
         request_id: Optional UUID idempotency key to prevent duplicate deductions
+        already_charged: When True, the unified handler already deducted credits and
+            recorded usage; skip the duplicate deduction here (rate-limit + shadow
+            ledger bookkeeping still runs).
 
     Returns: cost (float)
     """
@@ -76,6 +80,7 @@ async def _handle_credits_and_usage(
         endpoint="/v1/chat/completions",
         is_streaming=is_streaming,
         request_id=request_id,
+        already_charged=already_charged,
     )
 
 

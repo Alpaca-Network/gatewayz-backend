@@ -37,6 +37,101 @@ def _maybe_log_missing_table_hint(error: Exception) -> None:
         _missing_table_warning_logged = True
 
 
+def _is_duplicate_error(error: Exception) -> bool:
+    """True if *error* is a Postgres unique-violation (duplicate event_id)."""
+    message = str(error).lower()
+    return (
+        "23505" in message
+        or "duplicate key" in message
+        or "already exists" in message
+        or "unique constraint" in message
+    )
+
+
+def claim_event(
+    event_id: str,
+    event_type: str,
+    user_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Atomically claim a webhook event for processing (insert-first idempotency).
+
+    Inserts the event row up front and relies on the UNIQUE constraint on
+    ``stripe_webhook_events.event_id`` to reject a second, concurrent delivery of
+    the same event. This closes the check-then-act (TOCTOU) race that the old
+    ``is_event_processed`` + ``record_processed_event`` pair had.
+
+    Returns one of:
+      * ``"claimed"``     — this caller owns the event; run the handler, then keep
+                            the row (it is the permanent processed marker) on
+                            success, or call :func:`release_event` on failure so
+                            Stripe's retry can re-claim it.
+      * ``"duplicate"``   — the event was already claimed/processed; skip it.
+      * ``"unavailable"`` — the table is missing or the DB is unreachable; the
+                            caller should fail OPEN and rely on downstream
+                            (grant-level) idempotency rather than dropping the
+                            event.
+    """
+    try:
+
+        def _claim(client):
+            return (
+                client.table("stripe_webhook_events")
+                .insert(
+                    {
+                        "event_id": event_id,
+                        "event_type": event_type,
+                        "user_id": user_id,
+                        "metadata": metadata or {},
+                        "processed_at": datetime.now(UTC).isoformat(),
+                    }
+                )
+                .execute()
+            )
+
+        execute_with_retry(_claim, max_retries=2, retry_delay=0.2)
+        logger.info(f"Claimed webhook event for processing: {event_id} ({event_type})")
+        return "claimed"
+
+    except Exception as e:
+        if _is_duplicate_error(e):
+            logger.warning(f"Duplicate webhook event detected, skipping: {event_id}")
+            return "duplicate"
+        _maybe_log_missing_table_hint(e)
+        # Table missing or DB error: do NOT silently drop the event. Signal the
+        # caller to fail open and lean on grant-level idempotency (request_id).
+        logger.critical(
+            "Webhook dedup unavailable for %s (%s). Processing WITHOUT dedup; "
+            "relying on downstream idempotency. Apply migrations if this persists.",
+            event_id,
+            type(e).__name__,
+        )
+        return "unavailable"
+
+
+def release_event(event_id: str) -> None:
+    """Release a previously claimed event so Stripe's retry can re-process it.
+
+    Called when a handler raises after :func:`claim_event` returned ``"claimed"``,
+    so a transient failure doesn't permanently mark the event as processed.
+    """
+    try:
+
+        def _release(client):
+            return (
+                client.table("stripe_webhook_events")
+                .delete()
+                .eq("event_id", event_id)
+                .execute()
+            )
+
+        execute_with_retry(_release, max_retries=2, retry_delay=0.2)
+        logger.info(f"Released webhook event claim after handler failure: {event_id}")
+    except Exception as e:
+        _maybe_log_missing_table_hint(e)
+        logger.error(f"Failed to release webhook event claim {event_id}: {e}", exc_info=True)
+
+
 def is_event_processed(event_id: str) -> bool:
     """
     Check if a webhook event has already been processed
