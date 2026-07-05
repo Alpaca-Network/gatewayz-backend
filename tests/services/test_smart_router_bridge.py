@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import src.services.smart_router_bridge as bridge
+from src.services.model_canonicalization import offer_group_key
 from src.services.smart_router_bridge import (
     reorder_chain_by_ranking,
     reorder_provider_chain,
@@ -96,3 +98,53 @@ def test_unknown_policy_falls_back_to_balanced():
     # should not raise; returns a valid permutation
     out = reorder_provider_chain("m", chain, policy="nonsense", offers=offers)
     assert sorted(out) == sorted(chain)
+
+
+# --------------------------------------------------------------------------- #
+# _load_offers is queried by the cost-routing group key, not the raw model
+# --------------------------------------------------------------------------- #
+
+def test_load_offers_called_with_group_key(monkeypatch):
+    captured = {}
+
+    def _fake_load_offers(arg):
+        captured["arg"] = arg
+        return []
+
+    # Keep hermetic: no DB alias lookup, no DB offer lookup.
+    monkeypatch.setattr(bridge, "load_alias_map", lambda: {})
+    monkeypatch.setattr(bridge, "_load_offers", _fake_load_offers)
+
+    model = "Qwen/Qwen2.5-72B"
+    reorder_provider_chain(model, ["a", "b"], policy="cost")
+
+    assert captured["arg"] == offer_group_key(model, {})
+
+
+def test_passthrough_when_load_offers_returns_empty(monkeypatch):
+    monkeypatch.setattr(bridge, "load_alias_map", lambda: {})
+    monkeypatch.setattr(bridge, "_load_offers", lambda arg: [])
+
+    chain = ["a", "b"]
+    assert reorder_provider_chain("Qwen/Qwen2.5-72B", chain, policy="cost") == chain
+
+
+def test_group_keyed_offers_rank_cheapest_first():
+    """Regression: offers carry the GROUP KEY as canonical_id; the RoutingRequest
+    must use that same key or every offer is filtered out and the chain passes
+    through unranked (cheapest would not lead)."""
+    from src.services.smart_router_bridge import reorder_provider_chain
+
+    gk = "qwen/qwen2572binstruct"  # an offer_group_key value
+    offers = [
+        {"canonical_id": gk, "provider_slug": "novita", "native_id": "n",
+         "upstream_cost": 0.038, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
+         "is_active": True},
+        {"canonical_id": gk, "provider_slug": "openrouter", "native_id": "o",
+         "upstream_cost": 0.00036, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
+         "is_active": True},
+    ]
+    out = reorder_provider_chain(
+        "Qwen/Qwen2.5-72B-Instruct", ["novita", "openrouter"], policy="cost", offers=offers
+    )
+    assert out[0] == "openrouter"  # cheapest leads

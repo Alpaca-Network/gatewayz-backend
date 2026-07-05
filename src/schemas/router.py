@@ -147,6 +147,7 @@ class ModelCapabilities:
 
     model_id: str
     provider: str
+    canonical_id: str | None = None  # family key for quality-prior lookup
     tools: bool = False
     json_mode: bool = False
     json_schema: bool = False
@@ -155,6 +156,7 @@ class ModelCapabilities:
     tool_schema_adherence: str = "medium"  # "high", "medium", "low"
     cost_per_1k_input: float = 0.01
     cost_per_1k_output: float = 0.01
+    categories: tuple[str, ...] = ()  # derived catalog tags: cheapest/fastest/smartest/…
 
     def satisfies(self, required: RequiredCapabilities) -> bool:
         """Check if this model satisfies the required capabilities."""

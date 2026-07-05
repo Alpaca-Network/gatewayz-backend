@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 
+from src.services.model_canonicalization import load_alias_map, offer_group_key
 from src.services.smart_router import (
     DEFAULT_MARKUP,
     ProviderOffer,
@@ -123,15 +124,23 @@ def reorder_provider_chain(
     if not provider_chain or len(provider_chain) < 2:
         return provider_chain
     try:
-        rows = offers if offers is not None else _load_offers(model)
+        if offers is not None:
+            rows = offers
+        else:
+            rows = _load_offers(offer_group_key(model, load_alias_map()))
         if not rows:
             return provider_chain
         provider_offers = _offers_to_provider_offers(rows, markup)
         if not provider_offers:
             return provider_chain
+        # The RoutingRequest canonical_id MUST equal the offers' canonical_id (the
+        # cost-routing group key), or the smart router's eligibility check
+        # (offer.canonical_id != request.canonical_id) would exclude every offer
+        # and the chain would pass through unranked.
+        request_canonical = provider_offers[0].canonical_id
         ranked = build_failover_chain(
             provider_offers,
-            RoutingRequest(canonical_id=model, policy=_policy(policy)),
+            RoutingRequest(canonical_id=request_canonical, policy=_policy(policy)),
             markup,
         )
         ranked_slugs = [o.provider_slug for o in ranked]

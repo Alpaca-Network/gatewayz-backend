@@ -722,9 +722,12 @@ async def chat_completions(
 
         # Store original model for response and routing logic
         original_model = req.model
-        is_auto_route = original_model and original_model.lower().startswith(
-            AUTO_ROUTE_MODEL_PREFIX
-        )
+        # Single source of truth for the auto-route trigger: the `router*` prefix
+        # plus the ergonomic `auto` / `auto:<opt>` / `gatewayz/auto` aliases
+        # (NOT `openrouter/auto`, which is a real passthrough model).
+        from src.services.prompt_router import is_auto_route_request
+
+        is_auto_route = bool(original_model) and is_auto_route_request(original_model)
 
         # === 2.3-2.5) Model routing (auto / general / code) ===
         code_router_decision, is_code_route = await resolve_model_routing(

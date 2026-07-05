@@ -6,6 +6,7 @@ import pytest
 
 from src.services.model_offers_projection import (
     build_offer_rows,
+    cost_per_1k_from_model,
     filter_multi_provider,
     normalized_cost_per_1k,
     offer_summary,
@@ -57,19 +58,117 @@ def test_none_and_zero_and_garbage_return_none():
 
 
 # --------------------------------------------------------------------------- #
+# cost_per_1k_from_model — real pricing lives in the model_pricing join
+# --------------------------------------------------------------------------- #
+
+def test_cost_from_model_pricing_join_dict():
+    # model_pricing values are per-token; per-1k = value * 1000
+    m = _model(model_pricing={"price_per_input_token": 1.4e-06})
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0014)
+
+
+def test_cost_from_model_pricing_join_list():
+    # Supabase may return the join as a single-element list
+    m = _model(model_pricing=[{"price_per_input_token": 3e-07}])
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0003)
+
+
+def test_model_pricing_preferred_over_legacy_column():
+    # When both are present, the real per-provider join price wins
+    m = _model(
+        pricing_original_prompt="0.0000009",  # legacy → 0.0009/1k
+        model_pricing={"price_per_input_token": 1e-07},  # join → 0.0001/1k
+    )
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0001)
+
+
+def test_falls_back_to_legacy_column_when_no_join():
+    m = _model(model_pricing=None, pricing_original_prompt="0.0000005")
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0005)
+
+
+def test_zero_or_missing_join_price_falls_through():
+    assert cost_per_1k_from_model(
+        _model(model_pricing={"price_per_input_token": 0.0}, pricing_original_prompt=None)
+    ) is None
+    assert cost_per_1k_from_model(
+        _model(model_pricing={}, pricing_original_prompt=None)
+    ) is None
+
+
+def test_offer_built_from_model_pricing_join():
+    # End-to-end: a model with only the join priced still yields an offer
+    m = _model(
+        pricing_original_prompt=None,
+        model_pricing={"price_per_input_token": 6e-07},
+    )
+    rows = build_offer_rows([m], PROVIDERS)
+    assert len(rows) == 1
+    assert rows[0]["upstream_cost"] == pytest.approx(0.0006)
+
+
+def test_dedup_keeps_cheapest_across_join_prices():
+    models = [
+        _model(id="1", provider_id="98", pricing_original_prompt=None,
+               model_pricing={"price_per_input_token": 9e-07}),
+        _model(id="2", provider_id="98", pricing_original_prompt=None,
+               model_pricing={"price_per_input_token": 4e-07}),
+    ]
+    rows = build_offer_rows(models, PROVIDERS)
+    assert len(rows) == 1
+    assert rows[0]["upstream_cost"] == pytest.approx(0.0004)
+
+
+# --------------------------------------------------------------------------- #
 # build_offer_rows
 # --------------------------------------------------------------------------- #
 
 
 def test_basic_offer_built():
+    from src.services.model_canonicalization import offer_group_key
+
     rows = build_offer_rows([_model()], PROVIDERS)
     assert len(rows) == 1
     o = rows[0]
-    assert o["canonical_id"] == "meta/llama-3.1-8b"
+    # canonical_id is the cost-routing GROUP KEY; native_id keeps the raw id
+    assert o["canonical_id"] == offer_group_key("meta/llama-3.1-8b")
+    assert o["native_id"] == "meta/llama-3.1-8b"
     assert o["provider_slug"] == "onerouter"
     assert o["upstream_cost"] == pytest.approx(0.0005)
     assert o["quality_prior"] == 0.5
     assert o["is_active"] is True
+
+
+def test_same_model_different_casing_groups_across_providers():
+    # The core arbitrage win: two providers naming one model differently must
+    # land in ONE group so the router can compare their prices.
+    models = [
+        _model(id="1", provider_id="98", provider_model_id="Qwen/Qwen2.5-72B-Instruct",
+               pricing_original_prompt="0.0000009"),
+        _model(id="2", provider_id="110", provider_model_id="qwen/qwen-2.5-72b-instruct",
+               pricing_original_prompt="0.0000004"),
+    ]
+    rows = build_offer_rows(models, PROVIDERS)
+    assert len({o["canonical_id"] for o in rows}) == 1          # one group
+    assert {o["native_id"] for o in rows} == {
+        "Qwen/Qwen2.5-72B-Instruct", "qwen/qwen-2.5-72b-instruct",
+    }                                                            # native ids preserved
+    assert offer_summary(rows)["multi_provider_models"] == 1
+
+
+def test_alias_map_merges_across_orgs():
+    from src.services.model_canonicalization import offer_group_key
+
+    models = [
+        _model(id="1", provider_id="98", provider_model_id="z-ai/glm-4.7",
+               pricing_original_prompt="0.0000009"),
+        _model(id="2", provider_id="110", provider_model_id="zai-org/GLM-4.7",
+               pricing_original_prompt="0.0000004"),
+    ]
+    alias_map = {"zai-org/glm-4.7": "z-ai/glm-4.7"}
+    rows = build_offer_rows(models, PROVIDERS, alias_map)
+    assert len({o["canonical_id"] for o in rows}) == 1
+    assert rows[0]["canonical_id"] == offer_group_key("z-ai/glm-4.7", alias_map)
 
 
 def test_skips_inactive_nonchat_and_unpriced():

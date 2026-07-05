@@ -1010,6 +1010,7 @@ def _sync_categories(supabase, upserted_models: list[dict[str, Any]]) -> None:
         reduce_quality_scores,
         signals_from_model_row,
     )
+    from src.services.quality_inference import infer_quality_from_row
 
     try:
         model_ids = [m["id"] for m in upserted_models if m.get("id")]
@@ -1065,6 +1066,12 @@ def _sync_categories(supabase, upserted_models: list[dict[str, Any]]) -> None:
             overall, code = reduce_quality_scores(
                 quality_by_canonical.get(model.get("canonical_id") or "", {})
             )
+            # Gap-fill: models with no real (manual/benchmark) quality row get a
+            # deterministic inferred prior so smartest/coding/tier tags populate
+            # for the whole long-tail catalog automatically. Real scores always win.
+            if overall is None:
+                inferred = infer_quality_from_row(model)
+                overall, code = reduce_quality_scores(inferred)
             sig = signals_from_model_row(
                 model,
                 input_price_per_token=price.get("in"),
