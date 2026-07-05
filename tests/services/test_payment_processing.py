@@ -574,11 +574,20 @@ class TestWebhooks:
             stripe_session_id="cs_test_123",
         )
 
+    # get_payment is the idempotency guard's DB lookup; mock it to None so a
+    # pre-existing "completed" payment in a shared CI database can't trip the
+    # "already completed; skipping duplicate credit grant" short-circuit.
+    @patch("src.services.billing.payments.get_payment", return_value=None)
     @patch("stripe.checkout.Session.retrieve")
     @patch("src.services.billing.payments.add_credits_to_user")
     @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_refetches_metadata_when_missing(
-        self, mock_update_payment, mock_add_credits, mock_session_retrieve, stripe_service
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        mock_get_payment,
+        stripe_service,
     ):
         """Ensure checkout handler refetches the session when metadata is missing"""
 
@@ -722,6 +731,9 @@ class TestWebhooks:
 
     @patch("stripe.Webhook.construct_event")
     @patch("src.services.billing.payments.claim_event")
+    # get_payment is the idempotency guard; None means "no prior completed payment"
+    # so a shared CI database can't short-circuit the credit grant.
+    @patch("src.services.billing.payments.get_payment", return_value=None)
     @patch("src.services.billing.payments.get_payment_by_stripe_intent")
     @patch("src.services.billing.payments.add_credits_to_user")
     @patch("src.services.billing.payments.update_payment_status")
@@ -729,6 +741,7 @@ class TestWebhooks:
         self,
         mock_update_payment,
         mock_add_credits,
+        mock_get_payment_by_intent,
         mock_get_payment,
         mock_claim,
         mock_construct_event,
@@ -755,7 +768,7 @@ class TestWebhooks:
                 }
             return None
 
-        mock_get_payment.side_effect = _lookup
+        mock_get_payment_by_intent.side_effect = _lookup
 
         mock_event = {
             "id": "evt_missing_meta",
