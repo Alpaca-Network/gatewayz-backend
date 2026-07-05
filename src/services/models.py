@@ -7,7 +7,7 @@ from concurrent.futures import as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter

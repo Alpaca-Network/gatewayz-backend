@@ -185,7 +185,8 @@ async def send_usage_report(
             "total_requests": 1000,
             "tokens_used": 50000,
             "credits_spent": 5.00,
-            "remaining_credits": float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0),
+            "remaining_credits": float(user.get("subscription_allowance", 0) or 0)
+            + float(user.get("purchased_credits", 0) or 0),
         }
 
         success = enhanced_notification_service.send_monthly_usage_report(

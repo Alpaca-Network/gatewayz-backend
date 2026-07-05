@@ -35,10 +35,10 @@ class CategoryRule:
     """One tunable rule, mirroring a row of the category_rules table."""
 
     category: str
-    dimension: str          # blended_price | latency_tier | context_length | quality
-                            # | quality_code | is_reasoning | modality | is_free
-                            # | value_ratio | quality_band
-    operator: str           # lte | gte | eq | contains | band
+    dimension: str  # blended_price | latency_tier | context_length | quality
+    # | quality_code | is_reasoning | modality | is_free
+    # | value_ratio | quality_band
+    operator: str  # lte | gte | eq | contains | band
     threshold: float | None = None
     threshold2: float | None = None
     params: dict[str, Any] = field(default_factory=dict)
@@ -48,16 +48,22 @@ class CategoryRule:
 # In-code fallback rules — MUST stay in sync with the seed block of
 # supabase/migrations/20260704000000_add_model_categories.sql.
 DEFAULT_RULES: list[CategoryRule] = [
-    CategoryRule("cheapest", "blended_price", "lte", 0.50,
-                 params={"weight_input": 0.25, "weight_output": 0.75}),
+    CategoryRule(
+        "cheapest",
+        "blended_price",
+        "lte",
+        0.50,
+        params={"weight_input": 0.25, "weight_output": 0.75},
+    ),
     CategoryRule("fastest", "latency_tier", "lte", 2),
     CategoryRule("largest", "context_length", "gte", 200_000),
     CategoryRule("smartest", "quality", "gte", 85),
     CategoryRule("long-context", "context_length", "gte", 128_000),
     CategoryRule("coding", "quality_code", "gte", 85),
     CategoryRule("reasoning", "is_reasoning", "eq"),
-    CategoryRule("vision", "modality", "contains",
-                 params={"needles": ["image", "vision", "multimodal"]}),
+    CategoryRule(
+        "vision", "modality", "contains", params={"needles": ["image", "vision", "multimodal"]}
+    ),
     CategoryRule("free", "is_free", "eq"),
     CategoryRule("balanced", "value_ratio", "gte", 200),
     CategoryRule("flagship", "quality_band", "band", 90),
@@ -75,10 +81,10 @@ class ModelSignals:
     is_reasoning: bool = False
     is_free: bool = False
     modality: str | None = None
-    input_price_per_token: float | None = None   # normalized $/token
+    input_price_per_token: float | None = None  # normalized $/token
     output_price_per_token: float | None = None  # normalized $/token
-    quality_overall: float | None = None         # 0..100
-    quality_code: float | None = None            # 0..100
+    quality_overall: float | None = None  # 0..100
+    quality_code: float | None = None  # 0..100
 
 
 # --------------------------------------------------------------------------- #
@@ -297,9 +303,7 @@ def load_rules(supabase: Any = None, force_refresh: bool = False) -> list[Catego
                     category=r["category"],
                     dimension=r["dimension"],
                     operator=r["operator"],
-                    threshold=(
-                        float(r["threshold"]) if r.get("threshold") is not None else None
-                    ),
+                    threshold=(float(r["threshold"]) if r.get("threshold") is not None else None),
                     threshold2=(
                         float(r["threshold2"]) if r.get("threshold2") is not None else None
                     ),

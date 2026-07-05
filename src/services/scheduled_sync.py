@@ -495,9 +495,7 @@ def start_price_refresh_scheduler():
             coalesce=True,  # Combine missed runs
         )
         _price_scheduler.start()
-        logger.info(
-            "✅ Price refresh scheduler started (next run in %s minutes)", interval_minutes
-        )
+        logger.info("✅ Price refresh scheduler started (next run in %s minutes)", interval_minutes)
     except Exception as e:
         logger.error(f"❌ Failed to start price refresh scheduler: {e}")
         logger.exception(e)
@@ -620,7 +618,9 @@ def start_ledger_reconciliation_scheduler():
         return
 
     interval_minutes = Config.LEDGER_RECONCILIATION_INTERVAL_MINUTES
-    logger.info("Starting credit-ledger reconciliation scheduler (interval: %s min)", interval_minutes)
+    logger.info(
+        "Starting credit-ledger reconciliation scheduler (interval: %s min)", interval_minutes
+    )
     try:
         _recon_scheduler = AsyncIOScheduler()
         _recon_scheduler.add_job(
@@ -633,7 +633,9 @@ def start_ledger_reconciliation_scheduler():
             coalesce=True,
         )
         _recon_scheduler.start()
-        logger.info("✅ Ledger reconciliation scheduler started (next run in %s min)", interval_minutes)
+        logger.info(
+            "✅ Ledger reconciliation scheduler started (next run in %s min)", interval_minutes
+        )
     except Exception as e:
         logger.error("❌ Failed to start ledger reconciliation scheduler: %s", e)
         logger.exception(e)

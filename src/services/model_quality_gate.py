@@ -32,9 +32,18 @@ _JUNK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(GPTQ|AWQ|EXL2|EXL3)\b", re.I), "quant:weightformat"),
     (re.compile(r"(?<![a-z0-9])(?:int4|int8|4bit|8bit|3bit|2bit)(?![a-z0-9])", re.I), "quant:bits"),
     # Frankenmerges / passthrough merges — hobbyist noise.
-    (re.compile(r"(?<![a-z0-9])(?:slerp|frankenmerge|passthrough|della|dare[-_]?ties|ties[-_]?merge)(?![a-z0-9])", re.I), "merge"),
+    (
+        re.compile(
+            r"(?<![a-z0-9])(?:slerp|frankenmerge|passthrough|della|dare[-_]?ties|ties[-_]?merge)(?![a-z0-9])",
+            re.I,
+        ),
+        "merge",
+    ),
     # RP / ERP / uncensored spam catalogs.
-    (re.compile(r"(?<![a-z0-9])(?:erp|nsfw|waifu|uncensored|roleplay)(?![a-z0-9])", re.I), "adult-rp"),
+    (
+        re.compile(r"(?<![a-z0-9])(?:erp|nsfw|waifu|uncensored|roleplay)(?![a-z0-9])", re.I),
+        "adult-rp",
+    ),
 ]
 
 

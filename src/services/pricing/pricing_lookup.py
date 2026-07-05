@@ -16,11 +16,9 @@ If you add a new pricing source, use normalize_pricing_dict() with the correct
 PricingFormat constant before returning values from this module.
 """
 
-import json
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -418,7 +416,9 @@ def _resolve_pricing_from_db(
                         if prompt_price is not None and completion_price is not None:
                             logger.debug(
                                 "[DB] Pricing for %s via %s=%s (model_pricing table)",
-                                model_id, column, candidate,
+                                model_id,
+                                column,
+                                candidate,
                             )
                             return {
                                 "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
@@ -441,12 +441,12 @@ def _resolve_pricing_from_db(
                         if prompt_price is not None and completion_price is not None:
                             logger.debug(
                                 "[DB] Pricing for %s via %s=%s (metadata.pricing_raw)",
-                                model_id, column, candidate,
+                                model_id,
+                                column,
+                                candidate,
                             )
                             return {
-                                "prompt": validate_pricing_value(
-                                    prompt_price, "prompt", model_id
-                                ),
+                                "prompt": validate_pricing_value(prompt_price, "prompt", model_id),
                                 "completion": validate_pricing_value(
                                     completion_price, "completion", model_id
                                 ),
@@ -562,9 +562,7 @@ def get_all_pricing_batch() -> dict[str, dict]:
                         "request": validate_pricing_value(
                             pricing_raw.get("request", 0), "request", key
                         ),
-                        "image": validate_pricing_value(
-                            pricing_raw.get("image", 0), "image", key
-                        ),
+                        "image": validate_pricing_value(pricing_raw.get("image", 0), "image", key),
                         "source": "metadata_batch",
                     }
 

@@ -73,9 +73,7 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         return 0.1
 
     _on_vercel = bool(os.getenv("VERCEL"))
-    _profiles_rate = (
-        0.0 if _on_vercel else float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.05"))
-    )
+    _profiles_rate = 0.0 if _on_vercel else float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.05"))
     _sentry_init_kwargs = {
         "dsn": Config.SENTRY_DSN,
         "send_default_pii": True,
@@ -349,7 +347,6 @@ def create_app() -> FastAPI:
         # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking).
         # Hard cap at 5 s so a slow Upstash round-trip never causes the Prometheus scrape
         # to time out (scrape_timeout=10s in prometheus.yml → up{job="gatewayz_production"}=0).
-        import asyncio
 
         try:
             await asyncio.wait_for(
@@ -526,7 +523,10 @@ def create_app() -> FastAPI:
         ("payments", "Stripe Payments"),
         ("chat_history", "Chat History"),
         ("share", "Chat Share Links"),  # Shareable chat links
-        ("ranking", "Model Ranking"),  # Re-enabled — frontend model dropdowns depend on /ranking/models
+        (
+            "ranking",
+            "Model Ranking",
+        ),  # Re-enabled — frontend model dropdowns depend on /ranking/models
         ("activity", "Activity Tracking"),
         ("coupons", "Coupon Management"),
         ("referral", "Referral System"),
@@ -542,7 +542,10 @@ def create_app() -> FastAPI:
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
-        ("user_provider_keys", "BYOK Provider Keys"),  # Bring-your-own-key management (pivot Phase 5)
+        (
+            "user_provider_keys",
+            "BYOK Provider Keys",
+        ),  # Bring-your-own-key management (pivot Phase 5)
     ]
 
     loaded_count = 0

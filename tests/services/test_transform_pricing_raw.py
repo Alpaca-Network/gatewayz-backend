@@ -22,9 +22,7 @@ def _transform(model):
         "src.services.model_catalog_sync.get_provider_format",
         return_value=PricingFormat.PER_TOKEN,
     ):
-        return transform_normalized_model_to_db_schema(
-            model, provider_id=1, provider_slug="vendor"
-        )
+        return transform_normalized_model_to_db_schema(model, provider_id=1, provider_slug="vendor")
 
 
 def test_pricing_raw_is_persisted():
@@ -44,9 +42,7 @@ def test_pricing_raw_is_persisted():
 def test_unknown_pricing_fields_are_omitted():
     # Only prompt provided -> completion/image/request (None) must NOT appear,
     # so a known price is never overwritten with a guessed zero downstream.
-    result = _transform(
-        {"id": "vendor/model-y", "name": "Y", "pricing": {"prompt": "0.000001"}}
-    )
+    result = _transform({"id": "vendor/model-y", "name": "Y", "pricing": {"prompt": "0.000001"}})
     pricing_raw = result["metadata"]["pricing_raw"]
     assert "prompt" in pricing_raw
     assert "completion" not in pricing_raw

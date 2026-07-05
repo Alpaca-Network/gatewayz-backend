@@ -355,7 +355,6 @@ class Config:
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
 
-
     # Cloudflare Workers AI Configuration
     CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
     CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")

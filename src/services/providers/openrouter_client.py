@@ -8,7 +8,6 @@ from fastapi import APIRouter
 from openai import APIStatusError, AsyncOpenAI, BadRequestError
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerError,
@@ -18,6 +17,7 @@ from src.services.connection_pool import get_openrouter_pooled_client, get_poole
 from src.services.model_catalog_cache import (
     update_provider_catalog_incremental,
 )
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.security_validators import sanitize_for_logging
 from src.utils.sentry_context import capture_provider_error
 

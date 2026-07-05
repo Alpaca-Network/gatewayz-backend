@@ -254,7 +254,9 @@ def _handle_existing_user(
         api_key_to_return = None
 
     # user_credits is only used for legacy migration detection below; tiered fields are used for response
-    user_credits = float(existing_user.get("subscription_allowance") or 0) + float(existing_user.get("purchased_credits") or 0)
+    user_credits = float(existing_user.get("subscription_allowance") or 0) + float(
+        existing_user.get("purchased_credits") or 0
+    )
 
     tier = existing_user.get("tier")
     tier_display_name = _get_tier_display_name(tier)
@@ -284,17 +286,25 @@ def _handle_existing_user(
         # Write back to DB so deduction RPC sees the correct values
         try:
             _supabase = supabase_config.get_supabase_client()
-            _supabase.table("users").update({
-                "subscription_allowance": subscription_allowance_dollars,
-                "purchased_credits": purchased_credits_dollars,
-            }).eq("id", existing_user["id"]).execute()
+            _supabase.table("users").update(
+                {
+                    "subscription_allowance": subscription_allowance_dollars,
+                    "purchased_credits": purchased_credits_dollars,
+                }
+            ).eq("id", existing_user["id"]).execute()
             logger.info(
                 "Migrated legacy credits for user %s: $%.2f → subscription_allowance=$%.2f, purchased_credits=$%.2f",
-                existing_user["id"], legacy_credits_dollars,
-                subscription_allowance_dollars, purchased_credits_dollars,
+                existing_user["id"],
+                legacy_credits_dollars,
+                subscription_allowance_dollars,
+                purchased_credits_dollars,
             )
         except Exception as _migration_err:
-            logger.warning("Failed to persist legacy credit migration for user %s: %s", existing_user["id"], _migration_err)
+            logger.warning(
+                "Failed to persist legacy credit migration for user %s: %s",
+                existing_user["id"],
+                _migration_err,
+            )
 
     total_credits_dollars = subscription_allowance_dollars + purchased_credits_dollars
 
@@ -1196,7 +1206,8 @@ async def privy_auth(
                         "user_id": created_user["id"],
                         "username": created_user.get("username", username),
                         "email": created_user.get("email", fallback_email),
-                        "credits": float(created_user.get("purchased_credits", 0) or 0) + float(created_user.get("subscription_allowance", 0) or 0),
+                        "credits": float(created_user.get("purchased_credits", 0) or 0)
+                        + float(created_user.get("subscription_allowance", 0) or 0),
                         "primary_api_key": api_key_value,
                         "api_key": api_key_value,
                         "scope_permissions": created_user.get("scope_permissions", {}),
@@ -1537,7 +1548,8 @@ async def register_user(
                     "user_id": created_user["id"],
                     "username": created_user.get("username", request.username),
                     "email": created_user.get("email", request.email),
-                    "credits": float(created_user.get("purchased_credits", 0) or 0) + float(created_user.get("subscription_allowance", 0) or 0),
+                    "credits": float(created_user.get("purchased_credits", 0) or 0)
+                    + float(created_user.get("subscription_allowance", 0) or 0),
                     "primary_api_key": api_key_value,
                     "api_key": api_key_value,
                     "scope_permissions": created_user.get("scope_permissions", {}),

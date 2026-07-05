@@ -261,7 +261,9 @@ class StripeService:
         parent = self._get_stripe_object_value(invoice, "parent")
         if parent:
             details = self._get_stripe_object_value(parent, "subscription_details")
-            sub_id = _as_id(self._get_stripe_object_value(details, "subscription")) if details else None
+            sub_id = (
+                _as_id(self._get_stripe_object_value(details, "subscription")) if details else None
+            )
             if sub_id:
                 return sub_id
 
@@ -275,7 +277,11 @@ class StripeService:
                     if line_parent
                     else None
                 )
-                sub_id = _as_id(self._get_stripe_object_value(item_details, "subscription")) if item_details else None
+                sub_id = (
+                    _as_id(self._get_stripe_object_value(item_details, "subscription"))
+                    if item_details
+                    else None
+                )
                 if sub_id:
                     return sub_id
         return None
@@ -2690,9 +2696,7 @@ class StripeService:
                 start_date = datetime.now(UTC)
                 _upd_period_end = self._get_subscription_period_end(updated_subscription)
                 if _upd_period_end:
-                    end_date = datetime.fromtimestamp(
-                        _upd_period_end, tz=UTC
-                    )
+                    end_date = datetime.fromtimestamp(_upd_period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -2957,9 +2961,7 @@ class StripeService:
                 start_date = datetime.now(UTC)
                 _upd_period_end = self._get_subscription_period_end(updated_subscription)
                 if _upd_period_end:
-                    end_date = datetime.fromtimestamp(
-                        _upd_period_end, tz=UTC
-                    )
+                    end_date = datetime.fromtimestamp(_upd_period_end, tz=UTC)
                 else:
                     end_date = start_date + timedelta(days=30)
 
@@ -3148,7 +3150,11 @@ class StripeService:
 
                 effective_date = (
                     datetime.fromtimestamp(_cancel_period_end, tz=UTC)
-                    if (_cancel_period_end := self._get_subscription_period_end(updated_subscription))
+                    if (
+                        _cancel_period_end := self._get_subscription_period_end(
+                            updated_subscription
+                        )
+                    )
                     else None
                 )
 

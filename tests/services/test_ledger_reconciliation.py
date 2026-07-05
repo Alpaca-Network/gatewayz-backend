@@ -23,19 +23,44 @@ def _settled(ref, user_id, allowance, purchased):
     total = Decimal(str(allowance)) + Decimal(str(purchased))
     rows = []
     if Decimal(str(allowance)) > 0:
-        rows.append({"ref": ref, "user_id": user_id, "account": ALLOWANCE,
-                     "debit": str(allowance), "credit": "0", "state": "settled"})
+        rows.append(
+            {
+                "ref": ref,
+                "user_id": user_id,
+                "account": ALLOWANCE,
+                "debit": str(allowance),
+                "credit": "0",
+                "state": "settled",
+            }
+        )
     if Decimal(str(purchased)) > 0:
-        rows.append({"ref": ref, "user_id": user_id, "account": PURCHASED,
-                     "debit": str(purchased), "credit": "0", "state": "settled"})
-    rows.append({"ref": ref, "user_id": user_id, "account": REVENUE,
-                 "debit": "0", "credit": str(total), "state": "settled"})
+        rows.append(
+            {
+                "ref": ref,
+                "user_id": user_id,
+                "account": PURCHASED,
+                "debit": str(purchased),
+                "credit": "0",
+                "state": "settled",
+            }
+        )
+    rows.append(
+        {
+            "ref": ref,
+            "user_id": user_id,
+            "account": REVENUE,
+            "debit": "0",
+            "credit": str(total),
+            "state": "settled",
+        }
+    )
     return rows
 
 
 # --------------------------------------------------------------------------- #
 # summarize_ledger
 # --------------------------------------------------------------------------- #
+
 
 def test_summarize_ledger_empty_is_clean():
     s = summarize_ledger([])
@@ -47,8 +72,11 @@ def test_summarize_ledger_empty_is_clean():
 
 
 def test_summarize_ledger_aggregates_revenue_per_user():
-    rows = _settled("r1", 1, "0.02", "0.01") + _settled("r2", 1, "0.05", "0") \
+    rows = (
+        _settled("r1", 1, "0.02", "0.01")
+        + _settled("r2", 1, "0.05", "0")
         + _settled("r3", 2, "0", "0.10")
+    )
     s = summarize_ledger(rows)
     assert s.ref_count == 3
     assert s.revenue_by_user[1] == Decimal("0.08")  # 0.03 + 0.05
@@ -81,6 +109,7 @@ def test_summarize_ledger_handles_none_and_string_decimals():
 # --------------------------------------------------------------------------- #
 # summarize_usage
 # --------------------------------------------------------------------------- #
+
 
 def test_summarize_usage_aggregates_cost_per_user():
     rows = [
@@ -122,6 +151,7 @@ def test_summarize_usage_excludes_admin_user_ids():
 # reconcile
 # --------------------------------------------------------------------------- #
 
+
 def test_reconcile_perfect_match_is_ok():
     ledger = summarize_ledger(_settled("r1", 1, "0.03", "0") + _settled("r2", 2, "0.10", "0"))
     usage = summarize_usage([{"user_id": 1, "cost": "0.03"}, {"user_id": 2, "cost": "0.10"}])
@@ -155,11 +185,13 @@ def test_reconcile_within_tolerance_passes():
 
 
 def test_reconcile_unbalanced_ref_makes_report_not_ok():
-    ledger = summarize_ledger([
-        {"ref": "bad", "user_id": 1, "account": ALLOWANCE, "debit": "0.05", "credit": "0"},
-        {"ref": "bad", "user_id": 1, "account": REVENUE, "debit": "0", "credit": "0.05"},
-        {"ref": "bad", "user_id": 1, "account": PURCHASED, "debit": "0.01", "credit": "0"},
-    ])  # debits 0.06 != credit 0.05
+    ledger = summarize_ledger(
+        [
+            {"ref": "bad", "user_id": 1, "account": ALLOWANCE, "debit": "0.05", "credit": "0"},
+            {"ref": "bad", "user_id": 1, "account": REVENUE, "debit": "0", "credit": "0.05"},
+            {"ref": "bad", "user_id": 1, "account": PURCHASED, "debit": "0.01", "credit": "0"},
+        ]
+    )  # debits 0.06 != credit 0.05
     usage = summarize_usage([{"user_id": 1, "cost": "0.05"}])
     report = reconcile(ledger, usage)
     # revenue side matches, but the ref is internally unbalanced → not ok
@@ -186,13 +218,17 @@ def test_reconcile_empty_both_sides_is_ok():
 
 def test_reconcile_per_user_sorted_worst_first():
     ledger = summarize_ledger(
-        _settled("a", 1, "0.10", "0") + _settled("b", 2, "0.10", "0") + _settled("c", 3, "0.10", "0")
+        _settled("a", 1, "0.10", "0")
+        + _settled("b", 2, "0.10", "0")
+        + _settled("c", 3, "0.10", "0")
     )
-    usage = summarize_usage([
-        {"user_id": 1, "cost": "0.10"},   # drift 0
-        {"user_id": 2, "cost": "0.02"},   # drift 0.08
-        {"user_id": 3, "cost": "0.07"},   # drift 0.03
-    ])
+    usage = summarize_usage(
+        [
+            {"user_id": 1, "cost": "0.10"},  # drift 0
+            {"user_id": 2, "cost": "0.02"},  # drift 0.08
+            {"user_id": 3, "cost": "0.07"},  # drift 0.03
+        ]
+    )
     report = reconcile(ledger, usage)
     drifts = [u.drift for u in report.per_user]
     assert drifts == [Decimal("0.08"), Decimal("0.03"), Decimal("0")]
@@ -201,8 +237,9 @@ def test_reconcile_per_user_sorted_worst_first():
 def test_reconcile_rows_one_call_path():
     ledger_rows = _settled("r1", 1, "0.03", "0")
     usage_rows = [{"user_id": 1, "cost": "0.03"}, {"user_id": 99, "cost": "0.50"}]
-    report = reconcile_rows(usage_rows=usage_rows, ledger_rows=ledger_rows,
-                            exclude_user_ids=frozenset({99}))
+    report = reconcile_rows(
+        usage_rows=usage_rows, ledger_rows=ledger_rows, exclude_user_ids=frozenset({99})
+    )
     assert report.ok
     assert report.total_drift == Decimal("0")
 
@@ -276,7 +313,9 @@ def test_reconcile_window_mocked(monkeypatch):
     fake_mod.get_supabase_client = lambda: _Client(store)
     monkeypatch.setitem(sys.modules, "src.config.supabase_config", fake_mod)
 
-    report, admin_count = lr.reconcile_window("2026-01-01T00:00:00+00:00", "2030-01-01T00:00:00+00:00")
+    report, admin_count = lr.reconcile_window(
+        "2026-01-01T00:00:00+00:00", "2030-01-01T00:00:00+00:00"
+    )
     assert admin_count == 1
     assert report.ok
     assert report.total_drift == Decimal("0")

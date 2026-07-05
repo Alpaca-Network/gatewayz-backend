@@ -116,7 +116,9 @@ async def resolve_model_routing(
                 from src.services.general_router import (
                     parse_router_model_string as parse_general_router,
                 )
-                from src.services.general_router import route_general_prompt
+                from src.services.general_router import (
+                    route_general_prompt,
+                )
 
                 # Parse mode from model string
                 is_general_router, router_mode = parse_general_router(normalized_model.lower())

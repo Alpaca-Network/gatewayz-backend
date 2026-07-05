@@ -47,14 +47,14 @@ from src.services.models import (
     get_model_count_by_provider,
     normalize_provider_slug,
 )
+from src.services.prometheus_metrics import set_gateway_model_count
+from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
 from src.services.providers.modelz_client import (
     check_model_exists_on_modelz,
     fetch_modelz_tokens,
     get_modelz_model_details,
     get_modelz_model_ids,
 )
-from src.services.prometheus_metrics import set_gateway_model_count
-from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging

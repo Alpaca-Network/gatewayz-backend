@@ -24,8 +24,8 @@ from fastapi.responses import JSONResponse
 from src.config import Config
 from src.db.api_keys import increment_api_key_usage
 from src.db.users import deduct_credits, get_user, record_usage
-from src.security.inference_gates import enforce_subscription_status_gate
 from src.security.deps import get_api_key
+from src.security.inference_gates import enforce_subscription_status_gate
 from src.services.connection_pool import get_openai_pooled_client
 from src.utils.ai_tracing import AIRequestType, AITracer
 from src.utils.rate_limit_guard import enforce_request_rate_limit
@@ -195,7 +195,9 @@ async def _deduct_audio_credits(
         # Fetch fresh balance after deduction for accurate reporting
         updated_user = await loop.run_in_executor(executor, get_user, api_key)
         if updated_user:
-            actual_balance_after = float(updated_user.get("subscription_allowance", 0) or 0) + float(updated_user.get("purchased_credits", 0) or 0)
+            actual_balance_after = float(
+                updated_user.get("subscription_allowance", 0) or 0
+            ) + float(updated_user.get("purchased_credits", 0) or 0)
 
         await loop.run_in_executor(
             executor,
@@ -489,7 +491,11 @@ async def create_transcription(
             "user_balance_after": (
                 actual_balance_after
                 if actual_balance_after is not None
-                else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost
+                else (
+                    float(user.get("subscription_allowance", 0) or 0)
+                    + float(user.get("purchased_credits", 0) or 0)
+                )
+                - total_cost
             ),
             "user_api_key": f"{api_key[:10]}...",
             "used_fallback_pricing": used_fallback_pricing,
@@ -720,7 +726,11 @@ async def create_transcription_base64(
             "user_balance_after": (
                 actual_balance_after
                 if actual_balance_after is not None
-                else (float(user.get("subscription_allowance", 0) or 0) + float(user.get("purchased_credits", 0) or 0)) - total_cost
+                else (
+                    float(user.get("subscription_allowance", 0) or 0)
+                    + float(user.get("purchased_credits", 0) or 0)
+                )
+                - total_cost
             ),
             "user_api_key": f"{api_key[:10]}...",
             "used_fallback_pricing": used_fallback_pricing,

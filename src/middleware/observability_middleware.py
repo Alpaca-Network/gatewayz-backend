@@ -31,7 +31,6 @@ from src.services.prometheus_metrics import (
     http_request_duration,
     record_http_response,
 )
-
 from src.utils.profiling import tag_wrapper as _pyroscope_tag_wrapper
 
 logger = logging.getLogger(__name__)

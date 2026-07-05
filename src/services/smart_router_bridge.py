@@ -77,7 +77,9 @@ def _offers_to_provider_offers(offers: list[dict], markup: float) -> list[Provid
                     price_per_1k=upstream * markup,
                     p50_ms=float(o.get("p50_ms") or 0.0),
                     p95_ms=float(o.get("p95_ms") or 0.0),
-                    quality_prior=float(o.get("quality_prior") if o.get("quality_prior") is not None else 0.5),
+                    quality_prior=float(
+                        o.get("quality_prior") if o.get("quality_prior") is not None else 0.5
+                    ),
                     is_active=bool(o.get("is_active", True)),
                 )
             )

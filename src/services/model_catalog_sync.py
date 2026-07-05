@@ -14,6 +14,12 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
+from src.services.huggingface_models import fetch_models_from_huggingface_api
+from src.services.pricing_normalization import (
+    PricingFormat,
+    get_provider_format,
+    normalize_to_per_token,
+)
 from src.services.providers.aimo_client import fetch_models_from_aimo
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
@@ -31,7 +37,6 @@ from src.services.providers.featherless_client import fetch_models_from_featherl
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_client import fetch_models_from_groq
-from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.providers.modelz_client import fetch_models_from_modelz
 from src.services.providers.morpheus_client import fetch_models_from_morpheus
 from src.services.providers.near_client import fetch_models_from_near
@@ -39,11 +44,6 @@ from src.services.providers.nebius_client import fetch_models_from_nebius
 from src.services.providers.novita_client import fetch_models_from_novita
 from src.services.providers.openai_client import fetch_models_from_openai
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.pricing_normalization import (
-    PricingFormat,
-    get_provider_format,
-    normalize_to_per_token,
-)
 from src.services.providers.simplismart_client import fetch_models_from_simplismart
 from src.services.providers.sybil_client import fetch_models_from_sybil
 from src.services.providers.together_client import fetch_models_from_together
@@ -1014,8 +1014,7 @@ def sync_all_providers(
                 logger.warning("Failed to load providers from DB; using hardcoded fallback")
                 all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
             providers_to_sync = [
-                p for p in all_providers
-                if p not in skip_set and is_provider_enabled(p)
+                p for p in all_providers if p not in skip_set and is_provider_enabled(p)
             ]
             if skip_set:
                 logger.info(

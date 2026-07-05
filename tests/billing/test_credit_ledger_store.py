@@ -9,11 +9,11 @@ import asyncio
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from src.services.credit_ledger import ALLOWANCE, PURCHASED, REVENUE, EntryState, is_balanced
 from src.services.billing.credit_ledger_store import (
     build_settled_entries,
     record_shadow_settlement,
 )
+from src.services.credit_ledger import ALLOWANCE, PURCHASED, REVENUE, EntryState, is_balanced
 
 
 # --------------------------------------------------------------------------- #
@@ -70,7 +70,9 @@ def test_record_shadow_settlement_writes_rows():
     # one insert of the settled rows (allowance debit + revenue credit)
     inserted = client.table.return_value.insert.call_args.args[0]
     assert {r["account"] for r in inserted} == {ALLOWANCE, REVENUE}
-    assert all(r["state"] == "settled" and r["user_id"] == 7 and r["ref"] == "req-10" for r in inserted)
+    assert all(
+        r["state"] == "settled" and r["user_id"] == 7 and r["ref"] == "req-10" for r in inserted
+    )
 
 
 def test_record_shadow_settlement_idempotent_skips_existing_ref():
@@ -100,7 +102,9 @@ def test_record_shadow_settlement_non_blocking_on_error():
 def test_record_shadow_settlement_empty_ref_is_noop():
     with patch("src.config.supabase_config.get_supabase_client") as get_client:
         ok = asyncio.run(
-            record_shadow_settlement(ref="", user_id=7, cost="1.00", allowance="5.00", purchased="0")
+            record_shadow_settlement(
+                ref="", user_id=7, cost="1.00", allowance="5.00", purchased="0"
+            )
         )
     assert ok is False
     get_client.assert_not_called()  # bails before touching the DB

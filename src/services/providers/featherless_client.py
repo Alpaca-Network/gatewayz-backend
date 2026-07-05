@@ -5,9 +5,9 @@ from pathlib import Path
 import httpx
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.connection_pool import get_featherless_pooled_client
 from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 

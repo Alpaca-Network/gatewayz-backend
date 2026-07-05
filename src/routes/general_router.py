@@ -102,10 +102,7 @@ async def get_available_models() -> dict[str, Any]:
 
     fallback_models = get_fallback_models()
 
-    models = [
-        {"mode": mode, "gatewayz_id": model_id}
-        for mode, model_id in fallback_models.items()
-    ]
+    models = [{"mode": mode, "gatewayz_id": model_id} for mode, model_id in fallback_models.items()]
 
     return {
         "success": True,

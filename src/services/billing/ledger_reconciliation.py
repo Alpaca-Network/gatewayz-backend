@@ -135,9 +135,7 @@ def summarize_ledger(rows: list[dict]) -> LedgerSummary:
             revenue_by_user[uid] = revenue_by_user.get(uid, _ZERO) + credit
             total_revenue += credit
 
-    unbalanced = sorted(
-        str(ref) for ref, (d, c) in per_ref.items() if d != c
-    )
+    unbalanced = sorted(str(ref) for ref, (d, c) in per_ref.items() if d != c)
     return LedgerSummary(
         total_revenue=total_revenue,
         revenue_by_user=revenue_by_user,

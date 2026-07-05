@@ -7,6 +7,7 @@ functions do not exist — the real public helpers for the full active-only
 catalog are `get_cached_full_catalog` and `cache_full_catalog`. We adapt to the
 real names per the plan's step B1.1 instruction.
 """
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -24,12 +25,11 @@ def test_get_all_models_for_catalog_uses_cache_on_second_call(sb):
     """Second call within TTL should not hit Supabase."""
     fake_rows = [{"id": 1, "model_name": "test"}]
 
-    with patch("src.db.models_catalog_db.get_client_for_query") as mock_client, patch(
-        "src.services.cache.model_catalog_cache.get_cached_full_catalog"
-    ) as mock_get, patch(
-        "src.services.cache.model_catalog_cache.cache_full_catalog"
-    ) as mock_set:
-
+    with (
+        patch("src.db.models_catalog_db.get_client_for_query") as mock_client,
+        patch("src.services.cache.model_catalog_cache.get_cached_full_catalog") as mock_get,
+        patch("src.services.cache.model_catalog_cache.cache_full_catalog") as mock_set,
+    ):
         # First call: cache miss → fetch from Supabase → set cache.
         # Second call: cache hit → return cached data, no Supabase call.
         mock_get.side_effect = [None, fake_rows]

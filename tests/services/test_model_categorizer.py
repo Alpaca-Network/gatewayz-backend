@@ -67,9 +67,7 @@ def test_context_tags():
 # --------------------------------------------------------------------------- #
 def test_cheapest_blended_price():
     # gpt-4o-mini-ish: $0.15 in / $0.60 out per 1M => per-token 0.15e-6 / 0.60e-6
-    cheap = ModelSignals(
-        input_price_per_token=0.15e-6, output_price_per_token=0.60e-6
-    )
+    cheap = ModelSignals(input_price_per_token=0.15e-6, output_price_per_token=0.60e-6)
     # blended = (0.15*0.25 + 0.60*0.75) = 0.4875 $/1M <= 0.50
     assert "cheapest" in compute_categories(cheap)
 
@@ -82,9 +80,7 @@ def test_cheapest_blended_price():
 
 
 def test_free_model_is_cheapest_and_free():
-    sig = ModelSignals(
-        is_free=True, input_price_per_token=0.0, output_price_per_token=0.0
-    )
+    sig = ModelSignals(is_free=True, input_price_per_token=0.0, output_price_per_token=0.0)
     tags = compute_categories(sig)
     assert "free" in tags and "cheapest" in tags
 
@@ -158,12 +154,8 @@ def test_custom_threshold_via_rules():
         CategoryRule("largest", "context_length", "gte", 1_000_000),
         CategoryRule("budget", "quality_band", "band", 0, 70),
     ]
-    assert "largest" not in compute_categories(
-        ModelSignals(context_length=200_000), rules
-    )
-    assert "largest" in compute_categories(
-        ModelSignals(context_length=1_000_000), rules
-    )
+    assert "largest" not in compute_categories(ModelSignals(context_length=200_000), rules)
+    assert "largest" in compute_categories(ModelSignals(context_length=1_000_000), rules)
 
 
 # --------------------------------------------------------------------------- #

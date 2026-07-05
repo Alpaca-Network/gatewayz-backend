@@ -27,6 +27,7 @@ def _offer(canonical_id, slug, upstream_cost, p95=100.0, quality=0.5):
 # reorder_chain_by_ranking — pure permutation, never drops/adds
 # --------------------------------------------------------------------------- #
 
+
 def test_reorder_puts_ranked_first_preserves_rest():
     chain = ["a", "b", "c", "d"]
     ranked = ["c", "a"]
@@ -54,6 +55,7 @@ def test_reorder_empty_ranking_is_identity():
 # --------------------------------------------------------------------------- #
 # reorder_provider_chain — full bridge with injected offers
 # --------------------------------------------------------------------------- #
+
 
 def test_no_reorder_when_chain_too_short():
     assert reorder_provider_chain("m", ["only"], offers=[_offer("m", "only", 0.01)]) == ["only"]
@@ -84,9 +86,9 @@ def test_providers_without_offers_kept_at_tail():
     chain = ["no_offer", "cheap", "mid"]
     offers = [_offer("m", "cheap", 0.01), _offer("m", "mid", 0.05)]
     out = reorder_provider_chain("m", chain, policy="cost", offers=offers)
-    assert out[0] == "cheap"      # ranked first
-    assert out[1] == "mid"        # ranked second
-    assert out[2] == "no_offer"   # unranked → tail
+    assert out[0] == "cheap"  # ranked first
+    assert out[1] == "mid"  # ranked second
+    assert out[2] == "no_offer"  # unranked → tail
     assert sorted(out) == sorted(chain)
 
 

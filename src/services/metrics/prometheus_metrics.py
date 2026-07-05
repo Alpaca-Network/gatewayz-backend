@@ -1090,7 +1090,8 @@ def record_credits_used(provider: str, model: str, user_id: str, credits: float)
     credits_used.labels(provider=provider, model=model).inc(credits)
 
 
-from src.utils.db_instrumentation import track_database_query  # re-export for backward compat  # noqa: E402,F401
+# re-export for backward compat (imported from here by metrics_aggregator)
+from src.utils.db_instrumentation import track_database_query  # noqa: E402,F401
 
 
 def record_cache_hit(cache_name: str, key: str | None = None, item_size: int | None = None):

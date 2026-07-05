@@ -63,6 +63,38 @@ def encrypt_api_key(plaintext: str) -> tuple[str, int]:
         raise RuntimeError(f"Failed to encrypt API key: {str(e)}") from e
 
 
+def decrypt_api_key(token: str, key_version: int | None = None) -> str:
+    """Decrypt a token produced by ``encrypt_api_key``.
+
+    Reversible counterpart used where the plaintext key must be recovered for
+    outbound use (e.g. BYOK: calling an upstream provider with a customer's own
+    key). API-key auth does NOT use this — it matches by hash. Tries the given
+    key_version first, then every keyring entry (supports key rotation).
+
+    Raises RuntimeError if encryption is unavailable and ValueError if the
+    token cannot be decrypted with any configured key.
+    """
+    if Fernet is None:
+        raise RuntimeError("Cryptography library not available. Cannot decrypt.")
+    if not isinstance(_KEYRING, dict) or not _KEYRING:
+        raise RuntimeError("No encryption keys configured. Set KEY_VERSION and KEYRING_<version>.")
+
+    raw = token.encode("utf-8")
+    versions = []
+    if key_version is not None and key_version in _KEYRING:
+        versions.append(key_version)
+    versions.extend(v for v in _KEYRING if v not in versions)
+
+    for ver in versions:
+        try:
+            return _KEYRING[ver].decrypt(raw).decode("utf-8")
+        except InvalidToken:
+            continue
+        except Exception:
+            continue
+    raise ValueError("Failed to decrypt token with any configured key.")
+
+
 def sha256_key_hash(plaintext: str) -> str:
     """Deterministic hash for lookup/rate limiting. Requires configured salt via env.
 

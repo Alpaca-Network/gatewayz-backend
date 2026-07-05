@@ -13,7 +13,6 @@ import logging
 import httpx
 
 from src.config import Config
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.services.circuit_breaker import (
     CircuitBreakerConfig,
     CircuitBreakerError,
@@ -21,6 +20,7 @@ from src.services.circuit_breaker import (
 )
 from src.services.connection_pool import get_groq_pooled_client
 from src.services.model_catalog_cache import cache_gateway_catalog
+from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
 from src.utils.sentry_context import capture_provider_error
 

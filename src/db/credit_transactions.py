@@ -439,10 +439,18 @@ def add_credits(
 
         # Get user by ID if provided, otherwise by API key
         if user_id:
-            user_result = client.table("users").select("id, purchased_credits, subscription_allowance").eq("id", user_id).execute()
+            user_result = (
+                client.table("users")
+                .select("id, purchased_credits, subscription_allowance")
+                .eq("id", user_id)
+                .execute()
+            )
         else:
             user_result = (
-                client.table("users").select("id, purchased_credits, subscription_allowance").eq("api_key", api_key).execute()
+                client.table("users")
+                .select("id, purchased_credits, subscription_allowance")
+                .eq("api_key", api_key)
+                .execute()
             )
 
         if not user_result.data:
