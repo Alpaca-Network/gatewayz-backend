@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from src.services.auth_cache import (
+from src.services.cache.auth_cache import (
     cache_user_by_privy_id,
     cache_user_by_username,
     get_cached_user_by_privy_id,
@@ -104,7 +104,7 @@ class TestQueryTimeout:
 class TestAuthCache:
     """Test authentication caching functionality."""
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_cache_user_by_privy_id(self, mock_get_redis):
         """Test caching user by Privy ID."""
         mock_redis = Mock()
@@ -119,7 +119,7 @@ class TestAuthCache:
         assert call_args[0][0] == "auth:privy_id:privy_123"
         assert json.loads(call_args[0][2]) == user_data
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_get_cached_user_by_privy_id_hit(self, mock_get_redis):
         """Test retrieving cached user by Privy ID (cache hit)."""
         mock_redis = Mock()
@@ -132,7 +132,7 @@ class TestAuthCache:
         assert result == user_data
         mock_redis.get.assert_called_once_with("auth:privy_id:privy_123")
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_get_cached_user_by_privy_id_miss(self, mock_get_redis):
         """Test retrieving cached user by Privy ID (cache miss)."""
         mock_redis = Mock()
@@ -143,7 +143,7 @@ class TestAuthCache:
 
         assert result is None
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_cache_user_by_username(self, mock_get_redis):
         """Test caching user by username."""
         mock_redis = Mock()
@@ -155,7 +155,7 @@ class TestAuthCache:
         assert result is True
         mock_redis.setex.assert_called_once()
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_invalidate_user_cache(self, mock_get_redis):
         """Test invalidating cached user data."""
         mock_redis = Mock()
@@ -169,7 +169,7 @@ class TestAuthCache:
         assert "auth:privy_id:privy_123" in call_args
         assert "auth:username:testuser" in call_args
 
-    @patch("src.services.auth_cache.get_redis_client")
+    @patch("src.services.cache.auth_cache.get_redis_client")
     def test_cache_redis_unavailable(self, mock_get_redis):
         """Test cache operations when Redis is unavailable."""
         mock_get_redis.return_value = None

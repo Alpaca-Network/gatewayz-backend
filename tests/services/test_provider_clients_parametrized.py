@@ -28,48 +28,45 @@ import pytest
 
 SIMPLE_PROVIDERS = [
     (
-        "src.services.fireworks_client",
+        "src.services.providers.fireworks_client",
         "fireworks",
         "FIREWORKS_API_KEY",
         "Fireworks API key not configured",
     ),
-    ("src.services.groq_client", "groq", "GROQ_API_KEY", "Groq API key not configured"),
+    ("src.services.providers.groq_client", "groq", "GROQ_API_KEY", "Groq API key not configured"),
     (
-        "src.services.together_client",
+        "src.services.providers.together_client",
         "together",
         "TOGETHER_API_KEY",
         "Together API key not configured",
     ),
-    ("src.services.akash_client", "akash", "AKASH_API_KEY", "Akash API key not configured"),
-    ("src.services.openai_client", "openai", "OPENAI_API_KEY", "OpenAI API key not configured"),
-    ("src.services.zai_client", "zai", "ZAI_API_KEY", "Z.AI API key not configured"),
     (
-        "src.services.helicone_client",
-        "helicone",
-        "HELICONE_API_KEY",
-        "Helicone AI Gateway API key not configured",
+        "src.services.providers.akash_client",
+        "akash",
+        "AKASH_API_KEY",
+        "Akash API key not configured",
     ),
     (
-        "src.services.featherless_client",
+        "src.services.providers.openai_client",
+        "openai",
+        "OPENAI_API_KEY",
+        "OpenAI API key not configured",
+    ),
+    ("src.services.providers.zai_client", "zai", "ZAI_API_KEY", "Z.AI API key not configured"),
+    (
+        "src.services.providers.featherless_client",
         "featherless",
         "FEATHERLESS_API_KEY",
         "Featherless API key not configured",
     ),
     (
-        "src.services.onerouter_client",
-        "onerouter",
-        "ONEROUTER_API_KEY",
-        "Infron AI API key not configured",
-    ),
-    (
-        "src.services.morpheus_client",
+        "src.services.providers.morpheus_client",
         "morpheus",
         "MORPHEUS_API_KEY",
         "Morpheus API key not configured",
     ),
-    ("src.services.aihubmix_client", "aihubmix", "AIHUBMIX_API_KEY", "API key not configured"),
     (
-        "src.services.anthropic_client",
+        "src.services.providers.anthropic_client",
         "anthropic",
         "ANTHROPIC_API_KEY",
         "Anthropic API key not configured",
@@ -140,9 +137,6 @@ class TestGetClientMissingKey:
 
         with patch(f"{module_path}.Config") as mock_config:
             setattr(mock_config, config_key, None)
-            # aihubmix also checks APP_CODE -- set it so we isolate the key check
-            if provider == "aihubmix":
-                mock_config.AIHUBMIX_APP_CODE = "TEST"
             with pytest.raises(ValueError, match=error_match):
                 get_client()
 
@@ -302,28 +296,23 @@ class TestProcessResponse:
 # ---------------------------------------------------------------------------
 
 ALL_PROVIDER_MODULES = [
-    "src.services.fireworks_client",
-    "src.services.groq_client",
-    "src.services.together_client",
-    "src.services.akash_client",
-    "src.services.openai_client",
-    "src.services.zai_client",
-    "src.services.helicone_client",
-    "src.services.featherless_client",
-    "src.services.onerouter_client",
-    "src.services.morpheus_client",
-    "src.services.aihubmix_client",
-    "src.services.anthropic_client",
-    "src.services.vercel_ai_gateway_client",
-    "src.services.near_client",
-    "src.services.modelz_client",
-    "src.services.deepinfra_client",
-    "src.services.chutes_client",
-    "src.services.aimo_client",
-    "src.services.nebius_client",
-    "src.services.alpaca_network_client",
-    "src.services.clarifai_client",
-    "src.services.anannas_client",
+    "src.services.providers.fireworks_client",
+    "src.services.providers.groq_client",
+    "src.services.providers.together_client",
+    "src.services.providers.akash_client",
+    "src.services.providers.openai_client",
+    "src.services.providers.zai_client",
+    "src.services.providers.featherless_client",
+    "src.services.providers.morpheus_client",
+    "src.services.providers.anthropic_client",
+    "src.services.providers.near_client",
+    "src.services.providers.modelz_client",
+    "src.services.providers.deepinfra_client",
+    "src.services.providers.chutes_client",
+    "src.services.providers.aimo_client",
+    "src.services.providers.nebius_client",
+    "src.services.providers.alpaca_network_client",
+    "src.services.providers.clarifai_client",
 ]
 
 

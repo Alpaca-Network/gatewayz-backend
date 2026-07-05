@@ -414,7 +414,9 @@ async def test_require_active_subscription_forbidden(mod):
 
 @pytest.mark.anyio
 async def test_check_credits_ok(mod):
-    user = {"id": 1, "credits": 1.5}
+    # check_credits sums subscription_allowance + purchased_credits (current
+    # credit model), not the legacy flat "credits" field.
+    user = {"id": 1, "subscription_allowance": 0.5, "purchased_credits": 1.0}
     out = await mod.check_credits(user=user, min_credits=1.0)
     assert out["id"] == 1
 

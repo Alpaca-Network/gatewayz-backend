@@ -350,8 +350,7 @@ class TestUnsafeListAccessFixes:
 class TestSilentExceptionSwallowingFixes:
     """Tests for silent exception swallowing fixes in providers.py."""
 
-    @patch("src.services.providers.logger")
-    def test_url_parsing_exception_is_logged(self, mock_logger):
+    def test_url_parsing_exception_is_logged(self):
         """Test that URL parsing exceptions are now logged instead of silently ignored."""
         # Previously: except Exception: pass (silent)
         # Now: except Exception as e: logger.debug(f"Failed to parse...")

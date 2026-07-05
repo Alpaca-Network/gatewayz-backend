@@ -14,7 +14,7 @@ from prometheus_client import REGISTRY, generate_latest
 from starlette.testclient import TestClient
 
 from src.middleware.observability_middleware import ObservabilityMiddleware
-from src.services.prometheus_metrics import (
+from src.services.metrics.prometheus_metrics import (
     fastapi_request_size_bytes,
     fastapi_requests_duration_seconds,
     fastapi_requests_in_progress,

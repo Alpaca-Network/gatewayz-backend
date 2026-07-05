@@ -86,7 +86,7 @@ class TestXaiReasoningParams:
 class TestXaiRequestWithReasoning:
     """Test xAI request functions with reasoning parameters"""
 
-    @patch("src.services.xai_client.get_xai_client")
+    @patch("src.services.providers.xai_client.get_xai_client")
     def test_make_request_adds_reasoning_params(self, mock_get_client):
         """Test that reasoning params are added to requests for reasoning models"""
         from src.services.providers.xai_client import make_xai_request_openai
@@ -103,7 +103,7 @@ class TestXaiRequestWithReasoning:
         assert "reasoning" in call_kwargs
         assert call_kwargs["reasoning"] == {"enabled": True}
 
-    @patch("src.services.xai_client.get_xai_client")
+    @patch("src.services.providers.xai_client.get_xai_client")
     def test_make_request_no_reasoning_for_old_models(self, mock_get_client):
         """Test that reasoning params are NOT added for non-reasoning models"""
         from src.services.providers.xai_client import make_xai_request_openai
@@ -117,7 +117,7 @@ class TestXaiRequestWithReasoning:
         call_kwargs = mock_client.chat.completions.create.call_args.kwargs
         assert "reasoning" not in call_kwargs
 
-    @patch("src.services.xai_client.get_xai_client")
+    @patch("src.services.providers.xai_client.get_xai_client")
     def test_make_stream_request_adds_reasoning_params(self, mock_get_client):
         """Test that streaming requests also get reasoning params"""
         from src.services.providers.xai_client import make_xai_request_openai_stream
@@ -135,7 +135,7 @@ class TestXaiRequestWithReasoning:
         assert call_kwargs["reasoning"] == {"enabled": True}
         assert call_kwargs["stream"] is True
 
-    @patch("src.services.xai_client.get_xai_client")
+    @patch("src.services.providers.xai_client.get_xai_client")
     def test_explicit_reasoning_override(self, mock_get_client):
         """Test that explicit enable_reasoning parameter works"""
         from src.services.providers.xai_client import make_xai_request_openai

@@ -14,7 +14,7 @@ Tests cover:
 """
 
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import httpx
 import pytest
@@ -29,6 +29,27 @@ from src.services.provider_failover import (
     map_provider_error,
     should_failover,
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_full_provider_roster():
+    """Test the failover-chain algorithm against the full hardcoded roster.
+
+    ``build_provider_failover_chain`` filters the roster at runtime through
+    ``ENABLED_PROVIDERS`` / the DB-backed gateway registry (CI defaults
+    ``ENABLED_PROVIDERS=openrouter``; the staging DB exposes a reduced subset).
+    These tests assert the ordering/dedup logic over the complete
+    ``FALLBACK_PROVIDER_PRIORITY`` roster, so pin the roster and treat every
+    provider as enabled to keep them deterministic across environments.
+    """
+    with (
+        patch(
+            "src.services.provider_failover._get_failover_priority",
+            return_value=FALLBACK_PROVIDER_PRIORITY,
+        ),
+        patch("src.utils.provider_filter.is_provider_enabled", return_value=True),
+    ):
+        yield
 
 # Try to import OpenAI SDK exceptions (same pattern as the module)
 try:
@@ -163,16 +184,16 @@ class TestBuildProviderFailoverChain:
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
     def test_chain_with_none_provider(self):
-        """Test chain with None provider defaults to onerouter"""
+        """Test chain with None provider defaults to openrouter"""
         chain = build_provider_failover_chain(None)
 
-        assert chain[0] == "onerouter"
+        assert chain[0] == "openrouter"
 
     def test_chain_with_empty_string(self):
-        """Test chain with empty string defaults to onerouter"""
+        """Test chain with empty string defaults to openrouter"""
         chain = build_provider_failover_chain("")
 
-        assert chain[0] == "onerouter"
+        assert chain[0] == "openrouter"
 
     def test_chain_with_unknown_provider(self):
         """Test chain with unknown provider (not in fallback list)"""

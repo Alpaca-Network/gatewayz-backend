@@ -16,7 +16,7 @@ from src.schemas.payments import (
     StripeCurrency,
     StripePaymentMethodType,
 )
-from src.services.payments import StripeService
+from src.services.billing.payments import StripeService
 
 
 @pytest.fixture
@@ -82,10 +82,10 @@ class TestStripeServiceInitialization:
 class TestCheckoutSession:
     """Test checkout session creation"""
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_create_checkout_session_success(
         self,
         mock_update_payment,
@@ -145,10 +145,10 @@ class TestCheckoutSession:
             expected_update_kwargs["stripe_payment_intent_id"] = mock_session.payment_intent
         mock_update_payment.assert_called_once_with(**expected_update_kwargs)
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_create_checkout_session_with_discounted_credit_value(
         self,
         mock_update_payment,
@@ -203,10 +203,10 @@ class TestCheckoutSession:
         # Description should show the credit value
         assert "$10" in call_kwargs["line_items"][0]["price_data"]["product_data"]["description"]
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_create_checkout_session_large_discounted_package(
         self,
         mock_update_payment,
@@ -245,10 +245,10 @@ class TestCheckoutSession:
         assert call_kwargs["line_items"][0]["price_data"]["unit_amount"] == 7500
         assert call_kwargs["metadata"]["credits_cents"] == "10000"  # $100 in cents
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_create_checkout_session_persists_payment_intent(
         self,
         mock_update_payment,
@@ -287,7 +287,7 @@ class TestCheckoutSession:
             stripe_payment_intent_id="pi_cs_test_456",
         )
 
-    @patch("src.services.payments.get_user_by_id")
+    @patch("src.services.billing.payments.get_user_by_id")
     def test_create_checkout_session_user_not_found(self, mock_get_user, stripe_service):
         """Test checkout session fails for non-existent user"""
 
@@ -298,8 +298,8 @@ class TestCheckoutSession:
         with pytest.raises(ValueError, match="User .* not found"):
             stripe_service.create_checkout_session(user_id=999, request=request)
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
     def test_create_checkout_session_stripe_error(
         self,
@@ -321,8 +321,8 @@ class TestCheckoutSession:
         with pytest.raises(Exception, match="Payment processing error"):
             stripe_service.create_checkout_session(user_id=1, request=request)
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
     @patch("src.config.supabase_config.get_supabase_client")
     def test_create_checkout_session_with_privy_did(
@@ -373,10 +373,10 @@ class TestCheckoutSession:
 class TestPaymentIntents:
     """Test payment intent creation"""
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.PaymentIntent.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_create_payment_intent_success(
         self,
         mock_update_payment,
@@ -422,8 +422,8 @@ class TestPaymentIntents:
         assert call_kwargs["automatic_payment_methods"] == {"enabled": True}
         assert call_kwargs["metadata"]["user_id"] == "1"
 
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.PaymentIntent.create")
     def test_create_payment_intent_with_specific_payment_methods(
         self,
@@ -466,22 +466,19 @@ class TestPaymentIntents:
 class TestWebhooks:
     """Test webhook processing"""
 
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
+    @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
     @patch.object(StripeService, "_handle_checkout_completed")
     def test_handle_checkout_completed_webhook(
         self,
         mock_handle_checkout,
         mock_construct_event,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         stripe_service,
     ):
         """Test checkout.session.completed webhook"""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         mock_event = {
             "id": "evt_test_123",
@@ -509,24 +506,21 @@ class TestWebhooks:
         with pytest.raises(ValueError, match="Invalid signature"):
             stripe_service.handle_webhook(b"payload", "bad_signature")
 
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
+    @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_adds_credits(
         self,
         mock_update_payment,
         mock_add_credits,
         mock_construct_event,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         stripe_service,
     ):
         """Test checkout completed webhook adds credits to user"""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         # Create a Mock object instead of dict to support attribute access
         mock_session = Mock()
@@ -563,8 +557,8 @@ class TestWebhooks:
         )
 
     @patch("stripe.checkout.Session.retrieve")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_refetches_metadata_when_missing(
         self, mock_update_payment, mock_add_credits, mock_session_retrieve, stripe_service
     ):
@@ -585,7 +579,7 @@ class TestWebhooks:
 
         stripe_service._handle_checkout_completed(partial_session)
 
-        mock_session_retrieve.assert_called_once_with("cs_missing_meta", expand=["metadata"])
+        mock_session_retrieve.assert_called_once_with("cs_missing_meta")
         mock_add_credits.assert_called_once()
         assert mock_add_credits.call_args[1]["credits"] == 25.0
         mock_update_payment.assert_called_once_with(
@@ -596,9 +590,9 @@ class TestWebhooks:
         )
 
     @patch("stripe.PaymentIntent.retrieve")
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_recovers_metadata_from_payment_intent(
         self,
         mock_update_payment,
@@ -630,7 +624,7 @@ class TestWebhooks:
 
         stripe_service._handle_checkout_completed(session)
 
-        mock_intent_retrieve.assert_called_once_with("pi_meta_only", expand=["metadata"])
+        mock_intent_retrieve.assert_called_once_with("pi_meta_only")
         mock_add_credits.assert_called_once()
         add_kwargs = mock_add_credits.call_args[1]
         assert add_kwargs["user_id"] == 77
@@ -646,8 +640,8 @@ class TestWebhooks:
 
     @patch("stripe.PaymentIntent.retrieve")
     @patch("stripe.checkout.Session.retrieve")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_hydrates_metadata_from_payment_intent(
         self,
         mock_update_payment,
@@ -683,9 +677,9 @@ class TestWebhooks:
 
         stripe_service._handle_checkout_completed(webhook_session)
 
-        mock_session_retrieve.assert_called_once_with("cs_missing_everything", expand=["metadata"])
+        mock_session_retrieve.assert_called_once_with("cs_missing_everything")
         mock_payment_intent_retrieve.assert_called_once_with(
-            "pi_metadata_source", expand=["metadata"]
+            "pi_metadata_source"
         )
 
         mock_add_credits.assert_called_once()
@@ -711,25 +705,22 @@ class TestWebhooks:
             stripe_service._handle_checkout_completed(session_without_data)
 
     @patch("stripe.Webhook.construct_event")
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.claim_event")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_recovers_missing_metadata(
         self,
         mock_update_payment,
         mock_add_credits,
         mock_get_payment,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         mock_construct_event,
         stripe_service,
     ):
         """Ensure webhook handler falls back to Supabase when metadata is absent."""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         missing_metadata_session = {
             "id": "cs_missing_meta",
@@ -773,9 +764,9 @@ class TestWebhooks:
             stripe_session_id="cs_missing_meta",
         )
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_recovers_via_session_id_when_intent_lookup_fails(
         self,
         mock_update_payment,
@@ -820,26 +811,23 @@ class TestWebhooks:
             stripe_session_id="cs_lookup_only",
         )
 
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
+    @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.update_payment_status")
-    @patch("src.services.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.update_payment_status")
+    @patch("src.services.billing.payments.add_credits_to_user")
     def test_payment_intent_succeeded_webhook(
         self,
         mock_add_credits,
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         stripe_service,
     ):
         """Test payment_intent.succeeded webhook"""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         mock_get_payment.return_value = {"id": 1, "user_id": 1, "amount": 10.0, "status": "pending"}
 
@@ -860,24 +848,21 @@ class TestWebhooks:
         mock_update_payment.assert_called_once_with(payment_id=1, status="completed")
         mock_add_credits.assert_called_once()
 
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
+    @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_payment_intent_failed_webhook(
         self,
         mock_update_payment,
         mock_get_payment,
         mock_construct_event,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         stripe_service,
     ):
         """Test payment_intent.payment_failed webhook"""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         mock_get_payment.return_value = {"id": 1, "user_id": 1, "amount": 10.0, "status": "pending"}
 
@@ -1015,14 +1000,13 @@ class TestSessionRetrieval:
 class TestPaymentIntegration:
     """Integration tests for complete payment flows"""
 
-    @patch("src.services.payments.record_processed_event")
-    @patch("src.services.payments.is_event_processed")
-    @patch("src.services.payments.get_user_by_id")
-    @patch("src.services.payments.create_payment")
+    @patch("src.services.billing.payments.claim_event")
+    @patch("src.services.billing.payments.get_user_by_id")
+    @patch("src.services.billing.payments.create_payment")
     @patch("stripe.checkout.Session.create")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.update_payment_status")
     @patch("stripe.Webhook.construct_event")
-    @patch("src.services.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.add_credits_to_user")
     def test_complete_payment_flow(
         self,
         mock_add_credits,
@@ -1031,16 +1015,14 @@ class TestPaymentIntegration:
         mock_stripe_create,
         mock_create_payment,
         mock_get_user,
-        mock_is_processed,
-        mock_record_event,
+        mock_claim,
         stripe_service,
         mock_user,
         mock_payment,
     ):
         """Test complete payment flow: create session → webhook → credits added"""
 
-        mock_is_processed.return_value = False
-        mock_record_event.return_value = True
+        mock_claim.return_value = "claimed"
 
         # Step 1: Create checkout session
         mock_get_user.return_value = mock_user
@@ -1096,9 +1078,9 @@ class TestPaymentIntegration:
             "stripe_session_id": "cs_test_123",
         }
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_missing_credits_uses_amount_total(
         self, mock_update_payment, mock_add_credits, mock_get_payment, stripe_service
     ):
@@ -1126,9 +1108,9 @@ class TestPaymentIntegration:
             stripe_session_id="cs_test_fallback",
         )
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_missing_ids_uses_payment_lookup(
         self, mock_update_payment, mock_add_credits, mock_get_payment, stripe_service
     ):
@@ -1156,10 +1138,10 @@ class TestPaymentIntegration:
             stripe_session_id="cs_missing_ids",
         )
 
-    @patch("src.services.payments.create_payment")
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.create_payment")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_creates_fallback_payment_when_missing_metadata(
         self,
         mock_update_payment,
@@ -1213,9 +1195,9 @@ class TestPaymentIntegration:
 class TestCheckoutCompletedSubscriptionStatus:
     """Test that checkout completed sets subscription_status correctly"""
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     @patch("src.config.supabase_config.get_supabase_client")
     def test_checkout_completed_sets_inactive_status_for_trial_user(
         self,
@@ -1285,9 +1267,9 @@ class TestCheckoutCompletedSubscriptionStatus:
             found_inactive_update
         ), f"Expected subscription_status='inactive' update, but got calls: {update_calls}"
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     @patch("src.config.supabase_config.get_supabase_client")
     def test_checkout_completed_preserves_active_subscription_status(
         self,
@@ -1358,9 +1340,9 @@ class TestCheckoutCompletedSubscriptionStatus:
             found_api_key_update
         ), "Expected api_keys_new to be updated with is_trial=False and trial_converted=True"
 
-    @patch("src.services.payments.get_payment_by_stripe_intent")
-    @patch("src.services.payments.add_credits_to_user")
-    @patch("src.services.payments.update_payment_status")
+    @patch("src.services.billing.payments.get_payment_by_stripe_intent")
+    @patch("src.services.billing.payments.add_credits_to_user")
+    @patch("src.services.billing.payments.update_payment_status")
     @patch("src.config.supabase_config.get_supabase_client")
     def test_checkout_completed_sets_inactive_for_expired_trial_user(
         self,

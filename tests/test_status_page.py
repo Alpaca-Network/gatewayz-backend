@@ -82,18 +82,18 @@ def mock_supabase_data():
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_overall_status(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/ endpoint"""
     # Mock provider health data
     mock_response = MagicMock()
     mock_response.data = mock_supabase_data["providers"]
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
 
     # Mock incidents count
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
         mock_incidents
     )
 
@@ -110,12 +110,12 @@ async def test_get_overall_status(mock_supabase, client, mock_supabase_data):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_providers_status(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/providers endpoint"""
     mock_response = MagicMock()
     mock_response.data = mock_supabase_data["providers"]
-    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.order.return_value.execute.return_value = (
         mock_response
     )
 
@@ -135,7 +135,7 @@ async def test_get_providers_status(mock_supabase, client, mock_supabase_data):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_models_status(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/models endpoint"""
     mock_response = MagicMock()
@@ -145,7 +145,7 @@ async def test_get_models_status(mock_supabase, client, mock_supabase_data):
     mock_query = MagicMock()
     mock_query.range.return_value.order.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/models?limit=10")
 
@@ -156,7 +156,7 @@ async def test_get_models_status(mock_supabase, client, mock_supabase_data):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_models_status_with_filters(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/models with filters"""
     mock_response = MagicMock()
@@ -167,7 +167,7 @@ async def test_get_models_status_with_filters(mock_supabase, client, mock_supaba
     mock_query.eq.return_value = mock_query
     mock_query.range.return_value.order.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/models?provider=openai&gateway=openrouter&tier=critical")
 
@@ -178,7 +178,7 @@ async def test_get_models_status_with_filters(mock_supabase, client, mock_supaba
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_model_status(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/models/{provider}/{model_id} endpoint"""
     mock_response = MagicMock()
@@ -189,7 +189,7 @@ async def test_get_model_status(mock_supabase, client, mock_supabase_data):
     mock_query.eq.return_value = mock_query
     mock_query.maybe_single.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/models/openai/gpt-4")
 
@@ -203,7 +203,7 @@ async def test_get_model_status(mock_supabase, client, mock_supabase_data):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_model_status_not_found(mock_supabase, client):
     """Test GET /v1/status/models/{provider}/{model_id} when model doesn't exist"""
     mock_response = MagicMock()
@@ -213,7 +213,7 @@ async def test_get_model_status_not_found(mock_supabase, client):
     mock_query.eq.return_value = mock_query
     mock_query.maybe_single.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/models/unknown/unknown-model")
 
@@ -221,7 +221,7 @@ async def test_get_model_status_not_found(mock_supabase, client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_incidents(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/incidents endpoint"""
     mock_response = MagicMock()
@@ -231,7 +231,7 @@ async def test_get_incidents(mock_supabase, client, mock_supabase_data):
     mock_query = MagicMock()
     mock_query.range.return_value.order.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/incidents")
 
@@ -249,7 +249,7 @@ async def test_get_incidents(mock_supabase, client, mock_supabase_data):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_incidents_with_filters(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/incidents with filters"""
     mock_response = MagicMock()
@@ -260,7 +260,7 @@ async def test_get_incidents_with_filters(mock_supabase, client, mock_supabase_d
     mock_query.eq.return_value = mock_query
     mock_query.range.return_value.order.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/incidents?status=active&severity=critical")
 
@@ -271,7 +271,7 @@ async def test_get_incidents_with_filters(mock_supabase, client, mock_supabase_d
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_search_models(mock_supabase, client, mock_supabase_data):
     """Test GET /v1/status/search endpoint"""
     mock_response = MagicMock()
@@ -281,7 +281,7 @@ async def test_search_models(mock_supabase, client, mock_supabase_data):
     mock_query = MagicMock()
     mock_query.or_.return_value.limit.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/search?q=gpt")
 
@@ -300,7 +300,7 @@ async def test_search_models_requires_query(client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_stats(mock_supabase, client):
     """Test GET /v1/status/stats endpoint"""
     # Mock tier counts
@@ -339,7 +339,7 @@ async def test_get_stats(mock_supabase, client):
             )
         return mock_table
 
-    mock_supabase.table.side_effect = table_side_effect
+    mock_supabase.return_value.table.side_effect = table_side_effect
 
     response = client.get("/v1/status/stats")
 
@@ -364,7 +364,7 @@ def test_format_duration_seconds():
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_get_uptime_history(mock_supabase, client):
     """Test GET /v1/status/uptime/{provider}/{model_id} endpoint"""
     mock_response = MagicMock()
@@ -384,7 +384,7 @@ async def test_get_uptime_history(mock_supabase, client):
     mock_query.eq.return_value = mock_query
     mock_query.gte.return_value.order.return_value.execute.return_value = mock_response
 
-    mock_supabase.table.return_value.select.return_value = mock_query
+    mock_supabase.return_value.table.return_value.select.return_value = mock_query
 
     response = client.get("/v1/status/uptime/openai/gpt-4?period=24h")
 
@@ -401,7 +401,7 @@ async def test_get_uptime_history(mock_supabase, client):
 @pytest.mark.asyncio
 async def test_get_uptime_history_invalid_period(client):
     """Test GET /v1/status/uptime with invalid period"""
-    with patch("src.routes.status_page.supabase"):
+    with patch("src.routes.status_page.get_db"):
         response = client.get("/v1/status/uptime/openai/gpt-4?period=invalid")
 
         assert response.status_code == 400
@@ -413,7 +413,7 @@ async def test_get_uptime_history_invalid_period(client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_healthy_models_never_exceeds_total(mock_supabase, client):
     """
     Test that healthy_models is constrained to never exceed total_models.
@@ -456,12 +456,12 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
     # Mock provider health data
     mock_response = MagicMock()
     mock_response.data = inconsistent_providers
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
 
     # Mock incidents count
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
         mock_incidents
     )
 
@@ -482,7 +482,7 @@ async def test_healthy_models_never_exceeds_total(mock_supabase, client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_gateway_health_metrics_calculated(mock_supabase, client):
     """
     Test that gateway health metrics are properly calculated.
@@ -547,11 +547,11 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = providers_with_gateways
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
 
     mock_incidents = MagicMock()
     mock_incidents.count = 0
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
         mock_incidents
     )
 
@@ -576,12 +576,12 @@ async def test_gateway_health_metrics_calculated(mock_supabase, client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_empty_providers_returns_zero_gateways(mock_supabase, client):
     """Test that empty provider data returns zero gateway metrics."""
     mock_response = MagicMock()
     mock_response.data = []
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
 
     response = client.get("/v1/status/")
 
@@ -593,7 +593,7 @@ async def test_empty_providers_returns_zero_gateways(mock_supabase, client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
     """Test that when all models are unhealthy, uptime shows 0%."""
     all_unhealthy_providers = [
@@ -614,11 +614,11 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = all_unhealthy_providers
-    mock_supabase.table.return_value.select.return_value.execute.return_value = mock_response
+    mock_supabase.return_value.table.return_value.select.return_value.execute.return_value = mock_response
 
     mock_incidents = MagicMock()
     mock_incidents.count = 5
-    mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value = (
         mock_incidents
     )
 
@@ -634,7 +634,7 @@ async def test_no_healthy_models_shows_zero_uptime(mock_supabase, client):
 
 
 @pytest.mark.asyncio
-@patch("src.routes.status_page.supabase")
+@patch("src.routes.status_page.get_db")
 async def test_providers_endpoint_caps_healthy_models(mock_supabase, client):
     """
     Test that the /providers endpoint also applies the data consistency check.
@@ -659,7 +659,7 @@ async def test_providers_endpoint_caps_healthy_models(mock_supabase, client):
 
     mock_response = MagicMock()
     mock_response.data = inconsistent_providers
-    mock_supabase.table.return_value.select.return_value.order.return_value.execute.return_value = (
+    mock_supabase.return_value.table.return_value.select.return_value.order.return_value.execute.return_value = (
         mock_response
     )
 

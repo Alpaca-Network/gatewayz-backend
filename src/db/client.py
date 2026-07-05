@@ -6,8 +6,11 @@ from here rather than from src.config.supabase_config directly.
 """
 
 from src.config.supabase_config import (
+    get_initialization_status,
     get_supabase_client,
 )
+
+__all__ = ["get_db", "get_table", "get_initialization_status", "get_supabase_client"]
 
 
 def get_db():

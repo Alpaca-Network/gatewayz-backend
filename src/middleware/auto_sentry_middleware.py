@@ -299,6 +299,8 @@ class AutoSentryMiddleware:
         # Critical inference endpoints
         if "/v1/chat/completions" in path_lower:
             return "inference_chat"
+        elif "/v1/messages" in path_lower:
+            return "inference_messages"
         elif "/v1/images" in path_lower:
             return "inference_images"
 

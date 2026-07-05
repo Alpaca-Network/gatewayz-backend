@@ -68,7 +68,9 @@ class TestCM1502ImageGenerationInsufficientCredits402:
             ),
         ):
             with pytest.raises(HTTPException) as exc_info:
-                await generate_images(mock_req, MagicMock(), api_key="gw_test_key")
+                await generate_images(
+                    mock_req, MagicMock(), MagicMock(), api_key="gw_test_key"
+                )
             assert (
                 exc_info.value.status_code == 402
             ), f"Expected 402 for insufficient credits, got {exc_info.value.status_code}"
@@ -100,7 +102,12 @@ class TestCM1503AudioTranscriptionReturnsText:
         )
 
         # Mock user with sufficient credits
-        mock_user = {"id": 1, "credits": 100.0, "api_key": "gw_test"}
+        mock_user = {
+            "id": 1,
+            "subscription_allowance": 0.0,
+            "purchased_credits": 100.0,
+            "api_key": "gw_test",
+        }
 
         # Mock file upload with valid content type
         mock_file = MagicMock()
@@ -140,6 +147,7 @@ class TestCM1503AudioTranscriptionReturnsText:
             # Pass response_format explicitly (Form() defaults aren't resolved
             # when calling outside FastAPI's dependency injection)
             response = await create_transcription(
+                request=MagicMock(),
                 file=mock_file,
                 model="whisper-1",
                 response_format="json",

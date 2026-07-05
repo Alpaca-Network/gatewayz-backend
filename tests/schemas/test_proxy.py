@@ -7,7 +7,7 @@ See: https://platform.openai.com/docs/api-reference/chat/create
 import pytest
 from pydantic import ValidationError
 
-from src.schemas.proxy import Message, ProxyRequest, ResponseRequest, StreamOptions
+from src.schemas.proxy import Message, ProxyRequest, StreamOptions
 
 
 class TestMessageSchema:
@@ -557,68 +557,6 @@ class TestProxyRequestTools:
         request = ProxyRequest(**request_data)
         assert request.tools is not None
         assert len(request.tools) == 1
-
-
-class TestResponseRequestTools:
-    """Test ResponseRequest schema with tools field"""
-
-    def test_response_request_without_tools(self):
-        """Test ResponseRequest without tools field"""
-        request = ResponseRequest(
-            model="gpt-4",
-            input=[{"role": "user", "content": "Hello"}],
-        )
-        assert request.tools is None
-
-    def test_response_request_with_tools(self):
-        """Test ResponseRequest with tools field"""
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get weather",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"location": {"type": "string"}},
-                    },
-                },
-            }
-        ]
-        request = ResponseRequest(
-            model="gpt-4",
-            input=[{"role": "user", "content": "Hello"}],
-            tools=tools,
-        )
-        assert request.tools == tools
-        assert len(request.tools) == 1
-
-    def test_response_request_with_multiple_tools(self):
-        """Test ResponseRequest with multiple tools"""
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_weather",
-                    "description": "Get weather",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-            {
-                "type": "function",
-                "function": {
-                    "name": "get_time",
-                    "description": "Get time",
-                    "parameters": {"type": "object", "properties": {}},
-                },
-            },
-        ]
-        request = ResponseRequest(
-            model="gpt-4",
-            input=[{"role": "user", "content": "Hello"}],
-            tools=tools,
-        )
-        assert len(request.tools) == 2
 
 
 class TestMessageContentValidation:

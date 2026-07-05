@@ -225,7 +225,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.services.pricing.calculate_cost_async")
     @patch("src.db.trials.track_trial_usage_for_key")
     @patch("src.db.users.log_api_usage_transaction")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_trial_user_no_deduction(
         self,
         mock_metrics,
@@ -261,7 +261,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_paid_user_deduction_success(
         self,
         mock_metrics,
@@ -297,7 +297,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_shadow_dual_write_skipped_when_flag_off(
         self,
         mock_metrics,
@@ -337,7 +337,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_shadow_dual_write_failure_never_breaks_billing(
         self,
         mock_metrics,
@@ -377,7 +377,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     @patch("asyncio.sleep")
     async def test_retry_on_transient_failure(
         self,
@@ -413,7 +413,7 @@ class TestHandleCreditsAndUsage:
     @pytest.mark.asyncio
     @patch("src.services.pricing.calculate_cost_async")
     @patch("src.db.users.deduct_credits")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     @patch("src.utils.sentry_context.capture_payment_error")
     async def test_no_retry_on_validation_error(
         self,
@@ -446,9 +446,9 @@ class TestHandleCreditsAndUsage:
     @pytest.mark.asyncio
     @patch("src.services.pricing.calculate_cost_async")
     @patch("src.db.users.deduct_credits")
-    @patch("src.services.credit_handler._record_credit_metrics")
-    @patch("src.services.credit_handler._record_missed_deduction")
-    @patch("src.services.credit_handler._send_critical_billing_alert")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_missed_deduction")
+    @patch("src.services.billing.credit_handler._send_critical_billing_alert")
     @patch("asyncio.sleep")
     async def test_all_retries_exhausted(
         self,
@@ -487,7 +487,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_trial_override_for_paid_user_with_stale_flag(
         self,
         mock_metrics,
@@ -525,7 +525,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_no_duplicate_deduction_when_usage_logging_fails(
         self,
         mock_metrics,
@@ -569,7 +569,7 @@ class TestHandleCreditsAndUsage:
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
-    @patch("src.services.credit_handler._record_credit_metrics")
+    @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_no_duplicate_deduction_when_rate_limit_update_fails(
         self,
         mock_metrics,
@@ -608,7 +608,7 @@ class TestHandleCreditsAndUsageWithFallback:
     """Test the fallback wrapper for streaming requests."""
 
     @pytest.mark.asyncio
-    @patch("src.services.credit_handler.handle_credits_and_usage")
+    @patch("src.services.billing.credit_handler.handle_credits_and_usage")
     async def test_returns_success_on_normal_operation(
         self, mock_handler, mock_user, mock_trial_inactive
     ):
@@ -630,11 +630,11 @@ class TestHandleCreditsAndUsageWithFallback:
         assert success is True
 
     @pytest.mark.asyncio
-    @patch("src.services.credit_handler.handle_credits_and_usage")
+    @patch("src.services.billing.credit_handler.handle_credits_and_usage")
     @patch("src.services.pricing.calculate_cost_async")
-    @patch("src.services.credit_handler._record_background_task_failure")
-    @patch("src.services.credit_handler._record_missed_deduction")
-    @patch("src.services.credit_handler._log_failed_deduction_for_reconciliation")
+    @patch("src.services.billing.credit_handler._record_background_task_failure")
+    @patch("src.services.billing.credit_handler._record_missed_deduction")
+    @patch("src.services.billing.credit_handler._log_failed_deduction_for_reconciliation")
     async def test_returns_failure_and_logs_on_error(
         self,
         mock_log_recon,
@@ -667,11 +667,11 @@ class TestHandleCreditsAndUsageWithFallback:
         mock_log_recon.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("src.services.credit_handler.handle_credits_and_usage")
+    @patch("src.services.billing.credit_handler.handle_credits_and_usage")
     @patch("src.services.pricing.calculate_cost_async")
-    @patch("src.services.credit_handler._record_background_task_failure")
-    @patch("src.services.credit_handler._record_missed_deduction")
-    @patch("src.services.credit_handler._log_failed_deduction_for_reconciliation")
+    @patch("src.services.billing.credit_handler._record_background_task_failure")
+    @patch("src.services.billing.credit_handler._record_missed_deduction")
+    @patch("src.services.billing.credit_handler._log_failed_deduction_for_reconciliation")
     async def test_uses_fallback_cost_if_pricing_fails(
         self,
         mock_log_recon,
