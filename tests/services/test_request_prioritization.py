@@ -145,10 +145,17 @@ class TestProviderLatencyTiers:
         assert get_provider_latency_tier("unknown-provider") == DEFAULT_PROVIDER_TIER
 
     def test_get_fastest_providers(self):
-        """Test get_fastest_providers returns sorted list"""
+        """Test get_fastest_providers returns sorted list.
+
+        Force the static PROVIDER_LATENCY_TIERS fallback by emptying the DB-backed
+        gateway registry. Otherwise this asserts against live DB latency tiers,
+        which vary by environment (in CI only ``openrouter`` carries a tier), making
+        the ``groq``-in-top-2 assertion environment-dependent and flaky.
+        """
         from src.services.request_prioritization import get_fastest_providers
 
-        providers = get_fastest_providers()
+        with patch("src.services.gateway_registry.get_gateway_registry", return_value={}):
+            providers = get_fastest_providers()
         assert isinstance(providers, list)
         assert len(providers) > 0
         # Groq should be first (tier 1)

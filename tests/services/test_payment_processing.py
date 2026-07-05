@@ -21,7 +21,21 @@ from src.services.billing.payments import StripeService
 
 @pytest.fixture
 def stripe_service():
-    """Create StripeService instance"""
+    """Create StripeService instance.
+
+    Resolve StripeService from the *live* ``src.services.billing.payments`` module
+    rather than the module-top import. The backward-compat import shim in
+    ``src/services/__init__.py`` can re-execute this module under a fresh object
+    during ``create_app()`` (e.g. when another test in the same xdist worker builds
+    the app). The module-top ``StripeService`` then closes over the stale module
+    dict, while ``@patch("src.services.billing.payments.<fn>")`` targets the live
+    one — so mocked ``add_credits_to_user`` / ``update_payment_status`` are never
+    seen by the handler. Re-importing here keeps the instance and the patch targets
+    on the same module object.
+    """
+    import importlib
+
+    payments_module = importlib.import_module("src.services.billing.payments")
     with patch.dict(
         "os.environ",
         {
@@ -31,7 +45,7 @@ def stripe_service():
             "FRONTEND_URL": "https://test.gatewayz.ai",
         },
     ):
-        return StripeService()
+        return payments_module.StripeService()
 
 
 @pytest.fixture
@@ -468,7 +482,11 @@ class TestWebhooks:
 
     @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
-    @patch.object(StripeService, "_handle_checkout_completed")
+    # Patch via the live module path (not the module-top ``StripeService`` symbol),
+    # so this targets the same class object the ``stripe_service`` fixture builds.
+    # See the fixture docstring re: the backward-compat import shim duplicating the
+    # payments module.
+    @patch("src.services.billing.payments.StripeService._handle_checkout_completed")
     def test_handle_checkout_completed_webhook(
         self,
         mock_handle_checkout,
