@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import src.services.smart_router_bridge as bridge
+from src.services.model_canonicalization import offer_group_key
 from src.services.smart_router_bridge import (
     reorder_chain_by_ranking,
     reorder_provider_chain,
@@ -94,3 +96,32 @@ def test_unknown_policy_falls_back_to_balanced():
     # should not raise; returns a valid permutation
     out = reorder_provider_chain("m", chain, policy="nonsense", offers=offers)
     assert sorted(out) == sorted(chain)
+
+
+# --------------------------------------------------------------------------- #
+# _load_offers is queried by the cost-routing group key, not the raw model
+# --------------------------------------------------------------------------- #
+
+def test_load_offers_called_with_group_key(monkeypatch):
+    captured = {}
+
+    def _fake_load_offers(arg):
+        captured["arg"] = arg
+        return []
+
+    # Keep hermetic: no DB alias lookup, no DB offer lookup.
+    monkeypatch.setattr(bridge, "load_alias_map", lambda: {})
+    monkeypatch.setattr(bridge, "_load_offers", _fake_load_offers)
+
+    model = "Qwen/Qwen2.5-72B"
+    reorder_provider_chain(model, ["a", "b"], policy="cost")
+
+    assert captured["arg"] == offer_group_key(model, {})
+
+
+def test_passthrough_when_load_offers_returns_empty(monkeypatch):
+    monkeypatch.setattr(bridge, "load_alias_map", lambda: {})
+    monkeypatch.setattr(bridge, "_load_offers", lambda arg: [])
+
+    chain = ["a", "b"]
+    assert reorder_provider_chain("Qwen/Qwen2.5-72B", chain, policy="cost") == chain

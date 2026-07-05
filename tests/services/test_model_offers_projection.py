@@ -123,14 +123,50 @@ def test_dedup_keeps_cheapest_across_join_prices():
 # --------------------------------------------------------------------------- #
 
 def test_basic_offer_built():
+    from src.services.model_canonicalization import offer_group_key
+
     rows = build_offer_rows([_model()], PROVIDERS)
     assert len(rows) == 1
     o = rows[0]
-    assert o["canonical_id"] == "meta/llama-3.1-8b"
+    # canonical_id is the cost-routing GROUP KEY; native_id keeps the raw id
+    assert o["canonical_id"] == offer_group_key("meta/llama-3.1-8b")
+    assert o["native_id"] == "meta/llama-3.1-8b"
     assert o["provider_slug"] == "onerouter"
     assert o["upstream_cost"] == pytest.approx(0.0005)
     assert o["quality_prior"] == 0.5
     assert o["is_active"] is True
+
+
+def test_same_model_different_casing_groups_across_providers():
+    # The core arbitrage win: two providers naming one model differently must
+    # land in ONE group so the router can compare their prices.
+    models = [
+        _model(id="1", provider_id="98", provider_model_id="Qwen/Qwen2.5-72B-Instruct",
+               pricing_original_prompt="0.0000009"),
+        _model(id="2", provider_id="110", provider_model_id="qwen/qwen-2.5-72b-instruct",
+               pricing_original_prompt="0.0000004"),
+    ]
+    rows = build_offer_rows(models, PROVIDERS)
+    assert len({o["canonical_id"] for o in rows}) == 1          # one group
+    assert {o["native_id"] for o in rows} == {
+        "Qwen/Qwen2.5-72B-Instruct", "qwen/qwen-2.5-72b-instruct",
+    }                                                            # native ids preserved
+    assert offer_summary(rows)["multi_provider_models"] == 1
+
+
+def test_alias_map_merges_across_orgs():
+    from src.services.model_canonicalization import offer_group_key
+
+    models = [
+        _model(id="1", provider_id="98", provider_model_id="z-ai/glm-4.7",
+               pricing_original_prompt="0.0000009"),
+        _model(id="2", provider_id="110", provider_model_id="zai-org/GLM-4.7",
+               pricing_original_prompt="0.0000004"),
+    ]
+    alias_map = {"zai-org/glm-4.7": "z-ai/glm-4.7"}
+    rows = build_offer_rows(models, PROVIDERS, alias_map)
+    assert len({o["canonical_id"] for o in rows}) == 1
+    assert rows[0]["canonical_id"] == offer_group_key("z-ai/glm-4.7", alias_map)
 
 
 def test_skips_inactive_nonchat_and_unpriced():

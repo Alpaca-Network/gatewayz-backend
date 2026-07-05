@@ -109,14 +109,25 @@ def _to_int_or_none(value) -> int | None:
         return None
 
 
-def build_offer_rows(models: list[dict], providers_by_id: dict) -> list[dict]:
+def build_offer_rows(
+    models: list[dict], providers_by_id: dict, alias_map: dict[str, str] | None = None
+) -> list[dict]:
     """Project active catalog rows into deduped ``model_provider_offers`` insert rows.
 
     ``providers_by_id`` maps ``provider_id`` → provider dict (must contain ``slug``).
+    ``alias_map`` (lowercased native id → canonical) is applied inside the grouping
+    key so curated cross-org merges take effect; pass ``None`` for pure normalization.
+
     Rows are skipped when inactive, non-chat modality, lacking a resolvable gateway
-    slug or a positive prompt cost. Duplicates on ``(canonical_id, provider_slug)``
-    are collapsed to the cheapest offer (satisfies the table's UNIQUE constraint).
+    slug or a positive prompt cost. The ``canonical_id`` stored on each offer is the
+    cost-routing GROUP KEY (``offer_group_key``) so the same model served by several
+    providers — even under different casing/separators/re-host prefixes — collapses
+    into one comparable group. ``native_id`` keeps the provider-native id used to
+    dispatch. Duplicates on ``(canonical_id, provider_slug)`` collapse to the cheapest
+    offer (satisfies the table's UNIQUE constraint).
     """
+    from src.services.model_canonicalization import offer_group_key
+
     best: dict[tuple, dict] = {}
     for m in models:
         if not m.get("is_active", True):
@@ -125,8 +136,12 @@ def build_offer_rows(models: list[dict], providers_by_id: dict) -> list[dict]:
         if modality in _NON_CHAT_MODALITIES:
             continue
 
-        canonical_id = m.get("provider_model_id")
-        if not canonical_id:
+        native_id = m.get("provider_model_id")
+        if not native_id:
+            continue
+
+        group_key = offer_group_key(native_id, alias_map)
+        if not group_key:
             continue
 
         provider = providers_by_id.get(m.get("provider_id")) or providers_by_id.get(
@@ -140,11 +155,11 @@ def build_offer_rows(models: list[dict], providers_by_id: dict) -> list[dict]:
         if cost is None:
             continue
 
-        key = (canonical_id, slug)
+        key = (group_key, slug)
         offer = {
-            "canonical_id": canonical_id,
+            "canonical_id": group_key,
             "provider_slug": slug,
-            "native_id": m.get("provider_model_id") or str(m.get("id")),
+            "native_id": native_id,
             "upstream_cost": round(cost, 10),
             "quality_prior": _quality_from_success_rate(m.get("success_rate")),
             "p50_ms": _to_int_or_none(m.get("average_response_time_ms")),
@@ -223,7 +238,13 @@ def _fetch_active_models(client, limit: int | None) -> list[dict]:
         start += _PAGE
 
 
-def _upsert_offers(client, offers: list[dict]) -> int:
+# Below this many freshly-projected offers we skip the stale-row sweep, so a
+# transient near-empty projection (e.g. a failed catalog fetch) can never wipe the
+# live offers table.
+_STALE_SWEEP_FLOOR = 50
+
+
+def _upsert_offers(client, offers: list[dict]) -> tuple[int, str]:
     from datetime import UTC, datetime
 
     stamp = datetime.now(UTC).isoformat()
@@ -234,7 +255,29 @@ def _upsert_offers(client, offers: list[dict]) -> int:
             batch, on_conflict="canonical_id,provider_slug"
         ).execute()
         written += len(batch)
-    return written
+    return written, stamp
+
+
+def _delete_stale_offers(client, stamp: str, written: int) -> int:
+    """Delete offers this projection run did not touch (older key scheme / dropped).
+
+    Every current offer was upserted with ``updated_at == stamp``; anything with an
+    older stamp is stale. Guarded by a floor so a near-empty projection is a no-op.
+    """
+    if written < _STALE_SWEEP_FLOOR:
+        logger.warning(
+            "offers projection wrote only %d rows (< floor %d); skipping stale sweep",
+            written,
+            _STALE_SWEEP_FLOOR,
+        )
+        return 0
+    resp = (
+        client.table("model_provider_offers")
+        .delete()
+        .lt("updated_at", stamp)
+        .execute()
+    )
+    return len(getattr(resp, "data", None) or [])
 
 
 def refresh_offers_projection(
@@ -246,11 +289,12 @@ def refresh_offers_projection(
     the scheduled-sync hook. Idempotent (upserts on the unique key).
     """
     from src.config.supabase_config import get_supabase_client
+    from src.services.model_canonicalization import load_alias_map
 
     client = get_supabase_client()
     providers = _providers_by_id(client)
     models = _fetch_active_models(client, limit)
-    offers = build_offer_rows(models, providers)
+    offers = build_offer_rows(models, providers, load_alias_map())
     if only_multi:
         offers = filter_multi_provider(offers)
 
@@ -259,5 +303,9 @@ def refresh_offers_projection(
     summary["dry_run"] = dry_run
     summary["only_multi"] = only_multi
     if not dry_run:
-        summary["rows_written"] = _upsert_offers(client, offers)
+        written, stamp = _upsert_offers(client, offers)
+        summary["rows_written"] = written
+        # Sweep offers left over from the previous (raw-id) key scheme or dropped
+        # models, unless this run projected suspiciously few rows.
+        summary["stale_deleted"] = _delete_stale_offers(client, stamp, written)
     return {"summary": summary, "offers": offers}

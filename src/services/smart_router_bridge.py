@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 
+from src.services.model_canonicalization import load_alias_map, offer_group_key
 from src.services.smart_router import (
     DEFAULT_MARKUP,
     ProviderOffer,
@@ -121,7 +122,11 @@ def reorder_provider_chain(
     if not provider_chain or len(provider_chain) < 2:
         return provider_chain
     try:
-        rows = offers if offers is not None else _load_offers(model)
+        if offers is not None:
+            rows = offers
+        else:
+            key = offer_group_key(model, load_alias_map())
+            rows = _load_offers(key)
         if not rows:
             return provider_chain
         provider_offers = _offers_to_provider_offers(rows, markup)
