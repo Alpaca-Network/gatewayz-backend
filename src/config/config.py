@@ -156,18 +156,23 @@ class Config:
         "yes",
     }
 
-    # Gatewayz One Phase 2 — smart router. When true, the live provider failover
-    # chain is REORDERED by the policy-based smart router using the Phase 1
-    # model_provider_offers projection. Off by default; no-ops (exact passthrough)
-    # when the offers table has no rows for the model, so it is safe to enable
-    # before the projection is populated. Never drops a provider from the chain.
-    SMART_ROUTER_ENABLED = os.environ.get("SMART_ROUTER_ENABLED", "false").lower() in {
+    # Gatewayz One Phase 2 — smart (cost-first) router. When true, the live provider
+    # failover chain is REORDERED by the policy-based smart router using the
+    # model_provider_offers projection so the CHEAPEST healthy provider for a model
+    # leads the chain — the gateway keeps the markup + provider-cost spread on every
+    # request. Health/circuit-breaker routing still gets the final say and bumps an
+    # unhealthy cost-winner off the front. No-ops (exact passthrough) when the offers
+    # table has no rows for the model. Enabled by default; set SMART_ROUTER_ENABLED=
+    # false as a kill-switch to restore the legacy static-priority chain.
+    SMART_ROUTER_ENABLED = os.environ.get("SMART_ROUTER_ENABLED", "true").lower() in {
         "1",
         "true",
         "yes",
     }
-    # Default routing policy when no per-key routing_policies row applies.
-    SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "balanced").strip().lower()
+    # Default routing policy when no per-key routing_policies row applies. "cost"
+    # maximizes the captured spread (cheapest provider for the same model wins);
+    # "balanced" / "latency" / "quality" trade margin for latency/quality.
+    SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "cost").strip().lower()
 
     # Gatewayz One Phase 4 — context assembly. When true, conversation messages are
     # reassembled within a per-request token budget (system + memory + rolling
@@ -599,6 +604,21 @@ class Config:
     # 1.0 = pass-through (no profit), 1.25 = 25% margin, 1.30 = 30% margin.
     # This is the primary revenue lever for inference requests.
     PRICING_MARKUP: float = float(os.environ.get("PRICING_MARKUP", "1.25"))
+
+    # Credit top-up fee — fraction withheld from a credit purchase as revenue
+    # (the OpenRouter-style monetization model). 0.0 = disabled (default, no
+    # behaviour change); 0.05 = keep 5% of each top-up. To run the pure
+    # "5%-on-credits" model, set CREDIT_TOPUP_FEE_RATE=0.05 AND PRICING_MARKUP=1.0
+    # (near-cost inference passthrough + fee on purchases).
+    CREDIT_TOPUP_FEE_RATE: float = float(os.environ.get("CREDIT_TOPUP_FEE_RATE", "0.0"))
+
+    # BYOK routing fee — fraction charged as revenue when a request is served
+    # using a customer's own provider key (bring-your-own-key). Inference cost
+    # is paid on the customer's upstream account, so we bill only this routing
+    # fee (fraction of the computed upstream cost) instead of debiting credits.
+    # 0.0 = disabled (default); 0.05 = 5% routing fee. See Phase 5 in
+    # docs/BUSINESS_PIVOT_DIRECT_SUPPLY.md.
+    BYOK_ROUTING_FEE_RATE: float = float(os.environ.get("BYOK_ROUTING_FEE_RATE", "0.0"))
 
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)

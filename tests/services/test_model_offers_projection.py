@@ -6,6 +6,7 @@ import pytest
 
 from src.services.model_offers_projection import (
     build_offer_rows,
+    cost_per_1k_from_model,
     filter_multi_provider,
     normalized_cost_per_1k,
     offer_summary,
@@ -53,6 +54,68 @@ def test_none_and_zero_and_garbage_return_none():
     assert normalized_cost_per_1k("0") is None
     assert normalized_cost_per_1k("") is None
     assert normalized_cost_per_1k("abc") is None
+
+
+# --------------------------------------------------------------------------- #
+# cost_per_1k_from_model — real pricing lives in the model_pricing join
+# --------------------------------------------------------------------------- #
+
+def test_cost_from_model_pricing_join_dict():
+    # model_pricing values are per-token; per-1k = value * 1000
+    m = _model(model_pricing={"price_per_input_token": 1.4e-06})
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0014)
+
+
+def test_cost_from_model_pricing_join_list():
+    # Supabase may return the join as a single-element list
+    m = _model(model_pricing=[{"price_per_input_token": 3e-07}])
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0003)
+
+
+def test_model_pricing_preferred_over_legacy_column():
+    # When both are present, the real per-provider join price wins
+    m = _model(
+        pricing_original_prompt="0.0000009",  # legacy → 0.0009/1k
+        model_pricing={"price_per_input_token": 1e-07},  # join → 0.0001/1k
+    )
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0001)
+
+
+def test_falls_back_to_legacy_column_when_no_join():
+    m = _model(model_pricing=None, pricing_original_prompt="0.0000005")
+    assert cost_per_1k_from_model(m) == pytest.approx(0.0005)
+
+
+def test_zero_or_missing_join_price_falls_through():
+    assert cost_per_1k_from_model(
+        _model(model_pricing={"price_per_input_token": 0.0}, pricing_original_prompt=None)
+    ) is None
+    assert cost_per_1k_from_model(
+        _model(model_pricing={}, pricing_original_prompt=None)
+    ) is None
+
+
+def test_offer_built_from_model_pricing_join():
+    # End-to-end: a model with only the join priced still yields an offer
+    m = _model(
+        pricing_original_prompt=None,
+        model_pricing={"price_per_input_token": 6e-07},
+    )
+    rows = build_offer_rows([m], PROVIDERS)
+    assert len(rows) == 1
+    assert rows[0]["upstream_cost"] == pytest.approx(0.0006)
+
+
+def test_dedup_keeps_cheapest_across_join_prices():
+    models = [
+        _model(id="1", provider_id="98", pricing_original_prompt=None,
+               model_pricing={"price_per_input_token": 9e-07}),
+        _model(id="2", provider_id="98", pricing_original_prompt=None,
+               model_pricing={"price_per_input_token": 4e-07}),
+    ]
+    rows = build_offer_rows(models, PROVIDERS)
+    assert len(rows) == 1
+    assert rows[0]["upstream_cost"] == pytest.approx(0.0004)
 
 
 # --------------------------------------------------------------------------- #

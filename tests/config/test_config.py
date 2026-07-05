@@ -680,3 +680,31 @@ class TestConfigAdminAndAnalytics:
         importlib.reload(config)
 
         assert config.Config.OPENROUTER_COOKIE == "test_cookie_value"
+
+
+class TestCostRoutingDefaults:
+    """Cost-first routing is on by default so the markup+provider spread is captured."""
+
+    def test_smart_router_enabled_by_default(self, monkeypatch):
+        from src.config import config
+        import importlib
+
+        monkeypatch.delenv("SMART_ROUTER_ENABLED", raising=False)
+        importlib.reload(config)
+        assert config.Config.SMART_ROUTER_ENABLED is True
+
+    def test_default_policy_is_cost(self, monkeypatch):
+        from src.config import config
+        import importlib
+
+        monkeypatch.delenv("SMART_ROUTER_POLICY", raising=False)
+        importlib.reload(config)
+        assert config.Config.SMART_ROUTER_POLICY == "cost"
+
+    def test_kill_switch_restores_legacy(self, monkeypatch):
+        from src.config import config
+        import importlib
+
+        monkeypatch.setenv("SMART_ROUTER_ENABLED", "false")
+        importlib.reload(config)
+        assert config.Config.SMART_ROUTER_ENABLED is False

@@ -53,6 +53,40 @@ def normalized_cost_per_1k(raw_price) -> float | None:
         return None
 
 
+def _input_price_per_token(model_pricing) -> float | None:
+    """Extract ``price_per_input_token`` from a ``model_pricing`` join.
+
+    The join may arrive as a dict, a single-element list (Supabase embed), or
+    ``None`` when the model has no pricing row. Returns the positive per-token
+    price, or ``None`` when absent/zero/invalid.
+    """
+    if not model_pricing:
+        return None
+    row = model_pricing[0] if isinstance(model_pricing, list) else model_pricing
+    if not isinstance(row, dict):
+        return None
+    try:
+        v = float(row.get("price_per_input_token") or 0.0)
+    except (TypeError, ValueError):
+        return None
+    return v if v > 0 else None
+
+
+def cost_per_1k_from_model(m: dict) -> float | None:
+    """Per-1k upstream input cost for a catalog row. None if unpriced.
+
+    Prefers the real per-provider price from the ``model_pricing`` join
+    (``price_per_input_token`` is already per-token → ×1000 for per-1k), and
+    falls back to the legacy ``pricing_original_prompt`` column (magnitude
+    auto-detected) for rows that predate the pricing table.
+    """
+    per_token = _input_price_per_token(m.get("model_pricing"))
+    if per_token is not None:
+        cost = per_token * 1000.0
+        return cost if cost > 0 else None
+    return normalized_cost_per_1k(m.get("pricing_original_prompt"))
+
+
 def _quality_from_success_rate(success_rate) -> float:
     """Map a success_rate (0..1 or 0..100) to a 0..1 quality prior; 0.5 if unknown."""
     if success_rate is None or str(success_rate).lower() == "none":
@@ -102,7 +136,7 @@ def build_offer_rows(models: list[dict], providers_by_id: dict) -> list[dict]:
         if not slug:
             continue
 
-        cost = normalized_cost_per_1k(m.get("pricing_original_prompt"))
+        cost = cost_per_1k_from_model(m)
         if cost is None:
             continue
 
@@ -155,7 +189,8 @@ _PAGE = 1000
 _UPSERT_BATCH = 500
 _MODEL_COLS = (
     "id,provider_id,provider_model_id,pricing_original_prompt,"
-    "success_rate,average_response_time_ms,is_active,modality"
+    "success_rate,average_response_time_ms,is_active,modality,"
+    "model_pricing(price_per_input_token,price_per_output_token)"
 )
 
 
