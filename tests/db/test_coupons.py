@@ -447,7 +447,11 @@ class TestRedeemCoupon:
             mock.execute.return_value = Mock(data=[])
 
             if table_name == "users":
-                mock.execute.return_value = Mock(data=[{"credits": 50.0}])
+                # redeem_coupon reads the current credit model
+                # (purchased_credits + subscription_allowance), not legacy "credits".
+                mock.execute.return_value = Mock(
+                    data=[{"purchased_credits": 50.0, "subscription_allowance": 0.0}]
+                )
             elif table_name == "coupons":
                 mock.execute.return_value = Mock(data=[{"id": 1, "times_used": 5}])
 

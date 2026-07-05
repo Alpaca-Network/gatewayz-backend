@@ -17,46 +17,10 @@ from fastapi import HTTPException
 
 
 # ---------------------------------------------------------------------------
-# CM-7.1  New user gets $5.00 credits
+# CM-7.1  New user gets $5.00 credits — REMOVED (trial system removed).
+# The trial system was intentionally removed; new users no longer receive
+# $5.00 trial credits, so this claim no longer holds. Test deleted.
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-def test_new_user_gets_5_dollar_credits(mock_supabase):
-    """create_enhanced_user inserts a user row with credits=5.0 ($5.00)."""
-    from src.db.users import create_enhanced_user
-
-    # Mock the API key creation that happens inside create_enhanced_user
-    with patch(
-        "src.db.users.create_api_key",
-        return_value=("gw_live_testkey123456789012345678901234567890123", "hashed"),
-    ):
-        # Set up mock to return a valid user
-        insert_result = MagicMock()
-        insert_result.data = [
-            {"id": 1, "username": "testuser", "email": "test@example.com", "credits": 5.0}
-        ]
-        mock_supabase.table.return_value.insert.return_value.execute.return_value = insert_result
-
-        # Mock the update call for replacing temp API key
-        update_result = MagicMock()
-        update_result.data = [
-            {"id": 1, "api_key": "gw_live_testkey123456789012345678901234567890123"}
-        ]
-        mock_supabase.table.return_value.update.return_value.eq.return_value.execute.return_value = (
-            update_result
-        )
-
-        create_enhanced_user(
-            username="testuser",
-            email="test@example.com",
-            auth_method="privy",
-        )
-
-    # Verify the insert payload included credits=5.0
-    insert_call = mock_supabase.table.return_value.insert.call_args
-    inserted_data = insert_call[0][0]
-    assert (
-        inserted_data["credits"] == 5.0
-    ), f"Expected credits=5.0 in insert payload, got {inserted_data.get('credits')}"
 
 
 # ---------------------------------------------------------------------------

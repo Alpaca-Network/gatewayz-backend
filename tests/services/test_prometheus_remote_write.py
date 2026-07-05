@@ -113,9 +113,9 @@ class TestPrometheusRemoteWrite:
 
     def test_module_imports(self):
         """Test that module imports successfully"""
-        import src.services.prometheus_remote_write
+        import src.services.metrics.prometheus_remote_write
 
-        assert src.services.prometheus_remote_write is not None
+        assert src.services.metrics.prometheus_remote_write is not None
 
     def test_module_has_expected_attributes(self):
         """Test module exports"""
@@ -125,7 +125,7 @@ class TestPrometheusRemoteWrite:
 
     def test_prometheus_remote_writer_initialization(self):
         """Test PrometheusRemoteWriter initialization"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(
             remote_write_url="http://test:9090/api/v1/write",
@@ -142,7 +142,7 @@ class TestPrometheusRemoteWrite:
 
     async def test_push_metrics_when_disabled(self):
         """Test push_metrics returns False when disabled"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=False)
         result = await writer.push_metrics()
@@ -151,7 +151,7 @@ class TestPrometheusRemoteWrite:
 
     async def test_push_metrics_when_no_client(self):
         """Test push_metrics returns False when client is None"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
         writer.client = None
@@ -159,10 +159,10 @@ class TestPrometheusRemoteWrite:
 
         assert result is False
 
-    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    @patch("src.services.metrics.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_push_metrics_success(self, mock_serialize):
         """Test successful metrics push with protobuf"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         # Mock the serialization
         mock_serialize.return_value = b"compressed_protobuf_data"
@@ -184,12 +184,12 @@ class TestPrometheusRemoteWrite:
         assert writer._push_errors == 0
         mock_client.post.assert_called_once()
 
-    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    @patch("src.services.metrics.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_push_metrics_http_error(self, mock_serialize):
         """Test metrics push with HTTP error"""
         import httpx
 
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         # Mock the serialization
         mock_serialize.return_value = b"compressed_protobuf_data"
@@ -215,7 +215,7 @@ class TestPrometheusRemoteWrite:
 
     def test_get_stats(self):
         """Test get_stats returns correct statistics"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=False)
         writer._push_count = 10
@@ -233,7 +233,7 @@ class TestPrometheusRemoteWrite:
 
     def test_get_stats_no_pushes(self):
         """Test get_stats with no pushes returns 0 success rate"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=False)
         stats = writer.get_stats()
@@ -242,7 +242,7 @@ class TestPrometheusRemoteWrite:
 
     def test_circuit_breaker_initial_state(self):
         """Test circuit breaker is initially closed"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
         assert writer._circuit_open is False
@@ -251,7 +251,7 @@ class TestPrometheusRemoteWrite:
 
     def test_circuit_breaker_opens_after_threshold(self):
         """Test circuit breaker opens after consecutive failures"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
 
@@ -265,7 +265,7 @@ class TestPrometheusRemoteWrite:
 
     def test_circuit_breaker_resets_on_success(self):
         """Test circuit breaker resets after successful push"""
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
 
@@ -282,7 +282,7 @@ class TestPrometheusRemoteWrite:
         """Test circuit breaker allows retry after timeout"""
         import time
 
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
 
@@ -294,12 +294,12 @@ class TestPrometheusRemoteWrite:
         assert writer._check_circuit_breaker() is True
         assert writer._circuit_open is False
 
-    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    @patch("src.services.metrics.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_push_metrics_skipped_when_circuit_open(self, mock_serialize):
         """Test push_metrics is skipped when circuit is open"""
         import time
 
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         writer = PrometheusRemoteWriter(enabled=True)
         writer.client = AsyncMock()
@@ -312,12 +312,12 @@ class TestPrometheusRemoteWrite:
         mock_serialize.assert_not_called()
         writer.client.post.assert_not_called()
 
-    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    @patch("src.services.metrics.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_circuit_breaker_opens_on_connection_errors(self, mock_serialize):
         """Test circuit breaker opens after repeated connection errors"""
         import httpx
 
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         mock_serialize.return_value = b"compressed_data"
 
@@ -333,12 +333,12 @@ class TestPrometheusRemoteWrite:
         assert writer._circuit_open is True
         assert writer._push_errors == writer.CIRCUIT_BREAKER_THRESHOLD
 
-    @patch("src.services.prometheus_remote_write._serialize_metrics_to_protobuf")
+    @patch("src.services.metrics.prometheus_remote_write._serialize_metrics_to_protobuf")
     async def test_circuit_breaker_opens_on_timeout_errors(self, mock_serialize):
         """Test circuit breaker opens after repeated timeout errors"""
         import httpx
 
-        from src.services.prometheus_remote_write import PrometheusRemoteWriter
+        from src.services.metrics.prometheus_remote_write import PrometheusRemoteWriter
 
         mock_serialize.return_value = b"compressed_data"
 
@@ -354,17 +354,17 @@ class TestPrometheusRemoteWrite:
         assert writer._circuit_open is True
         assert writer._push_errors == writer.CIRCUIT_BREAKER_THRESHOLD
 
-    @patch("src.services.prometheus_remote_write.Config")
+    @patch("src.services.metrics.prometheus_remote_write.Config")
     async def test_init_prometheus_remote_write_disabled(self, mock_config):
         """Test init_prometheus_remote_write when Prometheus is disabled"""
-        import src.services.prometheus_remote_write
-        from src.services.prometheus_remote_write import (
+        import src.services.metrics.prometheus_remote_write
+        from src.services.metrics.prometheus_remote_write import (
             get_prometheus_writer,
             init_prometheus_remote_write,
         )
 
         # Reset the global writer
-        src.services.prometheus_remote_write.prometheus_writer = None
+        src.services.metrics.prometheus_remote_write.prometheus_writer = None
 
         mock_config.PROMETHEUS_ENABLED = False
 
@@ -374,24 +374,24 @@ class TestPrometheusRemoteWrite:
         writer = get_prometheus_writer()
         assert writer is None
 
-    @patch("src.services.prometheus_remote_write.Config")
+    @patch("src.services.metrics.prometheus_remote_write.Config")
     async def test_init_prometheus_remote_write_enabled(self, mock_config):
         """Test init_prometheus_remote_write creates and starts writer"""
-        import src.services.prometheus_remote_write
-        from src.services.prometheus_remote_write import (
+        import src.services.metrics.prometheus_remote_write
+        from src.services.metrics.prometheus_remote_write import (
             get_prometheus_writer,
             init_prometheus_remote_write,
         )
 
         # Reset the global writer
-        src.services.prometheus_remote_write.prometheus_writer = None
+        src.services.metrics.prometheus_remote_write.prometheus_writer = None
 
         mock_config.PROMETHEUS_ENABLED = True
         mock_config.PROMETHEUS_REMOTE_WRITE_URL = "http://test:9090/api/v1/write"
 
         # Mock the start method
         with patch.object(
-            src.services.prometheus_remote_write.PrometheusRemoteWriter,
+            src.services.metrics.prometheus_remote_write.PrometheusRemoteWriter,
             "start",
             new_callable=AsyncMock,
         ) as mock_start:
@@ -403,10 +403,10 @@ class TestPrometheusRemoteWrite:
             assert writer.enabled is True
             mock_start.assert_called_once()
 
-    @patch("src.services.prometheus_remote_write.prometheus_writer")
+    @patch("src.services.metrics.prometheus_remote_write.prometheus_writer")
     async def test_shutdown_prometheus_remote_write_with_writer(self, mock_prometheus_writer):
         """Test shutdown_prometheus_remote_write with active writer"""
-        from src.services.prometheus_remote_write import (
+        from src.services.metrics.prometheus_remote_write import (
             PrometheusRemoteWriter,
             shutdown_prometheus_remote_write,
         )
@@ -424,10 +424,10 @@ class TestPrometheusRemoteWrite:
         mock_writer.stop.assert_called_once()
         mock_writer.get_stats.assert_called_once()
 
-    @patch("src.services.prometheus_remote_write.prometheus_writer", None)
+    @patch("src.services.metrics.prometheus_remote_write.prometheus_writer", None)
     async def test_shutdown_prometheus_remote_write_no_writer(self):
         """Test shutdown_prometheus_remote_write with no writer"""
-        from src.services.prometheus_remote_write import shutdown_prometheus_remote_write
+        from src.services.metrics.prometheus_remote_write import shutdown_prometheus_remote_write
 
         # Should not raise an error when writer is None
         await shutdown_prometheus_remote_write()
@@ -435,27 +435,27 @@ class TestPrometheusRemoteWrite:
 
     def test_get_prometheus_writer(self):
         """Test get_prometheus_writer returns the global instance"""
-        import src.services.prometheus_remote_write
-        from src.services.prometheus_remote_write import (
+        import src.services.metrics.prometheus_remote_write
+        from src.services.metrics.prometheus_remote_write import (
             PrometheusRemoteWriter,
             get_prometheus_writer,
         )
 
         # Set up a test writer as the global instance
         test_writer = PrometheusRemoteWriter(enabled=False)
-        src.services.prometheus_remote_write.prometheus_writer = test_writer
+        src.services.metrics.prometheus_remote_write.prometheus_writer = test_writer
 
         result = get_prometheus_writer()
         assert result == test_writer
 
         # Clean up
-        src.services.prometheus_remote_write.prometheus_writer = None
+        src.services.metrics.prometheus_remote_write.prometheus_writer = None
 
-    @patch("src.services.prometheus_remote_write.snappy.compress")
-    @patch("src.services.prometheus_remote_write.REGISTRY")
+    @patch("src.services.metrics.prometheus_remote_write.snappy.compress")
+    @patch("src.services.metrics.prometheus_remote_write.REGISTRY")
     def test_serialize_metrics_success(self, mock_registry, mock_compress):
         """Test successful metrics serialization with new protobuf implementation"""
-        from src.services.prometheus_remote_write import _serialize_metrics_to_protobuf
+        from src.services.metrics.prometheus_remote_write import _serialize_metrics_to_protobuf
 
         # Mock the registry to return some test metrics
         mock_sample = Mock()
@@ -479,10 +479,10 @@ class TestPrometheusRemoteWrite:
         assert isinstance(call_args, bytes)
         assert len(call_args) > 0
 
-    @patch("src.services.prometheus_remote_write.REGISTRY")
+    @patch("src.services.metrics.prometheus_remote_write.REGISTRY")
     def test_serialize_metrics_empty_registry(self, mock_registry):
         """Test serialization with empty registry"""
-        from src.services.prometheus_remote_write import _serialize_metrics_to_protobuf
+        from src.services.metrics.prometheus_remote_write import _serialize_metrics_to_protobuf
 
         mock_registry.collect.return_value = []
 
@@ -493,7 +493,7 @@ class TestPrometheusRemoteWrite:
 
     def test_get_instance_labels(self):
         """Test _get_instance_labels returns expected labels"""
-        from src.services.prometheus_remote_write import _get_instance_labels
+        from src.services.metrics.prometheus_remote_write import _get_instance_labels
 
         labels = _get_instance_labels()
 
@@ -570,10 +570,10 @@ class TestLabelSorting:
         assert isinstance(data, bytes)
         assert len(data) > 0
 
-    @patch("src.services.prometheus_remote_write.REGISTRY")
+    @patch("src.services.metrics.prometheus_remote_write.REGISTRY")
     def test_serialize_metrics_sorts_labels(self, mock_registry):
         """Test that _serialize_metrics_to_protobuf sorts labels correctly"""
-        from src.services.prometheus_remote_write import _serialize_metrics_to_protobuf
+        from src.services.metrics.prometheus_remote_write import _serialize_metrics_to_protobuf
 
         # Mock a metric with labels that would be out of order if not sorted
         mock_sample = Mock()

@@ -55,7 +55,14 @@ class TestCM1602WebhookCreditsLowEventTriggered:
 
         # User with credits below the $5 threshold
         mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[{"id": 1, "credits": 2.0, "api_key": "gw_test"}]
+            data=[
+                {
+                    "id": 1,
+                    "subscription_allowance": 0.0,
+                    "purchased_credits": 2.0,
+                    "api_key": "gw_test",
+                }
+            ]
         )
 
         # Patch get_supabase_client so __init__ uses our mock
@@ -94,7 +101,14 @@ class TestCM1602WebhookCreditsLowEventTriggered:
 
         mock_supabase = MagicMock()
         mock_supabase.table.return_value.select.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[{"id": 1, "credits": 50.0, "api_key": "gw_test"}]
+            data=[
+                {
+                    "id": 1,
+                    "subscription_allowance": 0.0,
+                    "purchased_credits": 50.0,
+                    "api_key": "gw_test",
+                }
+            ]
         )
 
         with patch(

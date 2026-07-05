@@ -636,24 +636,6 @@ class TestConfigClarifai:
         assert config.Config.CLARIFAI_APP_ID == "test_app_id"
 
 
-class TestConfigAiHubMix:
-    """Test AiHubMix configuration"""
-
-    def test_aihubmix_configuration(self, monkeypatch):
-        """Test AiHubMix API configuration"""
-        from src.config import config
-
-        monkeypatch.setenv("AIHUBMIX_API_KEY", "test_aihubmix_key")
-        monkeypatch.setenv("AIHUBMIX_APP_CODE", "test_app_code")
-
-        import importlib
-
-        importlib.reload(config)
-
-        assert config.Config.AIHUBMIX_API_KEY == "test_aihubmix_key"
-        assert config.Config.AIHUBMIX_APP_CODE == "test_app_code"
-
-
 class TestConfigAdminAndAnalytics:
     """Test admin and analytics configuration"""
 

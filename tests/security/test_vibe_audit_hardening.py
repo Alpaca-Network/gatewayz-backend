@@ -179,15 +179,26 @@ def test_payment_succeeded_grants_when_pending(monkeypatch):
 
 
 def test_webhook_records_event_after_handlers():
-    """record_processed_event must run AFTER handler dispatch, not before."""
+    """A failed handler must release its claim AFTER dispatch, so Stripe retries.
+
+    Dedup switched from a check-then-record pair to insert-first idempotency:
+    the event is claimed up front (claim_event) before handler dispatch, and on
+    handler failure the claim is released (release_event) so the event is retried
+    instead of being silently marked done. This test enforces that ordering.
+    """
     from src.services.billing.payments import StripeService
 
     src = inspect.getsource(StripeService.handle_webhook)
+    claim_idx = src.index("claim_event(")
     handler_idx = src.index("_handle_checkout_completed")
-    record_idx = src.rindex("record_processed_event(")
-    assert record_idx > handler_idx, (
-        "record_processed_event must be called after the handler dispatch so a "
-        "failed handler is retried by Stripe instead of being silently dropped"
+    release_idx = src.rindex("release_event(")
+    # Event is claimed before the handler runs (insert-first idempotency)...
+    assert claim_idx < handler_idx, "claim_event must run before handler dispatch"
+    # ...and only released after a handler fails, so Stripe retries instead of the
+    # event being silently dropped.
+    assert release_idx > handler_idx, (
+        "release_event must be called after the handler dispatch so a failed "
+        "handler is retried by Stripe instead of being silently dropped"
     )
 
 

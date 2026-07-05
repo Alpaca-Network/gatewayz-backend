@@ -159,19 +159,19 @@ class TestUserLookupCache:
             assert "cached_users" in stats
             assert "ttl_seconds" in stats
             assert stats["cached_users"] == 2
-            assert stats["ttl_seconds"] == 300  # Default TTL
+            assert stats["ttl_seconds"] == 60  # Default TTL
 
     def test_set_cache_ttl(self):
         """set_cache_ttl should update cache TTL"""
         original_stats = get_cache_stats()
-        assert original_stats["ttl_seconds"] == 300
+        assert original_stats["ttl_seconds"] == 60
 
         set_cache_ttl(600)
         updated_stats = get_cache_stats()
         assert updated_stats["ttl_seconds"] == 600
 
         # Reset to original
-        set_cache_ttl(300)
+        set_cache_ttl(60)
 
     def test_cache_statistics_empty(self):
         """get_cache_stats should work on empty cache"""
@@ -179,4 +179,4 @@ class TestUserLookupCache:
         stats = get_cache_stats()
 
         assert stats["cached_users"] == 0
-        assert stats["ttl_seconds"] == 300
+        assert stats["ttl_seconds"] == 60

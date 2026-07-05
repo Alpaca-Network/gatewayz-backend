@@ -7,6 +7,7 @@ Tests covering:
   5.3 Circuit Breaker (CircuitBreaker, CircuitBreakerConfig, CircuitState)
 """
 
+import contextlib
 import time
 from unittest.mock import MagicMock, patch
 
@@ -26,6 +27,27 @@ from src.services.provider_failover import (
     enforce_model_failover_rules,
     should_failover,
 )
+
+
+@contextlib.contextmanager
+def _all_providers_enabled():
+    """Isolate the failover-chain *ordering* logic from deployment config.
+
+    ``build_provider_failover_chain`` now filters the roster at runtime through
+    ``ENABLED_PROVIDERS`` / the DB-backed gateway registry (CI defaults
+    ``ENABLED_PROVIDERS=openrouter``; staging DB currently exposes a 12-provider
+    subset). These CM tests assert the reliability-ordering algorithm over the
+    full ``FALLBACK_PROVIDER_PRIORITY`` roster, so we pin the roster to the full
+    hardcoded priority and treat every provider as enabled.
+    """
+    with (
+        patch(
+            "src.services.provider_failover._get_failover_priority",
+            return_value=FALLBACK_PROVIDER_PRIORITY,
+        ),
+        patch("src.utils.provider_filter.is_provider_enabled", return_value=True),
+    ):
+        yield
 
 # ---------------------------------------------------------------------------
 # Helper: create a CircuitBreaker with Redis disabled (in-memory only)
@@ -65,13 +87,15 @@ class TestFailoverChain:
     @pytest.mark.cm_verified
     def test_failover_chain_has_10_providers(self):
         """CM-5.1.1: build_provider_failover_chain produces a chain with 10 providers."""
-        chain = build_provider_failover_chain("openrouter")
+        with _all_providers_enabled():
+            chain = build_provider_failover_chain("openrouter")
         assert len(chain) == 10
 
     @pytest.mark.cm_verified
     def test_failover_chain_ordered_by_reliability(self):
         """CM-5.1.2: build_provider_failover_chain preserves reliability ranking after initial."""
-        chain = build_provider_failover_chain("openrouter")
+        with _all_providers_enabled():
+            chain = build_provider_failover_chain("openrouter")
         expected_order = (
             "openrouter",
             "openai",
@@ -144,7 +168,8 @@ class TestFailoverChain:
         We verify that build_provider_failover_chain produces a multi-provider
         chain so the dispatch loop can transparently try the next provider.
         """
-        chain = build_provider_failover_chain("openrouter")
+        with _all_providers_enabled():
+            chain = build_provider_failover_chain("openrouter")
         # The chain should start with the requested provider and include fallbacks
         assert chain[0] == "openrouter"
         assert len(chain) > 1  # fallback providers present

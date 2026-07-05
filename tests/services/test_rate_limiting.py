@@ -345,7 +345,7 @@ async def test_severe_rate_limit_for_temporary_email(monkeypatch, mod, fake_fall
     def mock_is_temporary(email):
         return email.endswith("@tempmail.com")
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
     monkeypatch.setattr(
         "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
@@ -374,7 +374,7 @@ async def test_blocked_rate_limit_for_blocked_email_domain(monkeypatch, mod, fak
     def mock_is_temporary(email):
         return False
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
     monkeypatch.setattr(
         "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
@@ -403,7 +403,7 @@ async def test_no_severe_rate_limit_for_normal_user(monkeypatch, mod, fake_fallb
     def mock_is_temporary(email):
         return False
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
     monkeypatch.setattr(
         "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary
@@ -424,7 +424,7 @@ async def test_severe_rate_limit_graceful_on_missing_user(monkeypatch, mod, fake
     def mock_get_user(api_key):
         return None
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
 
     mgr = mod.RateLimitManager(redis_client=None)
 
@@ -441,7 +441,7 @@ async def test_severe_rate_limit_graceful_on_exception(monkeypatch, mod, fake_fa
     def mock_get_user(api_key):
         raise Exception("Database error")
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
 
     mgr = mod.RateLimitManager(redis_client=None)
 
@@ -465,7 +465,7 @@ async def test_blocked_email_domain_check_priority(monkeypatch, mod, fake_fallba
     def mock_is_temporary(email):
         return True  # Also temporary
 
-    monkeypatch.setattr("src.services.user_lookup_cache.get_user", mock_get_user)
+    monkeypatch.setattr("src.services.cache.user_lookup_cache.get_user", mock_get_user)
     monkeypatch.setattr("src.utils.security_validators.is_blocked_email_domain", mock_is_blocked)
     monkeypatch.setattr(
         "src.utils.security_validators.is_temporary_email_domain", mock_is_temporary

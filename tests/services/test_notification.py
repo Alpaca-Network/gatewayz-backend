@@ -173,8 +173,8 @@ class TestLowBalanceAlerts:
         self, mock_validate_trial, notification_service, mock_user_data
     ):
         """Test low balance alert is triggered when credits < $5"""
-        # User has low credits
-        low_credit_user = {**mock_user_data, "credits": 3.0}
+        # User has low credits (source sums subscription_allowance + purchased_credits)
+        low_credit_user = {**mock_user_data, "purchased_credits": 3.0}
 
         mock_user_result = Mock()
         mock_user_result.data = [low_credit_user]
@@ -209,8 +209,8 @@ class TestLowBalanceAlerts:
         self, mock_validate_trial, notification_service, mock_user_data
     ):
         """Test low balance alert not triggered when credits > $5"""
-        # User has sufficient credits
-        sufficient_credit_user = {**mock_user_data, "credits": 10.0}
+        # User has sufficient credits (source sums subscription_allowance + purchased_credits)
+        sufficient_credit_user = {**mock_user_data, "purchased_credits": 10.0}
 
         mock_user_result = Mock()
         mock_user_result.data = [sufficient_credit_user]

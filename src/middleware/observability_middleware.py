@@ -21,7 +21,7 @@ import time
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from src.services.prometheus_metrics import (
+from src.services.metrics.prometheus_metrics import (
     APP_NAME,
     fastapi_request_size_bytes,
     fastapi_requests_duration_seconds,

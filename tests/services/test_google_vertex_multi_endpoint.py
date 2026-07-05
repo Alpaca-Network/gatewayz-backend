@@ -10,9 +10,9 @@ from src.services.providers.google_vertex_catalog import _fetch_models_from_vert
 class TestGoogleVertexMultiEndpoint:
     """Test Google Vertex AI model fetching with multi-endpoint fallback"""
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_first_endpoint_success(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
@@ -48,9 +48,9 @@ class TestGoogleVertexMultiEndpoint:
         # Verify only first endpoint was tried
         mock_client_instance.__enter__.return_value.get.assert_called_once()
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_fallback_to_second_endpoint(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
@@ -90,9 +90,9 @@ class TestGoogleVertexMultiEndpoint:
         # Verify both endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 2
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_fallback_to_global_endpoint(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
@@ -132,9 +132,9 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all three endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_all_endpoints_fail_returns_none(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env, caplog
@@ -170,9 +170,9 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all endpoints were tried
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_exception_handling_falls_through(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env
@@ -201,9 +201,9 @@ class TestGoogleVertexMultiEndpoint:
         # Verify all endpoints were attempted despite exceptions
         assert mock_client_instance.__enter__.return_value.get.call_count == 3
 
-    @patch("src.services.google_vertex_client._prepare_vertex_environment")
-    @patch("src.services.google_vertex_client._get_google_vertex_access_token")
-    @patch("src.services.google_vertex_client.Config")
+    @patch("src.services.providers.google_vertex_catalog._prepare_vertex_environment")
+    @patch("src.services.providers.google_vertex_catalog._get_google_vertex_access_token")
+    @patch("src.services.providers.google_vertex_catalog.Config")
     @patch("httpx.Client")
     def test_correct_endpoint_urls(
         self, mock_httpx_client, mock_config, mock_get_token, mock_prepare_env

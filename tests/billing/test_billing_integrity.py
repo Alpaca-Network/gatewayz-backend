@@ -141,16 +141,10 @@ def test_refund_transaction_type_exists():
 # =========================================================================
 
 
-def test_trial_duration_matches_config():
-    from src.config.usage_limits import TRIAL_DURATION_DAYS
-
-    assert TRIAL_DURATION_DAYS == 14  # Standard trial is 14 days
-
-
-def test_trial_credits_is_5_dollars():
-    from src.config.usage_limits import TRIAL_CREDITS_AMOUNT
-
-    assert TRIAL_CREDITS_AMOUNT == 5.0
+# NOTE: test_trial_duration_matches_config and test_trial_credits_is_5_dollars
+# were removed — the trial system was intentionally removed, so TRIAL_DURATION_DAYS
+# and TRIAL_CREDITS_AMOUNT are now legacy 0-valued constants kept only for import
+# compatibility. Asserting the old 14-day / $5 trial values is stale.
 
 
 def test_api_keys_uses_config_constants():
