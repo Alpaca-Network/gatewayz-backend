@@ -257,9 +257,7 @@ class PromptRouter:
             registry = build_capabilities_registry(rows)
             if registry:
                 self._capabilities_registry = registry
-                logger.info(
-                    "Loaded capabilities for %d chat models from catalog", len(registry)
-                )
+                logger.info("Loaded capabilities for %d chat models from catalog", len(registry))
                 return
             logger.warning("Catalog capability rows empty; loading defaults")
         except Exception as e:
@@ -614,7 +612,7 @@ def _normalize_auto_route_model(model: str) -> str:
     if m in _AUTO_ROUTE_BARE_ALIASES:
         return "router"
     if m.startswith("auto:"):
-        return "router:" + m[len("auto:"):]
+        return "router:" + m[len("auto:") :]
     return m
 
 

@@ -21,7 +21,21 @@ from src.services.billing.payments import StripeService
 
 @pytest.fixture
 def stripe_service():
-    """Create StripeService instance"""
+    """Create StripeService instance.
+
+    Resolve StripeService from the *live* ``src.services.billing.payments`` module
+    rather than the module-top import. The backward-compat import shim in
+    ``src/services/__init__.py`` can re-execute this module under a fresh object
+    during ``create_app()`` (e.g. when another test in the same xdist worker builds
+    the app). The module-top ``StripeService`` then closes over the stale module
+    dict, while ``@patch("src.services.billing.payments.<fn>")`` targets the live
+    one — so mocked ``add_credits_to_user`` / ``update_payment_status`` are never
+    seen by the handler. Re-importing here keeps the instance and the patch targets
+    on the same module object.
+    """
+    import importlib
+
+    payments_module = importlib.import_module("src.services.billing.payments")
     with patch.dict(
         "os.environ",
         {
@@ -31,7 +45,7 @@ def stripe_service():
             "FRONTEND_URL": "https://test.gatewayz.ai",
         },
     ):
-        return StripeService()
+        return payments_module.StripeService()
 
 
 @pytest.fixture
@@ -468,7 +482,11 @@ class TestWebhooks:
 
     @patch("src.services.billing.payments.claim_event")
     @patch("stripe.Webhook.construct_event")
-    @patch.object(StripeService, "_handle_checkout_completed")
+    # Patch via the live module path (not the module-top ``StripeService`` symbol),
+    # so this targets the same class object the ``stripe_service`` fixture builds.
+    # See the fixture docstring re: the backward-compat import shim duplicating the
+    # payments module.
+    @patch("src.services.billing.payments.StripeService._handle_checkout_completed")
     def test_handle_checkout_completed_webhook(
         self,
         mock_handle_checkout,
@@ -556,11 +574,20 @@ class TestWebhooks:
             stripe_session_id="cs_test_123",
         )
 
+    # get_payment is the idempotency guard's DB lookup; mock it to None so a
+    # pre-existing "completed" payment in a shared CI database can't trip the
+    # "already completed; skipping duplicate credit grant" short-circuit.
+    @patch("src.services.billing.payments.get_payment", return_value=None)
     @patch("stripe.checkout.Session.retrieve")
     @patch("src.services.billing.payments.add_credits_to_user")
     @patch("src.services.billing.payments.update_payment_status")
     def test_checkout_completed_refetches_metadata_when_missing(
-        self, mock_update_payment, mock_add_credits, mock_session_retrieve, stripe_service
+        self,
+        mock_update_payment,
+        mock_add_credits,
+        mock_session_retrieve,
+        mock_get_payment,
+        stripe_service,
     ):
         """Ensure checkout handler refetches the session when metadata is missing"""
 
@@ -678,9 +705,7 @@ class TestWebhooks:
         stripe_service._handle_checkout_completed(webhook_session)
 
         mock_session_retrieve.assert_called_once_with("cs_missing_everything")
-        mock_payment_intent_retrieve.assert_called_once_with(
-            "pi_metadata_source"
-        )
+        mock_payment_intent_retrieve.assert_called_once_with("pi_metadata_source")
 
         mock_add_credits.assert_called_once()
         add_kwargs = mock_add_credits.call_args[1]
@@ -706,6 +731,9 @@ class TestWebhooks:
 
     @patch("stripe.Webhook.construct_event")
     @patch("src.services.billing.payments.claim_event")
+    # get_payment is the idempotency guard; None means "no prior completed payment"
+    # so a shared CI database can't short-circuit the credit grant.
+    @patch("src.services.billing.payments.get_payment", return_value=None)
     @patch("src.services.billing.payments.get_payment_by_stripe_intent")
     @patch("src.services.billing.payments.add_credits_to_user")
     @patch("src.services.billing.payments.update_payment_status")
@@ -713,6 +741,7 @@ class TestWebhooks:
         self,
         mock_update_payment,
         mock_add_credits,
+        mock_get_payment_by_intent,
         mock_get_payment,
         mock_claim,
         mock_construct_event,
@@ -739,7 +768,7 @@ class TestWebhooks:
                 }
             return None
 
-        mock_get_payment.side_effect = _lookup
+        mock_get_payment_by_intent.side_effect = _lookup
 
         mock_event = {
             "id": "evt_missing_meta",

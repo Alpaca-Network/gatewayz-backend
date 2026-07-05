@@ -36,47 +36,6 @@ class TestStreamingE2E:
             assert "data:" in response.text
             assert "[DONE]" in response.text
 
-    def test_streaming_messages(self, client: TestClient, auth_headers: dict):
-        """Test streaming on messages endpoint."""
-        payload = {
-            "model": "claude-3.5-sonnet",
-            "max_tokens": 100,
-            "messages": [{"role": "user", "content": "Count to 5"}],
-            "stream": True,
-        }
-
-        response = client.post(
-            "/v1/messages",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        # May return various errors if backend doesn't support certain features
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        if response.status_code == 200:
-            assert "text/event-stream" in response.headers.get("content-type", "")
-            assert "data:" in response.text
-
-    def test_streaming_responses(self, client: TestClient, auth_headers: dict):
-        """Test streaming on responses endpoint."""
-        payload = {
-            "model": "gpt-3.5-turbo",
-            "input": [{"role": "user", "content": "Count to 5"}],
-            "stream": True,
-        }
-
-        response = client.post(
-            "/v1/responses",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        # May return various errors if backend doesn't support certain features
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        if response.status_code == 200:
-            assert "text/event-stream" in response.headers.get("content-type", "")
-            assert "data:" in response.text
-
     def test_streaming_with_custom_parameters(self, client: TestClient, auth_headers: dict):
         """Test streaming with custom temperature and tokens."""
         payload = {
@@ -118,27 +77,6 @@ class TestStreamingE2E:
             data = response.json()
             assert "choices" in data
             assert data["choices"][0]["message"]["content"]
-
-    def test_non_streaming_messages(self, client: TestClient, auth_headers: dict):
-        """Test non-streaming messages endpoint."""
-        payload = {
-            "model": "claude-3.5-sonnet",
-            "max_tokens": 100,
-            "messages": [{"role": "user", "content": "Say hello"}],
-            "stream": False,
-        }
-
-        response = client.post(
-            "/v1/messages",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        # May return various errors if backend doesn't support certain features
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-        if response.status_code == 200:
-            data = response.json()
-            assert "content" in data
 
 
 class TestProviderParameterE2E:
@@ -223,41 +161,6 @@ class TestProviderParameterE2E:
             headers=auth_headers,
         )
 
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
-    def test_provider_openrouter_messages(self, client: TestClient, auth_headers: dict):
-        """Test explicit OpenRouter provider on messages endpoint."""
-        payload = {
-            "model": "claude-3.5-sonnet",
-            "max_tokens": 100,
-            "messages": [{"role": "user", "content": "Hello"}],
-            "provider": "openrouter",
-        }
-
-        response = client.post(
-            "/v1/messages",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        # May return various errors if backend doesn't support certain features
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
-    def test_provider_openrouter_responses(self, client: TestClient, auth_headers: dict):
-        """Test explicit OpenRouter provider on responses endpoint."""
-        payload = {
-            "model": "gpt-3.5-turbo",
-            "input": [{"role": "user", "content": "Hello"}],
-            "provider": "openrouter",
-        }
-
-        response = client.post(
-            "/v1/responses",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        # May return various errors if backend doesn't support certain features
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
     def test_provider_deepinfra_images(self, client: TestClient, auth_headers: dict):

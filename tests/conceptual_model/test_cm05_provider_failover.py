@@ -49,6 +49,7 @@ def _all_providers_enabled():
     ):
         yield
 
+
 # ---------------------------------------------------------------------------
 # Helper: create a CircuitBreaker with Redis disabled (in-memory only)
 # ---------------------------------------------------------------------------

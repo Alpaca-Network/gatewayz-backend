@@ -271,12 +271,7 @@ def _delete_stale_offers(client, stamp: str, written: int) -> int:
             _STALE_SWEEP_FLOOR,
         )
         return 0
-    resp = (
-        client.table("model_provider_offers")
-        .delete()
-        .lt("updated_at", stamp)
-        .execute()
-    )
+    resp = client.table("model_provider_offers").delete().lt("updated_at", stamp).execute()
     return len(getattr(resp, "data", None) or [])
 
 

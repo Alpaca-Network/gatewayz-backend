@@ -104,6 +104,7 @@ def test_unknown_policy_falls_back_to_balanced():
 # _load_offers is queried by the cost-routing group key, not the raw model
 # --------------------------------------------------------------------------- #
 
+
 def test_load_offers_called_with_group_key(monkeypatch):
     captured = {}
 
@@ -137,12 +138,26 @@ def test_group_keyed_offers_rank_cheapest_first():
 
     gk = "qwen/qwen2572binstruct"  # an offer_group_key value
     offers = [
-        {"canonical_id": gk, "provider_slug": "novita", "native_id": "n",
-         "upstream_cost": 0.038, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
-         "is_active": True},
-        {"canonical_id": gk, "provider_slug": "openrouter", "native_id": "o",
-         "upstream_cost": 0.00036, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
-         "is_active": True},
+        {
+            "canonical_id": gk,
+            "provider_slug": "novita",
+            "native_id": "n",
+            "upstream_cost": 0.038,
+            "p50_ms": 0,
+            "p95_ms": 0,
+            "quality_prior": 0.5,
+            "is_active": True,
+        },
+        {
+            "canonical_id": gk,
+            "provider_slug": "openrouter",
+            "native_id": "o",
+            "upstream_cost": 0.00036,
+            "p50_ms": 0,
+            "p95_ms": 0,
+            "quality_prior": 0.5,
+            "is_active": True,
+        },
     ]
     out = reorder_provider_chain(
         "Qwen/Qwen2.5-72B-Instruct", ["novita", "openrouter"], policy="cost", offers=offers

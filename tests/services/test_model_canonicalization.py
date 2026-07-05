@@ -12,10 +12,10 @@ from src.services.model_canonicalization import (
     suspicious_merges,
 )
 
-
 # --------------------------------------------------------------------------- #
 # normalization_key
 # --------------------------------------------------------------------------- #
+
 
 def test_casing_and_separators_collapse():
     assert normalization_key("meta-llama/Llama-3.3-70B-Instruct") == normalization_key(
@@ -33,9 +33,7 @@ def test_rehost_prefix_stripped():
 
 
 def test_different_orgs_do_not_collide():
-    assert normalization_key("meta-llama/llama-3-70b") != normalization_key(
-        "someorg/llama-3-70b"
-    )
+    assert normalization_key("meta-llama/llama-3-70b") != normalization_key("someorg/llama-3-70b")
 
 
 def test_empty_and_single_segment():
@@ -47,6 +45,7 @@ def test_empty_and_single_segment():
 # offer_group_key — alias-then-normalize; projection and router share this
 # --------------------------------------------------------------------------- #
 
+
 def test_group_key_matches_across_casing_and_separators():
     assert offer_group_key("Qwen/Qwen2.5-72B-Instruct") == offer_group_key(
         "qwen/qwen-2.5-72b-instruct"
@@ -54,9 +53,7 @@ def test_group_key_matches_across_casing_and_separators():
 
 
 def test_group_key_strips_rehost_prefix():
-    assert offer_group_key("near/minimax/minimax-m2.5") == offer_group_key(
-        "minimax/minimax-m2.5"
-    )
+    assert offer_group_key("near/minimax/minimax-m2.5") == offer_group_key("minimax/minimax-m2.5")
 
 
 def test_alias_merges_across_orgs():
@@ -80,6 +77,7 @@ def test_group_key_empty():
 # --------------------------------------------------------------------------- #
 # suspicious_merges — QA aid
 # --------------------------------------------------------------------------- #
+
 
 def test_suspicious_merge_flagged_on_context_mismatch():
     rows = [
