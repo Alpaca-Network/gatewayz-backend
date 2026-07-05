@@ -363,9 +363,10 @@ def process_stale_models(
     provider_id: int,
     seen_provider_model_ids: set[str],
     deactivation_threshold: int = 3,
+    purge_after_days: int | None = None,
 ) -> dict[str, Any]:
     """
-    Track and deactivate models that are no longer listed by a provider.
+    Track, deactivate, and optionally purge models no longer listed by a provider.
 
     After a successful provider sync, call this with the set of model IDs
     that were returned by the provider API.  Models in the DB for this
@@ -373,25 +374,34 @@ def process_stale_models(
     incremented.  Once the count reaches the threshold, they are
     soft-deactivated (is_active = false).
 
+    Soft-deactivated rows otherwise live forever, so the `models` table only
+    grows.  When ``purge_after_days`` is set, any already-deactivated model
+    that has not been seen from its provider for longer than that many days is
+    hard-deleted, keeping the table light.  Active models are never purged.
+
     Args:
         provider_id: The provider's database ID.
         seen_provider_model_ids: Set of provider_model_id values returned
             by the provider API in this sync cycle.
         deactivation_threshold: Number of consecutive misses before
             deactivation (default: 3).
+        purge_after_days: If set (>0), hard-delete deactivated models whose
+            last_seen_in_provider_at is older than this cutoff. ``None`` or 0
+            disables purging (default) — deletion is irreversible, so it is
+            opt-in.
 
     Returns:
-        Dict with counts: reset, incremented, deactivated.
+        Dict with counts: reset, incremented, deactivated, purged.
     """
     from datetime import UTC, datetime
 
     supabase = get_client_for_query(read_only=False)
     now = datetime.now(UTC).isoformat()
-    result = {"reset": 0, "incremented": 0, "deactivated": 0}
+    result = {"reset": 0, "incremented": 0, "deactivated": 0, "purged": 0}
+    page_size = SUPABASE_PAGE_SIZE
 
     # Fetch all active models for this provider
     all_active: list[dict] = []
-    page_size = SUPABASE_PAGE_SIZE
     offset = 0
     while True:
         batch = (
@@ -408,6 +418,9 @@ def process_stale_models(
         offset += page_size
 
     if not all_active:
+        # No active models to reclassify, but there may still be long-dead
+        # rows to purge for this provider, so fall through to the purge step.
+        _purge_stale_deactivated_models(supabase, provider_id, purge_after_days, page_size, result)
         return result
 
     # Split into seen vs unseen
@@ -474,7 +487,61 @@ def process_stale_models(
             f"(missing for {deactivation_threshold}+ consecutive syncs)"
         )
 
+    # Hard-purge long-deactivated rows to keep the table light (opt-in).
+    _purge_stale_deactivated_models(supabase, provider_id, purge_after_days, page_size, result)
+
     return result
+
+
+def _purge_stale_deactivated_models(
+    supabase: Any,
+    provider_id: int,
+    purge_after_days: int | None,
+    page_size: int,
+    result: dict[str, Any],
+) -> None:
+    """Hard-delete deactivated models unseen for longer than the cutoff.
+
+    Only touches rows that are already ``is_active = false`` AND whose
+    ``last_seen_in_provider_at`` predates the cutoff, so an active or
+    recently-seen model can never be deleted. No-op when purging is disabled.
+    Increments ``result["purged"]`` with the number of rows removed.
+    """
+    if not purge_after_days or purge_after_days <= 0:
+        return
+
+    from datetime import UTC, datetime, timedelta
+
+    cutoff = (datetime.now(UTC) - timedelta(days=purge_after_days)).isoformat()
+
+    stale_ids: list[int] = []
+    offset = 0
+    while True:
+        batch = (
+            supabase.table("models")
+            .select("id")
+            .eq("provider_id", provider_id)
+            .eq("is_active", False)
+            .lt("last_seen_in_provider_at", cutoff)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        ).data or []
+        stale_ids.extend(row["id"] for row in batch)
+        if len(batch) < page_size:
+            break
+        offset += page_size
+
+    if not stale_ids:
+        return
+
+    for i in range(0, len(stale_ids), 500):
+        chunk = stale_ids[i : i + 500]
+        supabase.table("models").delete().in_("id", chunk).execute()
+    result["purged"] = len(stale_ids)
+    logger.info(
+        f"Purged {len(stale_ids)} long-deactivated models for provider_id={provider_id} "
+        f"(deactivated & unseen for {purge_after_days}+ days)"
+    )
 
 
 def update_model_health(

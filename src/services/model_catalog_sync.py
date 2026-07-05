@@ -108,8 +108,20 @@ def safe_decimal(value: Any) -> Decimal | None:
         if isinstance(value, (int, float)):
             return Decimal(str(value))
         if isinstance(value, str):
-            # Remove any non-numeric characters except decimal point and minus
-            cleaned = "".join(c for c in value if c.isdigit() or c in ".-")
+            s = value.strip()
+            if not s:
+                return None
+            # Parse directly first — Decimal natively handles scientific
+            # notation (e.g. "5e-07"), which many provider APIs emit for
+            # per-token prices. The char-stripping fallback below would
+            # otherwise drop the "e" and corrupt the value.
+            try:
+                return Decimal(s)
+            except ArithmeticError:
+                pass
+            # Fallback for currency-formatted strings ("$0.5", "1,234"):
+            # keep digits, decimal point, sign, and exponent notation.
+            cleaned = "".join(c for c in s if c.isdigit() or c in ".-+eE")
             if cleaned:
                 return Decimal(cleaned)
         return None
@@ -872,18 +884,30 @@ def sync_provider_models(
 
                 seen_ids = {m["provider_model_id"] for m in db_models if m.get("provider_model_id")}
 
+                # Optional hard-purge of long-deactivated rows to keep the
+                # models table light. Disabled by default (deletion is
+                # irreversible); set MODEL_STALE_PURGE_AFTER_DAYS to enable.
+                try:
+                    import os
+
+                    purge_after_days = int(os.getenv("MODEL_STALE_PURGE_AFTER_DAYS", "0")) or None
+                except ValueError:
+                    purge_after_days = None
+
                 if pre_sync_active_count > 0 and len(seen_ids) >= pre_sync_active_count * 0.5:
                     stale_result = process_stale_models(
                         provider_id=provider["id"],
                         seen_provider_model_ids=seen_ids,
                         deactivation_threshold=3,
+                        purge_after_days=purge_after_days,
                     )
-                    if stale_result.get("deactivated", 0) > 0:
+                    if stale_result.get("deactivated", 0) > 0 or stale_result.get("purged", 0) > 0:
                         logger.warning(
                             f"[{provider_slug.upper()}] Stale model cleanup | "
                             f"Reset: {stale_result['reset']} | "
                             f"Incremented: {stale_result['incremented']} | "
-                            f"Deactivated: {stale_result['deactivated']}"
+                            f"Deactivated: {stale_result['deactivated']} | "
+                            f"Purged: {stale_result.get('purged', 0)}"
                         )
                     else:
                         logger.info(
