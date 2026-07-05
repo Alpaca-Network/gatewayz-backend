@@ -16,11 +16,9 @@ If you add a new pricing source, use normalize_pricing_dict() with the correct
 PricingFormat constant before returning values from this module.
 """
 
-import json
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)

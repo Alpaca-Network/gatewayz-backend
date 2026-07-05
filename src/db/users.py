@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
-from src.config.usage_limits import TRIAL_DURATION_DAYS
 from src.db.api_keys import create_api_key
 from src.utils.db_instrumentation import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
@@ -2067,9 +2066,6 @@ def get_user_profile(api_key: str) -> dict[str, Any]:
         total_credits_val = subscription_allowance_val + purchased_credits_val
 
         # No unit conversion — DB value IS the credit count
-        subscription_allowance_cents = subscription_allowance_val
-        purchased_credits_cents = purchased_credits_val
-        total_credits_cents = total_credits_val
 
         # Return profile data
         profile = {

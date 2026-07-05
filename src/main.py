@@ -349,7 +349,6 @@ def create_app() -> FastAPI:
         # Refresh Redis INFO gauges on each scrape (run in threadpool to avoid blocking).
         # Hard cap at 5 s so a slow Upstash round-trip never causes the Prometheus scrape
         # to time out (scrape_timeout=10s in prometheus.yml → up{job="gatewayz_production"}=0).
-        import asyncio
 
         try:
             await asyncio.wait_for(

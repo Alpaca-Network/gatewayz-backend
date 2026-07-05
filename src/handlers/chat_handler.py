@@ -33,7 +33,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
-from src.services.pricing import calculate_cost, calculate_cost_split, get_model_pricing
+from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
 
 logger = logging.getLogger(__name__)
@@ -796,24 +796,24 @@ class ChatInferenceHandler:
         else:
             pricing_source = "calculated"  # DB default; tokens/cost will be 0
 
-        save_kwargs = dict(
-            request_id=self.request_id,
-            model_name=model_name,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            processing_time_ms=elapsed_ms,
-            cost_usd=cost_usd,
-            input_cost_usd=input_cost_usd,
-            output_cost_usd=output_cost_usd,
-            pricing_source=pricing_source,
-            status=status,
-            error_message=error_message,
-            user_id=self.user.get("id") if self.user else None,
-            provider_name=provider_name,
-            model_id=None,
-            api_key_id=self.user.get("key_id") if self.user else None,
-            is_anonymous=self.is_anonymous,
-        )
+        save_kwargs = {
+            "request_id": self.request_id,
+            "model_name": model_name,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "processing_time_ms": elapsed_ms,
+            "cost_usd": cost_usd,
+            "input_cost_usd": input_cost_usd,
+            "output_cost_usd": output_cost_usd,
+            "pricing_source": pricing_source,
+            "status": status,
+            "error_message": error_message,
+            "user_id": self.user.get("id") if self.user else None,
+            "provider_name": provider_name,
+            "model_id": None,
+            "api_key_id": self.user.get("key_id") if self.user else None,
+            "is_anonymous": self.is_anonymous,
+        }
 
         if self.background_tasks:
             self.background_tasks.add_task(save_chat_completion_request_with_cost, **save_kwargs)
