@@ -125,3 +125,24 @@ def test_passthrough_when_load_offers_returns_empty(monkeypatch):
 
     chain = ["a", "b"]
     assert reorder_provider_chain("Qwen/Qwen2.5-72B", chain, policy="cost") == chain
+
+
+def test_group_keyed_offers_rank_cheapest_first():
+    """Regression: offers carry the GROUP KEY as canonical_id; the RoutingRequest
+    must use that same key or every offer is filtered out and the chain passes
+    through unranked (cheapest would not lead)."""
+    from src.services.smart_router_bridge import reorder_provider_chain
+
+    gk = "qwen/qwen2572binstruct"  # an offer_group_key value
+    offers = [
+        {"canonical_id": gk, "provider_slug": "novita", "native_id": "n",
+         "upstream_cost": 0.038, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
+         "is_active": True},
+        {"canonical_id": gk, "provider_slug": "openrouter", "native_id": "o",
+         "upstream_cost": 0.00036, "p50_ms": 0, "p95_ms": 0, "quality_prior": 0.5,
+         "is_active": True},
+    ]
+    out = reorder_provider_chain(
+        "Qwen/Qwen2.5-72B-Instruct", ["novita", "openrouter"], policy="cost", offers=offers
+    )
+    assert out[0] == "openrouter"  # cheapest leads
