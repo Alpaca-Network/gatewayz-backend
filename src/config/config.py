@@ -620,6 +620,16 @@ class Config:
     # docs/BUSINESS_PIVOT_DIRECT_SUPPLY.md.
     BYOK_ROUTING_FEE_RATE: float = float(os.environ.get("BYOK_ROUTING_FEE_RATE", "0.0"))
 
+    # Master switch for bring-your-own-key routing. Off by default: when disabled
+    # the inference path does no per-request BYOK lookup, so there is zero added
+    # latency. Enable to let users serve requests on their own stored provider
+    # keys (billed at BYOK_ROUTING_FEE_RATE instead of full credit cost).
+    BYOK_ENABLED: bool = os.environ.get("BYOK_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
     # Pricing is now synced via model sync (provider_model_sync_service.py)
     # No separate pricing sync configuration needed

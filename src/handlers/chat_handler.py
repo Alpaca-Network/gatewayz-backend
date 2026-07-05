@@ -158,6 +158,10 @@ class ChatInferenceHandler:
         self.trial: dict[str, Any] | None = None
         self.request_id = str(uuid.uuid4())
         self.start_time = time.monotonic()
+        # Set True by _call_provider(_stream) when the served request used the
+        # customer's own provider key (BYOK); consumed at billing time to charge a
+        # routing fee instead of the full credit cost.
+        self.is_byok = False
 
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
@@ -303,6 +307,44 @@ class ChatInferenceHandler:
         )
         return max_tokens
 
+    def _bind_byok(self, provider_name: str):
+        """Bind the customer's own key for *provider_name* to the request context.
+
+        No-op (returns None) for anonymous users, when BYOK is disabled for the
+        deployment, or when the user has no stored key for this provider. When it
+        returns a token, the central key-resolution points substitute the
+        customer's key for the upstream call, and billing charges a routing fee.
+        """
+        if self.is_anonymous or not self.user:
+            return None
+        try:
+            from src.services.byok import byok_enabled, resolve_byok_key, set_byok_context
+
+            if not byok_enabled():
+                return None
+            key = resolve_byok_key(self.user.get("id"), provider_name)
+            if key:
+                logger.info(
+                    "[ChatHandler] Using BYOK key for provider=%s (user_id=%s)",
+                    provider_name,
+                    self.user.get("id"),
+                )
+                return set_byok_context(provider_name, key)
+        except Exception as e:
+            logger.warning("[ChatHandler] BYOK bind failed for %s: %s", provider_name, e)
+        return None
+
+    @staticmethod
+    def _unbind_byok(token) -> None:
+        if token is None:
+            return
+        try:
+            from src.services.byok import reset_byok_context
+
+            reset_byok_context(token)
+        except Exception:
+            pass
+
     def _call_provider(
         self,
         provider_name: str,
@@ -333,6 +375,9 @@ class ChatInferenceHandler:
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
         with tag_wrapper({"provider": provider_name, "model": model_id}):
+            # Bind the customer's own key (if any) for the duration of this call so
+            # the provider client uses it instead of the platform key.
+            byok_token = self._bind_byok(provider_name)
             try:
                 # Route to appropriate provider
                 # OpenRouter has native async — check via DB flag with fallback
@@ -348,21 +393,26 @@ class ChatInferenceHandler:
                     _is_openrouter_async = provider_name == "openrouter"
 
                 if _is_openrouter_async:
-                    return make_openrouter_request_openai(messages, model_id, **kwargs)
+                    result = make_openrouter_request_openai(messages, model_id, **kwargs)
+                else:
+                    # Registry-based dispatch for all other providers
+                    from src.handlers.provider_registry import PROVIDER_ROUTING
 
-                # Registry-based dispatch for all other providers
-                from src.handlers.provider_registry import PROVIDER_ROUTING
+                    routing = PROVIDER_ROUTING.get(provider_name)
+                    if routing and routing.get("request"):
+                        result = routing["request"](messages, model_id, **kwargs)
+                    else:
+                        # Fallback to OpenRouter for unknown providers
+                        logger.warning(
+                            f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
+                            f"falling back to OpenRouter"
+                        )
+                        result = make_openrouter_request_openai(messages, model_id, **kwargs)
 
-                routing = PROVIDER_ROUTING.get(provider_name)
-                if routing and routing.get("request"):
-                    return routing["request"](messages, model_id, **kwargs)
-
-                # Fallback to OpenRouter for unknown providers
-                logger.warning(
-                    f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
-                    f"falling back to OpenRouter"
-                )
-                return make_openrouter_request_openai(messages, model_id, **kwargs)
+                # Record BYOK status only on success, so failover to a platform-key
+                # provider correctly reflects the provider that actually served.
+                self.is_byok = byok_token is not None
+                return result
             except HTTPException:
                 # Re-raise HTTP exceptions (already formatted)
                 raise
@@ -479,6 +529,9 @@ class ChatInferenceHandler:
                     status_code=error_response.error.status,
                     detail=error_response.dict(exclude_none=True),
                 )
+            finally:
+                # Always clear the BYOK key binding for this attempt.
+                self._unbind_byok(byok_token)
 
     async def _call_provider_stream(
         self,
@@ -538,6 +591,13 @@ class ChatInferenceHandler:
         from src.utils.profiling import tag_wrapper
         from src.utils.error_factory import DetailedErrorFactory
 
+        # Bind the customer's BYOK key (if any) only around stream CREATION — the
+        # key is consumed when the client/stream is built. It is reset before any
+        # chunk is yielded so the binding can never leak across an async-generator
+        # suspension point into the caller's context.
+        byok_token = self._bind_byok(provider_name)
+        stream = None
+        is_sync_stream = False
         try:
             with tag_wrapper({"provider": provider_name, "model": model_id}):
                 # OpenRouter has native async streaming — check via DB flag
@@ -557,8 +617,6 @@ class ChatInferenceHandler:
                     stream = await make_openrouter_request_openai_stream_async(
                         messages, model_id, **kwargs
                     )
-                    async for chunk in stream:
-                        yield chunk
                 else:
                     # Registry-based dispatch for all other providers
                     from src.handlers.provider_registry import PROVIDER_ROUTING
@@ -567,8 +625,7 @@ class ChatInferenceHandler:
                     if routing and routing.get("stream"):
                         # All non-OpenRouter providers use sync streaming clients
                         stream = routing["stream"](messages, model_id, **kwargs)
-                        async for chunk in _iterate_sync_stream(stream):
-                            yield chunk
+                        is_sync_stream = True
                     else:
                         # Fallback to OpenRouter for unknown providers
                         logger.warning(
@@ -578,8 +635,8 @@ class ChatInferenceHandler:
                         stream = await make_openrouter_request_openai_stream_async(
                             messages, model_id, **kwargs
                         )
-                        async for chunk in stream:
-                            yield chunk
+                # Record BYOK status only on successful stream creation.
+                self.is_byok = byok_token is not None
         except CircuitBreakerError as e:
             # Circuit breaker is open - provider temporarily unavailable
             logger.warning(
@@ -607,6 +664,40 @@ class ChatInferenceHandler:
                 status_code=error_response.error.status,
                 detail=error_response.dict(exclude_none=True),
             )
+        finally:
+            # Clear the BYOK binding before yielding any chunks.
+            self._unbind_byok(byok_token)
+
+        # Iterate outside the BYOK binding — the key was already applied when the
+        # stream was created above.
+        if is_sync_stream:
+            async for chunk in _iterate_sync_stream(stream):
+                yield chunk
+        else:
+            async for chunk in stream:
+                yield chunk
+
+    def _apply_byok_fee(self, cost: float) -> float:
+        """Return the amount to bill, applying the BYOK routing fee when applicable.
+
+        When the request was served on the customer's own provider key
+        (``self.is_byok``), the inference cost was paid on their upstream account,
+        so we bill only ``byok_routing_fee(cost)`` (a fraction, default 0) instead
+        of the full credit cost. Otherwise the cost is unchanged.
+        """
+        if not getattr(self, "is_byok", False):
+            return cost
+        from src.services.byok import byok_routing_fee
+
+        fee = byok_routing_fee(cost)
+        logger.info(
+            "[ChatHandler] BYOK request: billing routing fee $%.6f instead of upstream "
+            "cost $%.6f (request_id=%s)",
+            fee,
+            cost,
+            self.request_id,
+        )
+        return fee
 
     async def _charge_user(
         self,
@@ -915,6 +1006,11 @@ class ChatInferenceHandler:
                 f"input=${input_cost:.6f}, output=${output_cost:.6f}"
             )
 
+            # BYOK: bill a routing fee instead of the full upstream cost when the
+            # request was served on the customer's own key. cost flows into the
+            # request record and response below, so they reflect the billed amount.
+            cost = self._apply_byok_fee(cost)
+
             # Step 6: Charge user
             await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
 
@@ -1208,6 +1304,9 @@ class ChatInferenceHandler:
             )
 
             logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")
+
+            # BYOK: bill a routing fee instead of the full upstream cost.
+            cost = self._apply_byok_fee(cost)
 
             await self._charge_user(cost, request.model, prompt_tokens, completion_tokens)
 

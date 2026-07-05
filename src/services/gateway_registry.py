@@ -527,10 +527,21 @@ def get_provider_fetch_timeout(slug: str) -> int:
 def get_provider_api_key(slug: str) -> str | None:
     """Resolve the actual API key value for *slug*.
 
-    Reads ``api_key_env_var`` from the registry, then resolves it via
-    ``Config`` (which mirrors ``os.environ`` for known vars) with a
-    fallback to ``os.environ.get()``.
+    If a bring-your-own-key override is bound for *slug* in the current request
+    context (see src.services.byok), that customer key wins. Otherwise reads
+    ``api_key_env_var`` from the registry and resolves it via ``Config`` (which
+    mirrors ``os.environ`` for known vars) with a fallback to ``os.environ.get()``.
     """
+    # BYOK override (only ever set during an inference call with the flag on).
+    try:
+        from src.services.byok import get_byok_key_for
+
+        byok = get_byok_key_for(slug)
+        if byok:
+            return byok
+    except Exception:
+        pass
+
     registry = _get_registry()
     entry = registry.get(slug)
     if not entry:
