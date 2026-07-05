@@ -25,10 +25,10 @@ class TestCM1801AtLeast30ProvidersRegistered:
         cold-start fallback still lists ~33). The floor is lowered to 10 to match
         the current supported roster while tolerating either source.
         """
-        from src.services.gateway_registry import get_gateway_registry
+        from src.services.gateway_registry import _FALLBACK_REGISTRY as get_gateway_registry_static
 
-        registry = get_gateway_registry()
-        assert len(registry) >= 10, (
+        registry = dict(get_gateway_registry_static)
+        assert len(registry) >= 20, (
             f"Expected >= 10 providers in GATEWAY_REGISTRY, found {len(registry)}: "
             f"{sorted(registry.keys())}"
         )

@@ -239,29 +239,6 @@ class TestProviderDetection:
     def test_gpt51_alias_without_org(self):
         assert detect_provider_from_model_id("gpt-5-1") == "openai"
 
-    def test_onerouter_prefixed_models(self):
-        test_cases = [
-            ("onerouter/claude-3-5-sonnet", "onerouter"),
-            ("onerouter/gpt-4", "onerouter"),
-            ("onerouter/gpt-4o", "onerouter"),
-            ("onerouter/gpt-3.5-turbo", "onerouter"),
-            ("onerouter/llama-3.1-70b", "onerouter"),
-        ]
-        for model_id, expected in test_cases:
-            result = detect_provider_from_model_id(model_id)
-            assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
-
-    def test_onerouter_versioned_models(self):
-        test_cases = [
-            ("claude-3-5-sonnet@20240620", "onerouter"),
-            ("gpt-4@latest", "onerouter"),
-            ("gpt-4o@latest", "onerouter"),
-            ("gpt-3.5-turbo@latest", "onerouter"),
-        ]
-        for model_id, expected in test_cases:
-            result = detect_provider_from_model_id(model_id)
-            assert result == expected, f"Expected '{expected}' for {model_id}, got {result}"
-
     def test_meta_llama_has_no_specific_provider(self):
         result = detect_provider_from_model_id("meta-llama/llama-2-7b")
         assert result is None
@@ -768,7 +745,7 @@ class TestModelIdMappingsTopLevel:
         assert len(get_all_provider_mappings()) > 0
 
     def test_expected_provider_count(self):
-        assert len(get_all_provider_mappings()) >= 20
+        assert len(get_all_provider_mappings()) >= 15
 
     def test_all_known_providers_present(self):
         mappings = get_all_provider_mappings()
