@@ -153,6 +153,41 @@ def filter_by_capabilities(
     return result
 
 
+def filter_by_category(
+    models: list[str],
+    capabilities_registry: dict[str, ModelCapabilities],
+    required_tags: tuple[str, ...] | list[str],
+) -> list[str]:
+    """
+    Hard-filter models to those carrying ALL of the requested category tags.
+
+    Pure, no I/O. Data-driven off the catalog's derived `categories` array, so
+    new providers/models are covered automatically with zero code change. The
+    caller is responsible for the empty-guard (fall back to the unfiltered set)
+    so a sparse tag never starves the router.
+
+    Args:
+        models: candidate model IDs (already capability-gated)
+        capabilities_registry: model_id -> ModelCapabilities (carries categories)
+        required_tags: category tags the model must ALL have (e.g. ("cheapest",))
+
+    Returns:
+        Filtered list (may be empty — caller decides how to handle that).
+    """
+    if not required_tags:
+        return list(models)
+
+    want = set(required_tags)
+    result = []
+    for model_id in models:
+        caps = capabilities_registry.get(model_id)
+        if not caps:
+            continue
+        if want.issubset(set(caps.categories or ())):
+            result.append(model_id)
+    return result
+
+
 def get_capability_mismatch_reason(
     model_caps: ModelCapabilities,
     required: RequiredCapabilities,

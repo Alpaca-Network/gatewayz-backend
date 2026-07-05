@@ -363,11 +363,27 @@ def _compute_model_score(
     # Get quality prior — prefer DB-loaded scores, fall back to hardcoded dict.
     # NOTE: use explicit None check, not `or`, because an empty dict {} is falsy
     # and would incorrectly bypass a legitimate empty-scores DB result.
+    # Quality priors are keyed by canonical_id (lowercased). A candidate's
+    # provider_model_id often differs from its canonical family id, so look up by
+    # canonical first, then fall back to the model id. This is what lets seeded
+    # scores actually reach scoring across providers of the same family.
+    canonical = getattr(capabilities, "canonical_id", None) if capabilities else None
     try:
         from src.services.model_capabilities_cache import get_quality_priors
 
-        _db_priors = get_quality_priors().get(model_id)
-        model_priors = _db_priors if _db_priors is not None else QUALITY_PRIORS.get(model_id, {})
+        priors = get_quality_priors()
+        _db_priors = None
+        for key in (canonical, model_id):
+            if not key:
+                continue
+            _db_priors = priors.get(key) or priors.get(key.lower())
+            if _db_priors is not None:
+                break
+        model_priors = (
+            _db_priors
+            if _db_priors is not None
+            else QUALITY_PRIORS.get(model_id, QUALITY_PRIORS.get(canonical or "", {}))
+        )
     except Exception:
         model_priors = QUALITY_PRIORS.get(model_id, {})
     quality = model_priors.get(category, 50.0)  # Default to 50 if unknown

@@ -22,7 +22,11 @@ from src.schemas.router import (
     RouterOptimization,
     UserRouterPreferences,
 )
-from src.services.capability_gating import extract_capabilities, filter_by_capabilities
+from src.services.capability_gating import (
+    extract_capabilities,
+    filter_by_capabilities,
+    filter_by_category,
+)
 from src.services.fallback_chain import build_fallback_chain
 from src.services.health_snapshots import get_healthy_models_sync
 from src.services.model_selector import select_model
@@ -61,7 +65,7 @@ STABLE_FALLBACK_MODELS = [
 # --------------------------------------------------------------------------- #
 
 _CAPABILITY_MODEL_COLS = (
-    "provider_model_id,canonical_id,modality,context_length,"
+    "provider_model_id,canonical_id,modality,context_length,categories,"
     "supports_function_calling,supports_vision,has_json_mode,"
     "model_pricing(price_per_input_token,price_per_output_token)"
 )
@@ -125,6 +129,24 @@ def _price_per_1k(model_pricing, field: str) -> float:
     return v * 1000.0 if v > 0 else 0.0
 
 
+# Optimization intent → the category tag candidates must carry (hard filter,
+# empty-guarded). Data-driven off the catalog's derived `categories`, so adding
+# providers/models needs no code change. BALANCED intentionally imposes no tag
+# filter and lets scoring balance cost vs quality.
+_OPTIMIZATION_CATEGORY: dict[RouterOptimization, tuple[str, ...]] = {
+    RouterOptimization.PRICE: ("cheapest",),
+    RouterOptimization.FAST: ("fastest",),
+    RouterOptimization.QUALITY: ("smartest",),
+}
+
+
+def category_tags_for_optimization(
+    optimization: RouterOptimization,
+) -> tuple[str, ...]:
+    """Return the category tag(s) an optimization intent should filter to."""
+    return _OPTIMIZATION_CATEGORY.get(optimization, ())
+
+
 def build_capabilities_registry(rows: list[dict]) -> dict[str, ModelCapabilities]:
     """Project catalog rows → a chat-only, cost-aware capabilities registry (pure).
 
@@ -153,9 +175,13 @@ def build_capabilities_registry(rows: list[dict]) -> dict[str, ModelCapabilities
         except (TypeError, ValueError):
             max_context = 128000
 
+        cats = r.get("categories") or ()
+        categories = tuple(cats) if isinstance(cats, (list, tuple)) else ()
+
         registry[model_id] = ModelCapabilities(
             model_id=model_id,
             provider=model_id.split("/")[0] if "/" in model_id else "unknown",
+            canonical_id=r.get("canonical_id"),
             tools=bool(r.get("supports_function_calling")),
             json_mode=bool(r.get("has_json_mode")),
             json_schema=False,
@@ -164,6 +190,7 @@ def build_capabilities_registry(rows: list[dict]) -> dict[str, ModelCapabilities
             tool_schema_adherence="medium",
             cost_per_1k_input=cost_in,
             cost_per_1k_output=_price_per_1k(r.get("model_pricing"), "price_per_output_token"),
+            categories=categories,
         )
     return registry
 
@@ -417,6 +444,29 @@ class PromptRouter:
             if self._check_timeout(start):
                 return self._fail_open("timeout_after_capability_filter")
 
+            # Resolve optimization intent up front (needed for the category filter).
+            optimization = RouterOptimization.BALANCED
+            excluded = []
+            preferred = []
+            if user_preferences:
+                optimization = user_preferences.default_optimization
+                excluded = user_preferences.excluded_models
+                preferred = user_preferences.preferred_models
+
+            # 3b. Category hard-filter by optimization intent (< 0.1ms, no I/O).
+            # Empty-guarded: if the tag is too sparse to leave any candidate,
+            # keep the unfiltered set so scoring still runs (never starves).
+            wanted_tags = category_tags_for_optimization(optimization)
+            if wanted_tags:
+                tagged = filter_by_category(candidates, self._capabilities_registry, wanted_tags)
+                if tagged:
+                    candidates = tagged
+                else:
+                    logger.debug(
+                        "category filter %s emptied candidates; keeping unfiltered set",
+                        wanted_tags,
+                    )
+
             # 4. Classify prompt (< 1ms, no I/O)
             classification = classify_prompt(messages)
 
@@ -425,15 +475,6 @@ class PromptRouter:
                 return self._fail_open("timeout_after_classification")
 
             # 5. Select model (< 0.3ms, no I/O)
-            optimization = RouterOptimization.BALANCED
-            excluded = []
-            preferred = []
-
-            if user_preferences:
-                optimization = user_preferences.default_optimization
-                excluded = user_preferences.excluded_models
-                preferred = user_preferences.preferred_models
-
             selected_model, reason = select_model(
                 candidates=candidates,
                 classification=classification,
