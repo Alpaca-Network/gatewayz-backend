@@ -943,7 +943,13 @@ async def chat_completions(
                         headers=rl_final_hdrs or None,
                     )
 
-        # Credit/usage tracking (only for authenticated users)
+        # Credit/usage tracking (only for authenticated users).
+        # The authenticated non-streaming path runs entirely through the unified
+        # ChatInferenceHandler (see dispatch_non_streaming), which has ALREADY
+        # deducted credits and recorded usage. Pass already_charged=True so this
+        # call performs only the route-owned bookkeeping (rate-limit + shadow
+        # ledger) and does NOT deduct a second time — the prior behaviour billed
+        # paid users twice per request.
         if not is_anonymous:
             cost = await _handle_credits_and_usage(
                 api_key=api_key,
@@ -956,6 +962,7 @@ async def chat_completions(
                 elapsed_ms=int(elapsed * 1000),
                 is_streaming=False,
                 request_id=request_id,
+                already_charged=True,
             )
             await _to_thread(increment_api_key_usage, api_key)
         else:
