@@ -183,39 +183,32 @@ def normalize_near_model(near_model: dict) -> dict:
         "internal_reasoning": None,
     }
 
-    # Extract pricing from Near AI API response
-    # FIXED: Near AI provides pricing as inputCostPerToken and outputCostPerToken with amount and scale
-    # Scale is in powers of 10 (e.g., -9 means 10^-9 = per token)
-    # Database stores per-token pricing, so just use amount × 10^scale
-    input_cost = near_model.get("inputCostPerToken", {})
-    output_cost = near_model.get("outputCostPerToken", {})
+    # Extract pricing from the Near AI API response and emit dollars-per-1M-tokens
+    # ($/1M). The catalog transform then applies the provider's per_1m format once
+    # (/1e6) to reach true per-token — see tests/services/test_provider_price_units.py.
+    #
+    # Near's `pricing` dict carries the per-1M price in `input`/`output` and the same
+    # value per-token in `prompt`/`completion`. Prefer the explicit per-1M fields;
+    # otherwise scale the per-token values up by 1e6 so the unit is consistent.
+    pricing_info = near_model.get("pricing", {}) or {}
 
-    if input_cost and isinstance(input_cost, dict):
-        input_amount = input_cost.get("amount", 0)
-        input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Per-token price = amount × 10^scale
-        if input_amount > 0:
-            pricing["prompt"] = str(input_amount * (10**input_scale))
+    def _to_per_million(per_million, per_token):
+        if per_million is not None:
+            try:
+                return str(float(per_million))
+            except (TypeError, ValueError):
+                return None
+        if per_token is not None:
+            try:
+                return str(float(per_token) * 1_000_000)
+            except (TypeError, ValueError):
+                return None
+        return None
 
-    if output_cost and isinstance(output_cost, dict):
-        output_amount = output_cost.get("amount", 0)
-        output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Per-token price = amount × 10^scale
-        if output_amount > 0:
-            pricing["completion"] = str(output_amount * (10**output_scale))
-
-    # Fallback to old pricing format for backward compatibility
-    if not pricing["prompt"] and not pricing["completion"]:
-        pricing_info = near_model.get("pricing", {})
-        if pricing_info:
-            pricing["prompt"] = (
-                str(pricing_info.get("prompt")) if pricing_info.get("prompt") is not None else None
-            )
-            pricing["completion"] = (
-                str(pricing_info.get("completion"))
-                if pricing_info.get("completion") is not None
-                else None
-            )
+    pricing["prompt"] = _to_per_million(pricing_info.get("input"), pricing_info.get("prompt"))
+    pricing["completion"] = _to_per_million(
+        pricing_info.get("output"), pricing_info.get("completion")
+    )
 
     architecture = {
         "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),

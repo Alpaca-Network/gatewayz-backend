@@ -150,16 +150,18 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
     }
 
     # Extract token-based pricing (text-generation, embeddings, etc.)
-    # DeepInfra returns pricing in cents per token, convert to dollars per token
+    # DeepInfra returns cents PER TOKEN. Emit dollars-per-1M-tokens ($/1M) so the
+    # catalog transform's single per_1m division reaches true per-token — matching
+    # near/novita/together. $/1M = cents_per_token / 100 * 1e6 = cents_per_token * 1e4.
+    # See tests/services/test_provider_price_units.py.
     if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
         cents_input = pricing_info.get("cents_per_input_token", 0)
         cents_output = pricing_info.get("cents_per_output_token", 0)
 
-        # Convert cents to dollars per token
         if cents_input:
-            pricing["prompt"] = str(cents_input / 100)
+            pricing["prompt"] = str(cents_input * 10_000)
         if cents_output:
-            pricing["completion"] = str(cents_output / 100)
+            pricing["completion"] = str(cents_output * 10_000)
 
     # Extract image unit pricing (text-to-image models)
     elif pricing_info.get("type") == "image_units" or "cents_per_image_unit" in pricing_info:

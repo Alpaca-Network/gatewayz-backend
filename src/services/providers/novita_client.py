@@ -269,7 +269,7 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
         "description": description,
         "context_length": context_length,
         "architecture": normalized_architecture,
-        "pricing": _normalize_pricing(payload.get("pricing")),
+        "pricing": _normalize_pricing(payload),
         "per_request_limits": payload.get("limits") or payload.get("rate_limits"),
         "supported_parameters": _extract_supported_parameters(payload),
         "default_parameters": payload.get("default_parameters") or {},
@@ -284,8 +284,16 @@ def _normalize_novita_model(model: Any) -> dict[str, Any] | None:
     return normalized
 
 
-def _normalize_pricing(pricing: dict[str, Any] | None) -> dict[str, str | None]:
-    pricing = pricing or {}
+# Novita reports `input_token_price_per_m` in units of 1e-4 USD per 1M tokens
+# (e.g. 14000 == $1.40 / 1M), so dividing by this factor yields dollars-per-1M.
+# Verified against Together's $/1M for glm-5.2 / minimax-m3 / kimi-k2.7.
+_NOVITA_PRICE_PER_M_SCALE = 10_000
+
+
+def _normalize_pricing(payload: dict[str, Any] | None) -> dict[str, str | None]:
+    payload = payload or {}
+    # Legacy shape carried a nested `pricing` dict; current API is top-level.
+    legacy = payload.get("pricing") if isinstance(payload.get("pricing"), dict) else {}
 
     def _stringify(value: Any) -> str | None:
         if value is None:
@@ -295,26 +303,26 @@ def _normalize_pricing(pricing: dict[str, Any] | None) -> dict[str, str | None]:
         except Exception:  # pragma: no cover - defensive
             return None
 
-    prompt = (
-        pricing.get("prompt")
-        or pricing.get("input")
-        or pricing.get("prompt_price")
-        or pricing.get("prompt_tokens")
-    )
-    completion = (
-        pricing.get("completion")
-        or pricing.get("output")
-        or pricing.get("completion_price")
-        or pricing.get("completion_tokens")
-    )
+    def _per_million(raw_per_m, legacy_key) -> str | None:
+        # Emit dollars-per-1M so the catalog transform's single per_1m division
+        # reaches true per-token. See tests/services/test_provider_price_units.py.
+        if raw_per_m is not None:
+            try:
+                return str(float(raw_per_m) / _NOVITA_PRICE_PER_M_SCALE)
+            except (TypeError, ValueError):
+                return None
+        return _stringify(legacy.get(legacy_key))
+
+    prompt = _per_million(payload.get("input_token_price_per_m"), "prompt")
+    completion = _per_million(payload.get("output_token_price_per_m"), "completion")
 
     return {
-        "prompt": _stringify(prompt),
-        "completion": _stringify(completion),
-        "request": _stringify(pricing.get("request")),
-        "image": _stringify(pricing.get("image")),
-        "web_search": _stringify(pricing.get("web_search")),
-        "internal_reasoning": _stringify(pricing.get("internal_reasoning")),
+        "prompt": prompt,
+        "completion": completion,
+        "request": _stringify(legacy.get("request")),
+        "image": _stringify(legacy.get("image")),
+        "web_search": _stringify(legacy.get("web_search")),
+        "internal_reasoning": _stringify(legacy.get("internal_reasoning")),
     }
 
 
