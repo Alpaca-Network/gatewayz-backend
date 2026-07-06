@@ -87,6 +87,26 @@ def cost_per_1k_from_model(m: dict) -> float | None:
     return normalized_cost_per_1k(m.get("pricing_original_prompt"))
 
 
+# Plausible per-token USD input price for a PAID model: ~$0.001/1M .. $1000/1M.
+# Anything outside almost certainly means a unit/ingestion error (or a stale
+# cached price). Such an offer must NOT win cost-routing — a near-zero price
+# would both mis-route and undercharge billing — so it is dropped from the
+# projection. In per-1k terms the band is [1e-6, 1.0].
+_MIN_PLAUSIBLE_COST_PER_1K = 1e-6
+_MAX_PLAUSIBLE_COST_PER_1K = 1.0
+
+
+def is_plausible_cost_per_1k(cost_per_1k: float | None) -> bool:
+    """True when a per-1k upstream cost is inside the sane pricing band.
+
+    ``None`` (unpriced) is not plausible here — callers handle free/unpriced
+    models separately before this check.
+    """
+    if cost_per_1k is None:
+        return False
+    return _MIN_PLAUSIBLE_COST_PER_1K <= cost_per_1k <= _MAX_PLAUSIBLE_COST_PER_1K
+
+
 def _quality_from_success_rate(success_rate) -> float:
     """Map a success_rate (0..1 or 0..100) to a 0..1 quality prior; 0.5 if unknown."""
     if success_rate is None or str(success_rate).lower() == "none":
@@ -129,6 +149,7 @@ def build_offer_rows(
     from src.services.model_canonicalization import offer_group_key
 
     best: dict[tuple, dict] = {}
+    dropped_implausible = 0
     for m in models:
         if not m.get("is_active", True):
             continue
@@ -154,6 +175,11 @@ def build_offer_rows(
         cost = cost_per_1k_from_model(m)
         if cost is None:
             continue
+        if not is_plausible_cost_per_1k(cost):
+            # Garbage/stale price (unit error, cache staleness). Excluding it keeps
+            # the cost router honest instead of letting a fake-cheap offer win.
+            dropped_implausible += 1
+            continue
 
         key = (group_key, slug)
         offer = {
@@ -170,6 +196,14 @@ def build_offer_rows(
         if existing is None or offer["upstream_cost"] < existing["upstream_cost"]:
             best[key] = offer
 
+    if dropped_implausible:
+        logger.warning(
+            "Dropped %d offer(s) with implausible upstream price "
+            "(outside [%s, %s] per 1k) — likely a unit/ingestion error or stale cache",
+            dropped_implausible,
+            _MIN_PLAUSIBLE_COST_PER_1K,
+            _MAX_PLAUSIBLE_COST_PER_1K,
+        )
     return list(best.values())
 
 
