@@ -117,13 +117,19 @@ def test_build_offer_rows_drops_implausible_priced_offer():
     providers = {1: {"slug": "near"}, 2: {"slug": "openrouter"}}
     models = [
         {  # garbage near-zero price -> must be dropped
-            "id": "1", "provider_id": 1, "provider_model_id": "anthropic/claude-sonnet-4-6",
-            "modality": "text->text", "is_active": True,
+            "id": "1",
+            "provider_id": 1,
+            "provider_model_id": "anthropic/claude-sonnet-4-6",
+            "modality": "text->text",
+            "is_active": True,
             "model_pricing": {"price_per_input_token": 3e-12},
         },
         {  # sane openrouter price -> kept
-            "id": "2", "provider_id": 2, "provider_model_id": "anthropic/claude-sonnet-4-6",
-            "modality": "text->text", "is_active": True,
+            "id": "2",
+            "provider_id": 2,
+            "provider_model_id": "anthropic/claude-sonnet-4-6",
+            "modality": "text->text",
+            "is_active": True,
             "model_pricing": {"price_per_input_token": 3e-6},
         },
     ]
