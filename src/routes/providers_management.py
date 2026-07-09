@@ -5,7 +5,7 @@ Handles CRUD operations for AI model providers
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 
 from src.db.models_catalog_db import get_models_stats
 from src.db.providers_db import (
@@ -29,12 +29,14 @@ from src.schemas.providers import (
     ProviderStats,
     ProviderUpdate,
 )
+from src.security.deps import require_admin_or_env_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/providers",
     tags=["Providers Management"],
+    dependencies=[Depends(require_admin_or_env_key)],
 )
 
 

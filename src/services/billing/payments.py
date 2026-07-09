@@ -1739,11 +1739,18 @@ class StripeService:
         except stripe.StripeError as e:
             logger.error(f"Stripe error creating subscription checkout: {e}")
             # Client-fixable Stripe errors (HTTP 4xx) — e.g. an invalid/unknown price_id, or a
-            # test/live mode mismatch — should surface as a 400 with the real reason, not a
-            # generic 500. Genuine Stripe outages (5xx/network) stay as 500.
+            # test/live mode mismatch — should surface as a 400, not a generic 500. The raw
+            # Stripe error text is logged above for debugging, but is NOT included in the
+            # ValueError message: it flows into HTTPException(400).detail verbatim (the
+            # global handler in error_handlers.py only sanitizes 500/404, not 400), which
+            # would otherwise leak internal Stripe error details to the client.
+            # Genuine Stripe outages (5xx/network) stay as 500 (already sanitized).
             http_status = getattr(e, "http_status", None)
             if http_status and 400 <= http_status < 500:
-                raise ValueError(f"Stripe rejected the checkout request: {str(e)}") from e
+                raise ValueError(
+                    "Your subscription request couldn't be processed. "
+                    "Please check your payment details and try again."
+                ) from e
             raise Exception(f"Payment processing error: {str(e)}") from e
 
         except Exception as e:
