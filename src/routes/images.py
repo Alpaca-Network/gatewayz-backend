@@ -536,7 +536,24 @@ async def generate_images(
                     error_message=str(e)[:500],
                 )
 
-            raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}") from e
+            # Capture full details in telemetry; never expose internals to the client
+            try:
+                from src.utils.sentry_context import capture_provider_error
+
+                capture_provider_error(
+                    e,
+                    provider=actual_provider or "unknown",
+                    model=model,
+                    endpoint="/v1/images/generations",
+                    extra_context={"error_category": "image_generation_error"},
+                )
+            except Exception:
+                logger.debug("Failed to capture image generation error", exc_info=True)
+
+            raise HTTPException(
+                status_code=500,
+                detail="Image generation failed due to an internal error. Please try again.",
+            ) from e
 
         finally:
             # Clean up executor
@@ -545,5 +562,5 @@ async def generate_images(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in image generation endpoint: {e}")
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}") from e
+        logger.error(f"Unexpected error in image generation endpoint: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
