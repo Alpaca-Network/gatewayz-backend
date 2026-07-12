@@ -112,10 +112,7 @@ async def test_check_rate_limit_happy_path_local(monkeypatch, mod, fake_fallback
 
 @pytest.mark.anyio
 async def test_concurrency_limit_exceeded(mod, fake_fallback):
-    """Test concurrency limit - currently disabled in source code (see rate_limiting.py lines 94-104)"""
-    pytest.skip(
-        "Concurrency limiting temporarily disabled - see rate_limiting.py _check_concurrency_limit()"
-    )
+    """Concurrency limit blocks when all slots are held."""
     limiter = mod.SlidingWindowRateLimiter(redis_client=None)
     cfg = mod.RateLimitConfig(
         concurrency_limit=1, burst_limit=50, requests_per_minute=60, tokens_per_minute=10000
@@ -128,6 +125,72 @@ async def test_concurrency_limit_exceeded(mod, fake_fallback):
     assert res.allowed is False
     assert "Concurrency" in res.reason
     assert res.retry_after == 60
+
+
+@pytest.mark.anyio
+async def test_allowed_check_takes_concurrency_slot_and_release_frees_it(mod, fake_fallback):
+    """An allowed check takes a slot; release_concurrent_request frees it."""
+    limiter = mod.SlidingWindowRateLimiter(redis_client=None)
+    cfg = mod.RateLimitConfig(
+        concurrency_limit=1, burst_limit=50, requests_per_minute=60, tokens_per_minute=10000
+    )
+
+    res1 = await limiter.check_rate_limit("keyD", cfg, tokens_used=0)
+    assert res1.allowed is True
+    assert limiter.concurrent_requests["keyD"] == 1
+
+    # Slot is held -> second concurrent request is blocked
+    res2 = await limiter.check_rate_limit("keyD", cfg, tokens_used=0)
+    assert res2.allowed is False
+    assert "Concurrency" in res2.reason
+
+    # Releasing frees the slot again
+    await limiter.release_concurrent_request("keyD")
+    assert limiter.concurrent_requests["keyD"] == 0
+    res3 = await limiter.check_rate_limit("keyD", cfg, tokens_used=0)
+    assert res3.allowed is True
+
+
+@pytest.mark.anyio
+async def test_accounting_only_check_does_not_consume(mod, fake_fallback):
+    """acquire_concurrency=False / count_request=False must not take a slot,
+    consume a burst token, or count a second request (used by the post-request
+    token accounting check in chat.py)."""
+    limiter = mod.SlidingWindowRateLimiter(redis_client=None)
+    cfg = mod.RateLimitConfig(
+        concurrency_limit=1, burst_limit=50, requests_per_minute=60, tokens_per_minute=10000
+    )
+
+    res = await limiter.check_rate_limit(
+        "keyE", cfg, tokens_used=123, acquire_concurrency=False, count_request=False
+    )
+    assert res.allowed is True
+    # No concurrency slot taken
+    assert limiter.concurrent_requests.get("keyE", 0) == 0
+    # No request counted in the sliding window
+    assert len(limiter.local_cache["keyE"]["requests"]) == 0
+    # But the tokens ARE recorded
+    assert sum(amount for _, amount in limiter.local_cache["keyE"]["tokens"]) == 123
+
+
+@pytest.mark.anyio
+async def test_local_burst_bucket_refills_over_time(mod, fake_fallback, monkeypatch):
+    """The local (no-Redis) burst bucket must refill over time; before the fix
+    it only ever drained, permanently 429ing every key on a long-lived worker."""
+    limiter = mod.SlidingWindowRateLimiter(redis_client=None)
+    cfg = mod.RateLimitConfig(
+        concurrency_limit=10, burst_limit=60, requests_per_minute=1000, tokens_per_minute=100000
+    )
+
+    # Drain the bucket completely
+    limiter.burst_tokens["keyF"] = 0
+    limiter.burst_last_refill["keyF"] = 1000.0
+
+    # 30 seconds later, half the bucket (30 tokens at 60/min) has refilled
+    monkeypatch.setattr(mod.time, "time", lambda: 1030.0)
+    burst = await limiter._check_burst_limit("keyF", cfg)
+    assert burst["allowed"] is True
+    assert burst["remaining"] >= 28  # ~30 refilled minus the one consumed
 
 
 # -------------------- Burst limit (local path) --------------------

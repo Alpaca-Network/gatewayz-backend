@@ -115,6 +115,7 @@ class SlidingWindowRateLimiter:
         self.fallback_manager = get_fallback_rate_limit_manager()
         self.concurrent_requests = defaultdict(int)
         self.burst_tokens = {}
+        self.burst_last_refill = {}
         self.local_cache = {}
         self.redis_client = redis_client
 
@@ -123,8 +124,22 @@ class SlidingWindowRateLimiter:
         api_key: str,
         config: RateLimitConfig,
         tokens_used: int = 0,
+        *,
+        acquire_concurrency: bool = True,
+        count_request: bool = True,
     ) -> RateLimitResult:
-        """Check rate limit using fallback system"""
+        """Check rate limit using fallback system.
+
+        Args:
+            acquire_concurrency: When True (default), an allowed result takes a
+                concurrency slot that the caller MUST release via
+                release_concurrent_request(). Pass False for post-request
+                accounting checks that must not take a slot.
+            count_request: When True (default), an allowed result consumes a
+                burst token and counts one request in the sliding windows.
+                Pass False for post-request token accounting so a single user
+                request is not counted twice.
+        """
         try:
             # Check concurrency limit first
             concurrency_check = await self._check_concurrency_limit(api_key, config)
@@ -144,7 +159,7 @@ class SlidingWindowRateLimiter:
                 return result
 
             # Check burst limit
-            burst_check = await self._check_burst_limit(api_key, config)
+            burst_check = await self._check_burst_limit(api_key, config, consume=count_request)
             if not burst_check["allowed"]:
                 result = RateLimitResult(
                     allowed=False,
@@ -161,7 +176,9 @@ class SlidingWindowRateLimiter:
                 return result
 
             # Check sliding window limits
-            window_check = await self._check_sliding_window(api_key, config, tokens_used)
+            window_check = await self._check_sliding_window(
+                api_key, config, tokens_used, count_request=count_request
+            )
             if not window_check["allowed"]:
                 result = RateLimitResult(
                     allowed=False,
@@ -179,8 +196,12 @@ class SlidingWindowRateLimiter:
                 return result
 
             # All checks passed - request is allowed
-            # Increment concurrency counter BEFORE returning
-            await self.increment_concurrent_requests(api_key)
+            # Increment concurrency counter BEFORE returning. The caller is
+            # responsible for releasing this slot on EVERY exit path (success,
+            # error, and stream completion) — a leaked slot permanently
+            # rate-limits the key until the worker restarts.
+            if acquire_concurrency:
+                await self.increment_concurrent_requests(api_key)
 
             # Build result from our own sliding window check data
             limit_result = RateLimitResult(
@@ -244,8 +265,13 @@ class SlidingWindowRateLimiter:
             "limit": config.concurrency_limit,
         }
 
-    async def _check_burst_limit(self, api_key: str, config: RateLimitConfig) -> dict[str, Any]:
+    async def _check_burst_limit(
+        self, api_key: str, config: RateLimitConfig, consume: bool = True
+    ) -> dict[str, Any]:
         """Check burst limit using token bucket algorithm
+
+        When consume=False, only reports the current bucket state without
+        taking a token (used for post-request accounting checks).
 
         FIX (2026-02-06): Removed invalid `await` on sync Redis pipeline operations.
         Pipeline commands queue up and execute together - they don't return awaitables.
@@ -276,6 +302,14 @@ class SlidingWindowRateLimiter:
             current_tokens = min(config.burst_limit, current_tokens + tokens_to_add)
 
             if current_tokens >= 1:
+                if not consume:
+                    return {
+                        "allowed": True,
+                        "remaining": int(current_tokens),
+                        "current": int(current_tokens),
+                        "limit": config.burst_limit,
+                    }
+
                 # Consume one token
                 def _consume_token():
                     with tag_wrapper({"cache_layer": "rate_limit", "cache_op": "write"}):
@@ -306,8 +340,20 @@ class SlidingWindowRateLimiter:
             if api_key not in self.burst_tokens:
                 self.burst_tokens[api_key] = config.burst_limit
 
+            # Refill tokens based on time passed (same policy as the Redis
+            # path). Without this the local bucket only ever drains, so every
+            # key ends up permanently "Burst limit exceeded" after burst_limit
+            # lifetime requests on a long-lived worker.
+            last_refill = self.burst_last_refill.get(api_key, now)
+            tokens_to_add = (now - last_refill) * (config.burst_limit / 60)
+            self.burst_tokens[api_key] = min(
+                config.burst_limit, self.burst_tokens[api_key] + tokens_to_add
+            )
+            self.burst_last_refill[api_key] = now
+
             if self.burst_tokens[api_key] >= 1:
-                self.burst_tokens[api_key] -= 1
+                if consume:
+                    self.burst_tokens[api_key] -= 1
                 return {
                     "allowed": True,
                     "remaining": int(self.burst_tokens[api_key]),
@@ -324,21 +370,25 @@ class SlidingWindowRateLimiter:
                 }
 
     async def _check_sliding_window(
-        self, api_key: str, config: RateLimitConfig, tokens_used: int
+        self, api_key: str, config: RateLimitConfig, tokens_used: int, count_request: bool = True
     ) -> dict[str, Any]:
-        """Check sliding window rate limits"""
+        """Check sliding window rate limits.
+
+        When count_request=False, tokens_used is still recorded but no request
+        is counted (post-request token accounting).
+        """
         now = datetime.now(UTC)
         window_start = now - timedelta(seconds=config.window_size_seconds)
 
         if self.redis_client:
             # Use Redis for distributed rate limiting
             return await self._check_redis_sliding_window(
-                api_key, config, tokens_used, now, window_start
+                api_key, config, tokens_used, now, window_start, count_request=count_request
             )
         else:
             # Fallback to local cache
             return await self._check_local_sliding_window(
-                api_key, config, tokens_used, now, window_start
+                api_key, config, tokens_used, now, window_start, count_request=count_request
             )
 
     async def _check_redis_sliding_window(
@@ -348,6 +398,7 @@ class SlidingWindowRateLimiter:
         tokens_used: int,
         now: datetime,
         window_start: datetime,
+        count_request: bool = True,
     ) -> dict[str, Any]:
         """Check sliding window using Redis
 
@@ -450,11 +501,12 @@ class SlidingWindowRateLimiter:
         def _update_counters():
             with tag_wrapper({"cache_layer": "rate_limit", "cache_op": "write"}):
                 pipe = self.redis_client.pipeline()
-                pipe.incr(f"{minute_key}:requests")
+                if count_request:
+                    pipe.incr(f"{minute_key}:requests")
+                    pipe.incr(f"{hour_key}:requests")
+                    pipe.incr(f"{day_key}:requests")
                 pipe.incrby(f"{minute_key}:tokens", tokens_used)
-                pipe.incr(f"{hour_key}:requests")
                 pipe.incrby(f"{hour_key}:tokens", tokens_used)
-                pipe.incr(f"{day_key}:requests")
                 pipe.incrby(f"{day_key}:tokens", tokens_used)
 
                 # Set expiration times
@@ -482,6 +534,7 @@ class SlidingWindowRateLimiter:
         tokens_used: int,
         now: datetime,
         window_start: datetime,
+        count_request: bool = True,
     ) -> dict[str, Any]:
         """Check sliding window using local cache (fallback)"""
         if api_key not in self.local_cache:
@@ -521,8 +574,11 @@ class SlidingWindowRateLimiter:
                 "reason": "Minute token limit exceeded",
             }
 
-        # Record this request
-        cache["requests"].append(now)
+        # Record this request (tokens are always recorded; the request itself
+        # only when count_request is set, so post-request accounting does not
+        # double-count a single user request)
+        if count_request:
+            cache["requests"].append(now)
         cache["tokens"].append((now, tokens_used))
 
         return {
@@ -608,7 +664,13 @@ class RateLimitManager:
         pass
 
     async def check_rate_limit(
-        self, api_key: str, tokens_used: int = 0, request_type: str = "api"
+        self,
+        api_key: str,
+        tokens_used: int = 0,
+        request_type: str = "api",
+        *,
+        acquire_concurrency: bool = True,
+        count_request: bool = True,
     ) -> RateLimitResult:
         """Check rate limit for a specific API key (OPTIMIZED: with short-lived caching)
 
@@ -625,7 +687,12 @@ class RateLimitManager:
         now = time.time()
         cache_key = f"{api_key}:{tokens_used}"
 
-        if cache_key in self._result_cache:
+        # Only full-consumption checks participate in the result cache: a
+        # cached "allowed" for an accounting-only check must not skip a real
+        # admission check (and vice versa).
+        use_result_cache = acquire_concurrency and count_request
+
+        if use_result_cache and cache_key in self._result_cache:
             cached_result, cached_time = self._result_cache[cache_key]
             if now - cached_time < self._cache_ttl:
                 logger.debug(
@@ -683,7 +750,13 @@ class RateLimitManager:
         severe_config = await self._get_severe_rate_limit_config_with_user(user)
         if severe_config is not None:
             # Apply severe rate limiting for suspicious accounts
-            result = await self.rate_limiter.check_rate_limit(api_key, severe_config, tokens_used)
+            result = await self.rate_limiter.check_rate_limit(
+                api_key,
+                severe_config,
+                tokens_used,
+                acquire_concurrency=acquire_concurrency,
+                count_request=count_request,
+            )
             if not result.allowed:
                 logger.warning(
                     f"Severe rate limit exceeded for suspicious account {api_key[:10]}...: {result.reason}"
@@ -692,10 +765,16 @@ class RateLimitManager:
 
         # Cache miss - do actual check
         config = await self.get_key_config(api_key)
-        result = await self.rate_limiter.check_rate_limit(api_key, config, tokens_used)
+        result = await self.rate_limiter.check_rate_limit(
+            api_key,
+            config,
+            tokens_used,
+            acquire_concurrency=acquire_concurrency,
+            count_request=count_request,
+        )
 
         # Cache the result if allowed (only cache successful checks)
-        if result.allowed:
+        if use_result_cache and result.allowed:
             self._result_cache[cache_key] = (result, now)
             # Clean up old cache entries (keep cache size bounded)
             if len(self._result_cache) > 1000:
