@@ -404,6 +404,30 @@ def filter_by_circuit_breaker(
         return provider_chain
 
 
+def _upstream_rate_limit_exception(
+    provider: str, model: str, retry_after: str | int | None
+) -> HTTPException:
+    """Build the client-facing 429 for an UPSTREAM provider rate limit.
+
+    Free-tier models (locked to a single provider) hit shared upstream limits
+    frequently; the message and X-RateLimit-Scope header make clear this is
+    model congestion, not the caller exceeding their own gateway limits.
+    """
+    headers = {
+        "Retry-After": str(retry_after) if retry_after else "30",
+        "X-RateLimit-Scope": "upstream",
+    }
+    return HTTPException(
+        status_code=429,
+        detail=(
+            f"The model '{model}' is temporarily rate limited upstream due to high demand. "
+            "This is congestion at the model provider, not your account limit. "
+            "Please retry shortly."
+        ),
+        headers=headers,
+    )
+
+
 def map_provider_error(
     provider: str,
     model: str,
@@ -411,12 +435,47 @@ def map_provider_error(
 ) -> HTTPException:
     """
     Map upstream exceptions to HTTPException responses.
-    Keeps existing status/detail semantics while allowing centralized handling.
+
+    All client-visible details are sanitized (no raw provider response bodies,
+    URLs, or key ids); the raw error is logged server-side and captured to
+    Sentry for retryable/upstream failures so the team is alerted instead of
+    end users seeing internals.
     """
-    # Log all upstream errors for debugging
+    http_exc = _map_provider_error_impl(provider, model, exc)
+
+    # Alert telemetry for upstream failures. HTTPExceptions are deliberately
+    # skipped by AutoSentryMiddleware, so without this capture provider
+    # outages/rate-limits/budget exhaustion never reach Sentry.
+    if not isinstance(exc, HTTPException) and (
+        http_exc.status_code in (402, 429) or http_exc.status_code >= 500
+    ):
+        try:
+            from src.utils.sentry_context import capture_provider_error
+
+            capture_provider_error(
+                exc,
+                provider=provider,
+                model=model,
+                extra_context={
+                    "mapped_status": http_exc.status_code,
+                    "error_category": "upstream_provider_error",
+                },
+            )
+        except Exception:  # noqa: BLE001 - telemetry must never break error mapping
+            logger.debug("Failed to capture provider error to Sentry", exc_info=True)
+
+    return http_exc
+
+
+def _map_provider_error_impl(
+    provider: str,
+    model: str,
+    exc: Exception,
+) -> HTTPException:
+    # Log all upstream errors for debugging (full detail stays server-side)
     logger.warning(
         f"Provider error: provider={provider}, model={model}, "
-        f"error_type={type(exc).__name__}, error={str(exc)[:200]}"
+        f"error_type={type(exc).__name__}, error={str(exc)[:500]}"
     )
 
     if isinstance(exc, HTTPException):
@@ -467,8 +526,11 @@ def map_provider_error(
                 detail=f"{provider} returned no response candidates. Trying alternative providers.",
             )
 
-        # Other ValueErrors are treated as bad requests
-        return HTTPException(status_code=400, detail=str(exc))
+        # Other ValueErrors are treated as bad requests (sanitized: never leak
+        # raw URLs/tokens embedded in upstream error text)
+        return HTTPException(
+            status_code=400, detail=sanitize_provider_error_for_user(error_msg, max_length=300)
+        )
 
     # OpenAI SDK exceptions (used for OpenRouter and other compatible providers)
     # Check APITimeoutError before APIConnectionError as it may be a subclass
@@ -493,11 +555,7 @@ def map_provider_error(
                 retry_after = exc.response.headers.get("retry-after")
             if retry_after is None and isinstance(getattr(exc, "body", None), dict):
                 retry_after = exc.body.get("retry_after")
-            if retry_after:
-                headers = {"Retry-After": str(retry_after)}
-            return HTTPException(
-                status_code=429, detail="Upstream rate limit exceeded", headers=headers
-            )
+            return _upstream_rate_limit_exception(provider, model, retry_after)
 
         auth_error_classes = tuple(
             err for err in (AuthenticationError, PermissionDeniedError) if err is not None
@@ -510,17 +568,26 @@ def map_provider_error(
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
         elif BadRequestError and isinstance(exc, BadRequestError):
-            # Extract actual error message from BadRequestError
+            # Extract actual error message from BadRequestError. The raw
+            # response body is logged server-side only — provider bodies can
+            # embed key ids, internal URLs, and infra details.
             error_msg = getattr(exc, "message", None) or str(exc)
             try:
-                # Try to get response body if available
                 if hasattr(exc, "response") and exc.response:
                     response_text = getattr(exc.response, "text", None)
                     if response_text:
-                        error_msg = f"{error_msg} | Response: {response_text[:200]}"
+                        logger.warning(
+                            "OpenAI BadRequestError response body (provider=%s, model=%s): %s",
+                            provider,
+                            model,
+                            response_text[:500],
+                        )
             except Exception as log_exc:
                 logger.debug("Failed to extract OpenAI BadRequestError response body: %r", log_exc)
-            detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
+            detail = (
+                f"Provider '{provider}' rejected request for model '{model}': "
+                f"{sanitize_provider_error_for_user(error_msg, max_length=300)}"
+            )
             status = 400
         elif status == 403:
             detail = f"{provider} authentication error"
@@ -534,12 +601,21 @@ def map_provider_error(
         if detail == "Upstream error":
             error_msg = getattr(exc, "message", None) or str(exc)
             # Include provider and model in error message for better error tracking
-            detail = f"Provider '{provider}' error for model '{model}': {error_msg}"
+            detail = (
+                f"Provider '{provider}' error for model '{model}': "
+                f"{sanitize_provider_error_for_user(error_msg, max_length=300)}"
+            )
 
         return HTTPException(status_code=status, detail=detail, headers=headers)
 
     if OpenAIError and isinstance(exc, OpenAIError):
-        return HTTPException(status_code=502, detail=str(exc))
+        return HTTPException(
+            status_code=502,
+            detail=(
+                f"Provider '{provider}' error for model '{model}': "
+                f"{sanitize_provider_error_for_user(str(exc), max_length=300)}"
+            ),
+        )
 
     # Cerebras SDK exceptions (similar structure to OpenAI SDK but separate classes)
     if CerebrasAPIConnectionError and isinstance(exc, CerebrasAPIConnectionError):
@@ -560,11 +636,7 @@ def map_provider_error(
                 retry_after = exc.response.headers.get("retry-after")
             if retry_after is None and isinstance(getattr(exc, "body", None), dict):
                 retry_after = exc.body.get("retry_after")
-            if retry_after:
-                headers = {"Retry-After": str(retry_after)}
-            return HTTPException(
-                status_code=429, detail="Upstream rate limit exceeded", headers=headers
-            )
+            return _upstream_rate_limit_exception(provider, model, retry_after)
 
         cerebras_auth_error_classes = tuple(
             err
@@ -579,19 +651,28 @@ def map_provider_error(
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
         elif CerebrasBadRequestError and isinstance(exc, CerebrasBadRequestError):
-            # Extract actual error message from BadRequestError
+            # Extract actual error message from BadRequestError. The raw
+            # response body is logged server-side only — provider bodies can
+            # embed key ids, internal URLs, and infra details.
             error_msg = getattr(exc, "message", None) or str(exc)
             try:
-                # Try to get response body if available
                 if hasattr(exc, "response") and exc.response:
                     response_text = getattr(exc.response, "text", None)
                     if response_text:
-                        error_msg = f"{error_msg} | Response: {response_text[:200]}"
+                        logger.warning(
+                            "Cerebras BadRequestError response body (provider=%s, model=%s): %s",
+                            provider,
+                            model,
+                            response_text[:500],
+                        )
             except Exception as log_exc:
                 logger.debug(
                     "Failed to extract Cerebras BadRequestError response body: %r", log_exc
                 )
-            detail = f"Provider '{provider}' rejected request for model '{model}': {error_msg}"
+            detail = (
+                f"Provider '{provider}' rejected request for model '{model}': "
+                f"{sanitize_provider_error_for_user(error_msg, max_length=300)}"
+            )
             status = 400
         elif status == 403:
             detail = f"{provider} authentication error"
@@ -605,7 +686,10 @@ def map_provider_error(
         if detail == "Upstream error":
             error_msg = getattr(exc, "message", None) or str(exc)
             # Include provider and model in error message for better error tracking
-            detail = f"Provider '{provider}' error for model '{model}': {error_msg}"
+            detail = (
+                f"Provider '{provider}' error for model '{model}': "
+                f"{sanitize_provider_error_for_user(error_msg, max_length=300)}"
+            )
 
         return HTTPException(status_code=status, detail=detail, headers=headers)
 
@@ -617,10 +701,7 @@ def map_provider_error(
         retry_after = exc.response.headers.get("retry-after")
 
         if status == 429:
-            headers = {"Retry-After": retry_after} if retry_after else None
-            return HTTPException(
-                status_code=429, detail="Upstream rate limit exceeded", headers=headers
-            )
+            return _upstream_rate_limit_exception(provider, model, retry_after)
         if status in (401, 403):
             return HTTPException(status_code=500, detail=f"{provider} authentication error")
         if status == 404:
@@ -629,13 +710,24 @@ def map_provider_error(
                 detail=f"Model {model} not found or unavailable on {provider}",
             )
         if 400 <= status < 500:
-            # Extract error details from response
+            # Client-visible detail carries only a sanitized summary; the raw
+            # response body is logged server-side for debugging.
             error_detail = (
                 f"Provider '{provider}' rejected request for model '{model}' (HTTP {status})"
             )
             try:
-                response_body = exc.response.text[:500] if exc.response.text else "No response body"
-                error_detail += f" | Response: {response_body}"
+                response_body = exc.response.text[:500] if exc.response.text else ""
+                if response_body:
+                    logger.warning(
+                        "Upstream 4xx response body (provider=%s, model=%s, status=%s): %s",
+                        provider,
+                        model,
+                        status,
+                        response_body,
+                    )
+                    error_detail += (
+                        f": {sanitize_provider_error_for_user(response_body, max_length=200)}"
+                    )
             except Exception as log_exc:
                 logger.debug("Failed to extract httpx response body: %r", log_exc)
             return HTTPException(status_code=400, detail=error_detail)
@@ -661,14 +753,7 @@ def map_provider_error(
         parsed_status == 429 or "rate limit" in msg.lower() or "too many requests" in msg.lower()
     )
     if is_rate_limited:
-        return HTTPException(
-            status_code=429,
-            detail=(
-                f"Provider '{provider}' rate limit exceeded for model '{model}'. "
-                "Please retry shortly."
-            ),
-            headers={"Retry-After": "30"},
-        )
+        return _upstream_rate_limit_exception(provider, model, None)
     if parsed_status == 404:
         return HTTPException(
             status_code=404, detail=f"Model {model} not found or unavailable on {provider}"

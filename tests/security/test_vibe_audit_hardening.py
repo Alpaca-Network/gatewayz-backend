@@ -52,7 +52,10 @@ async def test_guard_allows_under_limit(monkeypatch):
     monkeypatch.delenv("DISABLE_RATE_LIMITING", raising=False)
 
     class _Mgr:
-        async def check_rate_limit(self, api_key, tokens_used=0):
+        async def check_rate_limit(self, api_key, tokens_used=0, **kwargs):
+            # The guard must not take a concurrency slot: it has no release
+            # hook, so an acquired slot would leak permanently.
+            assert kwargs.get("acquire_concurrency") is False
             return _Result(allowed=True)
 
     monkeypatch.setattr(rate_limit_guard, "get_rate_limit_manager", lambda: _Mgr())
@@ -66,7 +69,7 @@ async def test_guard_raises_429_over_limit(monkeypatch):
     monkeypatch.delenv("DISABLE_RATE_LIMITING", raising=False)
 
     class _Mgr:
-        async def check_rate_limit(self, api_key, tokens_used=0):
+        async def check_rate_limit(self, api_key, tokens_used=0, **kwargs):
             return _Result(allowed=False, reason="Rate limit exceeded", retry_after=42)
 
     monkeypatch.setattr(rate_limit_guard, "get_rate_limit_manager", lambda: _Mgr())

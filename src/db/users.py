@@ -310,6 +310,63 @@ def _schedule_background_migration(client, user: dict[str, Any], api_key: str) -
     thread.start()
 
 
+def _migrate_legacy_credit_balance(client, user: dict[str, Any]) -> None:
+    """Persist a legacy ``users.credits`` balance into the tiered balance fields.
+
+    Older accounts hold their balance in the legacy ``credits`` column. The
+    inference credit gates and the atomic deduction RPC only look at
+    ``subscription_allowance`` / ``purchased_credits``, so without this
+    migration those users are blocked with 402 "Insufficient credits" while
+    their dashboard (get_user_profile, which applies a read-time fallback)
+    still shows a positive balance.
+
+    The guarded update (``credits`` must still equal the value we read) makes
+    concurrent migrations safe: only one writer matches the WHERE clause, so
+    the balance can never be duplicated. On success the passed-in user dict is
+    updated in place so this request already sees the spendable balance.
+    """
+    try:
+        allowance = float(user.get("subscription_allowance") or 0)
+        purchased = float(user.get("purchased_credits") or 0)
+        legacy_raw = user.get("credits")
+        legacy = float(legacy_raw or 0)
+        if legacy <= 0 or allowance != 0 or purchased != 0:
+            return
+
+        # Same target selection as the get_user_profile display fallback
+        if user.get("tier") in ("pro", "max") and user.get("subscription_status") == "active":
+            target_field = "subscription_allowance"
+        else:
+            target_field = "purchased_credits"
+
+        with track_database_query(table="users", operation="update"):
+            result = (
+                client.table("users")
+                .update({target_field: legacy, "credits": 0})
+                .eq("id", user["id"])
+                .eq("credits", legacy_raw)
+                .execute()
+            )
+
+        if result.data:
+            user[target_field] = legacy
+            user["credits"] = 0
+            logger.info(
+                "Migrated legacy credits balance for user %s: %.6f -> %s",
+                sanitize_for_logging(str(user["id"])),
+                legacy,
+                target_field,
+            )
+    except Exception as e:
+        # Best-effort: on failure the user keeps the pre-migration view and
+        # the migration is retried on the next uncached lookup.
+        logger.error(
+            "Failed to migrate legacy credits for user %s: %s",
+            sanitize_for_logging(str(user.get("id"))),
+            sanitize_for_logging(str(e)),
+        )
+
+
 def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
     """Internal function: Get user by API key from database (no caching)
 
@@ -349,6 +406,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                     user["scope_permissions"] = key_data.get("scope_permissions")
                     user["is_primary"] = key_data.get("is_primary", False)
                     user["api_key"] = api_key  # ensure api_key is always in user dict
+                    _migrate_legacy_credit_balance(client, user)
                     return user
             except (DatabaseResultError, KeyError) as e:
                 logger.warning(
@@ -380,6 +438,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
                 # Mark the user as having an unmigrated temporary key
                 user["_has_temporary_key"] = True
                 # Allow auth to proceed - temporary keys work fine
+                _migrate_legacy_credit_balance(client, user)
                 return user
 
             # PERF: Allow legacy key auth immediately, migrate in background
@@ -393,6 +452,7 @@ def _get_user_uncached(api_key: str) -> dict[str, Any] | None:
             _schedule_background_migration(client, user, api_key)
 
             # Return user immediately - don't wait for migration
+            _migrate_legacy_credit_balance(client, user)
             return user
 
         return None

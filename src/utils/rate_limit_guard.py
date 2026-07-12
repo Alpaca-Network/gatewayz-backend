@@ -55,7 +55,14 @@ async def enforce_request_rate_limit(
         return None
 
     try:
-        result = await manager.check_rate_limit(api_key, tokens_used=tokens_used)
+        # acquire_concurrency=False: this guard has no release hook, so taking
+        # a concurrency slot here would leak it permanently (the per-key
+        # counter is shared with /v1/chat/completions — leaked slots
+        # eventually 429 every request from the key until worker restart).
+        # Requests-per-window and burst limits are still fully enforced.
+        result = await manager.check_rate_limit(
+            api_key, tokens_used=tokens_used, acquire_concurrency=False
+        )
     except Exception as exc:  # pragma: no cover - defensive; manager already fails open
         logger.warning("Rate limit check errored; allowing request (fail-open): %s", exc)
         return None

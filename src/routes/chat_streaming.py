@@ -477,15 +477,35 @@ async def stream_generator(
             or "503" in error_str
             or "502" in error_str
         ):
-            error_message = f"Provider temporarily unavailable: {str(e)[:200]}"
+            # Generic client message — the raw error is logged above and
+            # captured to Sentry below; never surfaced to the end user.
+            error_message = (
+                "The model provider is temporarily unavailable. Please try again in a moment."
+            )
             error_type = "provider_error"
+            try:
+                from src.utils.sentry_context import capture_provider_error
+
+                capture_provider_error(
+                    e,
+                    provider=provider,
+                    model=model,
+                    request_id=request_id,
+                    endpoint="/v1/chat/completions",
+                    extra_context={"error_category": "stream_provider_error"},
+                )
+            except Exception:
+                logger.debug("Failed to capture stream provider error", exc_info=True)
         # Check for timeout errors
         elif "timeout" in error_str or "timed out" in error_str:
             error_message = "Request timed out. The model may be overloaded. Please try again."
             error_type = "timeout_error"
         # Check for model not found errors
         elif "not found" in error_str or "404" in error_str:
-            error_message = f"Model or resource not found: {str(e)[:200]}"
+            error_message = (
+                f"Model '{model}' was not found or is currently unavailable. "
+                "Please check the model ID or try another model."
+            )
             error_type = "not_found_error"
         # For other errors, include a sanitized version of the error message
         else:

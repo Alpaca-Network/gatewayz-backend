@@ -96,6 +96,22 @@ async def dispatch_streaming(
         # iteration (not just setup) can be caught and the next provider tried,
         # but only before the first content chunk has been sent to the client.
         async def _auth_stream_with_failover():
+            try:
+                async for _chunk in _auth_stream_attempts():
+                    yield _chunk
+            finally:
+                # Release the concurrency slot taken by the route's rate-limit
+                # pre-check. Streaming responses outlive chat_completions(), so
+                # the route can't release it — without this every streamed
+                # request leaked a slot until the key was permanently
+                # "Concurrency limit exceeded".
+                if rate_limit_mgr and rl_pre is not None and not (trial or {}).get("is_trial"):
+                    try:
+                        await rate_limit_mgr.release_concurrency(api_key)
+                    except Exception as _release_exc:
+                        logger.debug("Failed to release stream concurrency: %s", _release_exc)
+
+        async def _auth_stream_attempts():
             _adapter = OpenAIChatAdapter()
             last_exc = None
 

@@ -239,6 +239,18 @@ class Config:
         ).split(",")
         if s.strip()
     }
+    # Subset of blocked statuses that block regardless of balance (abuse states).
+    # For the remaining blocked statuses (payment lapses like canceled/past_due),
+    # users who still hold prepaid purchased credits may keep spending them —
+    # purchased credits are retained on cancellation and were already paid for.
+    HARD_BLOCKED_SUBSCRIPTION_STATUSES = {
+        s.strip().lower()
+        for s in os.environ.get(
+            "HARD_BLOCKED_SUBSCRIPTION_STATUSES",
+            "bot,suspended",
+        ).split(",")
+        if s.strip()
+    }
 
     # Supabase Configuration
     SUPABASE_URL = os.environ.get("SUPABASE_URL")

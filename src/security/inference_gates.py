@@ -107,6 +107,26 @@ def enforce_subscription_status_gate(
         return
     sub_status = str(raw).strip().lower()
     if sub_status in Config.BLOCKED_SUBSCRIPTION_STATUSES:
+        # Payment-lapse statuses (canceled, past_due, ...) must not lock out
+        # prepaid balances: purchased credits are retained on cancellation and
+        # were already paid for. Only hard-blocked abuse statuses (bot,
+        # suspended) block regardless of balance.
+        if sub_status not in Config.HARD_BLOCKED_SUBSCRIPTION_STATUSES:
+            purchased = float(user.get("purchased_credits") or 0)
+            legacy = float(user.get("credits") or 0)
+            allowance = float(user.get("subscription_allowance") or 0)
+            has_prepaid_balance = purchased > 0 or (
+                allowance == 0 and purchased == 0 and legacy > 0
+            )
+            if has_prepaid_balance:
+                logger.info(
+                    "Allowing request from lapsed-subscription user with prepaid credits "
+                    "(request_id=%s, user_id=%s, subscription_status=%s)",
+                    request_id,
+                    user.get("id"),
+                    sub_status,
+                )
+                return
         logger.warning(
             "Blocking request (request_id=%s, user_id=%s, subscription_status=%s)",
             request_id,

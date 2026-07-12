@@ -368,6 +368,14 @@ async def chat_completions(
     # Initialize performance tracker
     tracker = PerformanceTracker(endpoint="/v1/chat/completions")
 
+    # Bound before the try so the exception handlers below can always
+    # reference them, even for failures during auth/validation.
+    rate_limit_mgr = None
+    # True while this request holds a concurrency slot taken by the rate-limit
+    # pre-check. Must be released on EVERY exit path — a leaked slot
+    # permanently 429s the key ("Concurrency limit exceeded") until restart.
+    concurrency_slot_held = False
+
     try:
         # === 1) User + plan/trial prechecks (OPTIMIZED: parallelized DB calls) ===
         with tracker.stage("auth_validation"):
@@ -568,6 +576,7 @@ async def chat_completions(
                     reason=rl_pre.reason,
                     rate_limit_headers=get_rate_limit_headers(rl_pre),
                 )
+            concurrency_slot_held = should_release_concurrency
 
         # Credit check (only for authenticated non-trial users)
         # Uses cost-based pre-check instead of simple balance > 0
@@ -923,7 +932,16 @@ async def chat_completions(
                         mask_key(api_key),
                         exc,
                     )
-                rl_final = await rate_limit_mgr.check_rate_limit(api_key, tokens_used=total_tokens)
+                concurrency_slot_held = False
+                # Accounting-only check: records the tokens actually used but
+                # must NOT take another concurrency slot or count a second
+                # request — the pre-check already admitted this request.
+                rl_final = await rate_limit_mgr.check_rate_limit(
+                    api_key,
+                    tokens_used=total_tokens,
+                    acquire_concurrency=False,
+                    count_request=False,
+                )
                 if not rl_final.allowed:
                     await _to_thread(
                         create_rate_limit_alert,
@@ -1099,6 +1117,15 @@ async def chat_completions(
         return JSONResponse(content=processed, headers=headers)
 
     except HTTPException as http_exc:
+        # Release the concurrency slot taken by the rate-limit pre-check;
+        # otherwise every failed request leaks a slot until the key is
+        # permanently "Concurrency limit exceeded".
+        if concurrency_slot_held and rate_limit_mgr:
+            try:
+                await rate_limit_mgr.release_concurrency(api_key)
+            except Exception as release_exc:
+                logger.debug("Failed to release concurrency on error: %s", release_exc)
+
         # Save failed request for HTTPException errors (rate limits, auth errors, etc.)
         await save_failed_request(
             _to_thread=_to_thread,
@@ -1121,6 +1148,14 @@ async def chat_completions(
             f"[{request_id}] Unhandled server error: {type(e).__name__}",
             extra={"request_id": request_id, "error_type": type(e).__name__},
         )
+
+        # Release the concurrency slot taken by the rate-limit pre-check (see
+        # the HTTPException handler above).
+        if concurrency_slot_held and rate_limit_mgr:
+            try:
+                await rate_limit_mgr.release_concurrency(api_key)
+            except Exception as release_exc:
+                logger.debug("Failed to release concurrency on error: %s", release_exc)
 
         # Save failed request for unexpected errors
         await save_failed_request(
