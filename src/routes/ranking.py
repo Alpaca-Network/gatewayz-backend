@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.db.ranking import get_all_latest_apps, get_all_latest_models
+from src.db.ranking import get_all_latest_apps, get_ranking_models_from_usage
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -15,11 +15,12 @@ async def get_ranking_models(
     limit: int | None = Query(None, description="Limit number of results"),
     offset: int | None = Query(0, description="Offset for pagination"),
 ):
-    """Get all models from latest_models table for ranking page with logo URLs"""
+    """Get ranking models sourced from real Gatewayz usage, falling back to the
+    scraped snapshot per time-period bucket while traffic is still low."""
     try:
         # Get models with pagination support
-        models = get_all_latest_models(limit=limit, offset=offset)
-        logger.info(f"Retrieved {len(models)} models from latest_models table")
+        models = get_ranking_models_from_usage(limit=limit, offset=offset)
+        logger.info(f"Retrieved {len(models)} ranking models")
 
         return {
             "success": True,
