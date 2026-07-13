@@ -402,111 +402,137 @@ async def dispatch_non_streaming(
     processed = None
     last_http_exc = None
 
-    # Use unified handler for authenticated non-streaming requests
+    # Use unified handler for authenticated non-streaming requests, with failover
+    # across provider_chain — mirrors dispatch_streaming's _auth_stream_with_failover
+    # loop below. Previously this attempted exactly one provider (the stale,
+    # pre-smart-router `provider` value) with no failover at all.
     if not is_anonymous:
-        try:
-            logger.info(
-                f"[Unified Handler] Processing authenticated non-streaming request for model {original_model}"
+        if not provider_chain:
+            raise HTTPException(
+                status_code=502,
+                detail={"error": {"message": f"No providers available for model {original_model}"}},
             )
-
-            # Convert external OpenAI format to internal format
-            adapter = OpenAIChatAdapter()
-            internal_request = adapter.to_internal_request(
-                {"messages": messages, "model": original_model, "stream": False, **optional}
-            )
-            # Pass the detected provider so the handler doesn't have to re-detect
-            internal_request.provider = provider
-
-            # Create unified handler with user context (pass request for disconnect detection)
-            handler = ChatInferenceHandler(api_key, background_tasks, request=request)
-
-            # Wrap with AITracer for gen_ai.* telemetry + track duration for Prometheus
-            inference_start = time.time()
-            async with AITracer.trace_inference(
-                provider="openrouter",  # Will be updated after response
-                model=original_model,
-                request_type=AIRequestType.CHAT_COMPLETION,
-                operation_name=f"unified_handler/{original_model}",
-            ) as trace_ctx:
-                # Process request through unified pipeline
-                internal_response = await handler.process(internal_request)
-
-                # Convert internal response back to OpenAI format
-                processed = adapter.from_internal_response(internal_response)
-
-                # Extract values for postprocessing
-                provider = internal_response.provider_used or "openrouter"
-                model = internal_response.model or original_model
-
-                # Set trace attributes with actual values from response
-                usage = processed.get("usage", {}) or {}
-                input_tokens = usage.get("prompt_tokens", 0)
-                output_tokens = usage.get("completion_tokens", 0)
-                trace_ctx.set_token_usage(
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    total_tokens=usage.get("total_tokens", 0),
+        for idx, attempt_provider in enumerate(provider_chain):
+            is_last = idx == len(provider_chain) - 1
+            try:
+                logger.info(
+                    f"[Unified Handler] Processing authenticated non-streaming request for model "
+                    f"{original_model} (provider={attempt_provider}, attempt {idx + 1}/{len(provider_chain)})"
                 )
-                trace_ctx.set_response_model(
-                    response_model=model,
-                    finish_reason=(
-                        processed.get("choices", [{}])[0].get("finish_reason")
-                        if processed.get("choices")
-                        else None
-                    ),
-                    response_id=processed.get("id"),
+
+                # Convert external OpenAI format to internal format
+                adapter = OpenAIChatAdapter()
+                internal_request = adapter.to_internal_request(
+                    {"messages": messages, "model": original_model, "stream": False, **optional}
                 )
-                if optional:
-                    trace_ctx.set_model_parameters(
-                        temperature=optional.get("temperature"),
-                        max_tokens=optional.get("max_tokens"),
-                        top_p=optional.get("top_p"),
-                        frequency_penalty=optional.get("frequency_penalty"),
-                        presence_penalty=optional.get("presence_penalty"),
+                # Set the provider for this attempt
+                internal_request.provider = attempt_provider
+
+                # Create unified handler with user context (pass request for disconnect detection)
+                handler = ChatInferenceHandler(api_key, background_tasks, request=request)
+
+                # Wrap with AITracer for gen_ai.* telemetry + track duration for Prometheus
+                inference_start = time.time()
+                async with AITracer.trace_inference(
+                    provider=attempt_provider,
+                    model=original_model,
+                    request_type=AIRequestType.CHAT_COMPLETION,
+                    operation_name=f"unified_handler/{original_model}",
+                ) as trace_ctx:
+                    # Process request through unified pipeline
+                    internal_response = await handler.process(internal_request)
+
+                    # Convert internal response back to OpenAI format
+                    processed = adapter.from_internal_response(internal_response)
+
+                    # Extract values for postprocessing
+                    provider = internal_response.provider_used or attempt_provider
+                    model = internal_response.model or original_model
+
+                    # Set trace attributes with actual values from response
+                    usage = processed.get("usage", {}) or {}
+                    input_tokens = usage.get("prompt_tokens", 0)
+                    output_tokens = usage.get("completion_tokens", 0)
+                    trace_ctx.set_token_usage(
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=usage.get("total_tokens", 0),
                     )
-                if user:
-                    trace_ctx.set_user_info(
-                        user_id=str(user.get("id")),
-                        tier="trial" if trial.get("is_trial") else "paid",
+                    trace_ctx.set_response_model(
+                        response_model=model,
+                        finish_reason=(
+                            processed.get("choices", [{}])[0].get("finish_reason")
+                            if processed.get("choices")
+                            else None
+                        ),
+                        response_id=processed.get("id"),
+                    )
+                    if optional:
+                        trace_ctx.set_model_parameters(
+                            temperature=optional.get("temperature"),
+                            max_tokens=optional.get("max_tokens"),
+                            top_p=optional.get("top_p"),
+                            frequency_penalty=optional.get("frequency_penalty"),
+                            presence_penalty=optional.get("presence_penalty"),
+                        )
+                    if user:
+                        trace_ctx.set_user_info(
+                            user_id=str(user.get("id")),
+                            tier="trial" if trial.get("is_trial") else "paid",
+                        )
+
+                # Record Prometheus metrics for model popularity tracking
+                inference_duration = time.time() - inference_start
+                exemplar = get_trace_exemplar()
+                model_inference_requests.labels(
+                    provider=provider, model=model, status="success"
+                ).inc(1, exemplar=exemplar)
+                model_inference_duration.labels(provider=provider, model=model).observe(
+                    inference_duration, exemplar=exemplar
+                )
+                if input_tokens > 0:
+                    tokens_used.labels(provider=provider, model=model, token_type="input").inc(
+                        input_tokens, exemplar=exemplar
+                    )
+                if output_tokens > 0:
+                    tokens_used.labels(provider=provider, model=model, token_type="output").inc(
+                        output_tokens, exemplar=exemplar
                     )
 
-            # Record Prometheus metrics for model popularity tracking
-            inference_duration = time.time() - inference_start
-            exemplar = get_trace_exemplar()
-            model_inference_requests.labels(provider=provider, model=model, status="success").inc(
-                1, exemplar=exemplar
-            )
-            model_inference_duration.labels(provider=provider, model=model).observe(
-                inference_duration, exemplar=exemplar
-            )
-            if input_tokens > 0:
-                tokens_used.labels(provider=provider, model=model, token_type="input").inc(
-                    input_tokens, exemplar=exemplar
+                logger.info(
+                    f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
                 )
-            if output_tokens > 0:
-                tokens_used.labels(provider=provider, model=model, token_type="output").inc(
-                    output_tokens, exemplar=exemplar
+                last_http_exc = None
+                break  # success — stop the failover loop
+
+            except Exception as exc:
+                # Record error metric for model popularity tracking
+                model_inference_requests.labels(
+                    provider=attempt_provider, model=original_model, status="error"
+                ).inc(1, exemplar=get_trace_exemplar())
+
+                http_exc = (
+                    exc
+                    if isinstance(exc, HTTPException)
+                    else map_provider_error(attempt_provider, original_model, exc)
                 )
 
-            logger.info(
-                f"[Unified Handler] Successfully processed request: provider={provider}, model={model}"
-            )
+                if not is_last and should_failover(http_exc):
+                    logger.warning(
+                        f"[Unified Handler] Provider '{attempt_provider}' failed "
+                        f"(HTTP {http_exc.status_code}) for model {original_model}, "
+                        f"failing over ({idx + 1}/{len(provider_chain)})"
+                    )
+                    last_http_exc = http_exc
+                    processed = None
+                    continue
 
-        except Exception as exc:
-            # Record error metric for model popularity tracking
-            error_provider = provider if "provider" in locals() else "openrouter"
-            error_model = model if "model" in locals() else original_model
-            model_inference_requests.labels(
-                provider=error_provider, model=error_model, status="error"
-            ).inc(1, exemplar=get_trace_exemplar())
-
-            # Map any errors to HTTPException
-            logger.error(f"[Unified Handler] Error: {type(exc).__name__}: {exc}", exc_info=True)
-            if isinstance(exc, HTTPException):
-                raise
-            # Map provider-specific errors (map_provider_error imported at module level)
-            http_exc = map_provider_error(error_provider, error_model, exc)
-            raise http_exc
+                logger.error(
+                    f"[Unified Handler] Provider '{attempt_provider}' failed for model "
+                    f"{original_model}: {type(exc).__name__}: {exc}",
+                    exc_info=True,
+                )
+                raise http_exc
     else:
         # Anonymous users: keep existing provider routing logic
         for idx, attempt_provider in enumerate(provider_chain):
