@@ -29,20 +29,20 @@ def _make_response(provider_used: str, model: str) -> InternalChatResponse:
 
 
 def _kwargs(**overrides):
-    base = dict(
-        is_anonymous=False,
-        provider_chain=["deepinfra", "openrouter"],
-        messages=[{"role": "user", "content": "hi"}],
-        original_model="allenai/Olmo-3.1-32B-Instruct",
-        optional={},
-        model="allenai/Olmo-3.1-32B-Instruct",
-        provider="openrouter",  # stale pre-routing value — must NOT be trusted anymore
-        api_key="test-key",
-        background_tasks=BackgroundTasks(),
-        request=None,
-        user={"id": 1},
-        trial={"is_trial": False},
-    )
+    base = {
+        "is_anonymous": False,
+        "provider_chain": ["deepinfra", "openrouter"],
+        "messages": [{"role": "user", "content": "hi"}],
+        "original_model": "allenai/Olmo-3.1-32B-Instruct",
+        "optional": {},
+        "model": "allenai/Olmo-3.1-32B-Instruct",
+        "provider": "openrouter",  # stale pre-routing value — must NOT be trusted anymore
+        "api_key": "test-key",
+        "background_tasks": BackgroundTasks(),
+        "request": None,
+        "user": {"id": 1},
+        "trial": {"is_trial": False},
+    }
     base.update(overrides)
     return base
 
