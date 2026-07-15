@@ -7,6 +7,7 @@ import re
 import httpx
 from fastapi import HTTPException
 
+from src.services.provider_alerting import alert_provider_auth_failure
 from src.utils.error_messages import (
     is_provider_budget_error,
     sanitize_provider_error_for_user,
@@ -564,6 +565,7 @@ def _map_provider_error_impl(
             detail = f"{provider} authentication error"
             # Always map auth errors to 401 for consistency
             status = 401
+            alert_provider_auth_failure(provider, model, str(exc)[:500])
         elif NotFoundError and isinstance(exc, NotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
