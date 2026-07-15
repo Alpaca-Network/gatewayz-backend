@@ -7,6 +7,7 @@ NotificationType enum), it's a separate ops channel to OPS_ALERT_EMAIL.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -41,23 +42,37 @@ def alert_provider_auth_failure(provider: str, model: str, error_detail: str) ->
         )
         return
 
+    def _send() -> None:
+        try:
+            service = NotificationService()
+            sent = service.send_email_notification(
+                to_email=Config.OPS_ALERT_EMAIL,
+                subject=f"[Gatewayz] {provider} authentication failure",
+                html_content=(
+                    f"<p>Provider <b>{provider}</b> rejected a request for model "
+                    f"<b>{model}</b>:</p><pre>{error_detail}</pre>"
+                    f"<p>This usually means the provider's API key was rotated/revoked. "
+                    f"Check Railway env vars for the corresponding key.</p>"
+                ),
+                text_content=(
+                    f"Provider {provider} rejected a request for model {model}: {error_detail}\n"
+                    f"This usually means the provider's API key was rotated/revoked."
+                ),
+            )
+            if sent:
+                _last_alert_sent_at[provider] = now
+        except Exception as e:  # noqa: BLE001 - alerting must never break the request path
+            logger.error("Failed to send provider auth failure alert: %s", e)
+
+    # NotificationService.send_email_notification() makes a synchronous,
+    # un-timed HTTP call to Resend. This function is reached from the async
+    # request-handling path (dispatch_streaming -> map_provider_error), so
+    # run the blocking send in a worker thread instead of stalling the event
+    # loop for every concurrent request during an auth-failure storm. Falls
+    # back to an inline (blocking) send when there's no running event loop
+    # (e.g. sync callers/tests) so the alert is still attempted.
     try:
-        service = NotificationService()
-        sent = service.send_email_notification(
-            to_email=Config.OPS_ALERT_EMAIL,
-            subject=f"[Gatewayz] {provider} authentication failure",
-            html_content=(
-                f"<p>Provider <b>{provider}</b> rejected a request for model "
-                f"<b>{model}</b>:</p><pre>{error_detail}</pre>"
-                f"<p>This usually means the provider's API key was rotated/revoked. "
-                f"Check Railway env vars for the corresponding key.</p>"
-            ),
-            text_content=(
-                f"Provider {provider} rejected a request for model {model}: {error_detail}\n"
-                f"This usually means the provider's API key was rotated/revoked."
-            ),
-        )
-        if sent:
-            _last_alert_sent_at[provider] = now
-    except Exception as e:  # noqa: BLE001 - alerting must never break the request path
-        logger.error("Failed to send provider auth failure alert: %s", e)
+        asyncio.get_running_loop()
+        asyncio.create_task(asyncio.to_thread(_send))
+    except RuntimeError:
+        _send()
