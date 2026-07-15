@@ -2502,6 +2502,7 @@ async def get_model_usage_analytics(
     page: int = Query(1, ge=1, description="Page number (starts at 1)"),
     limit: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
     model_name: str = Query(None, description="Search by model name (partial match)"),
+    is_free: bool | None = Query(None, description="Filter by free-tier flag (true/false)"),
     sort_by: str = Query(
         "total_cost_usd", description="Sort by field (total_cost_usd, successful_requests, etc.)"
     ),
@@ -2522,6 +2523,7 @@ async def get_model_usage_analytics(
     Supports:
     - Pagination: ?page=1&limit=50
     - Search: ?model_name=gpt (partial match, case-insensitive)
+    - Filtering: ?is_free=true (free-tier only) or ?is_free=false (paid only)
     - Sorting: ?sort_by=total_cost_usd&sort_order=desc
     """
     try:
@@ -2539,6 +2541,9 @@ async def get_model_usage_analytics(
         if model_name:
             # Use ilike for case-insensitive partial match
             query = query.ilike("model_name", f"%{model_name}%")
+
+        if is_free is not None:
+            query = query.eq("is_free", is_free)
 
         # Validate sort_by field (prevent SQL injection)
         valid_sort_fields = [
