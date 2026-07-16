@@ -752,6 +752,20 @@ class TestMapProviderErrorOpenAI:
         assert mapped.status_code == 401
         assert "authentication" in mapped.detail.lower()
 
+    @patch("src.services.provider_failover.alert_provider_auth_failure")
+    def test_auth_error_triggers_alert(self, mock_alert):
+        """Test AuthenticationError fires the ops alert hook"""
+        response = Mock()
+        response.status_code = 401
+        error = AuthenticationError("Invalid API key", response=response, body=None)
+        error.status_code = 401
+        map_provider_error("openrouter", "gpt-4", error)
+
+        mock_alert.assert_called_once()
+        call_args = mock_alert.call_args.args
+        assert call_args[0] == "openrouter"
+        assert call_args[1] == "gpt-4"
+
     def test_map_not_found_error(self):
         """Test NotFoundError indicates model not available"""
         response = Mock()

@@ -675,6 +675,18 @@ async def lifespan(app):
     except Exception:
         pass
 
+    # Warn if ops alert email is missing (don't fail startup)
+    try:
+        from src.config import Config as _Config3
+
+        if not _Config3.OPS_ALERT_EMAIL:
+            logger.warning(
+                "  [WARN] OPS_ALERT_EMAIL is not set. "
+                "Provider auth-failure alerting will be a no-op."
+            )
+    except Exception:
+        pass
+
     # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
     # Must run after OTel but before any LLM SDK calls
     try:

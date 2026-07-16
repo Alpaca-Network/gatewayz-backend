@@ -1165,6 +1165,9 @@ async def get_chat_completion_requests(
     model_id: int | None = Query(None, description="Filter by model ID"),
     provider_id: int | None = Query(None, description="Filter by provider ID"),
     model_name: str | None = Query(None, description="Filter by model name (contains)"),
+    status: str | None = Query(
+        None, description="Filter by request status (completed, failed, partial)"
+    ),
     start_date: str | None = Query(
         None, description="Filter by start date (ISO format: YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)"
     ),
@@ -1240,6 +1243,9 @@ async def get_chat_completion_requests(
             # Use ilike for case-insensitive partial matching
             query = query.ilike("models.model_name", f"%{model_name}%")
 
+        if status is not None:
+            query = query.eq("status", status)
+
         if start_date is not None:
             query = query.gte("created_at", start_date)
 
@@ -1259,6 +1265,8 @@ async def get_chat_completion_requests(
 
         if model_id is not None:
             count_query = count_query.eq("model_id", model_id)
+        if status is not None:
+            count_query = count_query.eq("status", status)
 
         # Note: Filtering by provider_id or model_name requires joins,
         # so we'll use the result length as an approximation for now
@@ -1278,6 +1286,7 @@ async def get_chat_completion_requests(
                     "model_id": model_id,
                     "provider_id": provider_id,
                     "model_name": model_name,
+                    "status": status,
                     "start_date": start_date,
                     "end_date": end_date,
                 },
