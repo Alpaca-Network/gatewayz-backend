@@ -12,7 +12,6 @@ from src.db.credit_transactions import (
     get_transaction_summary,
 )
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
-from src.db.trials import get_trial_analytics
 from src.db.users import (
     add_credits_to_user,
     create_enhanced_user,
@@ -517,17 +516,6 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         raise HTTPException(
             status_code=500, detail=f"Failed to clear rate limit cache: {str(e)}"
         ) from e
-
-
-@router.get("/admin/trial/analytics", tags=["admin"])
-async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
-    """Get trial analytics and conversion metrics for admin"""
-    try:
-        analytics = get_trial_analytics()
-        return {"success": True, "analytics": analytics}
-    except Exception as e:
-        logger.error(f"Error getting trial analytics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get trial analytics") from e
 
 
 @router.get("/admin/users/growth", tags=["admin"])

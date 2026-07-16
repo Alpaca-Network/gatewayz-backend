@@ -132,23 +132,6 @@ from src.schemas.proxy import (  # Anthropic Messages API
     UsageResponse,
 )
 
-# Trial models
-from src.schemas.trials import (
-    ConvertTrialRequest,
-    ConvertTrialResponse,
-    StartTrialRequest,
-    StartTrialResponse,
-    TrackUsageRequest,
-    TrackUsageResponse,
-    TrialAnalytics,
-    TrialConversion,
-    TrialLimits,
-    TrialStatus,
-    TrialStatusResponse,
-    TrialUsage,
-    TrialValidationResult,
-)
-
 # User models
 from src.schemas.users import (
     CreateUserRequest,
@@ -202,19 +185,6 @@ __all__ = [
     "PlanResponse",
     "SubscriptionPlan",
     "UserPlanResponse",
-    # Trials
-    "TrialStatus",
-    "TrialUsage",
-    "StartTrialRequest",
-    "StartTrialResponse",
-    "ConvertTrialRequest",
-    "ConvertTrialResponse",
-    "TrialStatusResponse",
-    "TrackUsageRequest",
-    "TrackUsageResponse",
-    "TrialAnalytics",
-    "TrialLimits",
-    "TrialValidationResult",
     # Admin
     "UsageMetrics",
     "AdminMonitorResponse",

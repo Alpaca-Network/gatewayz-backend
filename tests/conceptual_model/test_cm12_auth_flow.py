@@ -3,11 +3,13 @@ CM-12  Authentication Flow  --  Conceptual-Model Unit Tests
 
 Tests verify that the codebase aligns with the Conceptual Model specification
 for authentication rate limiting, user provisioning, API key generation,
-auth info priority resolution, partner trials, referral codes, and
-temporary email detection.
+auth info priority resolution, referral codes, and temporary email detection.
 
 Markers:
     cm_verified  -- CM claim matches the code; test should PASS.
+
+NOTE: The partner-trials test (CM-12.8) was removed when the trials
+subsystem was cut (MVP refactor, Task 4).
 """
 
 import asyncio
@@ -253,45 +255,6 @@ def test_auth_info_priority_google_over_phone():
         None,
     )
     assert resolved == "user@gmail.com", f"Google email should be selected, got {resolved}"
-
-
-# ---------------------------------------------------------------------------
-# CM-12.8  Partner code triggers extended trial
-# ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-def test_partner_code_triggers_extended_trial(mock_supabase):
-    """A valid partner code triggers PartnerTrialService.start_partner_trial."""
-    from src.services.partner_trial_service import PartnerTrialService
-
-    partner_config = {
-        "id": 1,
-        "partner_code": "REDBEARD",
-        "partner_name": "Redbeard",
-        "is_active": True,
-        "trial_duration_days": 14,
-        "trial_tier": "pro",
-        "trial_credits_usd": 20.0,
-        "trial_max_tokens": 5000000,
-        "trial_max_requests": 10000,
-        "daily_usage_limit_usd": 5.0,
-    }
-
-    # Mock the DB query to return partner config
-    mock_supabase.table.return_value.execute.return_value.data = [partner_config]
-
-    # Also mock the RPC call for trial grant
-    mock_supabase.rpc.return_value.execute.return_value.data = {"success": True}
-
-    result = PartnerTrialService.start_partner_trial(
-        user_id=1,
-        api_key="gw_live_testkey",
-        partner_code="REDBEARD",
-    )
-
-    assert result["success"] is True
-    assert result["trial_duration_days"] == 14
-    assert result["trial_tier"] == "pro"
-    assert result["trial_credits_usd"] == 20.0
 
 
 # ---------------------------------------------------------------------------

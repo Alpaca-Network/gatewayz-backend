@@ -534,8 +534,7 @@ def create_app() -> FastAPI:
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration
         # Pricing audit/sync routes removed - deprecated 2026-02 (Phase 3, Issue #1063)
-        ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
-        ("partner_trials", "Partner Trials"),  # Partner-specific trials (Redbeard 14-day Pro)
+        # trial_analytics / partner_trials removed - MVP non-goal (trials subsystem cut)
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances

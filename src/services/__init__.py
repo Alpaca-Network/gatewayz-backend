@@ -94,9 +94,7 @@ _BILLING_MODULES = {
     "credit_precheck",
     "daily_usage_limiter",
     "payments",
-    "trial_service",
     "trial_validation",
-    "partner_trial_service",
 }
 
 _ALL_RELOCATED = {
