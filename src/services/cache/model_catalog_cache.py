@@ -43,7 +43,6 @@ except ImportError:
 import redis
 
 from src.config.redis_config import get_redis_client, is_redis_available
-from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -306,8 +305,7 @@ class ModelCatalogCache:
         key = self.PREFIX_FULL_CATALOG
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "read"}):
-                cached_data = self.redis_client.get(key)
+            cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
                 self._record_cache_operation("hit")
@@ -354,8 +352,7 @@ class ModelCatalogCache:
 
         try:
             serialized_data = _serialize(catalog)
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "write"}):
-                self.redis_client.setex(key, ttl, serialized_data)
+            self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
             logger.info(f"Cache SET: Full model catalog ({len(catalog)} models, TTL: {ttl}s)")
             return True
@@ -389,8 +386,7 @@ class ModelCatalogCache:
         key = self.PREFIX_FULL_CATALOG
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "delete"}):
-                self.redis_client.delete(key)
+            self.redis_client.delete(key)
             self._stats["invalidations"] += 1
             logger.info("Cache INVALIDATE: Full model catalog")
             return True
@@ -417,8 +413,7 @@ class ModelCatalogCache:
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "read"}):
-                cached_data = self.redis_client.get(key)
+            cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
                 self._record_cache_operation("hit")
@@ -459,8 +454,7 @@ class ModelCatalogCache:
 
         try:
             serialized_data = _serialize(catalog)
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "write"}):
-                self.redis_client.setex(key, ttl, serialized_data)
+            self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
             logger.debug(
                 f"Cache SET: Provider catalog for {provider_name} "
@@ -509,8 +503,7 @@ class ModelCatalogCache:
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "delete"}):
-                self.redis_client.delete(key)
+            self.redis_client.delete(key)
             self._stats["invalidations"] += 1
             if cascade:
                 self.invalidate_full_catalog()

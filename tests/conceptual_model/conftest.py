@@ -170,7 +170,6 @@ def mock_supabase():
         "src.db.roles",
         "src.db.rate_limits",
         "src.db.coupons",
-        "src.db.referral",
         "src.services.partner_trial_service",
     ]:
         # Only patch if the module is loaded AND has the attribute
