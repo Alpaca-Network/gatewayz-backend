@@ -3,13 +3,14 @@ CM-12  Authentication Flow  --  Conceptual-Model Unit Tests
 
 Tests verify that the codebase aligns with the Conceptual Model specification
 for authentication rate limiting, user provisioning, API key generation,
-auth info priority resolution, referral codes, and temporary email detection.
+auth info priority resolution, and temporary email detection.
 
 Markers:
     cm_verified  -- CM claim matches the code; test should PASS.
 
 NOTE: The partner-trials test (CM-12.8) was removed when the trials
-subsystem was cut (MVP refactor, Task 4).
+subsystem was cut (MVP refactor, Task 4). The referral-code test (CM-12.9)
+was removed when coupons/referrals were cut (Task 5).
 """
 
 import asyncio
@@ -255,39 +256,6 @@ def test_auth_info_priority_google_over_phone():
         None,
     )
     assert resolved == "user@gmail.com", f"Google email should be selected, got {resolved}"
-
-
-# ---------------------------------------------------------------------------
-# CM-12.9  Referral code stored on new user
-# ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-def test_referral_code_stored_on_new_user(mock_supabase):
-    """Referral code is saved to user record via _process_referral_code_background."""
-    from src.routes.auth import _process_referral_code_background
-
-    # Mock track_referral_signup to return success (imported locally inside the function)
-    with patch("src.services.referral.track_referral_signup") as mock_track:
-        mock_track.return_value = (True, None, {"id": 99, "username": "referrer"})
-
-        _process_referral_code_background(
-            referral_code="ABC12345",
-            user_id="42",
-            username="newuser",
-            is_new_user=True,
-        )
-
-    # Verify update was called to store referred_by_code on the user record
-    update_call = mock_supabase.table.return_value.update
-    update_call.assert_called()
-    # Find the call that sets referred_by_code
-    found_referral_update = False
-    for call in update_call.call_args_list:
-        payload = call[0][0] if call[0] else call[1]
-        if isinstance(payload, dict) and "referred_by_code" in payload:
-            assert payload["referred_by_code"] == "ABC12345"
-            found_referral_update = True
-            break
-    assert found_referral_update, "referred_by_code should be stored on user record"
 
 
 # ---------------------------------------------------------------------------

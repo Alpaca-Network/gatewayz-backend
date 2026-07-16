@@ -594,87 +594,6 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
         )
 
 
-def _process_referral_code_background(
-    referral_code: str, user_id: str, username: str, is_new_user: bool = True
-):
-    """Process referral code in background to avoid blocking auth response.
-
-    OPTIMIZATION: Moved from main auth flow to background task to reduce
-    latency on auth endpoint. Referral tracking is non-critical for login success.
-    """
-    try:
-        logger.info(
-            f"Background task: Processing referral code '{referral_code}' for user {user_id}"
-        )
-
-        from src.services.referral import (
-            send_referral_signup_notification,
-            track_referral_signup,
-        )
-
-        # Track referral signup and get referrer info
-        success, error_msg, referrer = track_referral_signup(referral_code, user_id)
-
-        if success and referrer:
-            logger.info(
-                f"Background task: Valid referral code processed: {referral_code} "
-                f"for user {user_id}"
-            )
-
-            try:
-                # Store referral code for the user
-                client = supabase_config.get_supabase_client()
-                client.table("users").update({"referred_by_code": referral_code}).eq(
-                    "id", user_id
-                ).execute()
-
-                logger.info(
-                    f"Background task: Stored referral code {referral_code} " f"for user {user_id}"
-                )
-
-                # Send notification to referrer
-                if referrer.get("email"):
-                    try:
-                        notification_sent = send_referral_signup_notification(
-                            referrer_id=referrer["id"],
-                            referrer_email=referrer["email"],
-                            referrer_username=referrer.get("username", "User"),
-                            referee_username=username,
-                        )
-                        if notification_sent:
-                            logger.info(
-                                f"Background task: Referral notification sent to referrer "
-                                f"{referrer['id']} at {referrer['email']}"
-                            )
-                        else:
-                            logger.warning(
-                                f"Background task: Referral notification failed for referrer "
-                                f"{referrer['id']} at {referrer['email']} - email service returned failure"
-                            )
-                    except Exception as notify_error:
-                        logger.error(
-                            f"Background task: Failed to send referral notification to "
-                            f"referrer {referrer['id']} at {referrer.get('email')}: {notify_error}"
-                        )
-                else:
-                    logger.warning(
-                        f"Background task: Cannot send referral notification - "
-                        f"referrer {referrer['id']} has no email address"
-                    )
-            except Exception as store_error:
-                logger.error(f"Background task: Failed to store referral code: {store_error}")
-        else:
-            logger.warning(
-                f"Background task: Invalid referral code provided: {referral_code} - {error_msg}"
-            )
-    except Exception as e:
-        logger.error(
-            f"Background task: Error processing referral code '{referral_code}' "
-            f"for user {user_id}: {e}",
-            exc_info=True,
-        )
-
-
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
 async def privy_auth(
     request: PrivyAuthRequest,
@@ -1179,23 +1098,6 @@ async def privy_auth(
                         status_code=500, detail="Failed to create user account"
                     ) from fallback_error
 
-            # OPTIMIZATION: Process referral code in background
-            referral_code_valid = False
-            if request.referral_code:
-                # User-to-user referral code - process normally
-                logger.info(
-                    f"Queuing referral code processing for new user: {request.referral_code}"
-                )
-                background_tasks.add_task(
-                    _process_referral_code_background,
-                    referral_code=request.referral_code,
-                    user_id=user_data["user_id"],
-                    username=username,
-                    is_new_user=True,
-                )
-                # We don't know if it's valid until processed in background, so assume it might be valid
-                # This is logged/tracked in the background task
-
             # OPTIMIZATION: Send welcome email in background for new users
             if email:
                 background_tasks.add_task(
@@ -1207,9 +1109,6 @@ async def privy_auth(
                 )
 
             logger.info(f"New Privy user created: {user_data['user_id']}")
-            logger.info(
-                f"Referral code processing result for new user {user_data['user_id']}: valid={referral_code_valid}"
-            )
 
             # OPTIMIZATION: Log registration activity in background
             activity_metadata = {
@@ -1220,8 +1119,6 @@ async def privy_auth(
                 "privy_user_id": request.user.id,
                 "is_new_user": True,
                 "initial_credits": user_data["credits"],
-                "referral_code": request.referral_code,
-                "referral_code_valid": referral_code_valid,
             }
             background_tasks.add_task(
                 _log_registration_activity_background,
@@ -1497,17 +1394,6 @@ async def register_user(
                 raise HTTPException(
                     status_code=500, detail="Failed to create user account"
                 ) from fallback_error
-
-        # OPTIMIZATION: Process referral code in background to avoid blocking registration response
-        if request.referral_code:
-            logger.info(f"Queuing referral code processing for user: {request.referral_code}")
-            background_tasks.add_task(
-                _process_referral_code_background,
-                referral_code=request.referral_code,
-                user_id=user_data["user_id"],
-                username=request.username,
-                is_new_user=True,
-            )
 
         # Send welcome email
         # FREEZE FIX: Wrap in asyncio.to_thread() — send_welcome_email() calls

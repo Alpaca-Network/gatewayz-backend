@@ -528,8 +528,7 @@ def create_app() -> FastAPI:
             "Model Ranking",
         ),  # Re-enabled — frontend model dropdowns depend on /ranking/models
         ("activity", "Activity Tracking"),
-        ("coupons", "Coupon Management"),
-        ("referral", "Referral System"),
+        # coupons / referral removed - MVP non-goal (growth-mechanics cut)
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
         ("analytics", "Analytics Events"),  # Server-side Statsig integration

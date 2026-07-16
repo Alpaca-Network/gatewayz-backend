@@ -38,23 +38,6 @@ from src.schemas.auth import (
 # Common enums
 from src.schemas.common import AuthMethod, PaymentMethod, PlanType, SubscriptionStatus
 
-# Coupon models
-from src.schemas.coupons import (
-    AvailableCouponResponse,
-    CouponAnalyticsResponse,
-    CouponResponse,
-    CouponScope,
-    CouponStatsResponse,
-    CouponType,
-    CreateCouponRequest,
-    CreatorType,
-    ListCouponsResponse,
-    RedeemCouponRequest,
-    RedemptionHistoryResponse,
-    RedemptionResponse,
-    UpdateCouponRequest,
-)
-
 # Payment models (includes both generic payment and Stripe-specific models)
 from src.schemas.payments import (
     AddCreditsRequest,

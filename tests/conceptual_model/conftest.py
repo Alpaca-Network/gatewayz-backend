@@ -168,7 +168,6 @@ def mock_supabase():
         "src.db.activity",
         "src.db.roles",
         "src.db.rate_limits",
-        "src.db.coupons",
     ]:
         # Only patch if the module is loaded AND has the attribute
         mod = sys.modules.get(mod_path)
