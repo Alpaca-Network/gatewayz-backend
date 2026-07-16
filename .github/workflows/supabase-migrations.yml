@@ -99,7 +99,7 @@ jobs:
           # Detect drift: lines where REMOTE has a version but LOCAL is empty
           # Format: "   LOCAL          | REMOTE         | TIME"
           DRIFT=$(awk -F'|' '{
-            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            gsub(/[ \t`]/, "", $1); gsub(/[ \t`]/, "", $2);
             if ($2 ~ /^[0-9]{14}$/ && $1 !~ /^[0-9]{14}$/) print $2
           }' migration-status.txt || true)
 
@@ -114,7 +114,7 @@ jobs:
 
           # Check for pending local-only migrations
           PENDING=$(awk -F'|' '{
-            gsub(/[ \t]/, "", $1); gsub(/[ \t]/, "", $2);
+            gsub(/[ \t`]/, "", $1); gsub(/[ \t`]/, "", $2);
             if ($1 ~ /^[0-9]{14}$/ && $2 !~ /^[0-9]{14}$/) print $1
           }' migration-status.txt || true)
 
