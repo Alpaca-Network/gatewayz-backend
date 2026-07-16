@@ -208,12 +208,14 @@ def create_app() -> FastAPI:
     #   [2] Timeout         — enforces 55 s hard deadline around everything below
     #   [3] Concurrency     — global admission gate (queue / shed load)
     #   [4] RequestID       — assigns X-Request-ID for correlation
-    #   [5] TraceContext    — propagates distributed-trace context
     #   [6] AutoSentry      — captures unhandled errors before CORS/GZip strip them
     #   [7] CORS            — handles OPTIONS pre-flight and injects CORS headers
     #   [8] Observability   — records Prometheus metrics / latency after routing
     #   [9] GZip            — compresses response bodies (innermost, last to touch body)
     #  [10] StagingSecurity — staging-env access gate (no-op in production)
+    #
+    # (Step [5] TraceContext was removed with the OTel/Tempo teardown — see
+    #  refactor(mvp) task 11. Numbering left as-is to minimize diff noise.)
     #
     # Registration order below is therefore [10] → [1] (innermost first).
     # ---------------------------------------------------------------------------
@@ -261,12 +263,6 @@ def create_app() -> FastAPI:
         logger.info(
             "  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)"
         )
-
-    # [5] TraceContext — propagates W3C traceparent / baggage for distributed tracing
-    from src.middleware.trace_context_middleware import TraceContextMiddleware
-
-    app.add_middleware(TraceContextMiddleware)
-    logger.info("  🔗 [5] Trace context middleware enabled (log-to-trace correlation)")
 
     # [4] RequestID — assigns a unique X-Request-ID to every request
     from src.middleware.request_id_middleware import RequestIDMiddleware
@@ -481,8 +477,6 @@ def create_app() -> FastAPI:
         ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
-        ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
-        ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
@@ -511,10 +505,12 @@ def create_app() -> FastAPI:
         # coupons / referral removed - MVP non-goal (growth-mechanics cut)
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
-        ("analytics", "Analytics Events"),  # Server-side Statsig integration
+        # analytics (Statsig/PostHog events proxy) removed - MVP observability teardown
+        # (task 11): its only job was forwarding to statsig_service/posthog_service,
+        # both deleted, so the route had nothing left to do.
         # Pricing audit/sync routes removed - deprecated 2026-02 (Phase 3, Issue #1063)
         # trial_analytics / partner_trials removed - MVP non-goal (trials subsystem cut)
-        ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
+        # prometheus_data (Grafana stack telemetry endpoints) removed - MVP observability teardown
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
@@ -625,16 +621,6 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
 
-    # ==================== Prometheus/Grafana SimpleJSON Datasource Router ====================
-    # Load Prometheus/Grafana datasource router for dashboard compatibility
-    try:
-        from src.routes.prometheus_grafana import router as prometheus_grafana_router
-
-        app.include_router(prometheus_grafana_router)
-        logger.info("  [OK] Prometheus/Grafana SimpleJSON Datasource (/prometheus/datasource/*)")
-    except ImportError as e:
-        logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
-
     # ==================== General Router API Router ====================
     # Load general router API endpoints for intelligent routing
     try:
@@ -674,45 +660,14 @@ def create_app() -> FastAPI:
         """
         Handle unexpected exceptions with detailed error responses.
 
-        Captures exceptions in monitoring tools (PostHog, Sentry) and returns
-        a detailed internal error response to the client.
+        Sentry capture for unhandled exceptions is handled by AutoSentryMiddleware
+        (the single error-capture mechanism). This handler is just responsible for
+        returning a detailed internal error response to the client.
         """
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
 
         # Get request ID from request state
         request_id = getattr(request.state, "request_id", None)
-
-        # Capture exception in PostHog for error tracking
-        try:
-            from src.services.posthog_service import posthog_service
-
-            # Extract user info from request if available
-            distinct_id = "system"
-            properties = {
-                "path": request.url.path,
-                "method": request.method,
-                "error_type": type(exc).__name__,
-                "error_message": str(exc),
-                "request_id": request_id,
-            }
-
-            # Try to get user ID from request state or headers
-            if hasattr(request.state, "user_id"):
-                distinct_id = request.state.user_id
-            elif "authorization" in request.headers:
-                # Use a hash of the auth header as distinct_id if no user_id available
-                import hashlib
-
-                auth_hash = hashlib.sha256(request.headers["authorization"].encode()).hexdigest()[
-                    :16
-                ]
-                distinct_id = f"user_{auth_hash}"
-
-            posthog_service.capture_exception(
-                exception=exc, distinct_id=distinct_id, properties=properties
-            )
-        except Exception as posthog_error:
-            logger.warning(f"Failed to capture exception in PostHog: {posthog_error}")
 
         # Return detailed internal error response
         from src.utils.error_factory import DetailedErrorFactory

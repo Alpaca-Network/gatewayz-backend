@@ -12,7 +12,6 @@ import os
 from contextlib import asynccontextmanager
 from datetime import UTC
 
-from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
@@ -262,18 +261,6 @@ async def lifespan(app):
         # This makes it trivial to spot misconfiguration (missing env vars, etc.)
         # without having to trace through individual service init log lines.
         _log_telemetry_startup_status()
-
-        # Initialize Arize OTEL for LLM observability in background
-        async def init_arize_background():
-            try:
-                if init_arize_otel():
-                    logger.info("Arize OTEL tracing initialized")
-                else:
-                    logger.debug("Arize OTEL tracing not enabled or not configured")
-            except Exception as e:
-                logger.warning(f"Arize OTEL initialization warning: {e}")
-
-        _create_background_task(init_arize_background(), name="init_arize_otel")
 
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
@@ -675,20 +662,6 @@ async def lifespan(app):
     except Exception:
         pass
 
-    # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
-    # Must run after OTel but before any LLM SDK calls
-    try:
-        from src.config.traceloop_config import initialize_traceloop
-
-        if initialize_traceloop():
-            logger.info("  [OK] Traceloop SDK (OpenLLMetry) initialized")
-        else:
-            logger.info("  [SKIP] Traceloop SDK not enabled or not available")
-    except ImportError:
-        logger.debug("  [SKIP] Traceloop SDK not installed")
-    except Exception as tl_e:
-        logger.warning(f"    Traceloop initialization warning: {tl_e}")
-
     # Set default admin user in background (non-blocking)
     async def _setup_admin_user_background():
         try:
@@ -718,23 +691,6 @@ async def lifespan(app):
             logger.warning(f"Admin setup warning: {admin_e}")
 
     _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
-
-    # Initialize analytics services (Statsig, PostHog)
-    try:
-        logger.info("   Initializing analytics services...")
-
-        from src.services.statsig_service import statsig_service
-
-        await statsig_service.initialize()
-        logger.info("   Statsig analytics initialized")
-
-        from src.services.posthog_service import posthog_service
-
-        posthog_service.initialize()
-        logger.info("   PostHog analytics initialized")
-
-    except Exception as analytics_e:
-        logger.warning(f"    Analytics initialization warning: {analytics_e}")
 
     logger.info("\n🎉 Application startup complete!")
     logger.info(" API Documentation: http://localhost:8000/docs")
@@ -829,52 +785,6 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
-
-        # Shutdown analytics services (migrated from @app.on_event("shutdown"))
-        try:
-            from src.services.statsig_service import statsig_service
-
-            await statsig_service.shutdown()
-            logger.info("Statsig shutdown complete")
-        except Exception as e:
-            logger.warning(f"    Statsig shutdown warning: {e}")
-
-        try:
-            from src.services.posthog_service import posthog_service
-
-            posthog_service.shutdown()
-            logger.info("PostHog shutdown complete")
-        except Exception as e:
-            logger.warning(f"    PostHog shutdown warning: {e}")
-
-        # Shutdown Traceloop SDK (OpenLLMetry)
-        try:
-            from src.config.traceloop_config import is_initialized
-            from src.config.traceloop_config import shutdown as traceloop_shutdown
-
-            if is_initialized():
-                traceloop_shutdown()
-                logger.info("Traceloop SDK shutdown complete")
-        except ImportError:
-            pass  # Traceloop not installed
-        except Exception as e:
-            logger.warning(f"    Traceloop shutdown warning: {e}")
-
-        # Shutdown OpenTelemetry (Tempo tracing)
-        try:
-            from src.config.opentelemetry_config import OpenTelemetryConfig
-
-            OpenTelemetryConfig.shutdown()
-            logger.info("OpenTelemetry (Tempo) shutdown complete")
-        except Exception as e:
-            logger.warning(f"OpenTelemetry shutdown warning: {e}")
-
-        # Shutdown Arize OTEL
-        try:
-            shutdown_arize_otel()
-            logger.info("Arize OTEL shutdown complete")
-        except Exception as e:
-            logger.warning(f"Arize OTEL shutdown warning: {e}")
 
         # Clear connection pools
         clear_connection_pools()
