@@ -14,15 +14,15 @@ _PROVIDER_MODULES = {
     "code_router_client",
     "deepinfra_catalog",
     "featherless_client",
-    "fireworks_client",
+    "fireworks_catalog",
     "google_vertex_client",
-    "groq_client",
+    "groq_catalog",
     "novita_client",
     "openai_client",
     "openrouter_client",
-    "together_client",
+    "together_catalog",
     "xai_client",
-    "zai_client",
+    "zai_catalog",
 }
 
 _CACHE_MODULES = {

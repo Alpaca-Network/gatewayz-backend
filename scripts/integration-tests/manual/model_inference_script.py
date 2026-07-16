@@ -30,8 +30,12 @@ logger = logging.getLogger(__name__)
 # Import gateway clients
 from src.services.providers.openrouter_client import make_openrouter_request_openai, make_openrouter_request_openai_stream
 from src.services.providers.featherless_client import make_featherless_request_openai, make_featherless_request_openai_stream
-from src.services.providers.fireworks_client import make_fireworks_request_openai, make_fireworks_request_openai_stream
-from src.services.providers.together_client import make_together_request_openai, make_together_request_openai_stream
+# fireworks/together are served by the config-driven OpenAI-compat adapter
+from src.services.providers.adapter_configs import ADAPTERS
+make_fireworks_request_openai = ADAPTERS["fireworks"].request
+make_fireworks_request_openai_stream = ADAPTERS["fireworks"].stream
+make_together_request_openai = ADAPTERS["together"].request
+make_together_request_openai_stream = ADAPTERS["together"].stream
 from src.services.providers.xai_client import make_xai_request_openai, make_xai_request_openai_stream
 from src.services.providers.cerebras_client import make_cerebras_request_openai, make_cerebras_request_openai_stream
 from src.services.models import (

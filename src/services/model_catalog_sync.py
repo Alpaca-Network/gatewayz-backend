@@ -25,15 +25,15 @@ from src.services.providers.anthropic_client import fetch_models_from_anthropic
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
 from src.services.providers.deepinfra_catalog import fetch_models_from_deepinfra
 from src.services.providers.featherless_client import fetch_models_from_featherless
-from src.services.providers.fireworks_client import fetch_models_from_fireworks
+from src.services.providers.fireworks_catalog import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
-from src.services.providers.groq_client import fetch_models_from_groq
+from src.services.providers.groq_catalog import fetch_models_from_groq
 from src.services.providers.novita_client import fetch_models_from_novita
 from src.services.providers.openai_client import fetch_models_from_openai
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.providers.together_client import fetch_models_from_together
+from src.services.providers.together_catalog import fetch_models_from_together
 from src.services.providers.xai_client import fetch_models_from_xai
-from src.services.providers.zai_client import fetch_models_from_zai
+from src.services.providers.zai_catalog import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 

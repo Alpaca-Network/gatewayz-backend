@@ -1,170 +1,26 @@
+"""Together.ai model-catalog functions (fetch + normalize).
+
+Moved verbatim from the former per-provider client module when its inference
+trio was consolidated onto the OpenAI-compat adapter
+(``src/services/providers/openai_compat.py`` / ``adapter_configs.py``).
+Pricing extraction below is provider-specific and intentionally NOT unified
+(see tests/services/test_provider_price_units.py).
+"""
+
 import logging
 
 import httpx
 
 from src.config import Config
-from src.services.circuit_breaker import (
-    CircuitBreakerConfig,
-    CircuitBreakerError,
-    get_circuit_breaker,
-)
-from src.services.connection_pool import get_together_pooled_client
 from src.services.model_catalog_cache import cache_gateway_catalog
-from src.services.providers.anthropic_transformer import extract_message_with_tools
 from src.utils.model_name_validator import clean_model_name
-from src.utils.sentry_context import capture_provider_error
 
 # Initialize logging
 logger = logging.getLogger(__name__)
 
-# Circuit breaker configuration for Together.ai
-TOGETHER_CIRCUIT_CONFIG = CircuitBreakerConfig(
-    failure_threshold=5,
-    success_threshold=2,
-    timeout_seconds=60,
-    failure_window_seconds=60,
-    failure_rate_threshold=0.5,
-    min_requests_for_rate=10,
-)
 
 # Modality constants
 MODALITY_TEXT_TO_TEXT = "text->text"
-
-
-def get_together_client():
-    """Get Together.ai client with connection pooling for better performance
-
-    Together.ai provides OpenAI-compatible API endpoints for various models
-    """
-    try:
-        if not Config.TOGETHER_API_KEY:
-            raise ValueError("Together API key not configured")
-
-        # Use pooled client for ~10-20ms performance improvement per request
-        return get_together_pooled_client()
-    except Exception as e:
-        logger.error(f"Failed to initialize Together client: {e}")
-        raise
-
-
-def _make_together_request_openai_internal(messages, model, **kwargs):
-    """Internal function to make request to Together.ai (called by circuit breaker)."""
-    client = get_together_client()
-    response = client.chat.completions.create(model=model, messages=messages, **kwargs)
-    return response
-
-
-def make_together_request_openai(messages, model, **kwargs):
-    """Make request to Together.ai using OpenAI client with circuit breaker protection
-
-    Args:
-        messages: List of message objects
-        model: Model name to use
-        **kwargs: Additional parameters like max_tokens, temperature, etc.
-    """
-    circuit_breaker = get_circuit_breaker("together", TOGETHER_CIRCUIT_CONFIG)
-
-    try:
-        response = circuit_breaker.call(
-            _make_together_request_openai_internal, messages, model, **kwargs
-        )
-        return response
-    except CircuitBreakerError as e:
-        logger.warning(f"Together circuit breaker OPEN: {e.message}")
-        capture_provider_error(
-            e,
-            provider="together",
-            model=model,
-            endpoint="/chat/completions",
-            extra_context={"circuit_breaker_state": e.state.value},
-        )
-        raise
-    except Exception as e:
-        logger.error(f"Together request failed: {e}")
-        capture_provider_error(e, provider="together", model=model, endpoint="/chat/completions")
-        raise
-
-
-def _make_together_request_openai_stream_internal(messages, model, **kwargs):
-    """Internal function to make streaming request to Together.ai (called by circuit breaker)."""
-    client = get_together_client()
-    stream = client.chat.completions.create(model=model, messages=messages, stream=True, **kwargs)
-    return stream
-
-
-def make_together_request_openai_stream(messages, model, **kwargs):
-    """Make streaming request to Together.ai using OpenAI client with circuit breaker protection
-
-    Args:
-        messages: List of message objects
-        model: Model name to use
-        **kwargs: Additional parameters like max_tokens, temperature, etc.
-    """
-    circuit_breaker = get_circuit_breaker("together", TOGETHER_CIRCUIT_CONFIG)
-
-    try:
-        stream = circuit_breaker.call(
-            _make_together_request_openai_stream_internal, messages, model, **kwargs
-        )
-        return stream
-    except CircuitBreakerError as e:
-        logger.warning(f"Together circuit breaker OPEN (streaming): {e.message}")
-        capture_provider_error(
-            e,
-            provider="together",
-            model=model,
-            endpoint="/chat/completions (stream)",
-            extra_context={"circuit_breaker_state": e.state.value},
-        )
-        raise
-    except Exception as e:
-        logger.error(f"Together streaming request failed: {e}")
-        capture_provider_error(
-            e, provider="together", model=model, endpoint="/chat/completions (stream)"
-        )
-        raise
-
-
-def process_together_response(response):
-    """Process Together response to extract relevant data"""
-    try:
-        choices = []
-        for choice in response.choices:
-            msg = extract_message_with_tools(choice.message)
-
-            choices.append(
-                {
-                    "index": choice.index,
-                    "message": msg,
-                    "finish_reason": choice.finish_reason,
-                }
-            )
-
-        return {
-            "id": response.id,
-            "object": response.object,
-            "created": response.created,
-            "model": response.model,
-            "choices": choices,
-            "usage": (
-                {
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens,
-                }
-                if response.usage
-                else {}
-            ),
-        }
-    except Exception as e:
-        logger.error(f"Failed to process Together response: {e}")
-        raise
-
-
-# ============================================================================
-# Model Catalog Functions
-# ============================================================================
-
 
 def normalize_together_model(together_model: dict) -> dict:
     """Normalize Together catalog entries to resemble OpenRouter model shape"""

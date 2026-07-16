@@ -33,10 +33,10 @@ from src.services.providers import (
 
 # Import fetch_models functions from their respective client files
 from src.services.providers.featherless_client import fetch_models_from_featherless
-from src.services.providers.fireworks_client import fetch_models_from_fireworks
-from src.services.providers.groq_client import fetch_models_from_groq
+from src.services.providers.fireworks_catalog import fetch_models_from_fireworks
+from src.services.providers.groq_catalog import fetch_models_from_groq
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.providers.together_client import fetch_models_from_together
+from src.services.providers.together_catalog import fetch_models_from_together
 
 # Initialize logging
 logger = logging.getLogger(__name__)

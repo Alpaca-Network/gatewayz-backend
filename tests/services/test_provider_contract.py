@@ -22,14 +22,24 @@ def test_contract_module_exposes_types():
 
 
 def test_every_provider_declares_a_full_trio():
-    """PROVIDER_FUNCTIONS: each provider declares one request, one process,
-    and one (sync) stream function name. Env-independent (static source of truth)."""
+    """PROVIDER_FUNCTIONS: each bespoke provider declares one request, one
+    process, and one (sync) stream function name; the OpenAI-compatible
+    providers consolidated onto the adapter are declared in ADAPTERS instead.
+    Env-independent (static source of truth)."""
     from src.handlers.provider_registry import PROVIDER_FUNCTIONS
+    from src.services.providers.adapter_configs import ADAPTERS
 
-    # MVP roster (post provider-purge): featherless, fireworks, together, xai,
-    # cerebras, google_vertex, alibaba_cloud, groq, zai, openai, anthropic,
-    # deepinfra (+ openrouter as fallback, injected separately).
-    assert len(PROVIDER_FUNCTIONS) >= 10, "expected ~13 MVP-roster providers declared"
+    # MVP roster (post provider-purge + adapter consolidation):
+    #   bespoke clients: featherless, xai, cerebras, google_vertex,
+    #     alibaba_cloud, openai, anthropic (+ openrouter as fallback,
+    #     injected separately)
+    #   adapter-served: deepinfra, together, fireworks, groq, zai
+    assert len(PROVIDER_FUNCTIONS) >= 7, "expected ~8 bespoke MVP-roster providers declared"
+    assert set(ADAPTERS) == {"deepinfra", "together", "fireworks", "groq", "zai"}
+    assert (
+        len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 12
+    ), "expected ~13 MVP-roster providers declared across bespoke + adapter"
+    assert not (set(PROVIDER_FUNCTIONS) & set(ADAPTERS)), "provider declared in both registries"
     for slug, fns in PROVIDER_FUNCTIONS.items():
         has_process = any(f.startswith("process_") for f in fns)
         has_stream = any(f.endswith("_stream") for f in fns)

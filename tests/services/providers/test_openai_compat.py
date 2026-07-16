@@ -529,8 +529,7 @@ class TestConsolidatedProviderParity:
 
 
 # Providers whose PROVIDER_ROUTING entry has been migrated to the adapter.
-# Grows as each provider is cut over; ends equal to CONSOLIDATED.
-MIGRATED = ["deepinfra"]
+MIGRATED = CONSOLIDATED
 
 
 class TestProviderRoutingIntegration:

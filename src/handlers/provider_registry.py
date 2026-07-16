@@ -86,16 +86,6 @@ PROVIDER_FUNCTIONS = {
         "process_featherless_response",
         "make_featherless_request_openai_stream",
     ],
-    "fireworks": [
-        "make_fireworks_request_openai",
-        "process_fireworks_response",
-        "make_fireworks_request_openai_stream",
-    ],
-    "together": [
-        "make_together_request_openai",
-        "process_together_response",
-        "make_together_request_openai_stream",
-    ],
     "xai": ["make_xai_request_openai", "process_xai_response", "make_xai_request_openai_stream"],
     "cerebras": [
         "make_cerebras_request_openai",
@@ -111,16 +101,6 @@ PROVIDER_FUNCTIONS = {
         "make_alibaba_cloud_request_openai",
         "process_alibaba_cloud_response",
         "make_alibaba_cloud_request_openai_stream",
-    ],
-    "groq": [
-        "make_groq_request_openai",
-        "process_groq_response",
-        "make_groq_request_openai_stream",
-    ],
-    "zai": [
-        "make_zai_request_openai",
-        "process_zai_response",
-        "make_zai_request_openai_stream",
     ],
     "openai": [
         "make_openai_request",
@@ -202,16 +182,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_featherless_response"),
         "stream": _loaded_functions.get("make_featherless_request_openai_stream"),
     },
-    "fireworks": {
-        "request": _loaded_functions.get("make_fireworks_request_openai"),
-        "process": _loaded_functions.get("process_fireworks_response"),
-        "stream": _loaded_functions.get("make_fireworks_request_openai_stream"),
-    },
-    "together": {
-        "request": _loaded_functions.get("make_together_request_openai"),
-        "process": _loaded_functions.get("process_together_response"),
-        "stream": _loaded_functions.get("make_together_request_openai_stream"),
-    },
     "xai": {
         "request": _loaded_functions.get("make_xai_request_openai"),
         "process": _loaded_functions.get("process_xai_response"),
@@ -232,16 +202,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_alibaba_cloud_response"),
         "stream": _loaded_functions.get("make_alibaba_cloud_request_openai_stream"),
     },
-    "groq": {
-        "request": _loaded_functions.get("make_groq_request_openai"),
-        "process": _loaded_functions.get("process_groq_response"),
-        "stream": _loaded_functions.get("make_groq_request_openai_stream"),
-    },
-    "zai": {
-        "request": _loaded_functions.get("make_zai_request_openai"),
-        "process": _loaded_functions.get("process_zai_response"),
-        "stream": _loaded_functions.get("make_zai_request_openai_stream"),
-    },
     "openai": {
         "request": _loaded_functions.get("make_openai_request"),
         "process": _loaded_functions.get("process_openai_response"),
@@ -255,6 +215,10 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     # OpenAI-compatible providers consolidated onto the config-driven adapter
     # (src/services/providers/openai_compat.py + adapter_configs.py).
     "deepinfra": _safe_adapter_routing("deepinfra"),
+    "together": _safe_adapter_routing("together"),
+    "fireworks": _safe_adapter_routing("fireworks"),
+    "groq": _safe_adapter_routing("groq"),
+    "zai": _safe_adapter_routing("zai"),
 }
 
 # Strip disabled providers from routing so they are completely unreachable
