@@ -19,14 +19,7 @@ from .health_models import (
     UptimeMetricsResponse,
 )
 
-# Import existing models
-from .image_models import ImageData, ImageGenerationRequest, ImageGenerationResponse
-
 __all__ = [
-    # Existing models
-    "ImageGenerationRequest",
-    "ImageGenerationResponse",
-    "ImageData",
     # Health models
     "HealthStatus",
     "ProviderStatus",

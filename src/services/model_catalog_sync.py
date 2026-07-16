@@ -32,7 +32,6 @@ from src.services.providers.cloudflare_workers_ai_client import (
 )
 from src.services.providers.cohere_client import fetch_models_from_cohere
 from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
-from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
@@ -76,7 +75,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "together": fetch_models_from_together,
     "aimo": fetch_models_from_aimo,
     "near": fetch_models_from_near,
-    "fal": fetch_models_from_fal,
     "alibaba": fetch_models_from_alibaba,
     "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,

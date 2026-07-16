@@ -1,77 +1,16 @@
 """
-CM-15 Image Generation & Audio Transcription
+CM-15 Audio Transcription
 
-Tests verifying credit deduction for image generation, insufficient-credits
-handling, and audio transcription response structure.
+Tests verifying audio transcription response structure.
+
+Note: the matching image-generation credit-deduction tests (CM-15.1, CM-15.2)
+were removed alongside src/routes/images.py (MVP refactor Task 7 — image
+generation cut, no frontend usage).
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import HTTPException
-
-
-# ---------------------------------------------------------------------------
-# CM-15.1  Image generation deducts credits
-# ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-class TestCM1501ImageGenerationDeductsCredits:
-    def test_image_generation_deducts_credits(self):
-        """The image generation route calculates a positive cost for images
-        and the get_image_cost function returns a non-zero cost that would
-        be deducted via deduct_credits."""
-        from src.routes.images import get_image_cost
-
-        # Call the actual cost function with real parameters
-        total_cost, cost_per_image, *_ = get_image_cost(
-            "deepinfra", "stable-diffusion-3.5-large", num_images=1, size="1024x1024"
-        )
-        assert total_cost > 0, "Image generation must have a positive cost for credit deduction"
-        assert cost_per_image > 0, "Per-image cost must be positive"
-
-        # Multiple images should cost more
-        total_cost_2, _, *_ = get_image_cost(
-            "deepinfra", "stable-diffusion-3.5-large", num_images=3, size="1024x1024"
-        )
-        assert total_cost_2 > total_cost, "3 images should cost more than 1"
-
-
-# ---------------------------------------------------------------------------
-# CM-15.2  Image generation with 0 credits returns 402
-# ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-class TestCM1502ImageGenerationInsufficientCredits402:
-    @pytest.mark.asyncio
-    async def test_image_generation_insufficient_credits_402(self):
-        """When a user has 0 credits, the image endpoint raises HTTP 402.
-
-        Patches get_user to return a zero-credit user and verifies the
-        pre-flight credit check raises a 402 HTTPException."""
-        from src.routes.images import generate_images
-
-        # Build a mock request with all required attributes
-        mock_req = MagicMock()
-        mock_req.prompt = "a test image"
-        mock_req.model = "stable-diffusion-3.5-large"
-        mock_req.n = 1
-        mock_req.size = "1024x1024"
-        mock_req.provider = "deepinfra"
-
-        # User with 0 credits — should trigger 402 at pre-flight check
-        zero_credit_user = {"id": 1, "credits": 0.0, "api_key": "gw_test"}
-
-        with (
-            patch("src.routes.images.get_user", return_value=zero_credit_user),
-            patch(
-                "src.routes.images.get_image_cost",
-                return_value=(0.05, 0.05, False, 1.0),
-            ),
-        ):
-            with pytest.raises(HTTPException) as exc_info:
-                await generate_images(mock_req, MagicMock(), MagicMock(), api_key="gw_test_key")
-            assert (
-                exc_info.value.status_code == 402
-            ), f"Expected 402 for insufficient credits, got {exc_info.value.status_code}"
 
 
 # ---------------------------------------------------------------------------

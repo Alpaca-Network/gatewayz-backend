@@ -35,7 +35,6 @@ from src.services.providers import (
 # Import fetch_models functions from their respective client files
 from src.services.providers.aimo_client import fetch_models_from_aimo
 from src.services.providers.chutes_client import fetch_models_from_chutes
-from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.groq_client import fetch_models_from_groq
@@ -114,7 +113,6 @@ def get_cacheable_gateways() -> list[str]:
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
-        "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,
@@ -142,7 +140,6 @@ def get_fetch_function(gateway: str):
         "cerebras": fetch_models_from_cerebras,
         "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
-        "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,

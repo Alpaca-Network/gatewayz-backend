@@ -475,7 +475,6 @@ def create_app() -> FastAPI:
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
         ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
-        ("images", "Image Generation"),  # Image generation endpoints
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
@@ -535,7 +534,6 @@ def create_app() -> FastAPI:
         # Pricing audit/sync routes removed - deprecated 2026-02 (Phase 3, Issue #1063)
         # trial_analytics / partner_trials removed - MVP non-goal (trials subsystem cut)
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
-        ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture

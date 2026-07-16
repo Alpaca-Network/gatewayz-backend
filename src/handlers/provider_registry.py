@@ -167,11 +167,6 @@ PROVIDER_FUNCTIONS = {
         "process_sybil_response",
         "make_sybil_request_openai_stream",
     ],
-    "nosana": [
-        "make_nosana_request_openai",
-        "process_nosana_response",
-        "make_nosana_request_openai_stream",
-    ],
     "zai": [
         "make_zai_request_openai",
         "process_zai_response",
@@ -315,11 +310,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "request": _loaded_functions.get("make_sybil_request_openai"),
         "process": _loaded_functions.get("process_sybil_response"),
         "stream": _loaded_functions.get("make_sybil_request_openai_stream"),
-    },
-    "nosana": {
-        "request": _loaded_functions.get("make_nosana_request_openai"),
-        "process": _loaded_functions.get("process_nosana_response"),
-        "stream": _loaded_functions.get("make_nosana_request_openai_stream"),
     },
     "zai": {
         "request": _loaded_functions.get("make_zai_request_openai"),
