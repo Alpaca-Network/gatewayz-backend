@@ -15,6 +15,7 @@
 BEGIN;
 
 -- 1. Deactivate the providers themselves.
+-- huggingface intentionally NOT deactivated: catalog fetch endpoints still live pending roster decision
 UPDATE "public"."providers"
 SET "is_active" = false,
     "updated_at" = NOW()
@@ -28,7 +29,6 @@ WHERE "slug" IN (
     'canopywave',
     'simplismart',
     'clarifai',
-    'huggingface',
     'cohere',
     'alpaca-network',
     'modelz',
@@ -38,6 +38,7 @@ WHERE "slug" IN (
 );
 
 -- 2. Deactivate their catalog models so they drop out of the health-gated catalog.
+-- huggingface intentionally NOT deactivated: catalog fetch endpoints still live pending roster decision
 UPDATE "public"."models"
 SET "is_active" = false,
     "updated_at" = NOW()
@@ -53,7 +54,6 @@ WHERE "provider_id" IN (
         'canopywave',
         'simplismart',
         'clarifai',
-        'huggingface',
         'cohere',
         'alpaca-network',
         'modelz',
@@ -67,11 +67,12 @@ WHERE "provider_id" IN (
 --    (idempotent; refresh_offers_projection would otherwise re-derive them).
 DO $$
 BEGIN
+    -- huggingface intentionally NOT deactivated: catalog fetch endpoints still live pending roster decision
     IF to_regclass('public.model_provider_offers') IS NOT NULL THEN
         DELETE FROM "public"."model_provider_offers"
         WHERE "provider_slug" IN (
             'aimo', 'near', 'morpheus', 'chutes', 'akash', 'sybil', 'canopywave',
-            'simplismart', 'clarifai', 'huggingface', 'cohere', 'alpaca-network',
+            'simplismart', 'clarifai', 'cohere', 'alpaca-network',
             'modelz', 'cloudflare-workers-ai', 'nebius', 'alpaca'
         );
     END IF;
