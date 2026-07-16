@@ -277,26 +277,11 @@ async def send_low_credit_alert(provider: str, balance: float, status: str) -> N
 
         message = f"{provider.upper()} credit balance is {status.upper()}: ${balance:.2f}"
 
-        if status == "critical":
-            # For critical alerts, also try to send email notification
-            try:
-                from src.services.notification import send_email
-
-                await send_email(
-                    to_email=Config.ADMIN_EMAIL if hasattr(Config, "ADMIN_EMAIL") else None,
-                    subject=f"URGENT: {provider} credits critically low",
-                    body=f"""
-                    <h2>Provider Credit Alert</h2>
-                    <p><strong>Provider:</strong> {provider}</p>
-                    <p><strong>Balance:</strong> ${balance:.2f}</p>
-                    <p><strong>Status:</strong> {status}</p>
-                    <p><strong>Action Required:</strong> Add credits immediately to prevent service disruption</p>
-                    <p><a href="https://openrouter.ai/settings/credits">Add Credits</a></p>
-                    """,
-                )
-                logger.info(f"Sent email alert for {provider} low credits")
-            except Exception as email_err:
-                logger.warning(f"Failed to send email alert for {provider}: {email_err}")
+        # Note: a "critical" email alert used to be attempted here via
+        # src.services.notification.send_email, but that function was never
+        # defined (notification.py had no such export) so this path always
+        # silently failed. Removed alongside the notifications subsystem cut
+        # (MVP refactor Task 8) rather than left as a dead, unreachable branch.
 
         # Log to Sentry for monitoring
         error = Exception(message)

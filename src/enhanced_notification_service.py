@@ -4,7 +4,6 @@ Enhanced Notification Service with Professional Email Templates
 Adds welcome emails, password reset, usage reports, and more
 """
 
-import json
 import logging
 import os
 import secrets
@@ -19,14 +18,6 @@ except ModuleNotFoundError:  # pragma: no cover - handled in send_email_notifica
     resend = None
 
 import src.config.supabase_config as supabase_config
-from src.config.supabase_config import execute_with_retry
-from src.schemas.notification import (
-    NotificationChannel,
-    NotificationPreferences,
-    NotificationStatus,
-    NotificationType,
-    SendNotificationRequest,
-)
 from src.services.professional_email_templates import email_templates
 
 logger = logging.getLogger(__name__)
@@ -108,20 +99,6 @@ class EnhancedNotificationService:
             logger.info(f"Email notification result: {success}")
 
             if success:
-                # Create notification record
-                request = SendNotificationRequest(
-                    user_id=user_id,
-                    type=NotificationType.CREDIT_ADDED,  # Using closest type
-                    channel=NotificationChannel.EMAIL,
-                    subject=template["subject"],
-                    content=template["html"],
-                    metadata={
-                        "email_type": "welcome",
-                        "api_key_provided": True,
-                        "credits_provided": credits,
-                    },
-                )
-                self.create_notification(request)
                 logger.info(f"Welcome email sent to {email}")
 
             return success
@@ -218,42 +195,6 @@ class EnhancedNotificationService:
         except Exception as e:
             logger.error(f"Error sending password reset email: {e}")
             return None
-
-    def send_monthly_usage_report(
-        self, user_id: int, username: str, email: str, month: str, usage_stats: dict[str, Any]
-    ) -> bool:
-        """Send monthly usage report email"""
-        try:
-            template = email_templates.monthly_usage_report(username, email, month, usage_stats)
-
-            success = self.send_email_notification(
-                to_email=email,
-                subject=template["subject"],
-                html_content=template["html"],
-                text_content=template["text"],
-            )
-
-            if success:
-                # Create notification record
-                request = SendNotificationRequest(
-                    user_id=user_id,
-                    type=NotificationType.USAGE_ALERT,
-                    channel=NotificationChannel.EMAIL,
-                    subject=template["subject"],
-                    content=template["html"],
-                    metadata={
-                        "email_type": "usage_report",
-                        "month": month,
-                        "usage_stats": usage_stats,
-                    },
-                )
-                self.create_notification(request)
-                logger.info(f"Monthly usage report sent to {email}")
-
-            return success
-        except Exception as e:
-            logger.error(f"Error sending monthly usage report: {e}")
-            return False
 
     def send_plan_upgrade_confirmation(
         self,
@@ -537,68 +478,6 @@ The {self.app_name} Team
             logger.error(f"❌ Error sending email to {to_email}: {e}")
             logger.error(f"Error details: {str(e)}", exc_info=True)
             return False
-
-    def create_notification(self, request: SendNotificationRequest) -> bool:
-        """Create notification record in database with retry on connection errors"""
-        try:
-            notification_data = {
-                "user_id": request.user_id,
-                "type": request.type.value,
-                "channel": request.channel.value,
-                "subject": request.subject,
-                "content": request.content,
-                "status": NotificationStatus.PENDING.value,
-                "metadata": json.dumps(request.metadata) if request.metadata else None,
-            }
-
-            def do_insert(client):
-                return client.table("notifications").insert(notification_data).execute()
-
-            result = execute_with_retry(
-                do_insert,
-                max_retries=2,
-                retry_delay=0.3,
-                operation_name="create_notification",
-            )
-            return bool(result.data)
-        except Exception as e:
-            # Downgrade to debug level for client-closed errors during shutdown
-            error_msg = str(e).lower()
-            if "client has been closed" in error_msg or "cannot send a request" in error_msg:
-                logger.debug(f"Notification record skipped (client closed): {e}")
-            else:
-                logger.error(f"Error creating notification: {e}")
-            return False
-
-    def get_user_preferences(self, user_id: int) -> NotificationPreferences | None:
-        """Get user notification preferences"""
-        try:
-            client = self.supabase or supabase_config.get_supabase_client()
-            result = (
-                client.table("notification_preferences")
-                .select("*")
-                .eq("user_id", user_id)
-                .execute()
-            )
-
-            if result.data:
-                data = result.data[0]
-                return NotificationPreferences(
-                    user_id=data["user_id"],
-                    email_notifications=data.get("email_notifications", True),
-                    low_balance_threshold=data.get("low_balance_threshold", 10.0),
-                    trial_expiry_reminder_days=data.get("trial_expiry_reminder_days", 1),
-                    plan_expiry_reminder_days=data.get("plan_expiry_reminder_days", 7),
-                    usage_alerts=data.get("usage_alerts", True),
-                    webhook_url=data.get("webhook_url"),
-                    created_at=data.get("created_at"),
-                    updated_at=data.get("updated_at"),
-                )
-            return None
-        except Exception as e:
-            logger.error(f"Error getting user preferences: {e}")
-            return None
-
 
 # Global enhanced notification service instance
 enhanced_notification_service = EnhancedNotificationService()

@@ -474,7 +474,6 @@ def create_app() -> FastAPI:
     # Single canonical inference endpoint: POST /v1/chat/completions
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
-        ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
@@ -487,24 +486,13 @@ def create_app() -> FastAPI:
         ("api_models", "API Models Detail"),  # /api/models/detail endpoint for frontend
         ("health", "Health Check"),
         ("availability", "Model Availability"),
-        ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
-        ("diagnostics", "Diagnostics API"),  # Real-time bottleneck diagnostics
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
         ("system", "System & Health"),  # Cache management and health monitoring
-        (
-            "optimization_monitor",
-            "Optimization Monitoring",
-        ),  # Connection pool, cache, and priority stats
-        (
-            "health_timeline",
-            "System Health Timeline",
-        ),  # Provider and model uptime timeline tracking
-        ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("root", "Root/Home"),
         ("auth", "Authentication"),
         ("users", "User Management"),
@@ -515,7 +503,6 @@ def create_app() -> FastAPI:
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
-        ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
         ("rate_limits", "Rate Limiting"),
         ("ip_whitelist", "IP Whitelist Management"),  # Admin IP whitelist management
@@ -536,7 +523,6 @@ def create_app() -> FastAPI:
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
-        ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
         (
             "user_provider_keys",
