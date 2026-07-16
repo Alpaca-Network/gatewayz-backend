@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.provider_alerting import alert_provider_auth_failure, _last_alert_sent_at
+from src.services.provider_alerting import _last_alert_sent_at, alert_provider_auth_failure
 
 
 @patch("src.services.provider_alerting.NotificationService")
