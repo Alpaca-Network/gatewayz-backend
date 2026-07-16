@@ -13,7 +13,9 @@ def sb(monkeypatch):
 
 @patch("src.db.chat_completion_requests_enhanced.get_model_id_by_name", return_value=None)
 @patch("src.db.chat_completion_requests_enhanced.get_supabase_client")
-def test_failed_request_persisted_even_when_model_unresolved(mock_get_client, mock_get_model_id, sb):
+def test_failed_request_persisted_even_when_model_unresolved(
+    mock_get_client, mock_get_model_id, sb
+):
     mock_client = MagicMock()
     mock_get_client.return_value = mock_client
     mock_client.table.return_value.insert.return_value.execute.return_value.data = [
