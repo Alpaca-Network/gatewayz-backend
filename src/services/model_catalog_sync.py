@@ -23,7 +23,7 @@ from src.services.pricing_normalization import (
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
-from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
+from src.services.providers.deepinfra_catalog import fetch_models_from_deepinfra
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex

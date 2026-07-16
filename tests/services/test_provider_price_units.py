@@ -17,7 +17,7 @@ These tests pin the client contract ($/1M) so the shared transform stays correct
 
 from decimal import Decimal
 
-from src.services.providers.deepinfra_client import normalize_deepinfra_model
+from src.services.providers.deepinfra_catalog import normalize_deepinfra_model
 from src.services.providers.novita_client import _normalize_pricing
 
 

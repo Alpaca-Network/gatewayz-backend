@@ -12,7 +12,7 @@ _PROVIDER_MODULES = {
     "cerebras_client",
     "chatterbox_tts_client",
     "code_router_client",
-    "deepinfra_client",
+    "deepinfra_catalog",
     "featherless_client",
     "fireworks_client",
     "google_vertex_client",

@@ -291,7 +291,10 @@ ALL_PROVIDER_MODULES = [
     "src.services.providers.zai_client",
     "src.services.providers.featherless_client",
     "src.services.providers.anthropic_client",
-    "src.services.providers.deepinfra_client",
+    # deepinfra's client was consolidated onto the OpenAI-compat adapter;
+    # its behavior is covered in tests/services/providers/test_openai_compat.py
+    # and its catalog half lives in deepinfra_catalog.py (smoke-tested here).
+    "src.services.providers.deepinfra_catalog",
 ]
 
 

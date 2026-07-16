@@ -132,12 +132,48 @@ PROVIDER_FUNCTIONS = {
         "process_anthropic_response",
         "make_anthropic_request_stream",
     ],
-    "deepinfra": [
-        "make_deepinfra_request_openai",
-        "process_deepinfra_response",
-        "make_deepinfra_request_openai_stream",
-    ],
 }
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible providers served by the config-driven adapter
+# ---------------------------------------------------------------------------
+def _safe_adapter_routing(slug: str) -> ProviderRouting:
+    """Build a PROVIDER_ROUTING entry from the openai_compat adapter registry.
+
+    Mirrors _safe_import_provider: on import/config failure the entry is
+    populated with sentinels that raise an informative 503 when called.
+    """
+    try:
+        from src.services.providers.adapter_configs import ADAPTERS
+
+        adapter = ADAPTERS[slug]
+        logger.debug(f"Loaded {slug} provider adapter")
+        return {
+            "request": adapter.request,
+            "process": adapter.process,
+            "stream": adapter.stream,
+        }
+    except Exception as e:
+        error_msg = f"Failed to load {slug} provider adapter: {type(e).__name__}: {str(e)}"
+        logger.error(error_msg)
+        _provider_import_errors[slug] = str(e)
+        err_text = str(e)
+
+        def make_error_raiser(func_name: str):
+            def sync_error(*args, **kwargs):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Provider '{slug}' is unavailable: {func_name} failed to load. Error: {err_text[:100]}",
+                )
+
+            return sync_error
+
+        return {
+            "request": make_error_raiser("request"),
+            "process": make_error_raiser("process"),
+            "stream": make_error_raiser("stream"),
+        }
 
 # ---------------------------------------------------------------------------
 # Load all providers and build PROVIDER_ROUTING
@@ -216,11 +252,9 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_anthropic_response"),
         "stream": _loaded_functions.get("make_anthropic_request_stream"),
     },
-    "deepinfra": {
-        "request": _loaded_functions.get("make_deepinfra_request_openai"),
-        "process": _loaded_functions.get("process_deepinfra_response"),
-        "stream": _loaded_functions.get("make_deepinfra_request_openai_stream"),
-    },
+    # OpenAI-compatible providers consolidated onto the config-driven adapter
+    # (src/services/providers/openai_compat.py + adapter_configs.py).
+    "deepinfra": _safe_adapter_routing("deepinfra"),
 }
 
 # Strip disabled providers from routing so they are completely unreachable
