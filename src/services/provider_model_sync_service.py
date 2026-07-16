@@ -44,18 +44,11 @@ PROVIDER_ENV_VAR_MAP = {
     "deepinfra": "DEEPINFRA_API_KEY",
     "google-vertex": "GOOGLE_APPLICATION_CREDENTIALS",
     "cerebras": "CEREBRAS_API_KEY",
-    "nebius": "NEBIUS_API_KEY",
     "xai": "XAI_API_KEY",
     "novita": "NOVITA_API_KEY",
     "huggingface": "HUGGINGFACE_API_KEY",
-    "aimo": "AIMO_API_KEY",
-    "near": "NEAR_API_KEY",
     "fal": "FAL_API_KEY",
-    "alpaca": "ALPACA_NETWORK_API_KEY",
     "alibaba": "ALIBABA_CLOUD_API_KEY",
-    "clarifai": "CLARIFAI_API_KEY",
-    "simplismart": "SIMPLISMART_API_KEY",
-    "cloudflare-workers-ai": "CLOUDFLARE_WORKERS_AI_API_KEY",
 }
 
 

@@ -26,7 +26,10 @@ def test_every_provider_declares_a_full_trio():
     and one (sync) stream function name. Env-independent (static source of truth)."""
     from src.handlers.provider_registry import PROVIDER_FUNCTIONS
 
-    assert len(PROVIDER_FUNCTIONS) >= 25, "expected ~30 providers declared"
+    # MVP roster (post provider-purge): featherless, fireworks, together, xai,
+    # cerebras, google_vertex, alibaba_cloud, groq, zai, openai, anthropic,
+    # deepinfra (+ openrouter as fallback, injected separately).
+    assert len(PROVIDER_FUNCTIONS) >= 10, "expected ~13 MVP-roster providers declared"
     for slug, fns in PROVIDER_FUNCTIONS.items():
         has_process = any(f.startswith("process_") for f in fns)
         has_stream = any(f.endswith("_stream") for f in fns)
@@ -56,7 +59,9 @@ def test_provider_routing_entries_are_shape_consistent(monkeypatch):
     try:
         reg = importlib.reload(reg)
         routing = reg.PROVIDER_ROUTING
-        assert len(routing) >= 25, f"expected ~30 providers enabled, got {len(routing)}"
+        # MVP roster (post provider-purge): ~13 providers routed directly,
+        # OpenRouter remains as a fallback outside PROVIDER_ROUTING.
+        assert len(routing) >= 10, f"expected ~13 MVP-roster providers enabled, got {len(routing)}"
         for slug, entry in routing.items():
             assert set(entry.keys()) == {"request", "process", "stream"}, f"{slug}: wrong keys"
             for key in ("request", "process", "stream"):
