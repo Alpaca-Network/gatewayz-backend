@@ -6,6 +6,13 @@ venv
 .idea
 .claude
 
+# Node
+node_modules/
+.ruff_cache/
+
+# Scratchpad
+scratchpad_*
+
 # graphify-generated knowledge graph (large; regenerate with /graphify)
 graphify-out/
 
