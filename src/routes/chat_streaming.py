@@ -15,7 +15,7 @@ import time  # noqa: F401  (used by the moved generator)
 from fastapi import Request  # noqa: F401
 
 from src.config import Config  # noqa: F401
-from src.db.chat_completion_requests_enhanced import (  # noqa: F401
+from src.db.chat_completion_requests import (  # noqa: F401
     save_chat_completion_request_with_cost,
 )
 from src.db.plans import enforce_plan_limits  # noqa: F401

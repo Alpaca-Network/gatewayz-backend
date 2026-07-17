@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator
 
 from fastapi import Request
 
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.users import deduct_credits, get_user, record_usage
 from src.schemas.internal.chat import (
     InternalChatRequest,

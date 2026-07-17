@@ -115,7 +115,7 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         Pricing dictionary (normalized to per-token format) or None if not found
     """
     try:
-        from src.services.pricing_normalization import get_provider_format, normalize_pricing_dict
+        from src.utils.pricing_normalization import get_provider_format, normalize_pricing_dict
 
         pricing_data = load_manual_pricing()
 
@@ -307,7 +307,7 @@ def _get_cross_reference_pricing(
         return None
 
     try:
-        from src.services.pricing_normalization import PricingFormat, normalize_pricing_dict
+        from src.utils.pricing_normalization import PricingFormat, normalize_pricing_dict
 
         # Use the provided index or build it on demand (single-model fallback path)
         index = (

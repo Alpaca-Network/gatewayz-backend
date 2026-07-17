@@ -15,7 +15,7 @@ import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 from src.config import Config
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest
 from src.security.deps import get_optional_api_key
 from src.services.anonymous_rate_limiter import (

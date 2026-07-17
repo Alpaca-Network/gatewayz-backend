@@ -15,7 +15,7 @@ from src.db.providers_db import (
     get_provider_by_slug,
 )
 from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.services.pricing_normalization import (
+from src.utils.pricing_normalization import (
     PricingFormat,
     get_provider_format,
     normalize_to_per_token,
