@@ -27,30 +27,16 @@ from src.services.model_catalog_cache import get_provider_cache_metadata as get_
 from src.services.pricing_lookup import get_model_pricing, refresh_pricing_cache
 from src.services.providers import (
     fetch_models_from_cerebras,
-    fetch_models_from_nebius,
     fetch_models_from_novita,
     fetch_models_from_xai,
 )
 
 # Import fetch_models functions from their respective client files
-from src.services.providers.aimo_client import fetch_models_from_aimo
-from src.services.providers.chutes_client import fetch_models_from_chutes
-from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
-from src.services.providers.fireworks_client import fetch_models_from_fireworks
-from src.services.providers.groq_client import fetch_models_from_groq
-from src.services.providers.modelz_client import (
-    clear_modelz_cache,
-)
-from src.services.providers.modelz_client import (
-    get_modelz_cache_status as get_modelz_cache_status_func,
-)
-from src.services.providers.modelz_client import (
-    refresh_modelz_cache,
-)
-from src.services.providers.near_client import fetch_models_from_near
+from src.services.providers.fireworks_catalog import fetch_models_from_fireworks
+from src.services.providers.groq_catalog import fetch_models_from_groq
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.providers.together_client import fetch_models_from_together
+from src.services.providers.together_catalog import fetch_models_from_together
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -80,17 +66,13 @@ def get_all_gateway_names() -> list[str]:
 
     # Fallback list if GATEWAY_CONFIG is not available
     return [
-        "aimo",
         "cerebras",
-        "chutes",
         "deepinfra",
         "fal",
         "featherless",
         "fireworks",
         "groq",
         "huggingface",
-        "near",
-        "nebius",
         "novita",
         "openrouter",
         "together",
@@ -110,17 +92,12 @@ def get_cacheable_gateways() -> list[str]:
     # Map of gateway names to their fetch functions
     # Only include gateways that have fetch functions implemented
     fetch_function_map = {
-        "aimo": fetch_models_from_aimo,
         "cerebras": fetch_models_from_cerebras,
-        "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
-        "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,
         "huggingface": fetch_models_from_hug,
-        "near": fetch_models_from_near,
-        "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
@@ -138,17 +115,12 @@ def get_fetch_function(gateway: str):
     Note: deepinfra is excluded as it only supports on-demand fetching.
     """
     fetch_functions = {
-        "aimo": fetch_models_from_aimo,
         "cerebras": fetch_models_from_cerebras,
-        "chutes": fetch_models_from_chutes,
         # "deepinfra": excluded - only supports on-demand fetching, not bulk refresh
-        "fal": fetch_models_from_fal,
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,
         "huggingface": fetch_models_from_hug,
-        "near": fetch_models_from_near,
-        "nebius": fetch_models_from_nebius,
         "novita": fetch_models_from_novita,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
@@ -1808,125 +1780,6 @@ async def check_single_gateway(gateway: str):
         logger.error(f"Failed to check gateway {gateway}: {e}")
         raise HTTPException(
             status_code=500, detail=f"Failed to check gateway health: {str(e)}"
-        ) from e
-
-
-# ============================================================================
-# Modelz Cache Management Endpoints
-# ============================================================================
-
-
-@router.get("/admin/cache/modelz/status", tags=["admin", "cache", "modelz"])
-async def get_modelz_cache_status(admin_user: dict = Depends(require_admin)):
-    """
-    Get the current status of the Modelz cache.
-
-    Returns information about:
-    - Cache validity status
-    - Number of tokens cached
-    - Last refresh timestamp
-    - Cache age and TTL
-
-    **Example Response:**
-    ```json
-    {
-      "status": "valid",
-      "message": "Modelz cache is valid",
-      "cache_size": 53,
-      "timestamp": 1705123456.789,
-      "ttl": 1800,
-      "age_seconds": 245.3,
-      "is_valid": true
-    }
-    ```
-    """
-    try:
-        cache_status = get_modelz_cache_status_func()
-        return {
-            "success": True,
-            "data": cache_status,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to get Modelz cache status: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to get Modelz cache status: {str(e)}"
-        ) from e
-
-
-@router.post("/admin/cache/modelz/refresh", tags=["admin", "cache", "modelz"])
-async def refresh_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
-    """
-    Force refresh the Modelz cache by fetching fresh data from the API.
-
-    This endpoint:
-    - Clears the existing Modelz cache
-    - Fetches fresh data from the Modelz API
-    - Updates the cache with new data
-
-    **Example Response:**
-    ```json
-    {
-      "success": true,
-      "data": {
-        "status": "success",
-        "message": "Modelz cache refreshed with 53 tokens",
-        "cache_size": 53,
-        "timestamp": 1705123456.789,
-        "ttl": 1800
-      },
-      "timestamp": "2024-01-15T10:30:45.123Z"
-    }
-    ```
-    """
-    try:
-        logger.info("Refreshing Modelz cache via API endpoint")
-        refresh_result = await refresh_modelz_cache()
-
-        return {
-            "success": True,
-            "data": refresh_result,
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to refresh Modelz cache: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to refresh Modelz cache: {str(e)}"
-        ) from e
-
-
-@router.delete("/admin/cache/modelz/clear", tags=["admin", "cache", "modelz"])
-async def clear_modelz_cache_endpoint(admin_user: dict = Depends(require_admin)):
-    """
-    Clear the Modelz cache.
-
-    This endpoint:
-    - Removes all cached Modelz data
-    - Resets cache timestamps
-    - Forces next request to fetch fresh data from API
-
-    **Example Response:**
-    ```json
-    {
-      "success": true,
-      "message": "Modelz cache cleared successfully",
-      "timestamp": "2024-01-15T10:30:45.123Z"
-    }
-    ```
-    """
-    try:
-        logger.info("Clearing Modelz cache via API endpoint")
-        clear_modelz_cache()
-
-        return {
-            "success": True,
-            "message": "Modelz cache cleared successfully",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-    except Exception as e:
-        logger.error(f"Failed to clear Modelz cache: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to clear Modelz cache: {str(e)}"
         ) from e
 
 

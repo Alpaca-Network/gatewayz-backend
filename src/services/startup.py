@@ -12,7 +12,6 @@ import os
 from contextlib import asynccontextmanager
 from datetime import UTC
 
-from src.config.arize_config import init_arize_otel, shutdown_arize_otel
 from src.services.autonomous_monitor import get_autonomous_monitor, initialize_autonomous_monitor
 from src.services.connection_pool import (
     clear_connection_pools,
@@ -263,18 +262,6 @@ async def lifespan(app):
         # without having to trace through individual service init log lines.
         _log_telemetry_startup_status()
 
-        # Initialize Arize OTEL for LLM observability in background
-        async def init_arize_background():
-            try:
-                if init_arize_otel():
-                    logger.info("Arize OTEL tracing initialized")
-                else:
-                    logger.debug("Arize OTEL tracing not enabled or not configured")
-            except Exception as e:
-                logger.warning(f"Arize OTEL initialization warning: {e}")
-
-        _create_background_task(init_arize_background(), name="init_arize_otel")
-
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
             try:
@@ -488,37 +475,30 @@ async def lifespan(app):
 
         _create_background_task(refresh_registry_background(), name="refresh_registry")
 
-        # Optionally sync high-priority models on startup (can be disabled for faster startup)
+        # Optionally sync high-priority models on startup (can be disabled for faster startup).
+        # Periodic model sync is handled by the scheduled_sync APScheduler (started below)
+        # and the external GitHub cron — the canonical catalog-sync engine is the single
+        # source (MVP Task 14: provider_model_sync_service's duplicate loop removed).
         sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"
         if sync_models_on_startup:
 
             async def sync_initial_models_background():
                 try:
-                    from src.services.provider_model_sync_service import (
-                        sync_initial_models_on_startup,
-                    )
+                    from src.services.model_catalog_sync import sync_all_providers
 
-                    result = await sync_initial_models_on_startup()
-                    if result["success"]:
-                        logger.info(f"✓ Initial model sync: {result['total_models_synced']} models")
+                    # Warm a few high-priority providers quickly; the scheduler covers the rest.
+                    high_priority = ["openrouter", "openai", "anthropic", "groq"]
+                    result = await asyncio.to_thread(
+                        sync_all_providers, provider_slugs=high_priority, dry_run=False
+                    )
+                    if result.get("success"):
+                        logger.info(
+                            f"✓ Initial model sync: {result.get('total_models_synced', 0)} models"
+                        )
                 except Exception as e:
                     logger.warning(f"Initial model sync warning: {e}")
 
             _create_background_task(sync_initial_models_background(), name="sync_initial_models")
-
-        # Start background model sync task (runs every N hours)
-        model_sync_interval = int(os.environ.get("MODEL_SYNC_INTERVAL_HOURS", "6"))
-
-        async def start_model_sync_background():
-            try:
-                from src.services.provider_model_sync_service import start_background_model_sync
-
-                await start_background_model_sync(interval_hours=model_sync_interval)
-                logger.info(f"✓ Background model sync started (every {model_sync_interval}h)")
-            except Exception as e:
-                logger.warning(f"Background model sync warning: {e}")
-
-        _create_background_task(start_model_sync_background(), name="start_model_sync")
 
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
@@ -687,20 +667,6 @@ async def lifespan(app):
     except Exception:
         pass
 
-    # Initialize Traceloop SDK (OpenLLMetry) for LLM auto-instrumentation
-    # Must run after OTel but before any LLM SDK calls
-    try:
-        from src.config.traceloop_config import initialize_traceloop
-
-        if initialize_traceloop():
-            logger.info("  [OK] Traceloop SDK (OpenLLMetry) initialized")
-        else:
-            logger.info("  [SKIP] Traceloop SDK not enabled or not available")
-    except ImportError:
-        logger.debug("  [SKIP] Traceloop SDK not installed")
-    except Exception as tl_e:
-        logger.warning(f"    Traceloop initialization warning: {tl_e}")
-
     # Set default admin user in background (non-blocking)
     async def _setup_admin_user_background():
         try:
@@ -730,23 +696,6 @@ async def lifespan(app):
             logger.warning(f"Admin setup warning: {admin_e}")
 
     _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
-
-    # Initialize analytics services (Statsig, PostHog)
-    try:
-        logger.info("   Initializing analytics services...")
-
-        from src.services.statsig_service import statsig_service
-
-        await statsig_service.initialize()
-        logger.info("   Statsig analytics initialized")
-
-        from src.services.posthog_service import posthog_service
-
-        posthog_service.initialize()
-        logger.info("   PostHog analytics initialized")
-
-    except Exception as analytics_e:
-        logger.warning(f"    Analytics initialization warning: {analytics_e}")
 
     logger.info("\n🎉 Application startup complete!")
     logger.info(" API Documentation: http://localhost:8000/docs")
@@ -795,15 +744,8 @@ async def lifespan(app):
 
     try:
         # Pricing sync scheduler shutdown removed (Phase 3, Issue #1063)
-
-        # Stop background model sync
-        try:
-            from src.services.provider_model_sync_service import stop_background_model_sync
-
-            await stop_background_model_sync()
-            logger.info("Background model sync stopped")
-        except Exception as e:
-            logger.warning(f"Model sync shutdown warning: {e}")
+        # Background model sync shutdown removed (MVP Task 14: the periodic loop
+        # is now the scheduled_sync APScheduler, stopped via stop_scheduler below).
 
         # Stop autonomous error monitoring
         try:
@@ -841,52 +783,6 @@ async def lifespan(app):
             logger.info("Prometheus remote write shutdown complete")
         except Exception as e:
             logger.warning(f"Prometheus shutdown warning: {e}")
-
-        # Shutdown analytics services (migrated from @app.on_event("shutdown"))
-        try:
-            from src.services.statsig_service import statsig_service
-
-            await statsig_service.shutdown()
-            logger.info("Statsig shutdown complete")
-        except Exception as e:
-            logger.warning(f"    Statsig shutdown warning: {e}")
-
-        try:
-            from src.services.posthog_service import posthog_service
-
-            posthog_service.shutdown()
-            logger.info("PostHog shutdown complete")
-        except Exception as e:
-            logger.warning(f"    PostHog shutdown warning: {e}")
-
-        # Shutdown Traceloop SDK (OpenLLMetry)
-        try:
-            from src.config.traceloop_config import is_initialized
-            from src.config.traceloop_config import shutdown as traceloop_shutdown
-
-            if is_initialized():
-                traceloop_shutdown()
-                logger.info("Traceloop SDK shutdown complete")
-        except ImportError:
-            pass  # Traceloop not installed
-        except Exception as e:
-            logger.warning(f"    Traceloop shutdown warning: {e}")
-
-        # Shutdown OpenTelemetry (Tempo tracing)
-        try:
-            from src.config.opentelemetry_config import OpenTelemetryConfig
-
-            OpenTelemetryConfig.shutdown()
-            logger.info("OpenTelemetry (Tempo) shutdown complete")
-        except Exception as e:
-            logger.warning(f"OpenTelemetry shutdown warning: {e}")
-
-        # Shutdown Arize OTEL
-        try:
-            shutdown_arize_otel()
-            logger.info("Arize OTEL shutdown complete")
-        except Exception as e:
-            logger.warning(f"Arize OTEL shutdown warning: {e}")
 
         # Clear connection pools
         clear_connection_pools()

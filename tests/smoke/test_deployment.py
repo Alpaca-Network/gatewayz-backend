@@ -112,19 +112,6 @@ class TestCriticalEndpointsExist:
             422,
         ], f"Expected auth/validation error, got {response.status_code}"
 
-    def test_images_endpoint_exists(self):
-        """Test /v1/images/generations endpoint exists"""
-        response = requests.post(
-            f"{BASE_URL}/v1/images/generations", json={"prompt": "test"}, timeout=TIMEOUT
-        )
-        assert response.status_code != 404, "Images endpoint should exist"
-        assert response.status_code in [
-            400,
-            401,
-            403,
-            422,
-        ], f"Expected auth/validation error, got {response.status_code}"
-
     def test_catalog_models_endpoint_exists(self):
         """Test /catalog/models endpoint exists"""
         response = requests.get(f"{BASE_URL}/catalog/models", timeout=TIMEOUT)

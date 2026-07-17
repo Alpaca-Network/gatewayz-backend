@@ -142,11 +142,9 @@ _multi_provider_catalog_cache = _get_or_create_cache("all")
 
 # Major provider caches
 _featherless_models_cache = _get_or_create_cache("featherless")
-_chutes_models_cache = _get_or_create_cache("chutes")
 _groq_models_cache = _get_or_create_cache("groq")
 _fireworks_models_cache = _get_or_create_cache("fireworks")
 _together_models_cache = _get_or_create_cache("together")
-_modelz_cache = _get_or_create_cache("modelz")
 
 # Legacy caches (special handling needed)
 _huggingface_cache = {"data": {}, "timestamp": None, "ttl": 3600, "stale_ttl": 7200}
@@ -156,25 +154,16 @@ _provider_cache = {"data": None, "timestamp": None, "ttl": 3600, "stale_ttl": 72
 # DeepInfra and Portkey-based providers
 _deepinfra_models_cache = _get_or_create_cache("deepinfra")
 _cerebras_models_cache = _get_or_create_cache("cerebras")
-_nebius_models_cache = _get_or_create_cache("nebius")
 _xai_models_cache = _get_or_create_cache("xai")
 _zai_models_cache = _get_or_create_cache("zai")
 _novita_models_cache = _get_or_create_cache("novita")
 _huggingface_models_cache = _get_or_create_cache("huggingface")
-_aimo_models_cache = _get_or_create_cache("aimo")
-_near_models_cache = _get_or_create_cache("near")
 _fal_models_cache = _get_or_create_cache("fal")
 _google_vertex_models_cache = _get_or_create_cache("google-vertex")
 
 # Gateway and provider caches
-_cloudflare_workers_ai_models_cache = _get_or_create_cache("cloudflare-workers-ai")
-_clarifai_models_cache = _get_or_create_cache("clarifai")
 _openai_models_cache = _get_or_create_cache("openai")
 _anthropic_models_cache = _get_or_create_cache("anthropic")
-_simplismart_models_cache = _get_or_create_cache("simplismart")
-_sybil_models_cache = _get_or_create_cache("sybil")
-_canopywave_models_cache = _get_or_create_cache("canopywave")
-_morpheus_models_cache = _get_or_create_cache("morpheus")
 
 # Special case: Alibaba cache with quota error tracking
 # Keep as regular dict since it has special fields beyond standard cache structure

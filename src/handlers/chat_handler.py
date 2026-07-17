@@ -15,7 +15,7 @@ from typing import Any, AsyncIterator
 
 from fastapi import Request
 
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.users import deduct_credits, get_user, record_usage
 from src.schemas.internal.chat import (
     InternalChatRequest,
@@ -185,7 +185,7 @@ class ChatInferenceHandler:
 
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         # Get user
         try:
@@ -266,7 +266,7 @@ class ChatInferenceHandler:
 
         if not check_result["allowed"]:
             # Cannot afford any output — reject before provider call
-            from src.utils.exceptions import APIExceptions
+            from src.utils.errors import APIExceptions
 
             max_cost = check_result["max_cost"]
             max_output_tokens = check_result["max_output_tokens"]
@@ -369,169 +369,167 @@ class ChatInferenceHandler:
         """
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
-        from src.utils.profiling import tag_wrapper
+        from src.utils.errors import DetailedErrorFactory
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
-        with tag_wrapper({"provider": provider_name, "model": model_id}):
-            # Bind the customer's own key (if any) for the duration of this call so
-            # the provider client uses it instead of the platform key.
-            byok_token = self._bind_byok(provider_name)
+        # Bind the customer's own key (if any) for the duration of this call so
+        # the provider client uses it instead of the platform key.
+        byok_token = self._bind_byok(provider_name)
+        try:
+            # Route to appropriate provider
+            # OpenRouter has native async — check via DB flag with fallback
+            _is_openrouter_async = False
             try:
-                # Route to appropriate provider
-                # OpenRouter has native async — check via DB flag with fallback
-                _is_openrouter_async = False
-                try:
-                    from src.services.gateway_registry import get_gateway_registry
+                from src.services.gateway_registry import get_gateway_registry
 
-                    _reg = get_gateway_registry()
-                    _is_openrouter_async = provider_name == "openrouter" and _reg.get(
-                        provider_name, {}
-                    ).get("async_streaming", False)
-                except Exception:
-                    _is_openrouter_async = provider_name == "openrouter"
+                _reg = get_gateway_registry()
+                _is_openrouter_async = provider_name == "openrouter" and _reg.get(
+                    provider_name, {}
+                ).get("async_streaming", False)
+            except Exception:
+                _is_openrouter_async = provider_name == "openrouter"
 
-                if _is_openrouter_async:
-                    result = make_openrouter_request_openai(messages, model_id, **kwargs)
+            if _is_openrouter_async:
+                result = make_openrouter_request_openai(messages, model_id, **kwargs)
+            else:
+                # Registry-based dispatch for all other providers
+                from src.handlers.provider_registry import PROVIDER_ROUTING
+
+                routing = PROVIDER_ROUTING.get(provider_name)
+                if routing and routing.get("request"):
+                    result = routing["request"](messages, model_id, **kwargs)
                 else:
-                    # Registry-based dispatch for all other providers
-                    from src.handlers.provider_registry import PROVIDER_ROUTING
+                    # Fallback to OpenRouter for unknown providers
+                    logger.warning(
+                        f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
+                        f"falling back to OpenRouter"
+                    )
+                    result = make_openrouter_request_openai(messages, model_id, **kwargs)
 
-                    routing = PROVIDER_ROUTING.get(provider_name)
-                    if routing and routing.get("request"):
-                        result = routing["request"](messages, model_id, **kwargs)
-                    else:
-                        # Fallback to OpenRouter for unknown providers
-                        logger.warning(
-                            f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
-                            f"falling back to OpenRouter"
-                        )
-                        result = make_openrouter_request_openai(messages, model_id, **kwargs)
+            # Record BYOK status only on success, so failover to a platform-key
+            # provider correctly reflects the provider that actually served.
+            self.is_byok = byok_token is not None
+            return result
+        except HTTPException:
+            # Re-raise HTTP exceptions (already formatted)
+            raise
+        except CircuitBreakerError as e:
+            # Circuit breaker is open - provider temporarily unavailable
+            logger.warning(
+                f"[ChatHandler] Circuit breaker open: provider={e.provider}, "
+                f"state={e.state.value}, model={model_id}"
+            )
 
-                # Record BYOK status only on success, so failover to a platform-key
-                # provider correctly reflects the provider that actually served.
-                self.is_byok = byok_token is not None
-                return result
-            except HTTPException:
-                # Re-raise HTTP exceptions (already formatted)
-                raise
-            except CircuitBreakerError as e:
-                # Circuit breaker is open - provider temporarily unavailable
-                logger.warning(
-                    f"[ChatHandler] Circuit breaker open: provider={e.provider}, "
-                    f"state={e.state.value}, model={model_id}"
-                )
+            # Get circuit breaker state for retry_after calculation
+            from src.services.circuit_breaker import get_circuit_breaker
 
-                # Get circuit breaker state for retry_after calculation
-                from src.services.circuit_breaker import get_circuit_breaker
+            breaker = get_circuit_breaker(e.provider)
+            state_info = breaker.get_state()
+            retry_after = state_info.get("seconds_until_retry", 60)
 
-                breaker = get_circuit_breaker(e.provider)
-                state_info = breaker.get_state()
-                retry_after = state_info.get("seconds_until_retry", 60)
+            # Create detailed circuit breaker error
+            error_response = DetailedErrorFactory.provider_unavailable(
+                provider=e.provider,
+                model=model_id,
+                retry_after=retry_after,
+                circuit_breaker_state=e.state.value,
+                request_id=self.request_id,
+            )
 
-                # Create detailed circuit breaker error
-                error_response = DetailedErrorFactory.provider_unavailable(
-                    provider=e.provider,
-                    model=model_id,
+            raise HTTPException(
+                status_code=error_response.error.status,
+                detail=error_response.dict(exclude_none=True),
+            )
+        except Exception as e:
+            # Convert provider exceptions to detailed errors
+            logger.error(
+                f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
+                exc_info=True,
+            )
+
+            # Surface upstream rate limits (e.g. OpenRouter free-tier 429) as a
+            # retryable 429 with Retry-After instead of a generic 502 — otherwise
+            # rate-limited models look "broken" in the model selector.
+            from src.services.provider_failover import map_provider_error
+
+            mapped = map_provider_error(provider_name, model_id, e)
+            if mapped.status_code == 429:
+                retry_after = None
+                if mapped.headers and "Retry-After" in mapped.headers:
+                    try:
+                        retry_after = int(mapped.headers["Retry-After"])
+                    except (TypeError, ValueError):
+                        retry_after = None
+                error_response = DetailedErrorFactory.rate_limit_exceeded(
+                    limit_type="provider_rate_limit",
                     retry_after=retry_after,
-                    circuit_breaker_state=e.state.value,
                     request_id=self.request_id,
                 )
-
                 raise HTTPException(
-                    status_code=error_response.error.status,
+                    status_code=429,
                     detail=error_response.dict(exclude_none=True),
-                )
-            except Exception as e:
-                # Convert provider exceptions to detailed errors
-                logger.error(
-                    f"[ChatHandler] Provider error: provider={provider_name}, model={model_id}, error={e}",
-                    exc_info=True,
-                )
+                    headers=mapped.headers,
+                ) from e
 
-                # Surface upstream rate limits (e.g. OpenRouter free-tier 429) as a
-                # retryable 429 with Retry-After instead of a generic 502 — otherwise
-                # rate-limited models look "broken" in the model selector.
-                from src.services.provider_failover import map_provider_error
+            # Provider account/key budget exhausted (e.g. an OpenRouter key hitting its
+            # weekly spend limit -> upstream 402). This is a gateway-side capacity issue,
+            # NOT the user's — show a friendly message, never leak the upstream key/URL,
+            # and fire a distinct Sentry alert so the team is notified to top up.
+            from src.utils.errors import (
+                PROVIDER_CAPACITY_MESSAGE,
+                is_provider_budget_error,
+                sanitize_provider_error_for_user,
+            )
 
-                mapped = map_provider_error(provider_name, model_id, e)
-                if mapped.status_code == 429:
-                    retry_after = None
-                    if mapped.headers and "Retry-After" in mapped.headers:
-                        try:
-                            retry_after = int(mapped.headers["Retry-After"])
-                        except (TypeError, ValueError):
-                            retry_after = None
-                    error_response = DetailedErrorFactory.rate_limit_exceeded(
-                        limit_type="provider_rate_limit",
-                        retry_after=retry_after,
-                        request_id=self.request_id,
-                    )
-                    raise HTTPException(
-                        status_code=429,
-                        detail=error_response.dict(exclude_none=True),
-                        headers=mapped.headers,
-                    ) from e
+            if mapped.status_code == 402 or is_provider_budget_error(str(e)):
+                try:
+                    from src.utils.sentry_context import capture_provider_error
 
-                # Provider account/key budget exhausted (e.g. an OpenRouter key hitting its
-                # weekly spend limit -> upstream 402). This is a gateway-side capacity issue,
-                # NOT the user's — show a friendly message, never leak the upstream key/URL,
-                # and fire a distinct Sentry alert so the team is notified to top up.
-                from src.utils.error_messages import (
-                    PROVIDER_CAPACITY_MESSAGE,
-                    is_provider_budget_error,
-                    sanitize_provider_error_for_user,
-                )
-
-                if mapped.status_code == 402 or is_provider_budget_error(str(e)):
-                    try:
-                        from src.utils.sentry_context import capture_provider_error
-
-                        capture_provider_error(
-                            e,
-                            provider=provider_name,
-                            model=model_id,
-                            request_id=self.request_id,
-                            endpoint="/v1/chat/completions",
-                            extra_context={
-                                "error_category": "provider_budget_exhausted",
-                                "alert": True,
-                            },
-                        )
-                    except Exception:
-                        logger.warning("Failed to capture provider-budget alert", exc_info=True)
-
-                    error_response = DetailedErrorFactory.provider_error(
+                    capture_provider_error(
+                        e,
                         provider=provider_name,
                         model=model_id,
-                        provider_message=PROVIDER_CAPACITY_MESSAGE,
-                        status_code=503,
                         request_id=self.request_id,
+                        endpoint="/v1/chat/completions",
+                        extra_context={
+                            "error_category": "provider_budget_exhausted",
+                            "alert": True,
+                        },
                     )
-                    raise HTTPException(
-                        status_code=error_response.error.status,
-                        detail=error_response.dict(exclude_none=True),
-                        headers={"Retry-After": "30"},
-                    ) from e
+                except Exception:
+                    logger.warning("Failed to capture provider-budget alert", exc_info=True)
 
-                # Other provider errors keep the existing 502 provider-error contract,
-                # sanitized so we never leak upstream URLs/key ids to end users.
                 error_response = DetailedErrorFactory.provider_error(
                     provider=provider_name,
                     model=model_id,
-                    provider_message=sanitize_provider_error_for_user(str(e)),
-                    status_code=502,
+                    provider_message=PROVIDER_CAPACITY_MESSAGE,
+                    status_code=503,
                     request_id=self.request_id,
                 )
-
                 raise HTTPException(
                     status_code=error_response.error.status,
                     detail=error_response.dict(exclude_none=True),
-                )
-            finally:
-                # Always clear the BYOK key binding for this attempt.
-                self._unbind_byok(byok_token)
+                    headers={"Retry-After": "30"},
+                ) from e
+
+            # Other provider errors keep the existing 502 provider-error contract,
+            # sanitized so we never leak upstream URLs/key ids to end users.
+            error_response = DetailedErrorFactory.provider_error(
+                provider=provider_name,
+                model=model_id,
+                provider_message=sanitize_provider_error_for_user(str(e)),
+                status_code=502,
+                request_id=self.request_id,
+            )
+
+            raise HTTPException(
+                status_code=error_response.error.status,
+                detail=error_response.dict(exclude_none=True),
+            )
+        finally:
+            # Always clear the BYOK key binding for this attempt.
+            self._unbind_byok(byok_token)
 
     async def _call_provider_stream(
         self,
@@ -588,8 +586,7 @@ class ChatInferenceHandler:
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
-        from src.utils.profiling import tag_wrapper
+        from src.utils.errors import DetailedErrorFactory
 
         # Bind the customer's BYOK key (if any) only around stream CREATION — the
         # key is consumed when the client/stream is built. It is reset before any
@@ -599,44 +596,43 @@ class ChatInferenceHandler:
         stream = None
         is_sync_stream = False
         try:
-            with tag_wrapper({"provider": provider_name, "model": model_id}):
-                # OpenRouter has native async streaming — check via DB flag
-                _is_openrouter_async_stream = False
-                try:
-                    from src.services.gateway_registry import get_gateway_registry
+            # OpenRouter has native async streaming — check via DB flag
+            _is_openrouter_async_stream = False
+            try:
+                from src.services.gateway_registry import get_gateway_registry
 
-                    _reg = get_gateway_registry()
-                    _is_openrouter_async_stream = provider_name == "openrouter" and _reg.get(
-                        provider_name, {}
-                    ).get("async_streaming", False)
-                except Exception:
-                    _is_openrouter_async_stream = provider_name == "openrouter"
+                _reg = get_gateway_registry()
+                _is_openrouter_async_stream = provider_name == "openrouter" and _reg.get(
+                    provider_name, {}
+                ).get("async_streaming", False)
+            except Exception:
+                _is_openrouter_async_stream = provider_name == "openrouter"
 
-                if _is_openrouter_async_stream:
-                    # OpenRouter supports native async streaming
+            if _is_openrouter_async_stream:
+                # OpenRouter supports native async streaming
+                stream = await make_openrouter_request_openai_stream_async(
+                    messages, model_id, **kwargs
+                )
+            else:
+                # Registry-based dispatch for all other providers
+                from src.handlers.provider_registry import PROVIDER_ROUTING
+
+                routing = PROVIDER_ROUTING.get(provider_name)
+                if routing and routing.get("stream"):
+                    # All non-OpenRouter providers use sync streaming clients
+                    stream = routing["stream"](messages, model_id, **kwargs)
+                    is_sync_stream = True
+                else:
+                    # Fallback to OpenRouter for unknown providers
+                    logger.warning(
+                        f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
+                        f"falling back to OpenRouter (streaming)"
+                    )
                     stream = await make_openrouter_request_openai_stream_async(
                         messages, model_id, **kwargs
                     )
-                else:
-                    # Registry-based dispatch for all other providers
-                    from src.handlers.provider_registry import PROVIDER_ROUTING
-
-                    routing = PROVIDER_ROUTING.get(provider_name)
-                    if routing and routing.get("stream"):
-                        # All non-OpenRouter providers use sync streaming clients
-                        stream = routing["stream"](messages, model_id, **kwargs)
-                        is_sync_stream = True
-                    else:
-                        # Fallback to OpenRouter for unknown providers
-                        logger.warning(
-                            f"[ChatHandler] Provider '{provider_name}' not in PROVIDER_ROUTING, "
-                            f"falling back to OpenRouter (streaming)"
-                        )
-                        stream = await make_openrouter_request_openai_stream_async(
-                            messages, model_id, **kwargs
-                        )
-                # Record BYOK status only on successful stream creation.
-                self.is_byok = byok_token is not None
+            # Record BYOK status only on successful stream creation.
+            self.is_byok = byok_token is not None
         except CircuitBreakerError as e:
             # Circuit breaker is open - provider temporarily unavailable
             logger.warning(

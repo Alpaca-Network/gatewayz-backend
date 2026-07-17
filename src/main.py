@@ -208,12 +208,14 @@ def create_app() -> FastAPI:
     #   [2] Timeout         — enforces 55 s hard deadline around everything below
     #   [3] Concurrency     — global admission gate (queue / shed load)
     #   [4] RequestID       — assigns X-Request-ID for correlation
-    #   [5] TraceContext    — propagates distributed-trace context
     #   [6] AutoSentry      — captures unhandled errors before CORS/GZip strip them
     #   [7] CORS            — handles OPTIONS pre-flight and injects CORS headers
     #   [8] Observability   — records Prometheus metrics / latency after routing
     #   [9] GZip            — compresses response bodies (innermost, last to touch body)
     #  [10] StagingSecurity — staging-env access gate (no-op in production)
+    #
+    # (Step [5] TraceContext was removed with the OTel/Tempo teardown — see
+    #  refactor(mvp) task 11. Numbering left as-is to minimize diff noise.)
     #
     # Registration order below is therefore [10] → [1] (innermost first).
     # ---------------------------------------------------------------------------
@@ -262,23 +264,11 @@ def create_app() -> FastAPI:
             "  🎯 [6] Auto-Sentry middleware enabled (automatic error capture for all routes)"
         )
 
-    # [5] TraceContext — propagates W3C traceparent / baggage for distributed tracing
-    from src.middleware.trace_context_middleware import TraceContextMiddleware
-
-    app.add_middleware(TraceContextMiddleware)
-    logger.info("  🔗 [5] Trace context middleware enabled (log-to-trace correlation)")
-
     # [4] RequestID — assigns a unique X-Request-ID to every request
     from src.middleware.request_id_middleware import RequestIDMiddleware
 
     app.add_middleware(RequestIDMiddleware)
     logger.info("  🆔 [4] Request ID middleware enabled (unique ID for all requests)")
-
-    # Region header — stamps X-Gatewayz-Region (Phase 5 rollout 1, observability only)
-    from src.middleware.region_middleware import RegionHeaderMiddleware
-
-    app.add_middleware(RegionHeaderMiddleware)
-    logger.info("  🌍 Region header middleware enabled (region: %s)", Config.GATEWAY_REGION)
 
     # [3] Concurrency — global admission gate; queues or sheds excess requests
     from src.middleware.concurrency_middleware import ConcurrencyMiddleware
@@ -474,8 +464,6 @@ def create_app() -> FastAPI:
     # Single canonical inference endpoint: POST /v1/chat/completions
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
-        ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
-        ("images", "Image Generation"),  # Image generation endpoints
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
@@ -488,24 +476,11 @@ def create_app() -> FastAPI:
         ("api_models", "API Models Detail"),  # /api/models/detail endpoint for frontend
         ("health", "Health Check"),
         ("availability", "Model Availability"),
-        ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
-        ("diagnostics", "Diagnostics API"),  # Real-time bottleneck diagnostics
-        ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
-        ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization
         ("system", "System & Health"),  # Cache management and health monitoring
-        (
-            "optimization_monitor",
-            "Optimization Monitoring",
-        ),  # Connection pool, cache, and priority stats
-        (
-            "health_timeline",
-            "System Health Timeline",
-        ),  # Provider and model uptime timeline tracking
-        ("error_monitor", "Error Monitoring"),  # Error detection and auto-fix system
         ("root", "Root/Home"),
         ("auth", "Authentication"),
         ("users", "User Management"),
@@ -516,7 +491,6 @@ def create_app() -> FastAPI:
         ("api_key_monitoring", "API Key Tracking Monitoring"),  # API key tracking quality metrics
         ("credits", "Credits Management"),  # Credit operations (add, adjust, bulk-add, refund)
         ("audit", "Audit Logs"),
-        ("notifications", "Notifications"),
         ("plans", "Subscription Plans"),
         ("rate_limits", "Rate Limiting"),
         ("ip_whitelist", "IP Whitelist Management"),  # Admin IP whitelist management
@@ -528,19 +502,17 @@ def create_app() -> FastAPI:
             "Model Ranking",
         ),  # Re-enabled — frontend model dropdowns depend on /ranking/models
         ("activity", "Activity Tracking"),
-        ("coupons", "Coupon Management"),
-        ("referral", "Referral System"),
+        # coupons / referral removed - MVP non-goal (growth-mechanics cut)
         ("roles", "Role Management"),
         ("transaction_analytics", "Transaction Analytics"),
-        ("analytics", "Analytics Events"),  # Server-side Statsig integration
+        # analytics (Statsig/PostHog events proxy) removed - MVP observability teardown
+        # (task 11): its only job was forwarding to statsig_service/posthog_service,
+        # both deleted, so the route had nothing left to do.
         # Pricing audit/sync routes removed - deprecated 2026-02 (Phase 3, Issue #1063)
-        ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
-        ("partner_trials", "Partner Trials"),  # Partner-specific trials (Redbeard 14-day Pro)
-        ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
-        ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
+        # trial_analytics / partner_trials removed - MVP non-goal (trials subsystem cut)
+        # prometheus_data (Grafana stack telemetry endpoints) removed - MVP observability teardown
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
-        ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
-        ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture
+        # code_router / general_router removed - MVP Task 13 (duplicate prompt-router engine cut)
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
         (
             "user_provider_keys",
@@ -649,26 +621,6 @@ def create_app() -> FastAPI:
     except ImportError as e:
         logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
 
-    # ==================== Prometheus/Grafana SimpleJSON Datasource Router ====================
-    # Load Prometheus/Grafana datasource router for dashboard compatibility
-    try:
-        from src.routes.prometheus_grafana import router as prometheus_grafana_router
-
-        app.include_router(prometheus_grafana_router)
-        logger.info("  [OK] Prometheus/Grafana SimpleJSON Datasource (/prometheus/datasource/*)")
-    except ImportError as e:
-        logger.warning(f"  [SKIP] Prometheus/Grafana datasource router not loaded: {e}")
-
-    # ==================== General Router API Router ====================
-    # Load general router API endpoints for intelligent routing
-    try:
-        from src.routes.general_router import router as general_router_router
-
-        app.include_router(general_router_router)
-        logger.info("  [OK] General Router API (/general-router/*)")
-    except ImportError as e:
-        logger.warning(f"  [SKIP] General router API not loaded: {e}")
-
     # ==================== Circuit Breaker Status Router ====================
     # Load circuit breaker monitoring and management endpoints
     try:
@@ -698,48 +650,17 @@ def create_app() -> FastAPI:
         """
         Handle unexpected exceptions with detailed error responses.
 
-        Captures exceptions in monitoring tools (PostHog, Sentry) and returns
-        a detailed internal error response to the client.
+        Sentry capture for unhandled exceptions is handled by AutoSentryMiddleware
+        (the single error-capture mechanism). This handler is just responsible for
+        returning a detailed internal error response to the client.
         """
         logger.error(f"Unhandled exception: {exc}", exc_info=True)
 
         # Get request ID from request state
         request_id = getattr(request.state, "request_id", None)
 
-        # Capture exception in PostHog for error tracking
-        try:
-            from src.services.posthog_service import posthog_service
-
-            # Extract user info from request if available
-            distinct_id = "system"
-            properties = {
-                "path": request.url.path,
-                "method": request.method,
-                "error_type": type(exc).__name__,
-                "error_message": str(exc),
-                "request_id": request_id,
-            }
-
-            # Try to get user ID from request state or headers
-            if hasattr(request.state, "user_id"):
-                distinct_id = request.state.user_id
-            elif "authorization" in request.headers:
-                # Use a hash of the auth header as distinct_id if no user_id available
-                import hashlib
-
-                auth_hash = hashlib.sha256(request.headers["authorization"].encode()).hexdigest()[
-                    :16
-                ]
-                distinct_id = f"user_{auth_hash}"
-
-            posthog_service.capture_exception(
-                exception=exc, distinct_id=distinct_id, properties=properties
-            )
-        except Exception as posthog_error:
-            logger.warning(f"Failed to capture exception in PostHog: {posthog_error}")
-
         # Return detailed internal error response
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         error_response = DetailedErrorFactory.internal_error(
             operation="request_processing",

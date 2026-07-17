@@ -18,8 +18,6 @@ import json
 import logging
 from typing import Any
 
-from src.utils.profiling import tag_wrapper
-
 logger = logging.getLogger(__name__)
 
 # Cache TTL in seconds
@@ -62,8 +60,7 @@ def cache_user_by_privy_id(privy_id: str, user_data: dict[str, Any]) -> bool:
             return False
 
         cache_key = f"{PRIVY_ID_CACHE_PREFIX}{privy_id}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "write"}):
-            redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
+        redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for Privy ID: {privy_id}")
         return True
     except Exception as e:
@@ -86,8 +83,7 @@ def get_cached_user_by_privy_id(privy_id: str) -> dict[str, Any] | None:
             return None
 
         cache_key = f"{PRIVY_ID_CACHE_PREFIX}{privy_id}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "read"}):
-            cached_data = redis_client.get(cache_key)
+        cached_data = redis_client.get(cache_key)
 
         if cached_data:
             user_data = json.loads(cached_data)
@@ -116,8 +112,7 @@ def cache_user_by_username(username: str, user_data: dict[str, Any]) -> bool:
             return False
 
         cache_key = f"{USERNAME_CACHE_PREFIX}{username}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "write"}):
-            redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
+        redis_client.setex(cache_key, AUTH_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for username: {username}")
         return True
     except Exception as e:
@@ -140,8 +135,7 @@ def get_cached_user_by_username(username: str) -> dict[str, Any] | None:
             return None
 
         cache_key = f"{USERNAME_CACHE_PREFIX}{username}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "read"}):
-            cached_data = redis_client.get(cache_key)
+        cached_data = redis_client.get(cache_key)
 
         if cached_data:
             user_data = json.loads(cached_data)
@@ -209,8 +203,7 @@ def cache_user_by_api_key(api_key: str, user_data: dict[str, Any], ttl: int | No
             return False
 
         cache_key = f"{API_KEY_USER_PREFIX}{api_key}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "write"}):
-            redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
+        redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for API key: {api_key[:15]}...")
         return True
     except Exception as e:
@@ -236,8 +229,7 @@ def get_cached_user_by_api_key(api_key: str) -> dict[str, Any] | None:
             return None
 
         cache_key = f"{API_KEY_USER_PREFIX}{api_key}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "read"}):
-            cached_data = redis_client.get(cache_key)
+        cached_data = redis_client.get(cache_key)
 
         if cached_data:
             user_data = json.loads(cached_data)
@@ -271,8 +263,7 @@ def invalidate_api_key_cache(api_key: str) -> bool:
             return False
 
         cache_key = f"{API_KEY_USER_PREFIX}{api_key}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "delete"}):
-            redis_client.delete(cache_key)
+        redis_client.delete(cache_key)
         logger.debug(f"Invalidated API key cache: {api_key[:15]}...")
         return True
     except Exception as e:
@@ -309,8 +300,7 @@ def cache_api_key_validation(
             "cached_at": json.dumps(None),  # Placeholder for timestamp
         }
 
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "write"}):
-            redis_client.setex(cache_key, ttl or API_KEY_CACHE_TTL, json.dumps(validation_data))
+        redis_client.setex(cache_key, ttl or API_KEY_CACHE_TTL, json.dumps(validation_data))
         logger.debug(f"Cached API key validation: {api_key[:15]}... (valid: {is_valid})")
         return True
     except Exception as e:
@@ -333,8 +323,7 @@ def get_cached_api_key_validation(api_key: str) -> dict[str, Any] | None:
             return None
 
         cache_key = f"{API_KEY_CACHE_PREFIX}{api_key}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "read"}):
-            cached_data = redis_client.get(cache_key)
+        cached_data = redis_client.get(cache_key)
 
         if cached_data:
             validation_data = json.loads(cached_data)
@@ -364,8 +353,7 @@ def cache_user_by_id(user_id: int, user_data: dict[str, Any], ttl: int | None = 
             return False
 
         cache_key = f"{USER_ID_CACHE_PREFIX}{user_id}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "write"}):
-            redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
+        redis_client.setex(cache_key, ttl or USER_CACHE_TTL, json.dumps(user_data))
         logger.debug(f"Cached user data for user ID: {user_id}")
         return True
     except Exception as e:
@@ -388,8 +376,7 @@ def get_cached_user_by_id(user_id: int) -> dict[str, Any] | None:
             return None
 
         cache_key = f"{USER_ID_CACHE_PREFIX}{user_id}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "read"}):
-            cached_data = redis_client.get(cache_key)
+        cached_data = redis_client.get(cache_key)
 
         if cached_data:
             user_data = json.loads(cached_data)
@@ -420,8 +407,7 @@ def invalidate_user_by_id(user_id: int) -> bool:
 
         # Invalidate user ID cache
         user_cache_key = f"{USER_ID_CACHE_PREFIX}{user_id}"
-        with tag_wrapper({"cache_layer": "auth", "cache_op": "delete"}):
-            redis_client.delete(user_cache_key)
+        redis_client.delete(user_cache_key)
 
         # Note: We can't easily invalidate API key caches without knowing the keys
         # Consider adding a user_id -> api_keys mapping if needed

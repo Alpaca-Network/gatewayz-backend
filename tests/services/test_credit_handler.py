@@ -223,14 +223,12 @@ class TestHandleCreditsAndUsage:
 
     @pytest.mark.asyncio
     @patch("src.services.pricing.calculate_cost_async")
-    @patch("src.db.trials.track_trial_usage_for_key")
     @patch("src.db.users.log_api_usage_transaction")
     @patch("src.services.billing.credit_handler._record_credit_metrics")
     async def test_trial_user_no_deduction(
         self,
         mock_metrics,
         mock_log_tx,
-        mock_track_trial,
         mock_calc_cost,
         mock_trial_user,
         mock_trial_active,
@@ -250,7 +248,6 @@ class TestHandleCreditsAndUsage:
         )
 
         assert cost == 0.05
-        mock_track_trial.assert_called_once()
         mock_log_tx.assert_called_once()
         # Verify the transaction was logged with $0 cost
         call_args = mock_log_tx.call_args
@@ -483,7 +480,6 @@ class TestHandleCreditsAndUsage:
 
     @pytest.mark.asyncio
     @patch("src.services.pricing.calculate_cost_async")
-    @patch("src.db.trials.track_trial_usage_for_key")
     @patch("src.db.users.deduct_credits")
     @patch("src.db.users.record_usage")
     @patch("src.db.rate_limits.update_rate_limit_usage")
@@ -494,7 +490,6 @@ class TestHandleCreditsAndUsage:
         mock_rate_limit,
         mock_record_usage,
         mock_deduct,
-        mock_track_trial,
         mock_calc_cost,
         mock_user,
     ):
@@ -515,8 +510,6 @@ class TestHandleCreditsAndUsage:
         )
 
         assert cost == 0.05
-        # Should NOT track trial usage
-        mock_track_trial.assert_not_called()
         # SHOULD deduct credits
         mock_deduct.assert_called_once()
 

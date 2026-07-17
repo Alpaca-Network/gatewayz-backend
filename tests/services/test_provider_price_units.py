@@ -8,7 +8,7 @@ so every provider's ingested price MUST end up in the same unit. The pipeline is
                                                     (per_1m => / 1e6) once
     => metadata.pricing_raw.prompt is true dollars-per-TOKEN
 
-near / novita / deepinfra previously each emitted a different unit (per-token,
+novita / deepinfra previously each emitted a different unit (per-token,
 a raw dict, or a bogus amount*10^scale), so the single ``per_1m`` division in
 transform produced values off by 1e2-1e6 and the router always picked OpenRouter.
 
@@ -17,34 +17,12 @@ These tests pin the client contract ($/1M) so the shared transform stays correct
 
 from decimal import Decimal
 
-from src.services.providers.deepinfra_client import normalize_deepinfra_model
-from src.services.providers.near_client import normalize_near_model
+from src.services.providers.deepinfra_catalog import normalize_deepinfra_model
 from src.services.providers.novita_client import _normalize_pricing
 
 
 def _prompt(pricing: dict) -> float:
     return float(pricing["prompt"])
-
-
-# --- NEAR -------------------------------------------------------------------
-# Real Near API shape: pricing dict carries per-1M in `input`/`output` and the
-# same value per-token in `prompt`/`completion`. Client must emit $/1M.
-def test_near_emits_dollars_per_million_from_input_field():
-    m = {
-        "id": "anthropic/claude-haiku-4-5",
-        "name": "Claude Haiku",
-        "pricing": {"input": 1.0, "output": 5.0, "prompt": "0.000001", "completion": "0.000005"},
-    }
-    out = normalize_near_model(m)
-    assert _prompt(out["pricing"]) == 1.0  # $1 / 1M input
-    assert float(out["pricing"]["completion"]) == 5.0
-
-
-def test_near_falls_back_to_per_token_times_million():
-    # Only the per-token `prompt` is present -> scale up to $/1M.
-    m = {"id": "x/y", "name": "y", "pricing": {"prompt": "0.000003"}}
-    out = normalize_near_model(m)
-    assert _prompt(out["pricing"]) == 3.0  # 0.000003 * 1e6
 
 
 # --- NOVITA -----------------------------------------------------------------
@@ -83,9 +61,6 @@ def test_pipeline_produces_consistent_per_token_across_providers():
         raw = (row.get("metadata") or {}).get("pricing_raw") or {}
         return Decimal(str(raw.get("prompt")))
 
-    near = normalize_near_model(
-        {"id": "anthropic/claude-haiku-4-5", "name": "h", "pricing": {"input": 1.0, "output": 5.0}}
-    )
     dinf = normalize_deepinfra_model(
         {
             "model_name": "anthropic/claude-haiku-4-5",
@@ -93,9 +68,8 @@ def test_pipeline_produces_consistent_per_token_across_providers():
             "pricing": {"cents_per_input_token": 0.0001, "cents_per_output_token": 0.0005},
         }
     )
-    # near & deepinfra are per_1m in the providers table, so transform divides by 1e6.
-    # $1/1M == 1e-6 per token; both providers must agree within rounding.
-    assert _final(near, "near") == Decimal("0.000001")
+    # deepinfra is per_1m in the providers table, so transform divides by 1e6.
+    # $1/1M == 1e-6 per token.
     assert _final(dinf, "deepinfra") == Decimal("0.000001")
 
 

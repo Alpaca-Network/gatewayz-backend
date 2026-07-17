@@ -7,7 +7,7 @@ import pytest
 from src.services.provider_alerting import _last_alert_sent_at, alert_provider_auth_failure
 
 
-@patch("src.services.provider_alerting.NotificationService")
+@patch("src.services.provider_alerting.EnhancedNotificationService")
 @patch("src.services.provider_alerting.Config")
 def test_alert_sent_when_ops_email_configured(mock_config, mock_notification_service_cls):
     mock_config.OPS_ALERT_EMAIL = "ops@gatewayz.ai"
@@ -23,7 +23,7 @@ def test_alert_sent_when_ops_email_configured(mock_config, mock_notification_ser
     assert "openrouter" in call_kwargs["subject"]
 
 
-@patch("src.services.provider_alerting.NotificationService")
+@patch("src.services.provider_alerting.EnhancedNotificationService")
 @patch("src.services.provider_alerting.Config")
 def test_alert_rate_limited_within_15_minutes(mock_config, mock_notification_service_cls):
     mock_config.OPS_ALERT_EMAIL = "ops@gatewayz.ai"
@@ -36,7 +36,7 @@ def test_alert_rate_limited_within_15_minutes(mock_config, mock_notification_ser
     assert mock_service.send_email_notification.call_count == 1
 
 
-@patch("src.services.provider_alerting.NotificationService")
+@patch("src.services.provider_alerting.EnhancedNotificationService")
 @patch("src.services.provider_alerting.Config")
 def test_no_alert_when_ops_email_unset(mock_config, mock_notification_service_cls):
     mock_config.OPS_ALERT_EMAIL = None
@@ -49,7 +49,7 @@ def test_no_alert_when_ops_email_unset(mock_config, mock_notification_service_cl
 
 
 @pytest.mark.asyncio
-@patch("src.services.provider_alerting.NotificationService")
+@patch("src.services.provider_alerting.EnhancedNotificationService")
 @patch("src.services.provider_alerting.Config")
 async def test_alert_does_not_block_event_loop(mock_config, mock_notification_service_cls):
     """The Resend send must be offloaded to a thread, not run inline on the
@@ -80,7 +80,7 @@ async def test_alert_does_not_block_event_loop(mock_config, mock_notification_se
     assert _last_alert_sent_at["openrouter"] > 0
 
 
-@patch("src.services.provider_alerting.NotificationService")
+@patch("src.services.provider_alerting.EnhancedNotificationService")
 @patch("src.services.provider_alerting.Config")
 def test_alert_sent_inline_without_running_event_loop(mock_config, mock_notification_service_cls):
     """When called from a plain synchronous context (no running event loop),

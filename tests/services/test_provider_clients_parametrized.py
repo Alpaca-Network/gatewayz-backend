@@ -26,44 +26,22 @@ import pytest
 # error_match:     regex to match against the ValueError message.
 # ---------------------------------------------------------------------------
 
+# NOTE: fireworks, groq, together, zai and deepinfra were consolidated onto the
+# config-driven OpenAI-compat adapter; their equivalent behavioral assertions
+# (missing-key ValueError, forwards-to-create, stream=True, process shape) now
+# live in tests/services/providers/test_openai_compat.py.
 SIMPLE_PROVIDERS = [
-    (
-        "src.services.providers.fireworks_client",
-        "fireworks",
-        "FIREWORKS_API_KEY",
-        "Fireworks API key not configured",
-    ),
-    ("src.services.providers.groq_client", "groq", "GROQ_API_KEY", "Groq API key not configured"),
-    (
-        "src.services.providers.together_client",
-        "together",
-        "TOGETHER_API_KEY",
-        "Together API key not configured",
-    ),
-    (
-        "src.services.providers.akash_client",
-        "akash",
-        "AKASH_API_KEY",
-        "Akash API key not configured",
-    ),
     (
         "src.services.providers.openai_client",
         "openai",
         "OPENAI_API_KEY",
         "OpenAI API key not configured",
     ),
-    ("src.services.providers.zai_client", "zai", "ZAI_API_KEY", "Z.AI API key not configured"),
     (
         "src.services.providers.featherless_client",
         "featherless",
         "FEATHERLESS_API_KEY",
         "Featherless API key not configured",
-    ),
-    (
-        "src.services.providers.morpheus_client",
-        "morpheus",
-        "MORPHEUS_API_KEY",
-        "Morpheus API key not configured",
     ),
     (
         "src.services.providers.anthropic_client",
@@ -296,23 +274,20 @@ class TestProcessResponse:
 # ---------------------------------------------------------------------------
 
 ALL_PROVIDER_MODULES = [
-    "src.services.providers.fireworks_client",
-    "src.services.providers.groq_client",
-    "src.services.providers.together_client",
-    "src.services.providers.akash_client",
     "src.services.providers.openai_client",
-    "src.services.providers.zai_client",
     "src.services.providers.featherless_client",
-    "src.services.providers.morpheus_client",
     "src.services.providers.anthropic_client",
-    "src.services.providers.near_client",
-    "src.services.providers.modelz_client",
-    "src.services.providers.deepinfra_client",
-    "src.services.providers.chutes_client",
-    "src.services.providers.aimo_client",
-    "src.services.providers.nebius_client",
-    "src.services.providers.alpaca_network_client",
-    "src.services.providers.clarifai_client",
+    # The five providers below were consolidated onto the OpenAI-compat
+    # adapter; their inference behavior is covered in
+    # tests/services/providers/test_openai_compat.py and their catalog halves
+    # live in *_catalog.py modules (smoke-tested here).
+    "src.services.providers.openai_compat",
+    "src.services.providers.adapter_configs",
+    "src.services.providers.deepinfra_catalog",
+    "src.services.providers.fireworks_catalog",
+    "src.services.providers.groq_catalog",
+    "src.services.providers.together_catalog",
+    "src.services.providers.zai_catalog",
 ]
 
 

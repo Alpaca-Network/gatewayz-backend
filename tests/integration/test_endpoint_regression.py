@@ -117,11 +117,6 @@ class TestHealthEndpoints:
         assert "status" in data
         assert data["status"] == "healthy"
 
-    def test_ping_endpoint_exists(self, client):
-        """Regression: GET /ping must exist"""
-        response = client.get("/ping")
-        assert response.status_code == 200
-
     def test_root_endpoint_exists(self, client):
         """Regression: GET / must exist"""
         response = client.get("/")

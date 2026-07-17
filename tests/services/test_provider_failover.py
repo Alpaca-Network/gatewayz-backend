@@ -153,16 +153,10 @@ class TestBuildProviderFailoverChain:
     """Test provider failover chain construction"""
 
     def test_chain_with_huggingface_first(self):
-        """Test chain starting with huggingface"""
+        """huggingface has no client and is not in the fallback chain; treated as unknown"""
         chain = build_provider_failover_chain("huggingface")
 
-        assert chain[0] == "huggingface"
-        assert "featherless" in chain
-        assert "fireworks" in chain
-        assert "together" in chain
-        assert "openrouter" in chain
-        # Verify all providers in priority list are included
-        assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
+        assert chain == ["huggingface"]
 
     def test_chain_with_openrouter_first(self):
         """Test chain starting with openrouter"""
@@ -180,7 +174,7 @@ class TestBuildProviderFailoverChain:
         chain = build_provider_failover_chain("featherless")
 
         assert chain[0] == "featherless"
-        assert "huggingface" in chain
+        assert "huggingface" not in chain
         assert "fireworks" in chain
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
@@ -228,7 +222,9 @@ class TestBuildProviderFailoverChain:
 
     def test_fallback_provider_priority_constants(self):
         """Test fallback provider constants are defined correctly"""
-        assert "huggingface" in FALLBACK_PROVIDER_PRIORITY
+        # huggingface client was deleted; it must not appear in the fallback chain
+        # (its PROVIDER_FETCH_FUNCTIONS/catalog entry remains — open roster decision)
+        assert "huggingface" not in FALLBACK_PROVIDER_PRIORITY
         assert "featherless" in FALLBACK_PROVIDER_PRIORITY
         assert "fireworks" in FALLBACK_PROVIDER_PRIORITY
         assert "together" in FALLBACK_PROVIDER_PRIORITY

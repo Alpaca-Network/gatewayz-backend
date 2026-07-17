@@ -88,12 +88,13 @@ async def test_guard_fails_open_when_manager_missing(monkeypatch):
 
 
 def test_expensive_endpoints_invoke_guard():
-    """images/audio/payments routes must actually call the guard."""
+    """audio/payments routes must actually call the guard.
+
+    (image generation was removed in the MVP refactor; images.py no longer exists.)
+    """
     import src.routes.audio as audio
-    import src.routes.images as images
     import src.routes.payments as payments
 
-    assert "enforce_request_rate_limit" in inspect.getsource(images.generate_images)
     assert "enforce_request_rate_limit" in inspect.getsource(audio.create_transcription)
     assert "enforce_request_rate_limit" in inspect.getsource(payments.create_checkout_session)
     assert "enforce_request_rate_limit" in inspect.getsource(payments.create_payment_intent)

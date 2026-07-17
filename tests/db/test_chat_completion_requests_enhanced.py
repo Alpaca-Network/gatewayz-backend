@@ -2,7 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 
 
 @pytest.fixture
@@ -11,8 +11,8 @@ def sb(monkeypatch):
     return MagicMock()
 
 
-@patch("src.db.chat_completion_requests_enhanced.get_model_id_by_name", return_value=None)
-@patch("src.db.chat_completion_requests_enhanced.get_supabase_client")
+@patch("src.db.chat_completion_requests.get_model_id_by_name", return_value=None)
+@patch("src.db.chat_completion_requests.get_supabase_client")
 def test_failed_request_persisted_even_when_model_unresolved(
     mock_get_client, mock_get_model_id, sb
 ):
@@ -45,8 +45,8 @@ def test_failed_request_persisted_even_when_model_unresolved(
     assert inserted_payload["status"] == "failed"
 
 
-@patch("src.db.chat_completion_requests_enhanced.get_model_id_by_name", return_value=None)
-@patch("src.db.chat_completion_requests_enhanced.get_supabase_client")
+@patch("src.db.chat_completion_requests.get_model_id_by_name", return_value=None)
+@patch("src.db.chat_completion_requests.get_supabase_client")
 def test_non_failed_request_skipped_when_model_unresolved(mock_get_client, mock_get_model_id, sb):
     """Verify that non-failed requests still return None (unchanged behavior)"""
     mock_client = MagicMock()

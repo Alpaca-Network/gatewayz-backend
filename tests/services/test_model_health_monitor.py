@@ -458,9 +458,6 @@ class TestApiKeyForGateway:
             mock_config.TOGETHER_API_KEY = "test-together-key"
             mock_config.XAI_API_KEY = "test-xai-key"
             mock_config.NOVITA_API_KEY = "test-novita-key"
-            mock_config.CHUTES_API_KEY = "test-chutes-key"
-            mock_config.AIMO_API_KEY = "test-aimo-key"
-            mock_config.NEBIUS_API_KEY = "test-nebius-key"
             mock_config.CEREBRAS_API_KEY = "test-cerebras-key"
 
             # Verify each gateway returns correct key
@@ -473,9 +470,6 @@ class TestApiKeyForGateway:
             assert monitor._get_api_key_for_gateway("together") == "test-together-key"
             assert monitor._get_api_key_for_gateway("xai") == "test-xai-key"
             assert monitor._get_api_key_for_gateway("novita") == "test-novita-key"
-            assert monitor._get_api_key_for_gateway("chutes") == "test-chutes-key"
-            assert monitor._get_api_key_for_gateway("aimo") == "test-aimo-key"
-            assert monitor._get_api_key_for_gateway("nebius") == "test-nebius-key"
             assert monitor._get_api_key_for_gateway("cerebras") == "test-cerebras-key"
 
     def test_get_api_key_for_unknown_gateway(self):

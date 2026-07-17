@@ -1175,10 +1175,9 @@ class StripeService:
                     f"Error clearing trial status for user {user_id}: {trial_error}", exc_info=True
                 )
 
-            # First top-up bonus + referral attribution (first purchase only)
+            # First top-up bonus (first purchase only)
             try:
                 from src.config.supabase_config import get_supabase_client
-                from src.services.referral import apply_referral_bonus, mark_first_purchase
 
                 client = get_supabase_client()
                 user_result = client.table("users").select("*").eq("id", user_id).execute()
@@ -1186,12 +1185,10 @@ class StripeService:
                 if user_result.data:
                     user = user_result.data[0]
                     has_made_first_purchase = user.get("has_made_first_purchase", False)
-                    referred_by_code = user.get("referred_by_code")
 
                     # Grant the one-time first top-up bonus: a flat +$5 when the
                     # user's FIRST one-time top-up is $5 or more. This is the only
-                    # exception to the "no free credits" policy and applies to all
-                    # users regardless of whether they were referred.
+                    # exception to the "no free credits" policy.
                     if not has_made_first_purchase and amount_dollars >= 5.0:
                         add_credits_to_user(
                             user_id=user_id,
@@ -1209,32 +1206,15 @@ class StripeService:
                             f"(first top-up of ${amount_dollars})"
                         )
 
-                    # Record referral attribution (no credits are granted here per
-                    # policy) if the user was referred and this is their first purchase.
-                    if not has_made_first_purchase and referred_by_code and amount_dollars >= 10.0:
-                        success, error_msg, bonus_data = apply_referral_bonus(
-                            user_id=user_id,
-                            referral_code=referred_by_code,
-                            purchase_amount=amount_dollars,
-                        )
-
-                        if success:
-                            logger.info(
-                                f"Referral attribution recorded for user {user_id} "
-                                f"(code: {referred_by_code})"
-                            )
-                        else:
-                            logger.warning(
-                                f"Failed to record referral attribution for user {user_id}: {error_msg}"
-                            )
-
-                    # Mark first purchase regardless of referral/bonus
+                    # Mark first purchase regardless of bonus eligibility
                     if not has_made_first_purchase:
-                        mark_first_purchase(user_id)
+                        client.table("users").update({"has_made_first_purchase": True}).eq(
+                            "id", user_id
+                        ).execute()
 
-            except Exception as referral_error:
-                # Don't fail the payment if referral bonus fails
-                logger.error(f"Error processing referral bonus: {referral_error}", exc_info=True)
+            except Exception as bonus_error:
+                # Don't fail the payment if the first-topup bonus bookkeeping fails
+                logger.error(f"Error processing first-topup bonus: {bonus_error}", exc_info=True)
 
             # CRITICAL: Invalidate user cache AFTER all user data updates
             # add_credits_to_user already invalidates cache, but subsequent updates

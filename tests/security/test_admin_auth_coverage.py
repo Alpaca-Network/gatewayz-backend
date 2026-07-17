@@ -169,7 +169,6 @@ def test_bandit_false_positives_suppressed():
     checks = [
         ("src/routes/admin.py", "nosec B324"),
         ("src/routes/health_timeline.py", "nosec B324"),
-        ("src/services/model_selector.py", "nosec B324"),
         ("src/services/huggingface_hub_service.py", "nosec B615"),
     ]
     for filepath, nosec_tag in checks:

@@ -7,7 +7,7 @@ Consolidates all configuration-related modules.
 from src.config.config import Config
 
 # Re-export database configuration
-from src.config.db_config import (
+from src.config.supabase_config import (
     DatabaseConfig,
     close_db_connections,
     get_db_config,

@@ -28,7 +28,7 @@ class TestCM1801AtLeast30ProvidersRegistered:
         from src.services.gateway_registry import _FALLBACK_REGISTRY as get_gateway_registry_static
 
         registry = dict(get_gateway_registry_static)
-        assert len(registry) >= 20, (
+        assert len(registry) >= 10, (
             f"Expected >= 10 providers in GATEWAY_REGISTRY, found {len(registry)}: "
             f"{sorted(registry.keys())}"
         )
@@ -40,7 +40,10 @@ class TestCM1801AtLeast30ProvidersRegistered:
 @pytest.mark.cm_verified
 class TestCM1802EachProviderHasClientModule:
     def test_each_provider_has_client_module(self):
-        """Key providers from GATEWAY_REGISTRY should have importable *_client modules."""
+        """Key providers must have an inference implementation: either a
+        dedicated *_client module or an entry in the OpenAI-compat adapter
+        registry (ADAPTERS), which replaced the near-identical client modules
+        during the MVP consolidation."""
         # These are core providers that must have dedicated client modules
         key_providers = [
             "openrouter",
@@ -50,12 +53,16 @@ class TestCM1802EachProviderHasClientModule:
             "together",
             "cerebras",
             "featherless",
-            "chutes",
         ]
+
+        from src.services.providers.adapter_configs import ADAPTERS
 
         imported = []
         failed = []
         for provider in key_providers:
+            if provider in ADAPTERS:
+                imported.append(provider)
+                continue
             module_path = f"src.services.{provider}_client"
             try:
                 importlib.import_module(module_path)
@@ -64,7 +71,8 @@ class TestCM1802EachProviderHasClientModule:
                 failed.append((provider, str(e)))
 
         assert len(failed) == 0, (
-            f"All key provider client modules must be importable. " f"Failed: {failed}"
+            f"All key providers must have a client module or adapter entry. "
+            f"Failed: {failed}"
         )
         assert len(imported) == len(key_providers)
 
@@ -75,21 +83,30 @@ class TestCM1802EachProviderHasClientModule:
 @pytest.mark.cm_verified
 class TestCM1803ProviderClientImplementsRequiredInterface:
     def test_provider_client_implements_required_interface(self):
-        """Provider client modules should have callable functions for sending
-        inference requests (send_*_request, make_*_request, or stream-related)."""
-        key_clients = [
-            "openrouter_client",
-            "deepinfra_client",
-            "fireworks_client",
-            "groq_client",
-            "together_client",
-            "cerebras_client",
-            "featherless_client",
-            "chutes_client",
+        """Providers must expose request/stream-capable callables — either in
+        a dedicated *_client module or via their OpenAI-compat adapter entry
+        (request/process/stream on the adapter object)."""
+        key_providers = [
+            "openrouter",
+            "deepinfra",
+            "fireworks",
+            "groq",
+            "together",
+            "cerebras",
+            "featherless",
         ]
 
-        for client_name in key_clients:
-            module = importlib.import_module(f"src.services.{client_name}")
+        from src.services.providers.adapter_configs import ADAPTERS
+
+        for provider in key_providers:
+            if provider in ADAPTERS:
+                adapter = ADAPTERS[provider]
+                assert callable(adapter.request) and callable(adapter.stream), (
+                    f"{provider} adapter must expose request/stream callables"
+                )
+                continue
+
+            module = importlib.import_module(f"src.services.{provider}_client")
             members = {
                 name: obj
                 for name, obj in vars(module).items()
@@ -106,6 +123,6 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
             )
 
             assert has_request_fn, (
-                f"{client_name} must have a request-handling function. "
+                f"{provider}_client must have a request-handling function. "
                 f"Found: {sorted(members.keys())}"
             )

@@ -331,13 +331,6 @@ def fetch_models_from_xai():
     return _fetch()
 
 
-def fetch_models_from_nebius():
-    """Fetch models from Nebius client"""
-    from src.services.providers.nebius_client import fetch_models_from_nebius as _fetch
-
-    return _fetch()
-
-
 def fetch_models_from_novita():
     """Fetch models from Novita client"""
     from src.services.providers.novita_client import fetch_models_from_novita as _fetch
@@ -345,15 +338,3 @@ def fetch_models_from_novita():
     return _fetch()
 
 
-def fetch_models_from_morpheus():
-    """Fetch models from Morpheus AI Gateway client"""
-    from src.services.providers.morpheus_client import fetch_models_from_morpheus as _fetch
-
-    return _fetch()
-
-
-def fetch_models_from_simplismart():
-    """Fetch models from Simplismart client"""
-    from src.services.providers.simplismart_client import fetch_models_from_simplismart as _fetch
-
-    return _fetch()

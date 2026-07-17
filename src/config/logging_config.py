@@ -287,42 +287,6 @@ class LokiLogHandler(logging.Handler):
             pass
 
 
-class TraceContextFilter(logging.Filter):
-    """
-    Logging filter that adds trace context to log records.
-
-    This filter enriches log records with OpenTelemetry trace and span IDs,
-    enabling correlation between logs and traces in Grafana.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Add trace context to log record.
-
-        Args:
-            record: LogRecord to enrich
-
-        Returns:
-            bool: Always True (don't filter out records)
-        """
-        try:
-            from src.config.opentelemetry_config import get_current_span_id, get_current_trace_id
-
-            trace_id = get_current_trace_id()
-            span_id = get_current_span_id()
-
-            if trace_id:
-                record.trace_id = trace_id
-            if span_id:
-                record.span_id = span_id
-
-        except Exception:
-            # Don't fail if we can't get trace context
-            pass
-
-        return True
-
-
 class StructuredFormatter(logging.Formatter):
     """
     JSON formatter for structured logging.
@@ -392,10 +356,6 @@ def configure_logging() -> bool:
 
     # Clear existing handlers
     root_logger.handlers.clear()
-
-    # Add trace context filter to all loggers
-    trace_filter = TraceContextFilter()
-    root_logger.addFilter(trace_filter)
 
     # Console handler (always enabled)
     console_handler = logging.StreamHandler(sys.stdout)

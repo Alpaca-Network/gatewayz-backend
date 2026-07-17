@@ -15,7 +15,7 @@ import src.db.plans as plans_module
 import src.db.rate_limits as rate_limits_module
 import src.db.users as users_module
 from src.config import Config
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest
 from src.security.deps import get_optional_api_key
 from src.services.anonymous_rate_limiter import (
@@ -28,17 +28,13 @@ from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import (
     record_free_model_usage,
 )
-from src.utils.exceptions import APIExceptions
+from src.utils.errors import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 
-# Optional Traceloop integration - gracefully handle if not installed
-try:
-    from src.config.traceloop_config import set_association_properties as set_traceloop_properties
-except ImportError:
-    # Traceloop not available - provide no-op function
-    def set_traceloop_properties(**kwargs):
-        pass
+# Traceloop integration removed; keep call sites as a no-op.
+def set_traceloop_properties(**kwargs):
+    pass
 
 
 # Unified chat handler and adapters for chat unification
@@ -280,8 +276,6 @@ from src.handlers.post_processing import (  # noqa: F401
     _record_inference_metrics_and_health,
 )
 from src.routes.chat_helpers import (  # noqa: F401
-    _get_auto_route_default_model,
-    _get_code_router_default_model,
     _to_thread,
     is_free_model,
     mask_key,
@@ -731,17 +725,11 @@ async def chat_completions(
 
         # Store original model for response and routing logic
         original_model = req.model
-        # Single source of truth for the auto-route trigger: the `router*` prefix
-        # plus the ergonomic `auto` / `auto:<opt>` / `gatewayz/auto` aliases
-        # (NOT `openrouter/auto`, which is a real passthrough model).
-        from src.services.prompt_router import is_auto_route_request
 
-        is_auto_route = bool(original_model) and is_auto_route_request(original_model)
-
-        # === 2.3-2.5) Model routing (auto / general / code) ===
-        code_router_decision, is_code_route = await resolve_model_routing(
-            req, original_model, messages, session_id, user, is_auto_route, tracker
-        )
+        # === 2.3) Model routing gate ===
+        # The auto/prompt/code/general router engine was removed (MVP Task 13);
+        # `auto`/`router:*` aliases now 400 instead of silently routing.
+        code_router_decision, is_code_route = await resolve_model_routing(req, original_model)
 
         # === 2.6) Prepare upstream request (params + provider + failover chain) ===
         model, provider, provider_chain, optional = await prepare_upstream_request(
@@ -821,29 +809,6 @@ async def chat_completions(
                 logger.warning(
                     "Auto web search failed, continuing without augmentation: %s", str(e)
                 )
-
-        # Gatewayz One Phase 4 — capture durable self-stated facts to user_memory
-        # (flag-gated, off by default). Scheduled as a post-response background task
-        # (covers both streaming and non-streaming paths); never affects the request.
-        if Config.MEMORY_CAPTURE_ENABLED and not is_anonymous and user:
-            from src.services.memory_extraction import capture_user_memory
-
-            background_tasks.add_task(capture_user_memory, user.get("id"), list(messages))
-
-        # Gatewayz One Phase 4 — context assembly (flag-gated, off by default).
-        # Reassemble the final messages within the model's token budget (system +
-        # per-user memory + rolling summary + most-recent turns, oldest dropped
-        # first). Exact passthrough when disabled; never raises.
-        if Config.CONTEXT_ASSEMBLY_ENABLED:
-            from src.services.context_assembly_bridge import apply_context_budget
-
-            messages = apply_context_budget(
-                messages,
-                model=model,
-                budget_ratio=Config.CONTEXT_ASSEMBLY_BUDGET_RATIO,
-                default_budget=Config.CONTEXT_ASSEMBLY_DEFAULT_BUDGET,
-                user_id=(user or {}).get("id") if not is_anonymous else None,
-            )
 
         # === 3) Call upstream (streaming or non-streaming) ===
         if req.stream:
@@ -1048,16 +1013,6 @@ async def chat_completions(
         if not trial.get("is_trial", False):
             # If you can cheaply re-fetch balance, do it here; otherwise omit
             processed["gateway_usage"]["cost_usd"] = round(cost, 6)
-
-        # === 6.1) Attach code router metadata if code routing was used ===
-        if code_router_decision:
-            try:
-                from src.services.code_router import get_routing_metadata
-
-                routing_metadata = get_routing_metadata(code_router_decision)
-                processed["routing_metadata"] = routing_metadata
-            except Exception as e:
-                logger.debug(f"Failed to attach code routing metadata: {e}")
 
         # Capture health metrics (passive monitoring) - run as background task
         background_tasks.add_task(

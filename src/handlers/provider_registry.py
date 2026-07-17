@@ -86,96 +86,21 @@ PROVIDER_FUNCTIONS = {
         "process_featherless_response",
         "make_featherless_request_openai_stream",
     ],
-    "fireworks": [
-        "make_fireworks_request_openai",
-        "process_fireworks_response",
-        "make_fireworks_request_openai_stream",
-    ],
-    "together": [
-        "make_together_request_openai",
-        "process_together_response",
-        "make_together_request_openai_stream",
-    ],
-    "huggingface": [
-        "make_huggingface_request_openai",
-        "process_huggingface_response",
-        "make_huggingface_request_openai_stream",
-    ],
-    "aimo": [
-        "make_aimo_request_openai",
-        "process_aimo_response",
-        "make_aimo_request_openai_stream",
-    ],
     "xai": ["make_xai_request_openai", "process_xai_response", "make_xai_request_openai_stream"],
     "cerebras": [
         "make_cerebras_request_openai",
         "process_cerebras_response",
         "make_cerebras_request_openai_stream",
     ],
-    "chutes": [
-        "make_chutes_request_openai",
-        "process_chutes_response",
-        "make_chutes_request_openai_stream",
-    ],
     "google_vertex": [
         "make_google_vertex_request_openai",
         "process_google_vertex_response",
         "make_google_vertex_request_openai_stream",
     ],
-    "near": [
-        "make_near_request_openai",
-        "process_near_response",
-        "make_near_request_openai_stream",
-    ],
-    "alpaca_network": [
-        "make_alpaca_network_request_openai",
-        "process_alpaca_network_response",
-        "make_alpaca_network_request_openai_stream",
-    ],
     "alibaba_cloud": [
         "make_alibaba_cloud_request_openai",
         "process_alibaba_cloud_response",
         "make_alibaba_cloud_request_openai_stream",
-    ],
-    "clarifai": [
-        "make_clarifai_request_openai",
-        "process_clarifai_response",
-        "make_clarifai_request_openai_stream",
-    ],
-    "groq": [
-        "make_groq_request_openai",
-        "process_groq_response",
-        "make_groq_request_openai_stream",
-    ],
-    "cloudflare_workers_ai": [
-        "make_cloudflare_workers_ai_request_openai",
-        "process_cloudflare_workers_ai_response",
-        "make_cloudflare_workers_ai_request_openai_stream",
-    ],
-    "morpheus": [
-        "make_morpheus_request_openai",
-        "process_morpheus_response",
-        "make_morpheus_request_openai_stream",
-    ],
-    "simplismart": [
-        "make_simplismart_request_openai",
-        "process_simplismart_response",
-        "make_simplismart_request_openai_stream",
-    ],
-    "sybil": [
-        "make_sybil_request_openai",
-        "process_sybil_response",
-        "make_sybil_request_openai_stream",
-    ],
-    "nosana": [
-        "make_nosana_request_openai",
-        "process_nosana_response",
-        "make_nosana_request_openai_stream",
-    ],
-    "zai": [
-        "make_zai_request_openai",
-        "process_zai_response",
-        "make_zai_request_openai_stream",
     ],
     "openai": [
         "make_openai_request",
@@ -187,22 +112,48 @@ PROVIDER_FUNCTIONS = {
         "process_anthropic_response",
         "make_anthropic_request_stream",
     ],
-    "deepinfra": [
-        "make_deepinfra_request_openai",
-        "process_deepinfra_response",
-        "make_deepinfra_request_openai_stream",
-    ],
-    "nebius": [
-        "make_nebius_request_openai",
-        "process_nebius_response",
-        "make_nebius_request_openai_stream",
-    ],
-    "canopywave": [
-        "make_canopywave_request_openai",
-        "process_canopywave_response",
-        "make_canopywave_request_openai_stream",
-    ],
 }
+
+
+# ---------------------------------------------------------------------------
+# OpenAI-compatible providers served by the config-driven adapter
+# ---------------------------------------------------------------------------
+def _safe_adapter_routing(slug: str) -> ProviderRouting:
+    """Build a PROVIDER_ROUTING entry from the openai_compat adapter registry.
+
+    Mirrors _safe_import_provider: on import/config failure the entry is
+    populated with sentinels that raise an informative 503 when called.
+    """
+    try:
+        from src.services.providers.adapter_configs import ADAPTERS
+
+        adapter = ADAPTERS[slug]
+        logger.debug(f"Loaded {slug} provider adapter")
+        return {
+            "request": adapter.request,
+            "process": adapter.process,
+            "stream": adapter.stream,
+        }
+    except Exception as e:
+        error_msg = f"Failed to load {slug} provider adapter: {type(e).__name__}: {str(e)}"
+        logger.error(error_msg)
+        _provider_import_errors[slug] = str(e)
+        err_text = str(e)
+
+        def make_error_raiser(func_name: str):
+            def sync_error(*args, **kwargs):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Provider '{slug}' is unavailable: {func_name} failed to load. Error: {err_text[:100]}",
+                )
+
+            return sync_error
+
+        return {
+            "request": make_error_raiser("request"),
+            "process": make_error_raiser("process"),
+            "stream": make_error_raiser("stream"),
+        }
 
 # ---------------------------------------------------------------------------
 # Load all providers and build PROVIDER_ROUTING
@@ -231,26 +182,6 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_featherless_response"),
         "stream": _loaded_functions.get("make_featherless_request_openai_stream"),
     },
-    "fireworks": {
-        "request": _loaded_functions.get("make_fireworks_request_openai"),
-        "process": _loaded_functions.get("process_fireworks_response"),
-        "stream": _loaded_functions.get("make_fireworks_request_openai_stream"),
-    },
-    "together": {
-        "request": _loaded_functions.get("make_together_request_openai"),
-        "process": _loaded_functions.get("process_together_response"),
-        "stream": _loaded_functions.get("make_together_request_openai_stream"),
-    },
-    "huggingface": {
-        "request": _loaded_functions.get("make_huggingface_request_openai"),
-        "process": _loaded_functions.get("process_huggingface_response"),
-        "stream": _loaded_functions.get("make_huggingface_request_openai_stream"),
-    },
-    "aimo": {
-        "request": _loaded_functions.get("make_aimo_request_openai"),
-        "process": _loaded_functions.get("process_aimo_response"),
-        "stream": _loaded_functions.get("make_aimo_request_openai_stream"),
-    },
     "xai": {
         "request": _loaded_functions.get("make_xai_request_openai"),
         "process": _loaded_functions.get("process_xai_response"),
@@ -261,70 +192,15 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_cerebras_response"),
         "stream": _loaded_functions.get("make_cerebras_request_openai_stream"),
     },
-    "chutes": {
-        "request": _loaded_functions.get("make_chutes_request_openai"),
-        "process": _loaded_functions.get("process_chutes_response"),
-        "stream": _loaded_functions.get("make_chutes_request_openai_stream"),
-    },
-    "near": {
-        "request": _loaded_functions.get("make_near_request_openai"),
-        "process": _loaded_functions.get("process_near_response"),
-        "stream": _loaded_functions.get("make_near_request_openai_stream"),
-    },
     "google-vertex": {
         "request": _loaded_functions.get("make_google_vertex_request_openai"),
         "process": _loaded_functions.get("process_google_vertex_response"),
         "stream": _loaded_functions.get("make_google_vertex_request_openai_stream"),
     },
-    "alpaca-network": {
-        "request": _loaded_functions.get("make_alpaca_network_request_openai"),
-        "process": _loaded_functions.get("process_alpaca_network_response"),
-        "stream": _loaded_functions.get("make_alpaca_network_request_openai_stream"),
-    },
     "alibaba-cloud": {
         "request": _loaded_functions.get("make_alibaba_cloud_request_openai"),
         "process": _loaded_functions.get("process_alibaba_cloud_response"),
         "stream": _loaded_functions.get("make_alibaba_cloud_request_openai_stream"),
-    },
-    "clarifai": {
-        "request": _loaded_functions.get("make_clarifai_request_openai"),
-        "process": _loaded_functions.get("process_clarifai_response"),
-        "stream": _loaded_functions.get("make_clarifai_request_openai_stream"),
-    },
-    "groq": {
-        "request": _loaded_functions.get("make_groq_request_openai"),
-        "process": _loaded_functions.get("process_groq_response"),
-        "stream": _loaded_functions.get("make_groq_request_openai_stream"),
-    },
-    "cloudflare-workers-ai": {
-        "request": _loaded_functions.get("make_cloudflare_workers_ai_request_openai"),
-        "process": _loaded_functions.get("process_cloudflare_workers_ai_response"),
-        "stream": _loaded_functions.get("make_cloudflare_workers_ai_request_openai_stream"),
-    },
-    "morpheus": {
-        "request": _loaded_functions.get("make_morpheus_request_openai"),
-        "process": _loaded_functions.get("process_morpheus_response"),
-        "stream": _loaded_functions.get("make_morpheus_request_openai_stream"),
-    },
-    "simplismart": {
-        "request": _loaded_functions.get("make_simplismart_request_openai"),
-        "process": _loaded_functions.get("process_simplismart_response"),
-        "stream": _loaded_functions.get("make_simplismart_request_openai_stream"),
-    },
-    "sybil": {
-        "request": _loaded_functions.get("make_sybil_request_openai"),
-        "process": _loaded_functions.get("process_sybil_response"),
-        "stream": _loaded_functions.get("make_sybil_request_openai_stream"),
-    },
-    "nosana": {
-        "request": _loaded_functions.get("make_nosana_request_openai"),
-        "process": _loaded_functions.get("process_nosana_response"),
-        "stream": _loaded_functions.get("make_nosana_request_openai_stream"),
-    },
-    "zai": {
-        "request": _loaded_functions.get("make_zai_request_openai"),
-        "process": _loaded_functions.get("process_zai_response"),
-        "stream": _loaded_functions.get("make_zai_request_openai_stream"),
     },
     "openai": {
         "request": _loaded_functions.get("make_openai_request"),
@@ -336,21 +212,18 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "process": _loaded_functions.get("process_anthropic_response"),
         "stream": _loaded_functions.get("make_anthropic_request_stream"),
     },
-    "deepinfra": {
-        "request": _loaded_functions.get("make_deepinfra_request_openai"),
-        "process": _loaded_functions.get("process_deepinfra_response"),
-        "stream": _loaded_functions.get("make_deepinfra_request_openai_stream"),
-    },
-    "nebius": {
-        "request": _loaded_functions.get("make_nebius_request_openai"),
-        "process": _loaded_functions.get("process_nebius_response"),
-        "stream": _loaded_functions.get("make_nebius_request_openai_stream"),
-    },
-    "canopywave": {
-        "request": _loaded_functions.get("make_canopywave_request_openai"),
-        "process": _loaded_functions.get("process_canopywave_response"),
-        "stream": _loaded_functions.get("make_canopywave_request_openai_stream"),
-    },
+    # OpenAI-compatible providers consolidated onto the config-driven adapter
+    # (src/services/providers/openai_compat.py + adapter_configs.py).
+    "deepinfra": _safe_adapter_routing("deepinfra"),
+    "together": _safe_adapter_routing("together"),
+    "fireworks": _safe_adapter_routing("fireworks"),
+    "groq": _safe_adapter_routing("groq"),
+    "zai": _safe_adapter_routing("zai"),
+    # Tier-2 providers (Task 18)
+    "deepseek": _safe_adapter_routing("deepseek"),
+    "moonshot": _safe_adapter_routing("moonshot"),
+    "minimax": _safe_adapter_routing("minimax"),
+    "xiaomi": _safe_adapter_routing("xiaomi"),
 }
 
 # Strip disabled providers from routing so they are completely unreachable

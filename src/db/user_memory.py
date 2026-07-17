@@ -1,15 +1,18 @@
 """Portable per-user memory store (Gatewayz One Phase 4).
 
-CRUD over ``public.user_memory`` — the model-agnostic facts/preferences the
-context assembler (:mod:`src.services.context_assembly_bridge`) injects into a
-request's context. The table is RLS-locked (service-role only), so all access
+CRUD over ``public.user_memory`` — the model-agnostic facts/preferences a user
+has accumulated. The table is RLS-locked (service-role only), so all access
 goes through the backend service client here.
 
-Reads are served from a short in-process TTL cache so the chat hot path (which
-loads a user's memory on every request when context assembly is enabled) does not
-pay a DB round-trip per request — at most one query per user per ``_CACHE_TTL``.
-Reads never raise (return ``[]`` on failure); writes raise so callers/routes can
-surface the error, and invalidate the user's cache entry.
+NOTE: The context-assembly subsystem that used to read this table on the chat
+hot path (``src.services.context_assembly_bridge``) was cut in the MVP
+refactor (Task 6, non-goal). This module and its CRUD routes
+(``src.routes.user_memory``) are retained — the live chat UI's settings/memory
+page still depends on them.
+
+Reads are served from a short in-process TTL cache. Reads never raise (return
+``[]`` on failure); writes raise so callers/routes can surface the error, and
+invalidate the user's cache entry.
 """
 
 from __future__ import annotations

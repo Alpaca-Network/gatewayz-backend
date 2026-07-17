@@ -1,8 +1,14 @@
 """
-CM-13 Observability: Prometheus, Sentry, OpenTelemetry, Audit Logging
+CM-13 Observability: Prometheus, Sentry, Audit Logging
 
-Tests verifying that Prometheus metrics, Sentry error capture,
-OpenTelemetry tracing, and activity audit logging are properly wired.
+Tests verifying that Prometheus metrics, Sentry error capture, and activity
+audit logging are properly wired.
+
+NOTE: OpenTelemetry/Tempo tracing was torn down as part of the MVP
+observability teardown (refactor(mvp) task 11) — see NORTH_STAR.md
+("basic metrics + error tracking, NOT a 12-module observability stack").
+CM-13.7 (OpenTelemetry trace creation) is removed accordingly; the spec
+itself is expected to be updated in a later phase.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -125,19 +131,11 @@ class TestCM1306SentryCapturesExceptions:
 
 # ---------------------------------------------------------------------------
 # CM-13.7  OpenTelemetry trace created per request
+#
+# REMOVED: OpenTelemetry/Tempo tracing was torn down as part of the MVP
+# observability teardown (refactor(mvp) task 11). src/config/opentelemetry_config.py
+# no longer exists. This is a deliberate spec deviation, not a regression.
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
-class TestCM1307OpentelemetryTraceCreatedPerRequest:
-    def test_opentelemetry_trace_created_per_request(self):
-        """OpenTelemetryConfig.initialize() returns a bool indicating success/failure."""
-        from src.config.opentelemetry_config import OpenTelemetryConfig
-
-        # Reset state so initialize() actually runs
-        OpenTelemetryConfig._initialized = False
-
-        # Call initialize - it returns True (if deps available) or False (if not)
-        result = OpenTelemetryConfig.initialize()
-        assert isinstance(result, bool), "initialize() must return a bool"
 
 
 # ---------------------------------------------------------------------------

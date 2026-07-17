@@ -38,9 +38,6 @@ tiktoken>=0.7.0
 # To enable NotDiamond routing, install separately: pip install notdiamond
 # notdiamond>=0.3.35,<1.0.0
 
-# Analytics
-statsig-python-core==0.10.2
-posthog==6.7.8
 prometheus-client==0.21.0
 python-snappy==0.7.0
 protobuf==5.29.4
@@ -49,31 +46,9 @@ sentry-sdk[fastapi]>=2.20.0
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
 
-# OpenTelemetry - Pinned to prevent dependency resolution backtracking
-# packaging==24.0 (removed)
-opentelemetry-api==1.33.0
-opentelemetry-sdk==1.33.0
-opentelemetry-instrumentation==0.54b0
-opentelemetry-instrumentation-fastapi==0.54b0
-opentelemetry-instrumentation-httpx==0.54b0
-opentelemetry-instrumentation-requests==0.54b0
-opentelemetry-instrumentation-redis==0.54b0
-opentelemetry-exporter-otlp-proto-http==1.33.0
-
 # Loki Logging
 python-json-logger>=2.0.7
 python-logging-loki>=0.3.1
-
-# Arize AI Observability - Pinned to prevent dependency resolution issues
-arize-otel==0.11.0
-openinference-instrumentation-openai==0.1.41
-
-# OpenLLMetry (Traceloop SDK) - Standardized LLM Observability (optional)
-# Excluded from main requirements due to 30+ transitive instrumentation packages
-# (cohere, crewai, llamaindex, marqo, etc.) that cause dependency conflicts.
-# Code gracefully falls back when not installed (see traceloop_config.py).
-# To enable OpenLLMetry, install separately: pip install traceloop-sdk
-# traceloop-sdk>=0.45.0
 
 # Testing dependencies
 pytest==7.4.3

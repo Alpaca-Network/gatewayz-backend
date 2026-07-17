@@ -28,6 +28,8 @@ Usage:
         ...
 """
 
+from __future__ import annotations
+
 import logging
 import time
 from contextlib import asynccontextmanager, contextmanager
@@ -92,7 +94,7 @@ class AISpanContext:
         input_tokens: int = 0,
         output_tokens: int = 0,
         total_tokens: int | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set token usage attributes on the span.
 
         Sets both custom ai.* attributes (for backward compatibility) and
@@ -110,7 +112,7 @@ class AISpanContext:
             self.span.set_attribute("gen_ai.usage.total_tokens", total)
         return self
 
-    def set_cost(self, cost_usd: float) -> "AISpanContext":
+    def set_cost(self, cost_usd: float) -> AISpanContext:
         """Set the cost of this inference call in USD."""
         if self.span and OTEL_AVAILABLE:
             self.span.set_attribute("ai.cost.usd", cost_usd)
@@ -123,7 +125,7 @@ class AISpanContext:
         response_model: str,
         finish_reason: str | None = None,
         response_id: str | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set the actual model returned by the provider.
 
         This captures the response model which may differ from the requested model
@@ -152,7 +154,7 @@ class AISpanContext:
         top_p: float | None = None,
         frequency_penalty: float | None = None,
         presence_penalty: float | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set model generation parameters.
 
         Sets both custom ai.params.* attributes (for backward compatibility) and
@@ -181,7 +183,7 @@ class AISpanContext:
         original_model: str | None = None,
         fallback_used: bool = False,
         routing_strategy: str | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set routing decision information."""
         if self.span and OTEL_AVAILABLE:
             if original_model:
@@ -196,7 +198,7 @@ class AISpanContext:
         state: CircuitState,
         failure_count: int = 0,
         success_count: int = 0,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set circuit breaker state information."""
         if self.span and OTEL_AVAILABLE:
             self.span.set_attribute("ai.circuit.state", state.value)
@@ -208,7 +210,7 @@ class AISpanContext:
         self,
         cache_hit: bool,
         cache_key: str | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set cache hit/miss information."""
         if self.span and OTEL_AVAILABLE:
             self.span.set_attribute("ai.cache.hit", cache_hit)
@@ -221,7 +223,7 @@ class AISpanContext:
         user_id: str | None = None,
         api_key_hash: str | None = None,
         tier: str | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set user context information (redacted for privacy).
 
         Sets both custom user.* attributes and customer.id for model popularity tracking.
@@ -241,7 +243,7 @@ class AISpanContext:
         self,
         error: Exception,
         error_type: str | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Record an error on the span."""
         if self.span and OTEL_AVAILABLE:
             self.span.set_status(Status(StatusCode.ERROR, str(error)))
@@ -255,7 +257,7 @@ class AISpanContext:
         queue_time_ms: float | None = None,
         inference_time_ms: float | None = None,
         network_time_ms: float | None = None,
-    ) -> "AISpanContext":
+    ) -> AISpanContext:
         """Set latency breakdown for detailed performance analysis."""
         if self.span and OTEL_AVAILABLE:
             if queue_time_ms is not None:
@@ -266,7 +268,7 @@ class AISpanContext:
                 self.span.set_attribute("ai.latency.network_ms", network_time_ms)
         return self
 
-    def add_event(self, name: str, attributes: dict | None = None) -> "AISpanContext":
+    def add_event(self, name: str, attributes: dict | None = None) -> AISpanContext:
         """Add an event to the span timeline."""
         if self.span and OTEL_AVAILABLE:
             self.span.add_event(name, attributes=attributes or {})

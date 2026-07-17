@@ -1,8 +1,8 @@
 """Rate-limited operational alerting for provider-level failures.
 
-Reuses NotificationService's existing Resend email integration — this is
-NOT the user-facing notification system (src/schemas/notification.py
-NotificationType enum), it's a separate ops channel to OPS_ALERT_EMAIL.
+Reuses EnhancedNotificationService's existing Resend email integration —
+this is a separate ops channel to OPS_ALERT_EMAIL, not a user-facing
+notification.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import logging
 import time
 
 from src.config import Config
-from src.services.notification import NotificationService
+from src.enhanced_notification_service import EnhancedNotificationService
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ def alert_provider_auth_failure(provider: str, model: str, error_detail: str) ->
 
     def _send() -> None:
         try:
-            service = NotificationService()
+            service = EnhancedNotificationService()
             sent = service.send_email_notification(
                 to_email=Config.OPS_ALERT_EMAIL,
                 subject=f"[Gatewayz] {provider} authentication failure",

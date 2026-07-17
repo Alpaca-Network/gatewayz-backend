@@ -1,62 +1,17 @@
-"""Tests for cost-plus markup on image/audio pricing + the get_image_cost arity fix.
+"""Tests for cost-plus markup on audio pricing.
 
-Image and audio charges previously skipped PRICING_MARKUP (no margin, unlike chat).
-These verify the markup is now applied and that get_image_cost returns a 4-tuple on
-both its config (Tier 1) and fallback (Tier 2) paths.
+Audio charges previously skipped PRICING_MARKUP (no margin, unlike chat).
+These verify the markup is now applied.
+
+Note: the matching image-pricing tests were removed alongside src/routes/images.py
+(MVP refactor Task 7 — image generation cut, no frontend usage).
 """
 
 from unittest.mock import patch
 
 from src.routes.audio import get_audio_cost
-from src.routes.images import get_image_cost
 
 MARKUP = 2.0  # use a distinctive factor so markup application is unambiguous
-
-
-# --------------------------------------------------------------------------
-# get_image_cost — markup + 4-tuple arity
-# --------------------------------------------------------------------------
-
-
-def test_image_config_path_applies_markup_and_returns_4_tuple():
-    # Tier 1: manual_pricing.json hit. Previously returned a 3-tuple (a bug,
-    # since callers unpack 4). Now must return 4 values, markup applied.
-    with (
-        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
-        patch("src.routes.images.get_image_pricing", return_value=(0.04, False)),
-    ):
-        result = get_image_cost("deepinfra", "some-model", num_images=2)
-        assert len(result) == 4
-        total, per_image, is_fallback, res_mult = result
-        assert per_image == 0.04 * MARKUP
-        assert total == 0.04 * MARKUP * 2
-        assert is_fallback is False
-        assert res_mult == 1.0
-
-
-def test_image_fallback_path_applies_markup():
-    # Tier 2+: hardcoded fallback (get_image_pricing returns None).
-    with (
-        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
-        patch("src.routes.images.get_image_pricing", return_value=None),
-    ):
-        total, per_image, is_fallback, res_mult = get_image_cost(
-            "fal", "flux-pro", num_images=1
-        )  # flux-pro = 0.05 in the hardcoded dict, size=None -> res mult 1.0
-        assert per_image == 0.05 * 1.0 * MARKUP
-        assert total == 0.05 * 1.0 * MARKUP
-        assert is_fallback is False
-
-
-def test_image_unknown_provider_applies_markup():
-    with (
-        patch("src.routes.images.Config.PRICING_MARKUP", MARKUP),
-        patch("src.routes.images.get_image_pricing", return_value=None),
-    ):
-        total, per_image, is_fallback, _ = get_image_cost("nobody", "x", num_images=1)
-        # UNKNOWN_PROVIDER_DEFAULT_COST = 0.05
-        assert per_image == 0.05 * MARKUP
-        assert is_fallback is True
 
 
 # --------------------------------------------------------------------------

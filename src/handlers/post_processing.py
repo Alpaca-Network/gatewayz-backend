@@ -5,7 +5,7 @@ import logging
 
 from src.db.activity import get_provider_from_model, log_activity
 from src.db.api_keys import increment_api_key_usage
-from src.db.chat_completion_requests_enhanced import save_chat_completion_request_with_cost
+from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.chat_history import get_chat_session, save_chat_message
 from src.db.plans import enforce_plan_limits
 from src.services.anonymous_rate_limiter import record_anonymous_request
@@ -20,7 +20,7 @@ from src.services.prometheus_metrics import (
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.utils.ai_tracing import AIRequestType, AITracer
-from src.utils.exceptions import APIExceptions
+from src.utils.errors import APIExceptions
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)

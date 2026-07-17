@@ -9,8 +9,6 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from src.config import Config
-from src.services.bug_fix_generator import BugFixGenerator, get_bug_fix_generator
 from src.services.monitoring.error_monitor import ErrorMonitor, get_error_monitor
 
 logger = logging.getLogger(__name__)
@@ -43,7 +41,6 @@ class AutonomousMonitor:
         self.critical_error_threshold = critical_error_threshold
         self.lookback_hours = lookback_hours
         self.error_monitor: ErrorMonitor | None = None
-        self.bug_fix_generator: BugFixGenerator | None = None
         self.is_running = False
         self.last_scan: datetime | None = None
         self.errors_since_last_fix: int = 0
@@ -59,14 +56,12 @@ class AutonomousMonitor:
             logger.info("Initializing autonomous monitor...")
             self.error_monitor = await get_error_monitor()
             if self.auto_fix_enabled:
-                anthropic_key = getattr(Config, "ANTHROPIC_API_KEY", None)
-                if anthropic_key:
-                    self.bug_fix_generator = await get_bug_fix_generator()
-                else:
-                    logger.warning(
-                        "ANTHROPIC_API_KEY not configured; disabling autonomous auto-fix generation"
-                    )
-                    self.auto_fix_enabled = False
+                # Auto-fix generation (bug_fix_generator) was removed as part of the
+                # MVP provider purge; this feature is no longer available.
+                logger.warning(
+                    "Auto-fix generation is no longer available; disabling autonomous auto-fix"
+                )
+                self.auto_fix_enabled = False
             logger.info("✓ Autonomous monitor initialized")
         except Exception as e:
             logger.error(f"Failed to initialize autonomous monitor: {e}")
@@ -186,49 +181,8 @@ class AutonomousMonitor:
                 logger.warning(f"Found {len(critical)} critical/high errors")
                 self.errors_since_last_fix += len(critical)
 
-                # Generate fixes for critical errors if auto-fix is enabled
-                if self.auto_fix_enabled and self.bug_fix_generator:
-                    await self._generate_fixes_for_critical(critical)
-
         except Exception as e:
             logger.error(f"Error scanning for errors: {e}", exc_info=True)
-
-    async def _generate_fixes_for_critical(self, critical_errors):
-        """Generate fixes for critical errors."""
-        if not self.bug_fix_generator:
-            return
-
-        try:
-            # Filter to fixable errors
-            fixable = [e for e in critical_errors if e.fixable]
-
-            if not fixable:
-                logger.debug(f"No fixable critical errors (out of {len(critical_errors)})")
-                return
-
-            logger.info(f"Generating fixes for {len(fixable)} critical errors")
-
-            # Process errors
-            fixes = await self.bug_fix_generator.process_multiple_errors(
-                fixable,
-                create_prs=True,
-            )
-
-            if fixes:
-                logger.info(f"Generated {len(fixes)} fixes")
-                self.errors_since_last_fix = 0  # Reset counter
-
-                # Log fix details
-                for fix in fixes:
-                    logger.info(
-                        f"Fix created: {fix.error_category} - {fix.error_message[:50]} "
-                        f"(PR: {fix.pr_url or 'pending'})"
-                    )
-            else:
-                logger.warning("No fixes were generated successfully")
-
-        except Exception as e:
-            logger.error(f"Error generating fixes: {e}", exc_info=True)
 
     async def get_status(self) -> dict:
         """Get current monitoring status."""

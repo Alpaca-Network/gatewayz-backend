@@ -235,7 +235,7 @@ class TestDetailedErrorFactory:
 
     def test_provider_unavailable_creates_503_error(self):
         """Test that provider_unavailable returns 503 status"""
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         error_response = DetailedErrorFactory.provider_unavailable(
             provider="openrouter",
@@ -250,7 +250,7 @@ class TestDetailedErrorFactory:
 
     def test_provider_unavailable_contains_helpful_info(self):
         """Test that error contains helpful information for users"""
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         error_response = DetailedErrorFactory.provider_unavailable(
             provider="openrouter",
