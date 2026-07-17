@@ -617,8 +617,6 @@ async def privy_auth(
 
     try:
         logger.info(f"Privy auth request for user: {request.user.id}")
-        if request.referral_code:
-            logger.info(f"Referral code provided in auth request: {request.referral_code}")
         logger.info(f"is_new_user flag: {request.is_new_user}")
 
         # ISSUE FIX #2: Validate Privy request structure before accessing nested fields

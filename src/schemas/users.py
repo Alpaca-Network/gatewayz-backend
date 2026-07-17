@@ -12,7 +12,6 @@ class UserRegistrationRequest(BaseModel):
     auth_method: AuthMethod = AuthMethod.EMAIL
     environment_tag: str = "live"
     key_name: str = "Primary Key"
-    referral_code: str | None = None  # Optional referral code from another user
 
 
 class UserRegistrationResponse(BaseModel):
