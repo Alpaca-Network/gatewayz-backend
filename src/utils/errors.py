@@ -1268,8 +1268,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.model_not_found(
             model_id=model_id,
@@ -1302,8 +1302,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.insufficient_credits(
             current_credits=current_credits,
@@ -1358,8 +1358,8 @@ class APIExceptions:
             ...     input_tokens=100
             ... )
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.insufficient_credits_for_reservation(
             current_credits=current_credits,
@@ -1394,8 +1394,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.invalid_api_key(
             reason=reason,
@@ -1431,8 +1431,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.rate_limit_exceeded(
             limit_type=limit_type,
@@ -1470,8 +1470,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.provider_error(
             provider=provider,
@@ -1513,8 +1513,8 @@ class APIExceptions:
         Returns:
             HTTPException with detailed error response
         """
-        from src.utils.errors import DetailedErrorFactory
         from src.utils.error_handlers import create_error_response_dict
+        from src.utils.errors import DetailedErrorFactory
 
         error = DetailedErrorFactory.invalid_parameter(
             parameter_name=parameter_name,

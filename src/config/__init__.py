@@ -6,23 +6,20 @@ Consolidates all configuration-related modules.
 # Re-export main Config class for backward compatibility
 from src.config.config import Config
 
+# Re-export Supabase configuration
 # Re-export database configuration
 from src.config.supabase_config import (
     DatabaseConfig,
     close_db_connections,
+    get_client,
     get_db_config,
     get_db_connection,
-    is_db_available,
-    test_db_connection,
-)
-
-# Re-export Supabase configuration
-from src.config.supabase_config import (
-    get_client,
     get_initialization_status,
     get_supabase_client,
     init_db,
+    is_db_available,
     test_connection,
+    test_db_connection,
 )
 
 # Re-export Redis configuration (if needed)
