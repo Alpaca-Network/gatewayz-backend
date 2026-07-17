@@ -219,6 +219,11 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     "fireworks": _safe_adapter_routing("fireworks"),
     "groq": _safe_adapter_routing("groq"),
     "zai": _safe_adapter_routing("zai"),
+    # Tier-2 providers (Task 18)
+    "deepseek": _safe_adapter_routing("deepseek"),
+    "moonshot": _safe_adapter_routing("moonshot"),
+    "minimax": _safe_adapter_routing("minimax"),
+    "xiaomi": _safe_adapter_routing("xiaomi"),
 }
 
 # Strip disabled providers from routing so they are completely unreachable

@@ -84,6 +84,37 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         display_name="Z.AI",
         client_factory=get_zai_pooled_client,
     ),
+    # -- Tier-2 providers (Task 18) ---------------------------------------
+    # None of these use a pooled client_factory or middleware quirks: parity
+    # with the deepinfra config (plain OpenAI client built per request).
+    "deepseek": ProviderConfig(
+        slug="deepseek",
+        base_url="https://api.deepseek.com/v1",
+        api_key_env="DEEPSEEK_API_KEY",
+        display_name="DeepSeek",
+    ),
+    "moonshot": ProviderConfig(
+        slug="moonshot",
+        base_url="https://api.moonshot.ai/v1",
+        api_key_env="MOONSHOT_API_KEY",
+        display_name="Moonshot AI",
+    ),
+    "minimax": ProviderConfig(
+        slug="minimax",
+        base_url="https://api.minimax.io/v1",
+        api_key_env="MINIMAX_API_KEY",
+        display_name="MiniMax",
+    ),
+    # Verified live: api.xiaomimimo.com resolves to Xiaomi-owned infra
+    # (mimo-pri-azams.alb.xiaomi.com) and GET /v1/models returns an
+    # OpenAI-shaped 401 without a key. No XIAOMI_API_KEY is provisioned yet
+    # (see task-18-report.md) so this entry is code-only / untested live.
+    "xiaomi": ProviderConfig(
+        slug="xiaomi",
+        base_url="https://api.xiaomimimo.com/v1",
+        api_key_env="XIAOMI_API_KEY",
+        display_name="Xiaomi MiMo",
+    ),
 }
 
 ADAPTERS: dict[str, OpenAICompatAdapter] = {

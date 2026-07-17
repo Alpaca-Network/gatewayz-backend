@@ -317,6 +317,18 @@ class Config:
     # Z.AI Configuration (Zhipu AI - GLM models)
     ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
 
+    # DeepSeek Configuration (deepseek-chat / deepseek-reasoner)
+    DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+
+    # Moonshot AI Configuration (Kimi models)
+    MOONSHOT_API_KEY = os.environ.get("MOONSHOT_API_KEY")
+
+    # MiniMax Configuration (MiniMax-M series models)
+    MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY")
+
+    # Xiaomi MiMo Configuration (MiMo model family)
+    XIAOMI_API_KEY = os.environ.get("XIAOMI_API_KEY")
+
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
 

@@ -389,10 +389,16 @@ EXPECTED_CONFIG = {
 
 
 class TestAdapterRegistry:
-    def test_contains_exactly_the_consolidated_slugs(self):
+    def test_contains_at_least_the_consolidated_slugs(self):
+        """ADAPTERS is a superset of the five Tier-1 consolidated providers.
+
+        Task 18 added four more config-driven entries (deepseek, moonshot,
+        minimax, xiaomi — see tests/services/providers/test_tier2_adapters.py)
+        onto the same registry, so this is no longer an exact-set check.
+        """
         from src.services.providers.adapter_configs import ADAPTERS
 
-        assert set(ADAPTERS) == set(CONSOLIDATED)
+        assert set(CONSOLIDATED).issubset(set(ADAPTERS))
 
     def test_all_entries_satisfy_protocol(self):
         from src.services.providers.adapter_configs import ADAPTERS
