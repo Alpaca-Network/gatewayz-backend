@@ -481,7 +481,7 @@ class Config:
     CONCURRENCY_QUEUE_TIMEOUT = float(os.environ.get("CONCURRENCY_QUEUE_TIMEOUT", "10.0"))
 
     # Pricing Sync Scheduler Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
-    # Pricing is now synced via model sync (provider_model_sync_service.py)
+    # Pricing is now synced via model sync (model_catalog_sync.py)
 
     # ============================================================================
     # MODEL SYNC CONFIGURATION
@@ -595,7 +595,7 @@ class Config:
     )
 
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
-    # Pricing is now synced via model sync (provider_model_sync_service.py)
+    # Pricing is now synced via model sync (model_catalog_sync.py)
     # No separate pricing sync configuration needed
 
     # Metrics Aggregation Configuration

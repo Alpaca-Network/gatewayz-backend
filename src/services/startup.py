@@ -475,37 +475,30 @@ async def lifespan(app):
 
         _create_background_task(refresh_registry_background(), name="refresh_registry")
 
-        # Optionally sync high-priority models on startup (can be disabled for faster startup)
+        # Optionally sync high-priority models on startup (can be disabled for faster startup).
+        # Periodic model sync is handled by the scheduled_sync APScheduler (started below)
+        # and the external GitHub cron — the canonical catalog-sync engine is the single
+        # source (MVP Task 14: provider_model_sync_service's duplicate loop removed).
         sync_models_on_startup = os.environ.get("SYNC_MODELS_ON_STARTUP", "false").lower() == "true"
         if sync_models_on_startup:
 
             async def sync_initial_models_background():
                 try:
-                    from src.services.provider_model_sync_service import (
-                        sync_initial_models_on_startup,
-                    )
+                    from src.services.model_catalog_sync import sync_all_providers
 
-                    result = await sync_initial_models_on_startup()
-                    if result["success"]:
-                        logger.info(f"✓ Initial model sync: {result['total_models_synced']} models")
+                    # Warm a few high-priority providers quickly; the scheduler covers the rest.
+                    high_priority = ["openrouter", "openai", "anthropic", "groq"]
+                    result = await asyncio.to_thread(
+                        sync_all_providers, provider_slugs=high_priority, dry_run=False
+                    )
+                    if result.get("success"):
+                        logger.info(
+                            f"✓ Initial model sync: {result.get('total_models_synced', 0)} models"
+                        )
                 except Exception as e:
                     logger.warning(f"Initial model sync warning: {e}")
 
             _create_background_task(sync_initial_models_background(), name="sync_initial_models")
-
-        # Start background model sync task (runs every N hours)
-        model_sync_interval = int(os.environ.get("MODEL_SYNC_INTERVAL_HOURS", "6"))
-
-        async def start_model_sync_background():
-            try:
-                from src.services.provider_model_sync_service import start_background_model_sync
-
-                await start_background_model_sync(interval_hours=model_sync_interval)
-                logger.info(f"✓ Background model sync started (every {model_sync_interval}h)")
-            except Exception as e:
-                logger.warning(f"Background model sync warning: {e}")
-
-        _create_background_task(start_model_sync_background(), name="start_model_sync")
 
         # Initialize autonomous error monitoring in background
         async def init_error_monitoring_background():
@@ -739,15 +732,8 @@ async def lifespan(app):
 
     try:
         # Pricing sync scheduler shutdown removed (Phase 3, Issue #1063)
-
-        # Stop background model sync
-        try:
-            from src.services.provider_model_sync_service import stop_background_model_sync
-
-            await stop_background_model_sync()
-            logger.info("Background model sync stopped")
-        except Exception as e:
-            logger.warning(f"Model sync shutdown warning: {e}")
+        # Background model sync shutdown removed (MVP Task 14: the periodic loop
+        # is now the scheduled_sync APScheduler, stopped via stop_scheduler below).
 
         # Stop autonomous error monitoring
         try:

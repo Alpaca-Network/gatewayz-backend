@@ -19,20 +19,35 @@ from src.db.models_catalog_db import (
     flush_providers_table,
 )
 from src.security.deps import require_admin_or_env_key
-from src.services.incremental_sync import (
-    sync_all_providers_incremental,
-)
 from src.services.model_catalog_sync import (
     PROVIDER_FETCH_FUNCTIONS,
     sync_all_providers,
     sync_provider_models,
 )
-from src.services.provider_model_sync_service import (
-    sync_providers_to_database,
-    trigger_full_sync,
-)
 
 logger = logging.getLogger(__name__)
+
+
+async def _refresh_provider_registry() -> dict:
+    """Provider registry status. DB is the source of truth (Phase 2A), so this
+    is a no-op that reports success; provider rows are managed via migrations
+    and admin APIs, not synced from a registry."""
+    return {"success": True, "providers_synced": 0, "note": "DB is source of truth"}
+
+
+async def _full_provider_and_model_sync(dry_run: bool = False) -> dict:
+    """Combined provider + model sync using the canonical catalog-sync engine.
+
+    Returns ``{"success", "providers", "models"}`` matching the shape the sync
+    endpoints expect. The blocking model sync runs in a thread pool.
+    """
+    provider_result = await _refresh_provider_registry()
+    model_result = await asyncio.to_thread(sync_all_providers, dry_run=dry_run)
+    return {
+        "success": provider_result["success"] and model_result.get("success", False),
+        "providers": provider_result,
+        "models": model_result,
+    }
 
 router = APIRouter(
     prefix="/admin/model-sync",
@@ -450,22 +465,9 @@ async def trigger_full_provider_and_model_sync(
     try:
         logger.info("🚀 Starting full provider and model sync...")
 
+        result = await _full_provider_and_model_sync(dry_run=dry_run)
         if dry_run:
-            # For dry run, just call the sync functions without writing
-            provider_result = await sync_providers_to_database()
-
-            # Run blocking sync function in thread pool to avoid blocking event loop
-            model_result = await asyncio.to_thread(sync_all_providers, dry_run=True)
-
-            result = {
-                "success": True,
-                "providers": provider_result,
-                "models": model_result,
-                "dry_run": True,
-            }
-        else:
-            # Use the existing full sync function
-            result = await trigger_full_sync()
+            result["dry_run"] = True
 
         provider_success = result.get("providers", {}).get("success", False)
         model_success = result.get("models", {}).get("success", False)
@@ -508,7 +510,7 @@ async def sync_providers_only():
     try:
         logger.info("🔄 Syncing providers only...")
 
-        result = await sync_providers_to_database()
+        result = await _refresh_provider_registry()
 
         success = result.get("success", False)
 
@@ -756,7 +758,7 @@ async def reset_and_resync():
 
         # Step 2: Full sync (providers + models)
         logger.info("Step 2/3: Starting full sync...")
-        sync_result = await trigger_full_sync()
+        sync_result = await _full_provider_and_model_sync(dry_run=False)
 
         provider_success = sync_result.get("providers", {}).get("success", False)
         model_success = sync_result.get("models", {}).get("success", False)
@@ -877,96 +879,57 @@ async def sync_incremental(
     providers: list[str] | None = Query(
         None, description="Specific providers to sync. If not provided, syncs all providers."
     ),
-    dry_run: bool = Query(False, description="Detect changes but don't write to database"),
+    dry_run: bool = Query(False, description="Fetch but don't write to database"),
 ):
     """
-    🚀 **Incremental Sync with Change Detection** (Recommended)
+    Sync models from provider APIs to the database.
 
-    This is the **OPTIMIZED** sync method that:
-    1. Fetches models from ALL provider APIs
-    2. Compares with existing DB using content hashing (SHA-256)
-    3. **Only writes models that have changed** (new or updated)
-    4. Only invalidates cache for providers with changes
-    5. Invalidates global cache once at the end (if any changes)
-
-    ## Why Use This?
-    - **Minimal DB writes**: Only changed models are written
-    - **Minimal cache invalidation**: Only affected caches are cleared
-    - **No API downtime**: Doesn't block requests during sync
-    - **Detailed metrics**: See exactly what changed
-
-    ## Typical Results:
-    - Change rate: 2-5% (most models unchanged)
-    - Efficiency gain: 95-98% (fewer DB operations)
-    - Duration: 50-80% faster than full sync
-
-    ## Example Response:
-    ```json
-    {
-      "success": true,
-      "message": "Incremental sync completed successfully",
-      "details": {
-        "total_providers": 35,
-        "providers_synced": 35,
-        "providers_with_changes": 3,
-        "changed_providers": ["openrouter", "groq", "anthropic"],
-        "total_models_fetched": 13247,
-        "total_models_changed": 84,
-        "total_models_unchanged": 13163,
-        "total_models_synced": 84,
-        "change_rate_percent": 0.63,
-        "efficiency_gain_percent": 99.37,
-        "total_duration_seconds": 45.8
-      }
-    }
-    ```
+    Backwards-compatible alias for the full sync (`POST /admin/model-sync/all`).
+    The separate hash-based incremental engine was consolidated into the single
+    catalog-sync engine in the MVP refactor; this endpoint now performs a full
+    fetch-and-upsert of the requested providers (or all providers).
 
     Args:
         providers: Optional list of specific providers to sync
-        dry_run: If True, shows what would change without writing to DB
+        dry_run: If True, fetch and transform but don't write to DB
 
     Returns:
-        Detailed sync results with change metrics
+        Sync results including per-provider counts
     """
     start_time = time.time()
     logger.info(
-        f"🚀 [INCREMENTAL-SYNC-START] Incremental sync initiated | "
+        f"🔄 [SYNC-START] Model sync initiated | "
         f"providers={providers or 'all'} | dry_run={dry_run}"
     )
 
     try:
-        # Run incremental sync in background thread to avoid blocking event loop
-        logger.debug("[INCREMENTAL-SYNC] Starting sync in executor thread")
+        # Run the blocking sync in a background thread to avoid blocking the loop.
         result = await asyncio.to_thread(
-            sync_all_providers_incremental, provider_slugs=providers, dry_run=dry_run
+            sync_all_providers, provider_slugs=providers, dry_run=dry_run
         )
 
         if not result.get("success"):
-            error_msg = result.get("error", "Incremental sync failed")
-            logger.error(f"[INCREMENTAL-SYNC-FAILED] Sync operation failed | " f"error={error_msg}")
+            error_msg = result.get("error", "Model sync failed")
+            logger.error(f"[SYNC-FAILED] Sync operation failed | error={error_msg}")
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error_msg)
 
-        # Log detailed results
         total_duration = time.time() - start_time
         logger.info(
-            f"✅ [INCREMENTAL-SYNC-COMPLETE] Sync completed successfully | "
+            f"✅ [SYNC-COMPLETE] Sync completed successfully | "
             f"duration={total_duration:.2f}s | "
-            f"providers_synced={result.get('providers_synced', 0)}/{result.get('total_providers', 0)} | "
+            f"providers_processed={result.get('providers_processed', 0)} | "
             f"models_fetched={result.get('total_models_fetched', 0):,} | "
-            f"models_changed={result.get('total_models_changed', 0):,} | "
-            f"change_rate={result.get('change_rate_percent', 0):.2f}% | "
-            f"efficiency_gain={result.get('efficiency_gain_percent', 0):.2f}% | "
-            f"providers_with_changes={result.get('providers_with_changes', 0)}"
+            f"models_synced={result.get('total_models_synced', 0):,} | "
+            f"models_skipped={result.get('total_models_skipped', 0):,}"
         )
 
         message = (
             f"{'[DRY RUN] ' if dry_run else ''}"
-            f"Incremental sync completed. "
-            f"Providers: {result.get('providers_synced', 0)}/{result.get('total_providers', 0)}. "
-            f"Models: {result.get('total_models_changed', 0):,} changed, "
-            f"{result.get('total_models_unchanged', 0):,} unchanged "
-            f"({result.get('change_rate_percent', 0):.1f}% change rate). "
-            f"Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%"
+            f"Sync completed. "
+            f"Providers processed: {result.get('providers_processed', 0)}. "
+            f"Models synced: {result.get('total_models_synced', 0):,} "
+            f"(fetched {result.get('total_models_fetched', 0):,}, "
+            f"skipped {result.get('total_models_skipped', 0):,})."
         )
 
         return SyncResponse(success=True, message=message, details=result)
@@ -976,7 +939,7 @@ async def sync_incremental(
     except Exception as e:
         total_duration = time.time() - start_time
         logger.error(
-            f"❌ [INCREMENTAL-SYNC-EXCEPTION] Unexpected error | "
+            f"❌ [SYNC-EXCEPTION] Unexpected error | "
             f"duration={total_duration:.2f}s | "
             f"error_type={type(e).__name__} | error={str(e)}",
             exc_info=True,

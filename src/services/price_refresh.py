@@ -2,7 +2,7 @@
 Lightweight, price-only background refresh.
 
 This is a deliberately minimal alternative to the full scheduled sync
-(``src.services.incremental_sync.sync_all_providers_incremental``). The full
+(``src.services.model_catalog_sync.sync_all_providers``). The full
 sync fetches every model from every provider, writes many columns, runs stale
 detection, and rebuilds/warms the entire catalog cache — which blocks resources
 for 10-20 minutes and causes 499 errors.

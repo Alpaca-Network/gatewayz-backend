@@ -873,20 +873,15 @@ async def get_models(
                 # the aggregated result directly
                 all_models_list = all_models_from_cache
             else:
-                # PERFORMANCE FIX: Use parallel fetching instead of sequential
-                # This reduces fetch time from 25*60s = 1500s to ~30s max
-                # Each provider has 15s timeout enforced via nested executor
-                logger.warning("Aggregated cache returned empty, using PARALLEL provider fetches")
-                try:
-                    from src.services.parallel_catalog_fetch import fetch_and_merge_all_providers
-
-                    all_models_list = merge_models_by_slug(
-                        await fetch_and_merge_all_providers(timeout=30.0)
-                    )
-                    logger.info(f"Parallel fetch returned {len(all_models_list)} models")
-                except Exception as e:
-                    logger.error(f"Parallel fetch failed: {e}")
-                    all_models_list = []
+                # Aggregated cache empty: the catalog is served from the DB via
+                # the model-sync engine + cache. The legacy live parallel-fetch
+                # fallback was removed (MVP Task 14). Return empty here; the next
+                # scheduled/cron sync repopulates the cache.
+                logger.warning(
+                    "Aggregated cache returned empty for gateway=all; "
+                    "returning empty list (cache repopulates on next model sync)"
+                )
+                all_models_list = []
         else:
             all_models_list = []
             # Log warning if unique_models is requested for non-all gateway

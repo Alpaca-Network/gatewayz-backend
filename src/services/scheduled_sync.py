@@ -130,31 +130,26 @@ async def refresh_offers_projection_after(reason: str) -> None:
 
 async def run_scheduled_model_sync():
     """
-    Run the scheduled model sync job with incremental change detection.
+    Run the scheduled model sync job.
 
     This function is called by APScheduler at the configured interval.
-    It syncs all providers to the database using efficient incremental sync:
-    - Fetches models from ALL providers
-    - Compares with DB using content hashing
-    - Only writes changed/new models
-    - Only invalidates cache for providers with changes
-
-    This minimizes DB writes and cache invalidation overhead.
+    It syncs all providers to the database via the canonical catalog-sync
+    engine (``model_catalog_sync.sync_all_providers``): fetches the latest
+    model catalog from every provider API and upserts to the DB.
     """
-    from src.services.incremental_sync import sync_all_providers_incremental
+    from src.services.model_catalog_sync import sync_all_providers
 
     start_time = datetime.now(UTC)
     _last_sync_status["last_run_time"] = start_time
     _last_sync_status["total_runs"] += 1
 
     logger.info("=" * 80)
-    logger.info("Starting scheduled incremental model sync")
+    logger.info("Starting scheduled model sync")
     logger.info("=" * 80)
 
     try:
-        # Run incremental sync in background thread to avoid blocking event loop
-        # This uses content-based change detection to minimize DB writes
-        result = await asyncio.to_thread(sync_all_providers_incremental, dry_run=False)
+        # Run the full sync in a background thread to avoid blocking event loop.
+        result = await asyncio.to_thread(sync_all_providers, dry_run=False)
 
         # Calculate duration
         end_time = datetime.now(UTC)
@@ -169,27 +164,22 @@ async def run_scheduled_model_sync():
             _last_sync_status["last_models_synced"] = result.get("total_models_synced", 0)
 
             logger.info("=" * 80)
-            logger.info("✅ Scheduled incremental sync SUCCESSFUL")
+            logger.info("✅ Scheduled sync SUCCESSFUL")
             logger.info(f"   Duration: {duration:.2f}s")
             logger.info(f"   Models fetched: {result.get('total_models_fetched', 0):,}")
-            logger.info(f"   Models changed: {result.get('total_models_changed', 0):,}")
             logger.info(f"   Models synced: {result.get('total_models_synced', 0):,}")
-            logger.info(f"   Change rate: {result.get('change_rate_percent', 0):.1f}%")
-            logger.info(f"   Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%")
-            logger.info(
-                f"   Providers synced: {result.get('providers_synced', 0)}/{result.get('total_providers', 0)}"
-            )
-            logger.info(f"   Providers with changes: {result.get('providers_with_changes', 0)}")
+            logger.info(f"   Models skipped: {result.get('total_models_skipped', 0):,}")
+            logger.info(f"   Providers processed: {result.get('providers_processed', 0)}")
             logger.info("=" * 80)
 
-            # Proactively warm caches so no user pays the rebuild cost
-            if result.get("providers_with_changes", 0) > 0:
-                changed = result.get("changed_providers", [])
+            # Proactively warm caches so no user pays the rebuild cost. A full
+            # sync always refreshes the catalog, so warm on any successful run.
+            if result.get("total_models_synced", 0) > 0:
                 asyncio.create_task(
-                    warm_caches_after_sync(changed),
+                    warm_caches_after_sync([]),
                     name="post_sync_cache_warm",
                 )
-                logger.info(f"Cache warming task queued for {len(changed)} changed providers")
+                logger.info("Cache warming task queued after model sync")
 
             # Refresh the smart router's offer projection from the updated catalog.
             asyncio.create_task(
