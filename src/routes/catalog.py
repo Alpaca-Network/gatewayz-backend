@@ -2383,21 +2383,6 @@ async def get_specific_model_api_legacy(
     )
 
 
-@router.get("/models/{developer_name}", tags=["models"])
-async def get_developer_models_api(
-    developer_name: str,
-    limit: int = Query(100, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
-    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
-):
-    return await get_developer_models(
-        developer_name=developer_name,
-        limit=limit,
-        offset=offset,
-        gateway=gateway,
-    )
-
-
 @router.get("/models/search", tags=["models"])
 async def search_models(
     q: str | None = Query(
@@ -2629,6 +2614,21 @@ async def search_models(
     except Exception as e:
         logger.error(f"Failed to search models: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to search models: {str(e)}")
+
+
+@router.get("/models/{developer_name}", tags=["models"])
+async def get_developer_models_api(
+    developer_name: str,
+    limit: int = Query(100, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
+    offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
+    gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
+):
+    return await get_developer_models(
+        developer_name=developer_name,
+        limit=limit,
+        offset=offset,
+        gateway=gateway,
+    )
 
 
 # Helper functions for model comparison
