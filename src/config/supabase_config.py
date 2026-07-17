@@ -838,8 +838,6 @@ supabase = _LazySupabaseClient()
 # consolidated here as the single DB-config module. Moved verbatim.
 # ============================================================================
 
-import logging
-import os
 from contextlib import contextmanager
 
 # Conditional imports

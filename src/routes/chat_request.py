@@ -12,8 +12,6 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import HTTPException
-
 from src.routes.chat_helpers import validate_and_adjust_max_tokens
 from src.services.health_routing import (
     get_healthy_alternative_provider,
