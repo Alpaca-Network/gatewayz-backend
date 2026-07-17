@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from src.config.supabase_config import get_client_for_query
-from src.db.models_catalog_db import bulk_upsert_models
+from src.db.models_catalog_db import bulk_upsert_models, deactivate_models_by_provider
 from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
@@ -699,11 +699,42 @@ def sync_provider_models(
             }
 
         if not provider.get("is_active"):
+            # Sync-time delisting: an inactive (unroutable) provider is not
+            # skipped as a pure no-op — its previously-synced models are
+            # bulk-deactivated so the live catalog reflects routable reality
+            # (North Star §5). This is the provider-level counterpart to the
+            # per-model "no_routable_provider" delist in
+            # transform_normalized_model_to_db_schema, which an inactive
+            # provider never reaches (this early return happens first).
+            if dry_run:
+                logger.info(
+                    f"[{provider_slug.upper()}] DRY RUN: provider is inactive — "
+                    f"would delist its previously-active models"
+                )
+                return {
+                    "success": True,
+                    "provider": provider_slug,
+                    "provider_id": provider["id"],
+                    "models_fetched": 0,
+                    "models_synced": 0,
+                    "models_delisted": 0,
+                    "reason": "provider_inactive",
+                    "dry_run": True,
+                }
+
+            delisted_count = deactivate_models_by_provider(provider["id"])
+            logger.info(
+                f"[{provider_slug.upper()}] Provider inactive | "
+                f"Delisted {delisted_count} previously-active model(s)"
+            )
             return {
-                "success": False,
-                "error": f"Provider '{provider_slug}' is inactive",
+                "success": True,
+                "provider": provider_slug,
+                "provider_id": provider["id"],
                 "models_fetched": 0,
                 "models_synced": 0,
+                "models_delisted": delisted_count,
+                "reason": "provider_inactive",
             }
 
         # Get fetch function for this provider (DB-first, fallback to hardcoded)

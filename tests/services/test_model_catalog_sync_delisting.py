@@ -136,3 +136,56 @@ def test_sync_provider_models_counts_and_reports_delisted():
     assert result["models_transformed"] == 3
     # Only the unpriced paid model should be delisted; priced + free stay active.
     assert result["models_delisted"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# sync_provider_models — inactive provider retroactively delists its models
+# --------------------------------------------------------------------------- #
+
+
+def test_sync_provider_models_inactive_provider_delists_previously_active_models():
+    # End-to-end: an inactive provider must not be a pure no-op. Its
+    # previously-synced, currently-active models must be bulk-deactivated
+    # (the provider-level counterpart to the per-model "no_routable_provider"
+    # delist, which an inactive provider never reaches since this early
+    # return happens before the fetch/transform loop).
+    with (
+        patch(
+            "src.services.model_catalog_sync.ensure_provider_exists",
+            return_value={"id": 42, "slug": "vendor", "is_active": False},
+        ),
+        patch(
+            "src.services.model_catalog_sync.deactivate_models_by_provider",
+            return_value=3,
+        ) as mock_deactivate,
+    ):
+        result = sync_provider_models("vendor")
+
+    mock_deactivate.assert_called_once_with(42)
+    assert result["success"] is True
+    assert result["models_delisted"] == 3
+    assert result["reason"] == "provider_inactive"
+    assert result["models_fetched"] == 0
+    assert result["models_synced"] == 0
+
+
+def test_sync_provider_models_active_provider_does_not_bulk_delist():
+    # Sanity check: the bulk-delist path must only fire for inactive
+    # providers. An active provider's normal sync must never call it.
+    with (
+        patch(
+            "src.services.model_catalog_sync.ensure_provider_exists",
+            return_value={"id": 1, "slug": "vendor", "is_active": True},
+        ),
+        patch(
+            "src.services.dynamic_provider_loader.get_fetch_models_function",
+            return_value=_fake_models,
+        ),
+        patch(
+            "src.services.model_catalog_sync.deactivate_models_by_provider"
+        ) as mock_deactivate,
+    ):
+        result = sync_provider_models("vendor", dry_run=True)
+
+    mock_deactivate.assert_not_called()
+    assert result["success"] is True
