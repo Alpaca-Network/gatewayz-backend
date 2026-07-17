@@ -39,7 +39,7 @@ def _log_telemetry_startup_status() -> None:
 
     Signals covered
     ---------------
-    1. Loki       — structured log shipping (push → Grafana Loki)
+    1. Loki       — error-monitor log queries (Grafana Loki query_range)
     2. Prometheus — metrics scrape endpoint + optional remote-write to Mimir
     3. Sentry     — error monitoring + Sentry-side profiling
     """
@@ -51,7 +51,7 @@ def _log_telemetry_startup_status() -> None:
         return "ENABLED " if enabled else "DISABLED"
 
     loki_enabled = Config.LOKI_ENABLED
-    loki_push = Config.LOKI_PUSH_URL or "(not set)"
+    loki_query = Config.LOKI_QUERY_URL or "(not set)"
 
     prometheus_enabled = Config.PROMETHEUS_ENABLED
     prom_remote_write = Config.PROMETHEUS_REMOTE_WRITE_URL or "(not set)"
@@ -65,7 +65,7 @@ def _log_telemetry_startup_status() -> None:
         "=" * W,
         f"  {'Signal':<14} {'Status':<10} Detail",
         "  " + "-" * (W - 2),
-        f"  {'Loki':<14} {_status(loki_enabled):<10} push={loki_push}",
+        f"  {'Loki':<14} {_status(loki_enabled):<10} query={loki_query}",
         f"  {'Prometheus':<14} {_status(prometheus_enabled):<10} scrape=/metrics | remote_write={prom_remote_write}",
         f"  {'Sentry':<14} {_status(sentry_enabled):<10} env={sentry_env}",
         "  " + "-" * (W - 2),
@@ -73,8 +73,8 @@ def _log_telemetry_startup_status() -> None:
 
     # Highlight any signals that are enabled but missing a required endpoint
     warnings = []
-    if loki_enabled and loki_push == "(not set)":
-        warnings.append("  WARN: LOKI_ENABLED=true but LOKI_PUSH_URL is not set")
+    if loki_enabled and loki_query == "(not set)":
+        warnings.append("  WARN: LOKI_ENABLED=true but LOKI_QUERY_URL is not set")
 
     for w in warnings:
         lines.append(w)

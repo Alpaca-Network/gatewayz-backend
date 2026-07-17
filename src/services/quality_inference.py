@@ -13,9 +13,8 @@ prior is used and adjusted only by the reasoning/coder flags.
 
 Key properties:
   * `infer_quality()` is PURE and deterministic — no I/O, fully unit-testable.
-  * Returns the full 12-task-type map so the former `model_selector` (removed in
-    the MVP refactor) was quality-aware for every category, and
-    `reduce_quality_scores` gets a real `unknown`/code prior for the
+  * Returns the full 12-task-type map so every category has a quality score,
+    and `reduce_quality_scores` gets a real `unknown`/code prior for the
     categorizer's smartest/coding/tier tags.
   * Missing size never fabricates a large-model score — the neutral base is
     intentionally mid-pack so the `smartest` tag (quality>=85) only fires for
@@ -28,8 +27,7 @@ import math
 import re
 from dataclasses import dataclass
 
-# The 12 task types the former model_selector.py (removed in the MVP refactor)
-# scored against (mirrors ClassificationCategory).
+# The 12 task types scored (mirrors the ClassificationCategory set).
 TASK_TYPES: tuple[str, ...] = (
     "simple_qa",
     "complex_reasoning",

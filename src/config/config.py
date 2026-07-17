@@ -433,10 +433,6 @@ class Config:
     GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
     GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
 
-    # Grafana Cloud Loki (Logs)
-    GRAFANA_LOKI_USERNAME = os.environ.get("GRAFANA_LOKI_USERNAME")
-    GRAFANA_LOKI_API_KEY = os.environ.get("GRAFANA_LOKI_API_KEY")
-
     # Grafana Cloud Tempo (Traces)
     GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
     GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")

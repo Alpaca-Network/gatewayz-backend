@@ -56,8 +56,7 @@ class AutonomousMonitor:
             logger.info("Initializing autonomous monitor...")
             self.error_monitor = await get_error_monitor()
             if self.auto_fix_enabled:
-                # Auto-fix generation (bug_fix_generator) was removed as part of the
-                # MVP provider purge; this feature is no longer available.
+                # Auto-fix generation is not supported.
                 logger.warning(
                     "Auto-fix generation is no longer available; disabling autonomous auto-fix"
                 )

@@ -346,6 +346,40 @@ def deactivate_model(model_id: int) -> dict[str, Any] | None:
     return update_model(model_id, {"is_active": False})
 
 
+def deactivate_models_by_provider(provider_id: int) -> int:
+    """
+    Bulk-deactivate every currently-active model belonging to a provider.
+
+    Used when the provider itself has been marked inactive: its
+    previously-synced models must be retroactively delisted so the live
+    catalog reflects routable reality (North Star §5) instead of leaving
+    them active forever because an inactive provider never reaches the
+    per-model sync/transform loop.
+
+    Args:
+        provider_id: The provider's database ID.
+
+    Returns:
+        Number of models deactivated (0 if none were active or on error).
+    """
+    try:
+        supabase = get_client_for_query(read_only=False)
+        response = (
+            supabase.table("models")
+            .update({"is_active": False})
+            .eq("provider_id", provider_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        count = len(response.data) if response.data else 0
+        if count:
+            logger.info(f"Deactivated {count} models for inactive provider_id={provider_id}")
+        return count
+    except Exception as e:
+        logger.error(f"Error bulk-deactivating models for provider_id={provider_id}: {e}")
+        return 0
+
+
 def activate_model(model_id: int) -> dict[str, Any] | None:
     """
     Activate a model
