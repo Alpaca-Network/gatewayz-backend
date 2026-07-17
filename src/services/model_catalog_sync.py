@@ -277,7 +277,11 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
 
 def transform_normalized_model_to_db_schema(
-    normalized_model: dict[str, Any], provider_id: int, provider_slug: str
+    normalized_model: dict[str, Any],
+    provider_id: int,
+    provider_slug: str,
+    *,
+    provider_active: bool = True,
 ) -> dict[str, Any] | None:
     """
     Transform a normalized model (from fetch functions) to database schema
@@ -286,6 +290,9 @@ def transform_normalized_model_to_db_schema(
         normalized_model: Model data from provider fetch function (already normalized)
         provider_id: Database provider ID
         provider_slug: Provider slug for context
+        provider_active: Whether the serving provider is currently active/routable.
+            Defaults to True for backward compatibility with existing call sites
+            that pre-validate provider status before calling this function.
 
     Returns:
         Dictionary matching database schema or None if invalid
@@ -375,6 +382,21 @@ def transform_normalized_model_to_db_schema(
         # Extract capabilities
         capabilities = extract_capabilities(normalized_model)
 
+        # --- Sync-time delisting (North Star §5: "no catalog breadth for its own
+        # sake" — every listed model must be priced, health-checked, and routable,
+        # or it isn't listed). A model is kept active only when it has a priced
+        # offer (free-tier models are exempt — zero pricing is legitimate there,
+        # per §4.3's free-tier routing) AND its serving provider is routable.
+        # This runs at sync time instead of only gating at inference, so the
+        # catalog itself reflects routable+priced reality (no silent inference-time
+        # 400s for models that were never going to work).
+        is_priced = bool(capabilities["is_free"]) or bool(pricing.get("prompt"))
+        is_routable = provider_active
+        model_is_active = is_priced and is_routable
+        delist_reason = None
+        if not model_is_active:
+            delist_reason = "no_routable_provider" if not is_routable else "unpriced"
+
         # Build metadata
         metadata = {
             "synced_at": datetime.now(UTC).isoformat(),
@@ -399,6 +421,12 @@ def transform_normalized_model_to_db_schema(
         # Store architecture string in metadata (no top-level DB column for it)
         if architecture_str:
             metadata["architecture_str"] = architecture_str
+
+        # Record why a model was delisted at sync time (observability — no silent
+        # drops; see sync_provider_models' "Delisted" log line and models_delisted
+        # count in its result dict).
+        if delist_reason:
+            metadata["delist_reason"] = delist_reason
 
         # Persist the normalized per-token pricing into metadata.pricing_raw.
         # Both the billing read path (pricing_lookup Source 2) and
@@ -442,8 +470,8 @@ def transform_normalized_model_to_db_schema(
             "is_reasoning": capabilities["is_reasoning"],
             "is_free": capabilities["is_free"],
             "latency_tier": capabilities["latency_tier"],
-            # Status
-            "is_active": True,
+            # Status — delisted at sync time when unpriced (non-free) or unroutable.
+            "is_active": model_is_active,
             "metadata": metadata,
         }
         # Only set max_output_tokens when the provider returned a value;
@@ -729,6 +757,8 @@ def sync_provider_models(
         db_models = []
         skipped = 0
         filtered = 0
+        delisted = 0
+        provider_active = provider.get("is_active", True)
         for model in normalized_models:
             try:
                 # Quality gate: drop obvious junk (quant/merge/RP spam) before upsert.
@@ -739,10 +769,15 @@ def sync_provider_models(
                         continue
 
                 db_model = transform_normalized_model_to_db_schema(
-                    model, provider["id"], provider_slug
+                    model, provider["id"], provider_slug, provider_active=provider_active
                 )
                 if db_model:
                     db_models.append(db_model)
+                    # Sync-time delisting: unpriced (non-free) or unroutable models
+                    # are synced but marked inactive so the live catalog reflects
+                    # routable+priced reality (North Star §5).
+                    if not db_model.get("is_active", True):
+                        delisted += 1
                 else:
                     skipped += 1
             except Exception as e:
@@ -774,6 +809,7 @@ def sync_provider_models(
             f"Transformed: {len(db_models)} | "
             f"Skipped: {skipped} | "
             f"Filtered (quality gate): {filtered} | "
+            f"Delisted (unpriced/unroutable): {delisted} | "
             f"Duration: {metrics['transform_duration']:.2f}s | "
             f"Rate: {len(db_models) / metrics['transform_duration']:.0f} models/sec"
         )
@@ -913,6 +949,7 @@ def sync_provider_models(
             "models_transformed": len(db_models),
             "models_skipped": skipped,
             "models_filtered": filtered,
+            "models_delisted": delisted,
             "models_synced": models_synced,
             "dry_run": dry_run,
             "metrics": metrics,
