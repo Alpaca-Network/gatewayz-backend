@@ -8,7 +8,6 @@ from src.services.pricing.pricing import *  # noqa: F401,F403
 from src.services.pricing.pricing import (  # noqa: F401  # explicit names for IDE support
     _default_pricing_tracker,
     _track_default_pricing_usage,
-    calculate_code_router_savings,
     calculate_cost,
     calculate_cost_async,
     clear_pricing_cache,
@@ -18,5 +17,4 @@ from src.services.pricing.pricing import (  # noqa: F401  # explicit names for I
     get_pricing_cache_stats,
     get_pricing_coverage_report,
     normalize_model_id_for_pricing,
-    track_code_router_cost_metrics,
 )

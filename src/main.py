@@ -512,7 +512,7 @@ def create_app() -> FastAPI:
         # trial_analytics / partner_trials removed - MVP non-goal (trials subsystem cut)
         # prometheus_data (Grafana stack telemetry endpoints) removed - MVP observability teardown
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
-        ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
+        # code_router / general_router removed - MVP Task 13 (duplicate prompt-router engine cut)
         ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
         (
             "user_provider_keys",
@@ -620,16 +620,6 @@ def create_app() -> FastAPI:
         logger.info("  [OK] Sentry Tunnel (POST /monitoring)")
     except ImportError as e:
         logger.warning(f"  [SKIP] Sentry tunnel router not loaded: {e}")
-
-    # ==================== General Router API Router ====================
-    # Load general router API endpoints for intelligent routing
-    try:
-        from src.routes.general_router import router as general_router_router
-
-        app.include_router(general_router_router)
-        logger.info("  [OK] General Router API (/general-router/*)")
-    except ImportError as e:
-        logger.warning(f"  [SKIP] General router API not loaded: {e}")
 
     # ==================== Circuit Breaker Status Router ====================
     # Load circuit breaker monitoring and management endpoints

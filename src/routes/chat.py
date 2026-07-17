@@ -280,8 +280,6 @@ from src.handlers.post_processing import (  # noqa: F401
     _record_inference_metrics_and_health,
 )
 from src.routes.chat_helpers import (  # noqa: F401
-    _get_auto_route_default_model,
-    _get_code_router_default_model,
     _to_thread,
     is_free_model,
     mask_key,
@@ -731,17 +729,11 @@ async def chat_completions(
 
         # Store original model for response and routing logic
         original_model = req.model
-        # Single source of truth for the auto-route trigger: the `router*` prefix
-        # plus the ergonomic `auto` / `auto:<opt>` / `gatewayz/auto` aliases
-        # (NOT `openrouter/auto`, which is a real passthrough model).
-        from src.services.prompt_router import is_auto_route_request
 
-        is_auto_route = bool(original_model) and is_auto_route_request(original_model)
-
-        # === 2.3-2.5) Model routing (auto / general / code) ===
-        code_router_decision, is_code_route = await resolve_model_routing(
-            req, original_model, messages, session_id, user, is_auto_route, tracker
-        )
+        # === 2.3) Model routing gate ===
+        # The auto/prompt/code/general router engine was removed (MVP Task 13);
+        # `auto`/`router:*` aliases now 400 instead of silently routing.
+        code_router_decision, is_code_route = await resolve_model_routing(req, original_model)
 
         # === 2.6) Prepare upstream request (params + provider + failover chain) ===
         model, provider, provider_chain, optional = await prepare_upstream_request(
@@ -1025,16 +1017,6 @@ async def chat_completions(
         if not trial.get("is_trial", False):
             # If you can cheaply re-fetch balance, do it here; otherwise omit
             processed["gateway_usage"]["cost_usd"] = round(cost, 6)
-
-        # === 6.1) Attach code router metadata if code routing was used ===
-        if code_router_decision:
-            try:
-                from src.services.code_router import get_routing_metadata
-
-                routing_metadata = get_routing_metadata(code_router_decision)
-                processed["routing_metadata"] = routing_metadata
-            except Exception as e:
-                logger.debug(f"Failed to attach code routing metadata: {e}")
 
         # Capture health metrics (passive monitoring) - run as background task
         background_tasks.add_task(

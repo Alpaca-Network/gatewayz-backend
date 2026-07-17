@@ -42,18 +42,6 @@ def validate_and_adjust_max_tokens(optional: dict, model: str) -> None:
             optional["max_tokens"] = min_tokens
 
 
-def _get_auto_route_default_model() -> str:
-    from src.db.system_config import get_config
-
-    return get_config("auto_route_default_model", "openai/gpt-4o-mini")
-
-
-def _get_code_router_default_model() -> str:
-    from src.db.system_config import get_config
-
-    return get_config("code_router_default_model", "zai/glm-4.7")
-
-
 def mask_key(k: str) -> str:
     return f"...{k[-4:]}" if k and len(k) >= 4 else "****"
 
