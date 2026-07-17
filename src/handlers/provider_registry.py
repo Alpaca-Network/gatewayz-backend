@@ -155,6 +155,7 @@ def _safe_adapter_routing(slug: str) -> ProviderRouting:
             "stream": make_error_raiser("stream"),
         }
 
+
 # ---------------------------------------------------------------------------
 # Load all providers and build PROVIDER_ROUTING
 # ---------------------------------------------------------------------------

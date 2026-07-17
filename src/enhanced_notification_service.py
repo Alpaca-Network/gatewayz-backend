@@ -478,5 +478,6 @@ The {self.app_name} Team
             logger.error(f"Error details: {str(e)}", exc_info=True)
             return False
 
+
 # Global enhanced notification service instance
 enhanced_notification_service = EnhancedNotificationService()

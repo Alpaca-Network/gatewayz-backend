@@ -49,6 +49,7 @@ async def _full_provider_and_model_sync(dry_run: bool = False) -> dict:
         "models": model_result,
     }
 
+
 router = APIRouter(
     prefix="/admin/model-sync",
     tags=["Admin - Model Sync"],

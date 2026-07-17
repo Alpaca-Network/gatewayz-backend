@@ -2757,4 +2757,3 @@ def _extract_availability_comparison(
     for item in models_data:
         availability[item["gateway"]] = True
     return availability
-

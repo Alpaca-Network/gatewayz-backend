@@ -880,4 +880,3 @@ def sanitize_for_logging(value: str) -> str:
         value = str(value)
     # Replace newlines and carriage returns with spaces to prevent log injection
     return value.replace("\n", " ").replace("\r", " ").replace("\x00", "")
-

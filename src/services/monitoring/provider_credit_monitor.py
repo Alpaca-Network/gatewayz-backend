@@ -60,8 +60,6 @@ def _get_monitored_402_providers() -> set[str]:
 MONITORED_402_PROVIDERS = _FALLBACK_402_PROVIDERS
 
 
-
-
 def _parse_openrouter_balance(data: dict) -> float | None:
     return data.get("data", {}).get("limit_remaining")
 
@@ -194,8 +192,10 @@ async def check_provider_balance(provider: str) -> dict[str, Any]:
         }
         _credit_balance_cache[provider] = result
 
-        log = logger.error if status == "critical" else (
-            logger.warning if status == "warning" else logger.info
+        log = (
+            logger.error
+            if status == "critical"
+            else (logger.warning if status == "warning" else logger.info)
         )
         log(f"{provider} credit balance {status.upper()}: {balance:.2f} {api['currency']}")
         return result

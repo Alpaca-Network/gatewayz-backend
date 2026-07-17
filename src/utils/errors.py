@@ -14,8 +14,6 @@ Public surface (re-exported verbatim for importers):
   - ``ErrorCode``/``ErrorCategory`` enums and their helper functions
 """
 
-
-
 # ============================================================================
 # Merged from error_codes.py
 # ============================================================================
@@ -401,7 +399,6 @@ Usage:
 """
 
 import re
-
 
 # User-facing, friendly message for provider account/key budget exhaustion (e.g. an
 # OpenRouter key hitting its weekly spend limit). Never expose the upstream key/URL.

@@ -33,9 +33,7 @@ def normalize_deepseek_model(deepseek_model: dict) -> dict | None:
     slug = f"deepseek/{provider_model_id}"
     provider_slug = "deepseek"
 
-    display_name = clean_model_name(
-        provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
+    display_name = clean_model_name(provider_model_id.replace("-", " ").replace("_", " ").title())
     owned_by = deepseek_model.get("owned_by", "deepseek")
     description = f"DeepSeek model {provider_model_id}, provided by {owned_by}."
 
