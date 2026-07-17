@@ -159,3 +159,17 @@ Decisions baked into `docs/superpowers/plans/2026-07-16-mvp-refactor.md` and exe
 **huggingface — OPEN roster decision, not resolved by this refactor**: `huggingface_client.py` was deleted (Task 10) and removed from `FALLBACK_PROVIDER_PRIORITY` (no client to fail over into), but its catalog-fetch entry in `PROVIDER_FETCH_FUNCTIONS` is still alive — models keep appearing in the catalog with no way to actually serve them. This is flagged, not fixed; needs a product call on whether to re-add a client, drop the catalog entry, or keep it as a "coming soon" listing.
 
 **Parked pending user/product decision** (frontend actively uses these paths; not deleted, not confirmed as permanent keeps): `chat_history` / `share` / `feedback` / `user_memory` / `chat_context` routes and DB tables, plus `audio` (Whisper transcription), `tools` (server-side TTS/calculator/code-exec), and `activity` routes. All still boot and serve traffic; none were evaluated against the admission/removal criteria in §3 because they're outside provider strategy — they need an explicit product decision on whether they belong in the MVP surface at all.
+
+### 2026-07-17 — Gap closure: huggingface killed, chat surface decisions, dead-field cleanup
+
+Owner decisions on the items parked above (branch `refactor/gap-closure-decisions`):
+
+| # | Decision | Call |
+|---|---|---|
+| D1 | `chat_history` / `share` / `feedback` | **KEEP** — confirmed as blessed product surface (the user-facing chat app depends on it), not just "parked." No longer an open question. |
+| D2 | `huggingface` (§3 open roster question from the previous amendment) | **KILL** — fully removed from catalog: the `PROVIDER_FETCH_FUNCTIONS` entry, `huggingface_models.py` + `huggingface_hub_service.py` (fetch/normalize/discovery), the 6 HF Hub SDK discovery endpoints, the 3 HF admin cache/debug endpoints, the `include_huggingface` mixed-source enrichment branch on the `/models` family of endpoints, its `GATEWAY_CONFIG` entry, and its `routes/system.py` fetch-map entries. A staged (not auto-applied) migration deactivates its provider row and models. |
+| D3 | `user_memory` | **CUT** — routes, DB access module, and DB table removed (staged migration). Frontend still calls `/v1/user/memory`; a parallel frontend PR removes those calls. |
+| D4 | `chat_context` | **NOT cut — this amendment corrects the previous one.** `src/routes/chat_context.py` is not a standalone parked feature with its own table; it holds `inject_conversation_history` / `persist_conversation_turn`, which `routes/chat.py` calls directly in the live chat-completions path to prepend/persist `chat_sessions`/`chat_messages` history. It **is** the request-time plumbing for the `chat_history` surface kept in D1, not something separate to remove. Left in place; flagged for the owner rather than deleted outright. |
+| D5 | `audio`, `tools` | **DEFERRED** — no KPI usage data yet to inform a keep/cut call; still parked. |
+
+Also cut in this pass, unrelated to the provider/chat-surface calls above: the dead `referral_code` field on `UserRegistrationRequest` and `PrivyAuthRequest` (referral/coupon system itself was already cut; this was its last unused vestige).

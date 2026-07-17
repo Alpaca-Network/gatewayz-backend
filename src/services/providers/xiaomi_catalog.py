@@ -34,9 +34,7 @@ def normalize_xiaomi_model(xiaomi_model: dict) -> dict | None:
     slug = f"xiaomi/{provider_model_id}"
     provider_slug = "xiaomi"
 
-    display_name = clean_model_name(
-        provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
+    display_name = clean_model_name(provider_model_id.replace("-", " ").replace("_", " ").title())
     owned_by = xiaomi_model.get("owned_by", "xiaomi")
     description = f"Xiaomi MiMo model {provider_model_id}, provided by {owned_by}."
 

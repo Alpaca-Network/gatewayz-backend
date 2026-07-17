@@ -37,7 +37,7 @@ _402_CRITICAL_THRESHOLD = 10  # Critical if >=10 402s in window
 _402_WARNING_THRESHOLD = 3  # Warning if >=3 402s in window
 
 # Fallback set (used when registry is unavailable)
-_FALLBACK_402_PROVIDERS = {"together", "deepinfra", "fireworks", "groq"}
+_FALLBACK_402_PROVIDERS = {"together", "deepinfra", "fireworks", "groq", "minimax"}
 
 
 def _get_monitored_402_providers() -> set[str]:
@@ -49,7 +49,9 @@ def _get_monitored_402_providers() -> set[str]:
         dynamic = {
             slug for slug, entry in registry.items() if entry.get("monitor_402_frequency", False)
         }
-        return dynamic if dynamic else _FALLBACK_402_PROVIDERS
+        # Union with the fallback set so providers not yet seeded in the DB
+        # (e.g. minimax pre-migration) are still tracked.
+        return (dynamic | _FALLBACK_402_PROVIDERS) if dynamic else _FALLBACK_402_PROVIDERS
     except Exception:
         return _FALLBACK_402_PROVIDERS
 
@@ -58,39 +60,101 @@ def _get_monitored_402_providers() -> set[str]:
 MONITORED_402_PROVIDERS = _FALLBACK_402_PROVIDERS
 
 
-async def check_openrouter_credits() -> dict[str, Any]:
-    """
-    Check OpenRouter account credit balance.
+def _parse_openrouter_balance(data: dict) -> float | None:
+    return data.get("data", {}).get("limit_remaining")
 
-    Returns:
-        Dictionary with balance information:
-        {
-            "provider": "openrouter",
-            "balance": 123.45,
-            "status": "healthy" | "warning" | "critical" | "unknown",
-            "checked_at": datetime,
-            "cached": bool
+
+def _parse_deepseek_balance(data: dict) -> float | None:
+    infos = data.get("balance_infos") or []
+    if not infos:
+        return None
+    try:
+        return float(infos[0].get("total_balance"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_moonshot_balance(data: dict) -> float | None:
+    bal = data.get("data", {}).get("available_balance")
+    try:
+        return float(bal) if bal is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_novita_balance(data: dict) -> float | None:
+    bal = data.get("credit_balance")
+    try:
+        return float(bal) if bal is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+# Providers with a real balance API. `currency` is reported verbatim in results;
+# thresholds are USD-calibrated, so non-USD providers only alert on zero/near-zero.
+BALANCE_APIS: dict[str, dict[str, Any]] = {
+    "openrouter": {
+        "url": "https://openrouter.ai/api/v1/auth/key",
+        "key_attr": "OPENROUTER_API_KEY",
+        "parse": _parse_openrouter_balance,
+        "currency": "USD",
+    },
+    "deepseek": {
+        "url": "https://api.deepseek.com/user/balance",
+        "key_attr": "DEEPSEEK_API_KEY",
+        "parse": _parse_deepseek_balance,
+        "currency": "USD",
+    },
+    "moonshot": {
+        "url": "https://api.moonshot.ai/v1/users/me/balance",
+        "key_attr": "MOONSHOT_API_KEY",
+        "parse": _parse_moonshot_balance,
+        # Moonshot reports CNY on the .ai international platform account page;
+        # verify against the dashboard once funded.
+        "currency": "CNY",
+    },
+    "novita": {
+        "url": "https://api.novita.ai/v3/user",
+        "key_attr": "NOVITA_API_KEY",
+        "parse": _parse_novita_balance,
+        # Raw platform credits; unit scale unverified until the account is funded.
+        "currency": "credits",
+    },
+}
+
+
+async def check_provider_balance(provider: str) -> dict[str, Any]:
+    """Check one provider's account balance via its balance API.
+
+    Returns the same result shape as the legacy ``check_openrouter_credits``:
+    {provider, balance, currency, status, checked_at, cached[, error]}.
+    """
+    api = BALANCE_APIS.get(provider)
+    if api is None:
+        return {
+            "provider": provider,
+            "balance": None,
+            "status": "unknown",
+            "checked_at": datetime.now(UTC),
+            "cached": False,
+            "error": "No balance API configured",
         }
-    """
-    provider = "openrouter"
 
-    # Check cache first
     if provider in _credit_balance_cache:
         cached = _credit_balance_cache[provider]
         cache_age = datetime.now(UTC) - cached["checked_at"]
         if cache_age < timedelta(minutes=CACHE_DURATION_MINUTES):
-            logger.debug(f"Using cached credit balance for {provider}: ${cached['balance']:.2f}")
             return {**cached, "cached": True}
 
-    # Fetch fresh balance
     try:
         import httpx
 
-        if not Config.OPENROUTER_API_KEY:
-            logger.warning(f"{provider}: API key not configured")
+        api_key = getattr(Config, api["key_attr"], None)
+        if not api_key:
             return {
                 "provider": provider,
                 "balance": None,
+                "currency": api["currency"],
                 "status": "unknown",
                 "checked_at": datetime.now(UTC),
                 "cached": False,
@@ -99,56 +163,49 @@ async def check_openrouter_credits() -> dict[str, Any]:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                "https://openrouter.ai/api/v1/auth/key",
-                headers={"Authorization": f"Bearer {Config.OPENROUTER_API_KEY}"},
+                api["url"],
+                headers={"Authorization": f"Bearer {api_key}"},
                 timeout=10.0,
             )
             response.raise_for_status()
-            data = response.json()
+            balance = api["parse"](response.json())
 
-            # OpenRouter returns balance in credits object
-            balance = data.get("data", {}).get("limit_remaining")
-
-            if balance is None:
-                logger.warning(f"{provider}: Could not parse balance from API response")
-                return {
-                    "provider": provider,
-                    "balance": None,
-                    "status": "unknown",
-                    "checked_at": datetime.now(UTC),
-                    "cached": False,
-                    "error": "Could not parse balance",
-                }
-
-            # Determine status based on thresholds
-            status = _determine_credit_status(balance)
-
-            result = {
+        if balance is None:
+            return {
                 "provider": provider,
-                "balance": balance,
-                "status": status,
+                "balance": None,
+                "currency": api["currency"],
+                "status": "unknown",
                 "checked_at": datetime.now(UTC),
                 "cached": False,
+                "error": "Could not parse balance",
             }
 
-            # Update cache
-            _credit_balance_cache[provider] = result
+        status = _determine_credit_status(balance)
+        result = {
+            "provider": provider,
+            "balance": balance,
+            "currency": api["currency"],
+            "status": status,
+            "checked_at": datetime.now(UTC),
+            "cached": False,
+        }
+        _credit_balance_cache[provider] = result
 
-            # Log status
-            if status == "critical":
-                logger.error(f"{provider} credit balance CRITICAL: ${balance:.2f}")
-            elif status == "warning":
-                logger.warning(f"{provider} credit balance WARNING: ${balance:.2f}")
-            else:
-                logger.info(f"{provider} credit balance: ${balance:.2f}")
-
-            return result
+        log = (
+            logger.error
+            if status == "critical"
+            else (logger.warning if status == "warning" else logger.info)
+        )
+        log(f"{provider} credit balance {status.upper()}: {balance:.2f} {api['currency']}")
+        return result
 
     except httpx.HTTPStatusError as e:
         logger.error(f"Failed to check {provider} credits (HTTP {e.response.status_code}): {e}")
         return {
             "provider": provider,
             "balance": None,
+            "currency": api["currency"],
             "status": "unknown",
             "checked_at": datetime.now(UTC),
             "cached": False,
@@ -159,11 +216,17 @@ async def check_openrouter_credits() -> dict[str, Any]:
         return {
             "provider": provider,
             "balance": None,
+            "currency": api["currency"],
             "status": "unknown",
             "checked_at": datetime.now(UTC),
             "cached": False,
             "error": str(e),
         }
+
+
+async def check_openrouter_credits() -> dict[str, Any]:
+    """Check OpenRouter account credit balance (legacy wrapper over check_provider_balance)."""
+    return await check_provider_balance("openrouter")
 
 
 def _determine_credit_status(balance: float) -> str:
@@ -244,18 +307,36 @@ async def check_all_provider_credits() -> dict[str, dict[str, Any]]:
     """
     Check credit balance for all monitored providers.
 
-    Uses direct balance API for OpenRouter and 402-frequency monitoring
-    for Together, DeepInfra, Fireworks, and Groq.
+    Uses direct balance APIs (OpenRouter, DeepSeek, Moonshot, Novita) and
+    402-frequency monitoring for providers without one (Together, DeepInfra,
+    Fireworks, Groq, MiniMax).
 
     Returns:
         Dictionary mapping provider name to balance information
     """
+    import asyncio
+
     results = {}
 
-    # OpenRouter: direct balance API
-    results["openrouter"] = await check_openrouter_credits()
+    # Providers with a real balance API: query concurrently
+    api_providers = list(BALANCE_APIS)
+    balances = await asyncio.gather(
+        *(check_provider_balance(p) for p in api_providers), return_exceptions=True
+    )
+    for provider, result in zip(api_providers, balances, strict=False):
+        if isinstance(result, Exception):
+            results[provider] = {
+                "provider": provider,
+                "balance": None,
+                "status": "unknown",
+                "checked_at": datetime.now(UTC),
+                "cached": False,
+                "error": str(result),
+            }
+        else:
+            results[provider] = result
 
-    # Top providers without balance APIs: monitor via 402 frequency
+    # Providers without balance APIs: monitor via 402 frequency
     for provider in _get_monitored_402_providers():
         results[provider] = check_provider_402_status(provider)
 

@@ -123,9 +123,7 @@ class TestRequestClientConstruction:
     def test_extra_headers_passed_as_default_headers(self, fake_key):
         adapter = make_adapter(_fake_cfg(extra_headers={"X-Custom": "yes"}))
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.return_value = (
-                _mock_openai_response()
-            )
+            mock_openai.return_value.chat.completions.create.return_value = _mock_openai_response()
             adapter.request(MESSAGES, "test-model")
             assert mock_openai.call_args[1]["default_headers"] == {"X-Custom": "yes"}
 
@@ -186,9 +184,7 @@ class TestRequestClientConstruction:
     def test_request_propagates_provider_error(self, fake_key):
         adapter = make_adapter(_fake_cfg())
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.side_effect = Exception(
-                "API Error"
-            )
+            mock_openai.return_value.chat.completions.create.side_effect = Exception("API Error")
             with pytest.raises(Exception, match="API Error"):
                 adapter.request(MESSAGES, "test-model")
 
@@ -216,9 +212,7 @@ class TestStream:
     def test_stream_propagates_error(self, fake_key):
         adapter = make_adapter(_fake_cfg())
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.side_effect = Exception(
-                "Stream Error"
-            )
+            mock_openai.return_value.chat.completions.create.side_effect = Exception("Stream Error")
             with pytest.raises(Exception, match="Stream Error"):
                 adapter.stream(MESSAGES, "test-model")
 
@@ -265,9 +259,7 @@ class TestProcess:
 
 class TestQuirks:
     def _cb_cfg(self):
-        return _fake_cfg(
-            quirks=Quirks(circuit_breaker=CircuitBreakerConfig(), sentry=True)
-        )
+        return _fake_cfg(quirks=Quirks(circuit_breaker=CircuitBreakerConfig(), sentry=True))
 
     def test_circuit_breaker_wraps_call(self, fake_key):
         adapter = make_adapter(self._cb_cfg())
@@ -293,27 +285,19 @@ class TestQuirks:
             "src.services.providers.openai_compat.get_circuit_breaker",
             return_value=breaker,
         ):
-            with patch(
-                "src.utils.sentry_context.capture_provider_error"
-            ) as mock_capture:
+            with patch("src.utils.sentry_context.capture_provider_error") as mock_capture:
                 with pytest.raises(CircuitBreakerError):
                     adapter.request(MESSAGES, "test-model")
 
         mock_capture.assert_called_once()
         assert mock_capture.call_args[1]["provider"] == "fakeprov"
-        assert mock_capture.call_args[1]["extra_context"] == {
-            "circuit_breaker_state": "open"
-        }
+        assert mock_capture.call_args[1]["extra_context"] == {"circuit_breaker_state": "open"}
 
     def test_sentry_captures_generic_error(self, fake_key):
         adapter = make_adapter(_fake_cfg(quirks=Quirks(sentry=True)))
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.side_effect = Exception(
-                "boom"
-            )
-            with patch(
-                "src.utils.sentry_context.capture_provider_error"
-            ) as mock_capture:
+            mock_openai.return_value.chat.completions.create.side_effect = Exception("boom")
+            with patch("src.utils.sentry_context.capture_provider_error") as mock_capture:
                 with pytest.raises(Exception, match="boom"):
                     adapter.request(MESSAGES, "test-model")
 
@@ -324,12 +308,8 @@ class TestQuirks:
     def test_no_sentry_capture_without_quirk(self, fake_key):
         adapter = make_adapter(_fake_cfg())
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.side_effect = Exception(
-                "boom"
-            )
-            with patch(
-                "src.utils.sentry_context.capture_provider_error"
-            ) as mock_capture:
+            mock_openai.return_value.chat.completions.create.side_effect = Exception("boom")
+            with patch("src.utils.sentry_context.capture_provider_error") as mock_capture:
                 with pytest.raises(Exception, match="boom"):
                     adapter.request(MESSAGES, "test-model")
 
@@ -338,9 +318,7 @@ class TestQuirks:
     def test_timing_context_used_when_enabled(self, fake_key):
         adapter = make_adapter(_fake_cfg(quirks=Quirks(timing=True)))
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.return_value = (
-                _mock_openai_response()
-            )
+            mock_openai.return_value.chat.completions.create.return_value = _mock_openai_response()
             with patch("src.utils.provider_timing.ProviderTimingContext") as mock_ctx:
                 adapter.request(MESSAGES, "test-model")
 
@@ -480,9 +458,7 @@ class TestConsolidatedProviderParity:
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = _mock_openai_response()
 
-        with patch.object(
-            OpenAICompatAdapter, "_get_client", return_value=mock_client
-        ):
+        with patch.object(OpenAICompatAdapter, "_get_client", return_value=mock_client):
             response = adapter.request(MESSAGES, "test-model")
 
         assert response is not None
@@ -493,9 +469,7 @@ class TestConsolidatedProviderParity:
         mock_client = Mock()
         mock_client.chat.completions.create.side_effect = Exception("API Error")
 
-        with patch.object(
-            OpenAICompatAdapter, "_get_client", return_value=mock_client
-        ):
+        with patch.object(OpenAICompatAdapter, "_get_client", return_value=mock_client):
             with pytest.raises(Exception, match="API Error"):
                 adapter.request(MESSAGES, "test-model")
 
@@ -505,9 +479,7 @@ class TestConsolidatedProviderParity:
         sentinel = Mock(name="stream")
         mock_client.chat.completions.create.return_value = sentinel
 
-        with patch.object(
-            OpenAICompatAdapter, "_get_client", return_value=mock_client
-        ):
+        with patch.object(OpenAICompatAdapter, "_get_client", return_value=mock_client):
             result = adapter.stream(MESSAGES, "test-model")
 
         assert result is sentinel
@@ -518,9 +490,7 @@ class TestConsolidatedProviderParity:
         mock_client = Mock()
         mock_client.chat.completions.create.side_effect = Exception("Stream Error")
 
-        with patch.object(
-            OpenAICompatAdapter, "_get_client", return_value=mock_client
-        ):
+        with patch.object(OpenAICompatAdapter, "_get_client", return_value=mock_client):
             with pytest.raises(Exception, match="Stream Error"):
                 adapter.stream(MESSAGES, "test-model")
 

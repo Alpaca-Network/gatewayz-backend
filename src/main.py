@@ -513,7 +513,7 @@ def create_app() -> FastAPI:
         # prometheus_data (Grafana stack telemetry endpoints) removed - MVP observability teardown
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         # code_router / general_router removed - MVP Task 13 (duplicate prompt-router engine cut)
-        ("user_memory", "User Memory"),  # Portable per-user memory (Phase 4 context assembly)
+        # user_memory removed - North Star gap-closure decision: CUT (frontend PR to follow)
         (
             "user_provider_keys",
             "BYOK Provider Keys",

@@ -32,6 +32,7 @@ from src.utils.errors import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 
+
 # Traceloop integration removed; keep call sites as a no-op.
 def set_traceloop_properties(**kwargs):
     pass

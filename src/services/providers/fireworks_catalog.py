@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # Modality constants
 MODALITY_TEXT_TO_TEXT = "text->text"
 
+
 def normalize_fireworks_model(fireworks_model: dict) -> dict:
     """Normalize Fireworks catalog entries to resemble OpenRouter model shape"""
     from src.services.pricing_lookup import enrich_model_with_pricing

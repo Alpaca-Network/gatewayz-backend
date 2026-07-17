@@ -14,12 +14,6 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.utils.pricing_normalization import (
-    PricingFormat,
-    get_provider_format,
-    normalize_to_per_token,
-)
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
@@ -38,6 +32,11 @@ from src.services.providers.together_catalog import fetch_models_from_together
 from src.services.providers.xai_client import fetch_models_from_xai
 from src.services.providers.xiaomi_catalog import fetch_models_from_xiaomi
 from src.services.providers.zai_catalog import fetch_models_from_zai
+from src.utils.pricing_normalization import (
+    PricingFormat,
+    get_provider_format,
+    normalize_to_per_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "fireworks": fetch_models_from_fireworks,
     "together": fetch_models_from_together,
     "alibaba": fetch_models_from_alibaba,
-    "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,
     "google-vertex": fetch_models_from_google_vertex,
     "xai": fetch_models_from_xai,

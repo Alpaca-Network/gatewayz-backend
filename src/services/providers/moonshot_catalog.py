@@ -33,9 +33,7 @@ def normalize_moonshot_model(moonshot_model: dict) -> dict | None:
     slug = f"moonshot/{provider_model_id}"
     provider_slug = "moonshot"
 
-    display_name = clean_model_name(
-        provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
+    display_name = clean_model_name(provider_model_id.replace("-", " ").replace("_", " ").title())
     owned_by = moonshot_model.get("owned_by", "moonshot")
     description = f"Moonshot AI (Kimi) model {provider_model_id}, provided by {owned_by}."
 

@@ -40,7 +40,6 @@ from src.services.gateway_registry import (
     validate_gateway,
 )
 from src.services.models import (
-    enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
     fetch_specific_model,
     get_cached_models,
@@ -58,7 +57,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Constants for query parameter descriptions (to avoid duplication)
-DESC_INCLUDE_HUGGINGFACE = "Include Hugging Face metrics if available"
 DESC_GATEWAY_AUTO_DETECT = (
     "Gateway to use (e.g., 'openrouter', 'groq'), or auto-detect if not specified"
 )
@@ -779,9 +777,6 @@ async def get_models(
     ),
     limit: int | None = Query(None, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: int | None = Query(0, ge=0, description=DESC_OFFSET_FOR_PAGINATION),
-    include_huggingface: bool = Query(
-        True, description="Include Hugging Face metrics for models that have hugging_face_id"
-    ),
     gateway: str | None = Query(
         "all",
         description=DESC_GATEWAY_WITH_ALL,
@@ -795,7 +790,7 @@ async def get_models(
         ),
     ),
 ):
-    """Get all metric data of available models with optional filtering, pagination, Hugging Face integration, and provider logos"""
+    """Get all metric data of available models with optional filtering, pagination, and provider logos"""
 
     try:
         validate_gateway(gateway)
@@ -823,7 +818,6 @@ async def get_models(
             "offset": offset,
             "provider": provider,
             "is_private": is_private,
-            "include_huggingface": include_huggingface,
             "unique_models": unique_models,
         }
 
@@ -1083,21 +1077,6 @@ async def get_models(
             enhanced_model = enhance_model_with_provider_info(model, enhanced_providers)
             enhanced_models.append(enhanced_model)
 
-        # If HuggingFace data requested, fetch it asynchronously in background
-        # This allows the response to return immediately without waiting
-        if include_huggingface:
-            # Schedule background task to enrich with HF data
-            # Note: In production, this would use a background task queue
-            # For now, we'll enrich a limited subset to avoid blocking
-            for i, model in enumerate(
-                enhanced_models[:10]
-            ):  # Only enrich first 10 to keep response fast
-                try:
-                    enhanced_models[i] = enhance_model_with_huggingface_data(model)
-                except Exception as e:
-                    logger.debug(f"Failed to enrich model {model.get('id')} with HF data: {e}")
-                    # Continue without HF data if fetch fails
-
         note = {
             "openrouter": "OpenRouter catalog",
             "featherless": "Featherless catalog",
@@ -1111,12 +1090,11 @@ async def get_models(
             "nebius": "Nebius catalog (no public listing is currently available)",
             "xai": "Xai catalog",
             "novita": "Novita catalog",
-            "hug": "Hugging Face catalog",
             "aimo": "AIMO Network catalog",
             "near": "Near AI catalog",
             "fal": "Fal.ai catalog",
             "simplismart": "Simplismart catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, and Simplismart catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, AIMO, Near AI, Fal.ai, and Simplismart catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         # Calculate pagination metadata
@@ -1131,7 +1109,6 @@ async def get_models(
             "limit": limit_int,
             "has_more": has_more,
             "next_offset": next_offset,
-            "include_huggingface": include_huggingface,
             "gateway": gateway_value,
             "note": note,
             "timestamp": datetime.now(UTC).isoformat(),
@@ -1169,7 +1146,6 @@ async def get_models(
 async def get_specific_model(
     provider_name: str,
     model_name: str,
-    include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
     gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
@@ -1183,7 +1159,6 @@ async def get_specific_model(
     - DeepInfra: Model catalog data from DeepInfra's API
     - Chutes: Model catalog data from Chutes.ai
     - Fal.ai: Image/video/audio generation models (e.g., fal-ai/stable-diffusion-v15)
-    - Hugging Face: Open-source models from Hugging Face Hub
     - And other gateways: groq, fireworks, together, cerebras, nebius, xai, novita, aimo, near
 
     If gateway is not specified, it will automatically detect which gateway the model belongs to.
@@ -1270,16 +1245,11 @@ async def get_specific_model(
         if isinstance(model_data, dict):
             model_data = enhance_model_with_provider_info(model_data, enhanced_providers)
 
-            # Then enhance with Hugging Face data if requested
-            if include_huggingface and model_data.get("hugging_face_id"):
-                model_data = enhance_model_with_huggingface_data(model_data)
-
         return {
             "data": model_data,
             "provider": provider_name,
             "model": model_name,
             "gateway": detected_gateway,
-            "include_huggingface": include_huggingface,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
@@ -1299,7 +1269,6 @@ async def get_developer_models(
     developer_name: str,
     limit: int = Query(100, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
     gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
 ):
     """
@@ -1309,7 +1278,6 @@ async def get_developer_models(
         developer_name: Provider/developer name (e.g., 'anthropic', 'openai', 'meta')
         limit: Maximum number of models to return
         offset: Number of models to skip (for pagination)
-        include_huggingface: Whether to include HuggingFace metrics
         gateway: Which gateway to query ('openrouter' or 'all')
 
     Returns:
@@ -1340,7 +1308,6 @@ async def get_developer_models(
             "developer": developer_name,
             "limit": limit,
             "offset": offset,
-            "include_huggingface": include_huggingface,
         }
 
         # Try to get from cache
@@ -1391,15 +1358,13 @@ async def get_developer_models(
         if limit:
             filtered_models = filtered_models[:limit]
 
-        # Enhance models with provider info and HuggingFace data
+        # Enhance models with provider info
         providers = await asyncio.to_thread(get_cached_providers)
         enhanced_providers = enhance_providers_with_logos_and_sites(providers or [])
 
         enhanced_models = []
         for model in filtered_models:
             enhanced_model = enhance_model_with_provider_info(model, enhanced_providers)
-            if include_huggingface and enhanced_model.get("hugging_face_id"):
-                enhanced_model = enhance_model_with_huggingface_data(enhanced_model)
             enhanced_models.append(enhanced_model)
 
         # Build response
@@ -2017,10 +1982,6 @@ async def get_all_models(
         100, ge=1, le=1000, description=f"{DESC_LIMIT_NUMBER_OF_RESULTS} (default: 100, max: 1000)"
     ),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    include_huggingface: bool = Query(
-        False,
-        description="Include Hugging Face metrics for models that have hugging_face_id (slower, default: false)",
-    ),
     gateway: str | None = Query(
         "all",
         description=DESC_GATEWAY_WITH_ALL,
@@ -2040,7 +2001,6 @@ async def get_all_models(
         is_private=is_private,
         limit=limit,
         offset=offset,
-        include_huggingface=include_huggingface,
         gateway=gateway,
         unique_models=unique_models,
     )
@@ -2394,7 +2354,6 @@ async def compare_model_gateways_api(
 async def get_specific_model_api(
     provider_name: str,
     model_name: str,
-    include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
     gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
@@ -2403,7 +2362,6 @@ async def get_specific_model_api(
     return await get_specific_model(
         provider_name=provider_name,
         model_name=model_name,
-        include_huggingface=include_huggingface,
         gateway=gateway,
     )
 
@@ -2412,7 +2370,6 @@ async def get_specific_model_api(
 async def get_specific_model_api_legacy(
     provider_name: str,
     model_name: str,
-    include_huggingface: bool = Query(True, description=DESC_INCLUDE_HUGGINGFACE),
     gateway: str | None = Query(
         None,
         description=DESC_GATEWAY_AUTO_DETECT,
@@ -2422,7 +2379,6 @@ async def get_specific_model_api_legacy(
     return await get_specific_model(
         provider_name=provider_name,
         model_name=model_name,
-        include_huggingface=include_huggingface,
         gateway=gateway,
     )
 
@@ -2432,14 +2388,12 @@ async def get_developer_models_api(
     developer_name: str,
     limit: int = Query(100, ge=1, le=1000, description=DESC_LIMIT_NUMBER_OF_RESULTS),
     offset: int | None = Query(0, description=DESC_OFFSET_FOR_PAGINATION),
-    include_huggingface: bool = Query(True, description="Include Hugging Face metrics"),
     gateway: str | None = Query("all", description="Gateway: 'openrouter' or 'all'"),
 ):
     return await get_developer_models(
         developer_name=developer_name,
         limit=limit,
         offset=offset,
-        include_huggingface=include_huggingface,
         gateway=gateway,
     )
 
@@ -2803,284 +2757,3 @@ def _extract_availability_comparison(
     for item in models_data:
         availability[item["gateway"]] = True
     return availability
-
-
-# HuggingFace Hub SDK Discovery Endpoints
-@router.get("/huggingface/discovery", tags=["huggingface-discovery"])
-async def discover_huggingface_models(
-    task: str | None = Query(
-        "text-generation",
-        description="Filter by task type (e.g., 'text-generation', 'text2text-generation', 'conversational')",
-    ),
-    sort: str = Query("likes", description="Sort by: 'likes' or 'downloads'"),
-    limit: int = Query(50, description="Number of models to return", ge=1, le=500),
-    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
-):
-    """
-    Discover HuggingFace models using the official Hub SDK.
-
-    This endpoint provides advanced model discovery with filtering by task type
-    and sorting by popularity metrics (likes/downloads). Great for exploring
-    available models on HuggingFace Hub.
-
-    Uses the official huggingface_hub SDK for direct API access to Hub metadata.
-    """
-    try:
-        from src.services.huggingface_hub_service import list_huggingface_models
-
-        logger.info(
-            f"Discovering HuggingFace models: task={task}, sort={sort}, limit={limit}, offset={offset}"
-        )
-
-        # Fetch a large result set so total_count reflects the true number of
-        # results regardless of pagination params.
-        _HF_DISCOVER_BUFFER = 200
-        models = list_huggingface_models(
-            task=task,
-            sort=sort,
-            limit=_HF_DISCOVER_BUFFER,
-        )
-
-        if not models:
-            logger.warning(f"No HuggingFace models found for task={task}")
-            return {
-                "models": [],
-                "count": 0,
-                "source": "huggingface-hub",
-                "task": task,
-                "sort": sort,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "total": 0,
-                    "has_more": False,
-                },
-            }
-
-        # Get total count BEFORE slicing so pagination metadata is accurate
-        total_count = len(models)
-        paginated_models = models[offset : offset + limit]
-
-        return {
-            "models": paginated_models,
-            "count": len(paginated_models),
-            "source": "huggingface-hub",
-            "task": task,
-            "sort": sort,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": total_count,
-                "has_more": offset + limit < total_count,
-            },
-        }
-
-    except Exception as e:
-        logger.error(f"Error discovering HuggingFace models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to discover HuggingFace models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/search", tags=["huggingface-discovery"])
-async def search_huggingface_models_endpoint(
-    q: str = Query(..., description="Search query (model name, description, etc.)", min_length=1),
-    task: str | None = Query(None, description="Optional task filter"),
-    limit: int = Query(20, description="Number of results to return", ge=1, le=100),
-    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
-):
-    """
-    Search for HuggingFace models by query.
-
-    Searches across model names, descriptions, and other metadata.
-    Uses the official huggingface_hub SDK.
-    """
-    try:
-        from src.services.huggingface_hub_service import search_models_by_query
-
-        logger.info(
-            f"Searching HuggingFace models: q='{q}', task={task}, limit={limit}, offset={offset}"
-        )
-
-        # Fetch a large result set so total_count reflects the true number of
-        # results regardless of pagination params.
-        _HF_SEARCH_BUFFER = 200
-        models = search_models_by_query(
-            query=q,
-            task=task,
-            limit=_HF_SEARCH_BUFFER,
-        )
-
-        # Get total count BEFORE slicing so pagination metadata is accurate
-        total_count = len(models)
-        paginated_models = models[offset : offset + limit]
-
-        return {
-            "query": q,
-            "models": paginated_models,
-            "count": len(paginated_models),
-            "source": "huggingface-hub",
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": total_count,
-                "has_more": offset + limit < total_count,
-            },
-        }
-
-    except Exception as e:
-        logger.error(f"Error searching HuggingFace models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to search HuggingFace models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
-async def get_huggingface_model_details_endpoint(
-    model_id: str,
-):
-    """
-    Get detailed information about a specific HuggingFace model.
-
-    Returns comprehensive metadata including model card, library info, and metrics.
-    Uses the official huggingface_hub SDK for direct Hub access.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_details
-
-        logger.info(f"Fetching details for HuggingFace model: {model_id}")
-
-        model_info = get_model_details(model_id)
-
-        if not model_info:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model not found: {model_id}",
-            )
-
-        return {
-            "model": model_info,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model details: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model details: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
-async def get_huggingface_model_card_endpoint(
-    model_id: str,
-):
-    """
-    Retrieve the model card (README) for a HuggingFace model.
-
-    The model card contains documentation, usage instructions, and metadata
-    about the model in Markdown format.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_card
-
-        logger.info(f"Fetching model card for: {model_id}")
-
-        card_content = get_model_card(model_id)
-
-        if not card_content:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model card not found for: {model_id}",
-            )
-
-        return {
-            "model_id": model_id,
-            "card": card_content,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model card: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model card: {str(e)}",
-        )
-
-
-@router.get("/huggingface/author/{author}/models", tags=["huggingface-discovery"])
-async def list_author_models_endpoint(
-    author: str,
-    limit: int = Query(50, description="Number of models to return", ge=1, le=500),
-):
-    """
-    List all models from a specific HuggingFace author or organization.
-
-    Returns all public models published by the specified author/org.
-    """
-    try:
-        from src.services.huggingface_hub_service import list_models_by_author
-
-        logger.info(f"Listing models from author: {author}, limit={limit}")
-
-        models = list_models_by_author(author=author, limit=limit)
-
-        return {
-            "author": author,
-            "models": models,
-            "count": len(models),
-            "source": "huggingface-hub",
-        }
-
-    except Exception as e:
-        logger.error(f"Error listing author models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list author models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
-async def get_model_files_endpoint(
-    model_id: str,
-):
-    """
-    Get information about all files in a HuggingFace model repository.
-
-    Returns a list of files with sizes and metadata, useful for understanding
-    what's available in the model repository.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_files
-
-        logger.info(f"Fetching files for model: {model_id}")
-
-        files = get_model_files(model_id)
-
-        if files is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model not found: {model_id}",
-            )
-
-        return {
-            "model_id": model_id,
-            "files": files,
-            "count": len(files) if files else 0,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model files: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model files: {str(e)}",
-        )

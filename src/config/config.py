@@ -174,37 +174,6 @@ class Config:
     # "balanced" / "latency" / "quality" trade margin for latency/quality.
     SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "cost").strip().lower()
 
-    # Gatewayz One Phase 4 — context assembly. When true, conversation messages are
-    # reassembled within a per-request token budget (system + memory + rolling
-    # summary + most-recent turns, oldest-first dropping) before the upstream call.
-    # Off by default; exact passthrough when disabled.
-    CONTEXT_ASSEMBLY_ENABLED = os.environ.get("CONTEXT_ASSEMBLY_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # Fraction of a model's context window reserved for the assembled prompt
-    # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
-    CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
-    # Phase 4 — heuristic user-memory capture. When on, durable self-stated facts
-    # ("my name is…", "I prefer…", "remember that…") are extracted from a user's
-    # messages and saved to user_memory (post-response background task) so the
-    # context assembler can recall them. High-precision + capped; off by default.
-    MEMORY_CAPTURE_ENABLED = os.environ.get("MEMORY_CAPTURE_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    MEMORY_MAX_PER_USER = int(os.environ.get("MEMORY_MAX_PER_USER", "100"))
-
-    # Assumed budget when a model's context length is unknown. Deliberately large
-    # so an unknown window does NOT cause aggressive truncation — when we can't tell
-    # a model's real window, we pass the turns through (no worse than today) rather
-    # than risk dropping context that would have fit.
-    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(
-        os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "1000000")
-    )
-
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
     # MULTI_REGION_ENABLED is true the inventory is just this single region, so all

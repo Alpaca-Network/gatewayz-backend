@@ -19,7 +19,6 @@ from src.cache import (  # Cache helper functions
 from src.config import Config
 from src.config.redis_config import get_redis_manager
 from src.services.google_models_config import register_google_models_in_canonical_registry
-from src.services.huggingface_models import get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
@@ -1774,39 +1773,6 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
         return None
 
 
-def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
-    """Fetch specific model data from Hugging Face by using direct lookup or cached models"""
-    try:
-        provider_model_id = f"{provider_name}/{model_name}"
-        provider_model_id_lower = provider_model_id.lower()
-
-        # Try lightweight direct lookup first
-        model_data = get_huggingface_model_info(provider_model_id)
-        if model_data:
-            model_data.setdefault("source_gateway", "hug")
-            return model_data
-
-        # Fall back to cached catalog (may trigger a full fetch on first call)
-        huggingface_models = get_cached_models("huggingface") or get_cached_models("hug")
-        if huggingface_models:
-            for model in huggingface_models:
-                if model.get("id", "").lower() == provider_model_id_lower:
-                    return model
-
-        logger.warning(
-            "Model %s not found in Hugging Face catalog", sanitize_for_logging(provider_model_id)
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Hugging Face: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
 def fetch_specific_model_from_fal(provider_name: str, model_name: str):
     """Fetch specific model data from Fal.ai by using cached catalog"""
     try:
@@ -1875,7 +1841,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'fal', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         provider_model_id = f"{provider_name}/{model_name}".lower()
@@ -1890,7 +1856,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             if models:
                 for model in models:
                     if model.get("id", "").lower() == provider_model_id:
-                        return "huggingface" if gateway in ("hug", "huggingface") else gateway
+                        return gateway
 
         # Default to openrouter if not found
         return "openrouter"
@@ -1925,10 +1891,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         def normalize_gateway(value: str) -> str:
             if not value:
                 return None
-            value = value.lower()
-            if value == "hug":
-                return "huggingface"
-            return value
+            return value.lower()
 
         candidate_gateways = []
 
@@ -1952,9 +1915,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         if not explicit_gateway:
             if "openrouter" not in candidate_gateways:
                 candidate_gateways.append("openrouter")
-            # "huggingface" is the fetch-function key (not the normalized slug "hug")
-            if "huggingface" not in candidate_gateways:
-                candidate_gateways.append("huggingface")
 
         # fetch_specific_model_from_* functions live in this file (models.py),
         # not in individual client modules, so dynamic import doesn't apply here.
@@ -1967,7 +1927,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "fireworks": fetch_specific_model_from_fireworks,
             "together": fetch_specific_model_from_together,
             "google-vertex": fetch_specific_model_from_google_vertex,
-            "huggingface": fetch_specific_model_from_huggingface,
             "fal": fetch_specific_model_from_fal,
         }
 
@@ -1978,8 +1937,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             fetcher = fetchers.get(candidate, fetch_specific_model_from_openrouter)
             model_data = fetcher(provider_name, model_name)
             if model_data:
-                if candidate == "huggingface":
-                    model_data.setdefault("source_gateway", "hug")
                 return model_data
 
         logger.warning(
@@ -1997,110 +1954,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             sanitize_for_logging(str(e)),
         )
         return None
-
-
-def get_cached_huggingface_model(hugging_face_id: str):
-    """Get cached Hugging Face model data or fetch if not cached"""
-    try:
-        # Check if we have cached data for this specific model in Redis
-        redis_manager = get_redis_manager()
-        cache_key = f"huggingface:model:{hugging_face_id}"
-        cached_data = redis_manager.get_json(cache_key)
-        if cached_data:
-            return cached_data
-
-        # Fetch from Hugging Face API
-        return fetch_huggingface_model(hugging_face_id)
-    except Exception as e:
-        logger.error(f"Error getting cached Hugging Face model {hugging_face_id}: {e}")
-        return None
-
-
-def fetch_huggingface_model(hugging_face_id: str):
-    """Fetch model data from Hugging Face API"""
-    try:
-        # Hugging Face API endpoint for model info
-        url = f"https://huggingface.co/api/models/{hugging_face_id}"
-
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
-
-        model_data = response.json()
-
-        # Cache the result in Redis with 1-hour TTL
-        try:
-            redis_manager = get_redis_manager()
-            cache_key = f"huggingface:model:{hugging_face_id}"
-            redis_manager.set_json(cache_key, model_data, ttl=3600)
-        except Exception as cache_error:
-            logger.warning(f"Failed to cache HuggingFace model {hugging_face_id}: {cache_error}")
-
-        return model_data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Hugging Face model {hugging_face_id} not found")
-            return None
-        else:
-            logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
-            return None
-    except Exception as e:
-        logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
-        return None
-
-
-def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
-    """Enhance OpenRouter model data with Hugging Face information"""
-    try:
-        hugging_face_id = openrouter_model.get("hugging_face_id")
-        if not hugging_face_id:
-            return openrouter_model
-
-        # Get Hugging Face data
-        hf_data = get_cached_huggingface_model(hugging_face_id)
-        if not hf_data:
-            return openrouter_model
-
-        # Extract author data more robustly
-        author_data = None
-        if hf_data.get("author_data"):
-            author_data = {
-                "name": hf_data["author_data"].get("name"),
-                "fullname": hf_data["author_data"].get("fullname"),
-                "avatar_url": hf_data["author_data"].get("avatarUrl"),
-                "follower_count": hf_data["author_data"].get("followerCount", 0),
-            }
-        elif hf_data.get("author"):
-            # Fallback: create basic author data from author field
-            author_data = {
-                "name": hf_data.get("author"),
-                "fullname": hf_data.get("author"),
-                "avatar_url": None,
-                "follower_count": 0,
-            }
-
-        # Create enhanced model data
-        enhanced_model = {
-            **openrouter_model,
-            "huggingface_metrics": {
-                "downloads": hf_data.get("downloads", 0),
-                "likes": hf_data.get("likes", 0),
-                "pipeline_tag": hf_data.get("pipeline_tag"),
-                "num_parameters": hf_data.get("numParameters"),
-                "gated": hf_data.get("gated", False),
-                "private": hf_data.get("private", False),
-                "last_modified": hf_data.get("lastModified"),
-                "author": hf_data.get("author"),
-                "author_data": author_data,
-                "available_inference_providers": hf_data.get("availableInferenceProviders", []),
-                "widget_output_urls": hf_data.get("widgetOutputUrls", []),
-                "is_liked_by_user": hf_data.get("isLikedByUser", False),
-            },
-        }
-
-        return enhanced_model
-    except Exception as e:
-        logger.error(f"Error enhancing model with Hugging Face data: {e}")
-        return openrouter_model
 
 
 def _extract_model_provider_slug(model: dict) -> str | None:

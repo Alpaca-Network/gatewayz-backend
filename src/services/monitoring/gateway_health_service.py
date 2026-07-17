@@ -75,7 +75,6 @@ _deepinfra_models_cache = _CacheWrapper("deepinfra")
 _cerebras_models_cache = _CacheWrapper("cerebras")
 _xai_models_cache = _CacheWrapper("xai")
 _novita_models_cache = _CacheWrapper("novita")
-_huggingface_models_cache = _CacheWrapper("huggingface")
 _fal_models_cache = _CacheWrapper("fal")
 _google_vertex_models_cache = _CacheWrapper("google-vertex")
 _openai_models_cache = _CacheWrapper("openai")
@@ -163,15 +162,6 @@ GATEWAY_CONFIG = {
         "api_key": Config.NOVITA_API_KEY,
         "cache": _novita_models_cache,
         "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "huggingface": {
-        "name": "Hugging Face",
-        "url": "https://huggingface.co/api/models",
-        "api_key_env": "HUG_API_KEY",
-        "api_key": Config.HUG_API_KEY,
-        "cache": _huggingface_models_cache,
-        "min_expected_models": 100,
         "header_type": "bearer",
     },
     "fal": {

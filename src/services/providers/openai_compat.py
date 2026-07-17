@@ -110,9 +110,7 @@ class OpenAICompatAdapter:
 
             mode = "stream" if stream else "non_stream"
             with ProviderTimingContext(self.cfg.slug, resolved, mode):
-                return client.chat.completions.create(
-                    model=resolved, messages=messages, **kwargs
-                )
+                return client.chat.completions.create(model=resolved, messages=messages, **kwargs)
         return client.chat.completions.create(model=resolved, messages=messages, **kwargs)
 
     def _capture(
@@ -143,18 +141,14 @@ class OpenAICompatAdapter:
         except CircuitBreakerError as e:
             logger.warning(f"{self.name} circuit breaker OPEN: {e.message}")
             if self.quirks.sentry:
-                self._capture(
-                    e, model, endpoint, {"circuit_breaker_state": e.state.value}
-                )
+                self._capture(e, model, endpoint, {"circuit_breaker_state": e.state.value})
             raise
         except Exception as e:
             try:
                 logger.error(f"{self.name} request failed for model '{model}': {e}")
                 logger.error(f"Error type: {type(e).__name__}")
                 if hasattr(e, "response"):
-                    logger.error(
-                        f"Response status: {getattr(e.response, 'status_code', 'N/A')}"
-                    )
+                    logger.error(f"Response status: {getattr(e.response, 'status_code', 'N/A')}")
             except UnicodeEncodeError:
                 logger.error(f"{self.name} request failed (encoding error in logging)")
             if self.quirks.sentry:
@@ -167,9 +161,7 @@ class OpenAICompatAdapter:
         """Non-streaming chat completion (old make_<slug>_request_openai)."""
         return self._call(messages, model, stream=False, **params)
 
-    def stream(
-        self, messages: list[dict[str, Any]], model: str, **params: Any
-    ) -> Iterator[Any]:
+    def stream(self, messages: list[dict[str, Any]], model: str, **params: Any) -> Iterator[Any]:
         """Streaming chat completion; the SDK stream (and its SSE chunks) is
         returned unmodified (old make_<slug>_request_openai_stream)."""
         return self._call(messages, model, stream=True, **params)
