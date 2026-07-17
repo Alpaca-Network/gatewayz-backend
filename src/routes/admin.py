@@ -33,13 +33,9 @@ from src.security.deps import require_admin
 from src.services.model_catalog_cache import (
     get_gateway_cache_metadata,
     get_provider_cache_metadata,
-    invalidate_gateway_catalog,
     invalidate_provider_catalog,
 )
-from src.services.models import (
-    fetch_huggingface_model,
-    get_cached_models,
-)
+from src.services.models import get_cached_models
 from src.services.providers import get_cached_providers
 
 # Initialize logging
@@ -313,107 +309,6 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     except Exception as e:
         logger.error(f"Failed to get cache status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get cache status") from e
-
-
-@router.get("/admin/huggingface-cache-status", tags=["admin"])
-async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
-    """Get Hugging Face cache status and statistics"""
-    try:
-        hf_cache = get_gateway_cache_metadata("huggingface")
-        cache_age = None
-        if hf_cache.get("timestamp"):
-            cache_age = (datetime.now(UTC) - hf_cache["timestamp"]).total_seconds()
-
-        hf_data = hf_cache.get("data") or []
-        cached_ids = [
-            model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")
-        ]
-
-        return {
-            "huggingface_cache": {
-                "age_seconds": cache_age,
-                "is_valid": cache_age is not None and cache_age < hf_cache.get("ttl", 1800),
-                "total_cached_models": len(hf_data),
-                "cached_model_ids": cached_ids,
-            },
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get Hugging Face cache status: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to get Hugging Face cache status"
-        ) from e
-
-
-@router.post("/admin/refresh-huggingface-cache", tags=["admin"])
-async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
-    """Clear Hugging Face cache to force refresh on the next request"""
-    try:
-        invalidate_gateway_catalog("huggingface")
-
-        return {
-            "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to clear Hugging Face cache: {e}")
-        raise HTTPException(status_code=500, detail="Failed to clear Hugging Face cache") from e
-
-
-@router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])
-async def admin_test_huggingface(
-    hugging_face_id: str = "openai/gpt-oss-120b", admin_user: dict = Depends(require_admin)
-):
-    """Test Hugging Face API response for debugging"""
-    try:
-        hf_data = fetch_huggingface_model(hugging_face_id)
-        if not hf_data:
-            raise HTTPException(
-                status_code=404, detail=f"Hugging Face model {hugging_face_id} not found"
-            )
-
-        return {
-            "hugging_face_id": hugging_face_id,
-            "raw_response": hf_data,
-            "author_data_extracted": {
-                "has_author_data": bool(hf_data.get("author_data")),
-                "author_data": hf_data.get("author_data"),
-                "author": hf_data.get("author"),
-                "extracted_author_data": {
-                    "name": (
-                        hf_data.get("author_data", {}).get("name")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "fullname": (
-                        hf_data.get("author_data", {}).get("fullname")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "avatar_url": (
-                        hf_data.get("author_data", {}).get("avatarUrl")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "follower_count": (
-                        hf_data.get("author_data", {}).get("followerCount", 0)
-                        if hf_data.get("author_data")
-                        else 0
-                    ),
-                },
-            },
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to test Hugging Face API for {hugging_face_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to test Hugging Face API: {str(e)}"
-        ) from e
 
 
 @router.get("/admin/debug-models", tags=["admin"])

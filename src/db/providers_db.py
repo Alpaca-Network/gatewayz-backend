@@ -26,7 +26,6 @@ _FALLBACK_PROVIDER_SLUGS: list[str] = [
     "cerebras",
     "xai",
     "novita",
-    "huggingface",
     "groq",
     "fireworks",
     "together",
