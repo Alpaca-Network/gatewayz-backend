@@ -323,7 +323,7 @@ async def check_all_provider_credits() -> dict[str, dict[str, Any]]:
     balances = await asyncio.gather(
         *(check_provider_balance(p) for p in api_providers), return_exceptions=True
     )
-    for provider, result in zip(api_providers, balances):
+    for provider, result in zip(api_providers, balances, strict=False):
         if isinstance(result, Exception):
             results[provider] = {
                 "provider": provider,

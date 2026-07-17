@@ -44,7 +44,17 @@ class TestCM1601WebhookPayloadHmacSigned:
 # ---------------------------------------------------------------------------
 # CM-16.2  credits.low event triggered
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
+# GAP: The MVP refactor (commit 8fa2e773 "refactor(mvp): remove notifications")
+# deleted src/services/notification.py entirely, including NotificationService
+# and check_low_balance_alert / LowBalanceAlert. The surviving
+# EnhancedNotificationService only handles welcome / password-reset / plan-upgrade
+# / api-key emails — it has no low-balance alerting equivalent. The spec still
+# lists the credits.low event, so this is a documented code-vs-spec gap.
+@pytest.mark.cm_gap
+@pytest.mark.xfail(
+    reason="Low-balance alerting removed in MVP refactor (8fa2e773); no surviving equivalent",
+    raises=(ModuleNotFoundError, ImportError),
+)
 class TestCM1602WebhookCreditsLowEventTriggered:
     def test_webhook_credits_low_event_triggered(self):
         """check_low_balance_alert returns a LowBalanceAlert when the user's
@@ -129,7 +139,14 @@ class TestCM1602WebhookCreditsLowEventTriggered:
 # ---------------------------------------------------------------------------
 # CM-16.3  credits.depleted event triggered
 # ---------------------------------------------------------------------------
-@pytest.mark.cm_verified
+# GAP: Same removal as CM-16.2 — check_low_balance_alert no longer exists after
+# the MVP notifications purge. Spec still lists credits.depleted, so this is a
+# documented code-vs-spec gap rather than a regression.
+@pytest.mark.cm_gap
+@pytest.mark.xfail(
+    reason="Low-balance alerting removed in MVP refactor (8fa2e773); no surviving equivalent",
+    raises=(ModuleNotFoundError, ImportError),
+)
 class TestCM1603WebhookCreditsDepletedEventTriggered:
     def test_webhook_credits_depleted_event_triggered(self):
         """The low balance alert fires when credits are 0 (depleted),
