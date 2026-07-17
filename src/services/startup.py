@@ -655,6 +655,18 @@ async def lifespan(app):
     except Exception:
         pass
 
+    # Warn if ops alert email is missing (don't fail startup)
+    try:
+        from src.config import Config as _Config3
+
+        if not _Config3.OPS_ALERT_EMAIL:
+            logger.warning(
+                "  [WARN] OPS_ALERT_EMAIL is not set. "
+                "Provider auth-failure alerting will be a no-op."
+            )
+    except Exception:
+        pass
+
     # Set default admin user in background (non-blocking)
     async def _setup_admin_user_background():
         try:

@@ -360,6 +360,11 @@ class Config:
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 
+    # Ops Alerting Configuration
+    # Destination for provider-auth-failure alerts (src/services/provider_alerting.py).
+    # Unset (default) means alerting is a no-op — see startup.py warning.
+    OPS_ALERT_EMAIL: str | None = os.environ.get("OPS_ALERT_EMAIL")
+
     # Admin Credit Grant Safety Controls
     # Maximum single credit grant amount in dollars (default $1000)
     ADMIN_MAX_CREDIT_GRANT: float = float(os.environ.get("ADMIN_MAX_CREDIT_GRANT", "1000"))

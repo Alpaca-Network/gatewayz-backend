@@ -1408,11 +1408,20 @@ def save_chat_completion_request_with_cost(
             model_id = get_model_id_by_name(model_name, provider_name)
 
         if model_id is None:
-            logger.warning(
-                f"Skipping chat completion request save: model not found in database "
-                f"(model_name={model_name}, provider={provider_name})"
-            )
-            return None
+            if status == "failed":
+                # Persist failed requests even when the model can't be resolved —
+                # these are exactly the failures worth surfacing (e.g. a dead
+                # provider key or a model removed from the catalog).
+                logger.warning(
+                    f"Saving failed chat completion request with unresolved model "
+                    f"(model_name={model_name}, provider={provider_name})"
+                )
+            else:
+                logger.warning(
+                    f"Skipping chat completion request save: model not found in database "
+                    f"(model_name={model_name}, provider={provider_name})"
+                )
+                return None
 
         # Prepare the data with cost fields
         request_data = {
@@ -1438,6 +1447,11 @@ def save_chat_completion_request_with_cost(
             request_data["api_key_id"] = api_key_id
         if metadata:
             request_data["metadata"] = metadata
+        if model_id is None and status == "failed":
+            request_data["metadata"] = {
+                **(request_data.get("metadata") or {}),
+                "unresolved_model_name": model_name,
+            }
 
         # Insert into database
         result = client.table("chat_completion_requests").insert(request_data).execute()
