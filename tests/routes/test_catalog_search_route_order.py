@@ -69,9 +69,9 @@ class TestModelsSearchRouteOrder:
             "/models/unique",
             "/models/search",
         ):
-            assert paths.index(static_path) < developer_idx, (
-                f"{static_path} must be registered before /models/{{developer_name}}"
-            )
+            assert (
+                paths.index(static_path) < developer_idx
+            ), f"{static_path} must be registered before /models/{{developer_name}}"
 
     def test_models_search_endpoint_returns_search_handler_shape(self):
         """End-to-end proof via the real router mount order: GET
