@@ -34,9 +34,7 @@ def _transform(model, **kw):
 
 
 def test_unpriced_paid_model_is_delisted_at_sync():
-    result = _transform(
-        {"id": "vendor/no-price-model", "name": "No Price", "pricing": {}}
-    )
+    result = _transform({"id": "vendor/no-price-model", "name": "No Price", "pricing": {}})
     assert result is not None
     assert result["is_active"] is False
     assert result["metadata"]["delist_reason"] == "unpriced"
@@ -181,9 +179,7 @@ def test_sync_provider_models_active_provider_does_not_bulk_delist():
             "src.services.dynamic_provider_loader.get_fetch_models_function",
             return_value=_fake_models,
         ),
-        patch(
-            "src.services.model_catalog_sync.deactivate_models_by_provider"
-        ) as mock_deactivate,
+        patch("src.services.model_catalog_sync.deactivate_models_by_provider") as mock_deactivate,
     ):
         result = sync_provider_models("vendor", dry_run=True)
 

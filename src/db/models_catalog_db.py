@@ -373,14 +373,10 @@ def deactivate_models_by_provider(provider_id: int) -> int:
         )
         count = len(response.data) if response.data else 0
         if count:
-            logger.info(
-                f"Deactivated {count} models for inactive provider_id={provider_id}"
-            )
+            logger.info(f"Deactivated {count} models for inactive provider_id={provider_id}")
         return count
     except Exception as e:
-        logger.error(
-            f"Error bulk-deactivating models for provider_id={provider_id}: {e}"
-        )
+        logger.error(f"Error bulk-deactivating models for provider_id={provider_id}: {e}")
         return 0
 
 
