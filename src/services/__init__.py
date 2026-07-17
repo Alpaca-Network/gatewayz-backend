@@ -57,7 +57,6 @@ _METRICS_MODULES = {
     "prometheus_exporter",
     "prometheus_pb2",
     "prometheus_remote_write",
-    "grafana_metrics_service",
     "metrics_aggregator",
     "metrics_instrumentation",
     "metrics_parser",
