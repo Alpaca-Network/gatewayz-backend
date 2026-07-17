@@ -7,7 +7,7 @@ import re
 import httpx
 from fastapi import HTTPException
 
-from src.utils.error_messages import (
+from src.utils.errors import (
     is_provider_budget_error,
     sanitize_provider_error_for_user,
 )
@@ -804,7 +804,7 @@ def map_provider_error_detailed(
         except Exception as e:
             raise map_provider_error_detailed(provider, model, e, request_id)
     """
-    from src.utils.error_factory import DetailedErrorFactory
+    from src.utils.errors import DetailedErrorFactory
 
     # Get the basic HTTP exception from the existing mapper
     http_exc = map_provider_error(provider, model, exc)

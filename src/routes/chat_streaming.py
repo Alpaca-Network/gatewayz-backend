@@ -438,7 +438,7 @@ async def stream_generator(
         error_message = "Streaming error occurred"
         error_type = "stream_error"
 
-        from src.utils.error_messages import (
+        from src.utils.errors import (
             PROVIDER_CAPACITY_MESSAGE,
             is_provider_budget_error,
             sanitize_provider_error_for_user,

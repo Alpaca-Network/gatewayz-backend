@@ -660,7 +660,7 @@ def create_app() -> FastAPI:
         request_id = getattr(request.state, "request_id", None)
 
         # Return detailed internal error response
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         error_response = DetailedErrorFactory.internal_error(
             operation="request_processing",

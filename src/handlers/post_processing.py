@@ -20,7 +20,7 @@ from src.services.prometheus_metrics import (
 )
 from src.services.redis_metrics import get_redis_metrics
 from src.utils.ai_tracing import AIRequestType, AITracer
-from src.utils.exceptions import APIExceptions
+from src.utils.errors import APIExceptions
 from src.utils.security_validators import sanitize_for_logging
 
 logger = logging.getLogger(__name__)

@@ -28,7 +28,7 @@ from src.services.passive_health_monitor import capture_model_health
 from src.services.prometheus_metrics import (
     record_free_model_usage,
 )
-from src.utils.exceptions import APIExceptions
+from src.utils.errors import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 

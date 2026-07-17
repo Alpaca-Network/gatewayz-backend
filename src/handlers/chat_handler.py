@@ -185,7 +185,7 @@ class ChatInferenceHandler:
 
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         # Get user
         try:
@@ -266,7 +266,7 @@ class ChatInferenceHandler:
 
         if not check_result["allowed"]:
             # Cannot afford any output — reject before provider call
-            from src.utils.exceptions import APIExceptions
+            from src.utils.errors import APIExceptions
 
             max_cost = check_result["max_cost"]
             max_output_tokens = check_result["max_output_tokens"]
@@ -369,7 +369,7 @@ class ChatInferenceHandler:
         """
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
 
@@ -476,7 +476,7 @@ class ChatInferenceHandler:
             # weekly spend limit -> upstream 402). This is a gateway-side capacity issue,
             # NOT the user's — show a friendly message, never leak the upstream key/URL,
             # and fire a distinct Sentry alert so the team is notified to top up.
-            from src.utils.error_messages import (
+            from src.utils.errors import (
                 PROVIDER_CAPACITY_MESSAGE,
                 is_provider_budget_error,
                 sanitize_provider_error_for_user,
@@ -586,7 +586,7 @@ class ChatInferenceHandler:
         # Route to appropriate provider with circuit breaker error handling
         from fastapi import HTTPException
 
-        from src.utils.error_factory import DetailedErrorFactory
+        from src.utils.errors import DetailedErrorFactory
 
         # Bind the customer's BYOK key (if any) only around stream CREATION — the
         # key is consumed when the client/stream is built. It is reset before any
