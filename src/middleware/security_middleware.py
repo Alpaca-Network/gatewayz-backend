@@ -1,15 +1,17 @@
 """
-Security & Behavioral Rate Limiting Middleware
+Security & Rate Limiting Middleware (hot-path slim, MVP Task 16)
 
-This middleware provides a front-line defense against DoS attacks, IP rotation,
-and 499 timeout spikes. It implements:
-1. Tiered IP Rate Limiting (Stricter for cloud/datacenter IPs)
-2. Behavioral Fingerprinting (Detects bots rotating IPs but keeping headers)
-3. Global Velocity Protection (System-wide shield during high error spikes)
+This middleware is a lean front-line defense on the request hot path. It keeps
+only three things, so the per-request budget stays under ~50ms:
+1. API-key presence fast-fail (authenticated requests skip IP rate limiting)
+2. IP rate limiting via the Redis sliding-window check
+3. Global Velocity Protection (system-wide shield + billing guardrail during
+   high error spikes)
+
+IP fingerprinting, bot tiering and datacenter classification were removed.
 """
 
 import asyncio
-import hashlib
 import logging
 import os
 import secrets
@@ -31,12 +33,9 @@ from src.services.prometheus_metrics import rate_limited_requests
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-# Standard Residential/Business limit
-DEFAULT_IP_LIMIT = 300  # requests per minute (was 60 - too low for shared IPs/NAT)
-# Cloud/Datacenter/VPN limit (Stricter)
-STRICT_IP_LIMIT = 60  # requests per minute (was 10 - too restrictive)
-# Fingerprint limit (Cross-IP detection)
-FINGERPRINT_LIMIT = 100  # requests per minute across all IPs for 1 fingerprint
+# Standard IP rate limit (per minute). Applied to unauthenticated requests only;
+# authenticated requests are rate-limited by their API key in the app layer.
+DEFAULT_IP_LIMIT = 300  # requests per minute (shared IPs / NAT friendly)
 
 # --- Global Velocity Mode Configuration ---
 # Activates when error rate exceeds threshold, tightens all limits system-wide
@@ -56,20 +55,6 @@ VELOCITY_TIER_MULTIPLIERS = {
     "max": 0.9,  # MAX tier: 10% reduction
     "admin": 1.0,  # Admin tier: No reduction (bypasses velocity mode)
 }
-
-# Known Datacenter/Proxy CIDR patterns (simplified for implementation)
-# In production, this would be a more comprehensive list or GeoIP database
-DATACENTER_KEYWORDS = [
-    "aws",
-    "amazon",
-    "google",
-    "digitalocean",
-    "azure",
-    "ovh",
-    "linode",
-    "proxy",
-    "vpn",
-]
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -97,7 +82,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     For requests that are identified as SSE streaming requests (i.e. POST to
     /v1/chat/completions with `stream=true` in the body, or an `Accept:
     text/event-stream` header), we still run all inbound security checks (IP rate
-    limit, fingerprint limit) but we call `call_next` and return its response
+    limit) but we call `call_next` and return its response
     immediately without any additional processing of the response body.  This
     restores streaming behaviour for chat endpoints while preserving all
     rate-limiting protection.
@@ -132,42 +117,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         if forwarded_for:
             return forwarded_for.split(",")[0].strip()
         return request.client.host if request.client else "unknown"
-
-    def _generate_fingerprint(self, request: Request) -> str:
-        """
-        Generate a unique 'DNA' for the request based on headers.
-        Helps detect bots that rotate IPs but reuse the same script configuration.
-        """
-        ua = request.headers.get("user-agent", "none")
-        accept = request.headers.get("accept-language", "none")
-        encoding = request.headers.get("accept-encoding", "none")
-
-        # Combine identifiers into a stable hash
-        fingerprint_raw = f"{ua}|{accept}|{encoding}"
-        return hashlib.sha256(fingerprint_raw.encode()).hexdigest()[:16]
-
-    async def _is_datacenter_ip(self, ip: str, request: Request) -> bool:
-        """
-        Check if the IP belongs to a high-risk range (Datacenters/Cloud).
-        Uses CIDR/ASN-based detection (fast, accurate) + header-based hints.
-        """
-        # 1. Check CIDR ranges first (fast, accurate)
-        # This catches known datacenter IPs like AWS, GCP, Azure, Huawei Cloud, etc.
-        from src.services.ip_classification import is_datacenter_ip_fast
-
-        if await is_datacenter_ip_fast(ip):
-            return True
-
-        # 2. Check User-Agent for known scraping tools (secondary signal)
-        ua = request.headers.get("user-agent", "").lower()
-        if any(tool in ua for tool in ["python-requests", "aiohttp", "curl", "postman"]):
-            return True
-
-        # 3. Check for proxy headers often added by scraping services (secondary signal)
-        if request.headers.get("X-Proxy-ID") or request.headers.get("Via"):
-            return True
-
-        return False
 
     def _is_authenticated_request(self, request: Request) -> bool:
         """
@@ -614,8 +563,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                 f"Unexpected error in IP whitelist check for {client_ip}: {e}", exc_info=True
             )
 
-        fingerprint = self._generate_fingerprint(request)
-
         # Check if velocity mode is active (for logging)
         velocity_active = self._is_velocity_mode_active()
 
@@ -625,11 +572,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         # Get user tier for tiered velocity mode (basic, pro, max, admin)
         user_tier = await self._get_user_tier_from_request(request)
 
-        # Determine applicable limit (Tiering) with velocity mode adjustment
-        is_dc = await self._is_datacenter_ip(client_ip, request)
-        base_ip_limit = STRICT_IP_LIMIT if is_dc else DEFAULT_IP_LIMIT
-        ip_limit = self._get_effective_limit(base_ip_limit, user_tier)
-        fp_limit = self._get_effective_limit(FINGERPRINT_LIMIT, user_tier)
+        # IP rate limit with velocity mode adjustment
+        ip_limit = self._get_effective_limit(DEFAULT_IP_LIMIT, user_tier)
 
         # 1. Check IP-based limit (skip for authenticated users and test environment)
         _skip_rate_limit = os.environ.get("TESTING") == "true"
@@ -656,7 +600,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                         details={
                             "limit_type": "ip",
                             "limit": ip_limit,
-                            "fingerprint": fingerprint,
                             "velocity_mode": velocity_active,
                             "user_tier": user_tier,
                         },
@@ -697,79 +640,6 @@ class SecurityMiddleware(BaseHTTPMiddleware):
                     "error": {
                         "message": "Too many requests from this IP address.",
                         "type": "security_limit",
-                    }
-                },
-                headers=headers,
-            )
-
-        # 2. Check Behavioral Fingerprint limit (Cross-IP detection)
-        #    Skip for authenticated users and test environment
-        if (
-            not _skip_rate_limit
-            and not is_authenticated
-            and not await self._check_limit(f"fp:{fingerprint}", fp_limit)
-        ):
-            rate_limited_requests.labels(limit_type="security_fingerprint").inc()
-            mode_indicator = " [VELOCITY MODE]" if velocity_active else ""
-            logger.warning(
-                f"🛡️ Blocked Bot Fingerprint: {fingerprint} (Rotating IPs detected){mode_indicator}"
-            )
-
-            # Log security event to audit table (non-blocking)
-            try:
-                from src.db.activity import log_security_event
-
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        log_security_event,
-                        event_type="rate_limit_block",
-                        ip_address=client_ip,
-                        details={
-                            "limit_type": "fingerprint",
-                            "limit": fp_limit,
-                            "fingerprint": fingerprint,
-                            "velocity_mode": velocity_active,
-                            "user_tier": user_tier,
-                        },
-                    )
-                )
-            except Exception as e:
-                logger.debug(f"Failed to log security audit event: {e}")
-
-            _fp_reset_ts = str(int(time.time()) + 60)
-            headers = {
-                # IETF draft standard headers (RateLimit-*); RateLimit-Reset is seconds until reset
-                "RateLimit-Limit": str(fp_limit),
-                "RateLimit-Remaining": "0",
-                "RateLimit-Reset": "60",
-                # Retry-After (RFC 7231)
-                "Retry-After": "60",
-                # Legacy X-RateLimit-* headers kept for backwards compatibility
-                "X-RateLimit-Limit": str(fp_limit),
-                "X-RateLimit-Remaining": "0",
-                "X-RateLimit-Reset": _fp_reset_ts,
-                "X-RateLimit-Reason": (
-                    "fingerprint_limit"
-                    if not velocity_active
-                    else "velocity_mode_fingerprint_limit"
-                ),
-                "X-RateLimit-Mode": "velocity" if velocity_active else "normal",
-                "X-Velocity-Mode-Active": str(velocity_active).lower(),
-                "X-User-Tier": user_tier,
-            }
-
-            if velocity_active:
-                headers["X-Velocity-Mode-Until"] = str(int(self._velocity_mode_until))
-                headers["X-Velocity-Mode-Multiplier"] = str(
-                    VELOCITY_TIER_MULTIPLIERS.get(user_tier, VELOCITY_LIMIT_MULTIPLIER)
-                )
-
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "error": {
-                        "message": "Suspicious request patterns detected.",
-                        "type": "behavioral_limit",
                     }
                 },
                 headers=headers,
