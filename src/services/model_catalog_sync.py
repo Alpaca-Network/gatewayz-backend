@@ -14,7 +14,6 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.utils.pricing_normalization import (
     PricingFormat,
     get_provider_format,
@@ -62,7 +61,6 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "fireworks": fetch_models_from_fireworks,
     "together": fetch_models_from_together,
     "alibaba": fetch_models_from_alibaba,
-    "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,
     "google-vertex": fetch_models_from_google_vertex,
     "xai": fetch_models_from_xai,

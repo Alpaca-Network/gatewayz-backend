@@ -17,7 +17,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from src.security.deps import require_admin
-from src.services.huggingface_models import fetch_models_from_hug
 from src.services.model_catalog_cache import (
     clear_models_cache,
     clear_providers_cache,
@@ -72,7 +71,6 @@ def get_all_gateway_names() -> list[str]:
         "featherless",
         "fireworks",
         "groq",
-        "huggingface",
         "novita",
         "openrouter",
         "together",
@@ -97,7 +95,6 @@ def get_cacheable_gateways() -> list[str]:
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,
-        "huggingface": fetch_models_from_hug,
         "novita": fetch_models_from_novita,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,
@@ -120,7 +117,6 @@ def get_fetch_function(gateway: str):
         "featherless": fetch_models_from_featherless,
         "fireworks": fetch_models_from_fireworks,
         "groq": fetch_models_from_groq,
-        "huggingface": fetch_models_from_hug,
         "novita": fetch_models_from_novita,
         "openrouter": fetch_models_from_openrouter,
         "together": fetch_models_from_together,

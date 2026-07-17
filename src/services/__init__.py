@@ -160,7 +160,7 @@ def __getattr__(name):
             setattr(sys.modules[__name__], name, module)
             return module
     # Modules that remain directly under src/services/
-    if name in ("rate_limiting", "huggingface_hub_service"):
+    if name in ("rate_limiting",):
         module = importlib.import_module(f"{__name__}.{name}")
         setattr(sys.modules[__name__], name, module)
         return module
