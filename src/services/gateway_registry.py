@@ -172,18 +172,6 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
-    "fal": {
-        "name": "Fal",
-        "color": "bg-emerald-600",
-        "priority": "slow",
-        "site_url": "https://fal.ai",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
     "alibaba": {
         "name": "Alibaba",
         "color": "bg-orange-700",

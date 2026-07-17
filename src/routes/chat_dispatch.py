@@ -49,7 +49,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_PROVIDER_TIMEOUT = 30
 PROVIDER_TIMEOUTS = {
     "huggingface": 120,
-    "near": 120,  # Large models like Qwen3-30B need extended timeout
 }
 
 
@@ -208,21 +207,7 @@ async def dispatch_streaming(
             try:
                 # Registry-based provider dispatch (replaces ~400 lines of if-elif chains)
                 # Note: Streaming tracing is handled in _chat.stream_generator to capture final token counts
-                if attempt_provider == "fal":
-                    # FAL models are for image/video generation, not chat completions
-                    raise HTTPException(
-                        status_code=400,
-                        detail={
-                            "error": {
-                                "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                "and is not available through the chat completions endpoint. "
-                                "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                "type": "invalid_request_error",
-                                "code": "model_not_supported_for_chat",
-                            }
-                        },
-                    )
-                elif attempt_provider in PROVIDER_ROUTING:
+                if attempt_provider in PROVIDER_ROUTING:
                     # Use registry for all registered providers
                     stream_func = PROVIDER_ROUTING[attempt_provider]["stream"]
                     stream = await _to_thread(stream_func, messages, request_model, **optional)
@@ -559,21 +544,7 @@ async def dispatch_non_streaming(
                     model=request_model,
                     request_type=AIRequestType.CHAT_COMPLETION,
                 ) as trace_ctx:
-                    if attempt_provider == "fal":
-                        # FAL models are for image/video generation, not chat completions
-                        raise HTTPException(
-                            status_code=400,
-                            detail={
-                                "error": {
-                                    "message": f"Model '{request_model}' is a FAL.ai image/video generation model "
-                                    "and is not available through the chat completions endpoint. "
-                                    "Please use the /v1/images/generations endpoint with provider='fal' instead.",
-                                    "type": "invalid_request_error",
-                                    "code": "model_not_supported_for_chat",
-                                }
-                            },
-                        )
-                    elif attempt_provider in PROVIDER_ROUTING:
+                    if attempt_provider in PROVIDER_ROUTING:
                         # Use registry for all registered providers
                         request_func = PROVIDER_ROUTING[attempt_provider]["request"]
                         process_func = PROVIDER_ROUTING[attempt_provider]["process"]

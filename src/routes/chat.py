@@ -32,13 +32,9 @@ from src.utils.errors import APIExceptions
 from src.utils.performance_tracker import PerformanceTracker
 from src.utils.rate_limit_headers import get_rate_limit_headers
 
-# Optional Traceloop integration - gracefully handle if not installed
-try:
-    from src.config.traceloop_config import set_association_properties as set_traceloop_properties
-except ImportError:
-    # Traceloop not available - provide no-op function
-    def set_traceloop_properties(**kwargs):
-        pass
+# Traceloop integration removed; keep call sites as a no-op.
+def set_traceloop_properties(**kwargs):
+    pass
 
 
 # Unified chat handler and adapters for chat unification
