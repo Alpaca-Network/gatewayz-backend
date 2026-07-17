@@ -36,8 +36,21 @@ def test_every_provider_declares_a_full_trio():
     #   adapter-served (Tier-1): deepinfra, together, fireworks, groq, zai
     #   adapter-served (Tier-2, Task 18): deepseek, moonshot, minimax, xiaomi
     assert len(PROVIDER_FUNCTIONS) >= 7, "expected ~8 bespoke MVP-roster providers declared"
-    assert {"deepinfra", "together", "fireworks", "groq", "zai"}.issubset(set(ADAPTERS))
-    assert {"deepseek", "moonshot", "minimax", "xiaomi"}.issubset(set(ADAPTERS))
+    # Exact-set drift guard: ADAPTERS must be precisely the five Tier-1
+    # consolidated providers plus the four Tier-2 providers from Task 18 —
+    # not merely a superset. Adding/removing an adapter slug must update
+    # this assertion deliberately.
+    assert set(ADAPTERS) == {
+        "deepinfra",
+        "together",
+        "fireworks",
+        "groq",
+        "zai",
+        "deepseek",
+        "moonshot",
+        "minimax",
+        "xiaomi",
+    }
     assert (
         len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 12
     ), "expected ~13 MVP-roster providers declared across bespoke + adapter"
