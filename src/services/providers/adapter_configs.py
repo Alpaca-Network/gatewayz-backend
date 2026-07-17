@@ -73,9 +73,7 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         api_key_env="GROQ_API_KEY",
         display_name="Groq",
         client_factory=get_groq_pooled_client,
-        quirks=Quirks(
-            circuit_breaker=_STANDARD_CIRCUIT_CONFIG, sentry=True, timing=True
-        ),
+        quirks=Quirks(circuit_breaker=_STANDARD_CIRCUIT_CONFIG, sentry=True, timing=True),
     ),
     "zai": ProviderConfig(
         slug="zai",

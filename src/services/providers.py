@@ -336,5 +336,3 @@ def fetch_models_from_novita():
     from src.services.providers.novita_client import fetch_models_from_novita as _fetch
 
     return _fetch()
-
-

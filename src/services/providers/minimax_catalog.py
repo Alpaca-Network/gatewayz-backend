@@ -33,9 +33,7 @@ def normalize_minimax_model(minimax_model: dict) -> dict | None:
     slug = f"minimax/{provider_model_id}"
     provider_slug = "minimax"
 
-    display_name = clean_model_name(
-        provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
+    display_name = clean_model_name(provider_model_id.replace("-", " ").replace("_", " ").title())
     owned_by = minimax_model.get("owned_by", "minimax")
     description = f"MiniMax model {provider_model_id}, provided by {owned_by}."
 

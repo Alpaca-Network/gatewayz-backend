@@ -168,7 +168,6 @@ def test_bandit_false_positives_suppressed():
     project_root = Path(__file__).parent.parent.parent
     checks = [
         ("src/routes/admin.py", "nosec B324"),
-        ("src/routes/health_timeline.py", "nosec B324"),
     ]
     for filepath, nosec_tag in checks:
         source = (project_root / filepath).read_text()

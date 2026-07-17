@@ -487,7 +487,7 @@ class TestGlobalFunctions:
 
     def test_get_db_config_singleton(self):
         """Test get_db_config returns singleton"""
-        from src.config import db_config
+        from src.config import supabase_config as db_config
 
         # Reset global
         db_config._db_config = None
@@ -501,7 +501,7 @@ class TestGlobalFunctions:
     @patch("src.config.supabase_config.pool")
     def test_get_db_connection(self, mock_pool):
         """Test get_db_connection helper"""
-        from src.config import db_config
+        from src.config import supabase_config as db_config
 
         mock_conn = Mock()
         mock_pool_instance = Mock()
@@ -519,7 +519,7 @@ class TestGlobalFunctions:
     @patch("src.config.supabase_config.pool")
     def test_test_db_connection(self, mock_pool):
         """Test test_db_connection helper"""
-        from src.config import db_config
+        from src.config import supabase_config as db_config
 
         mock_cursor = Mock()
         mock_cursor.fetchone = Mock(return_value=(1,))
@@ -538,7 +538,7 @@ class TestGlobalFunctions:
 
     def test_close_db_connections(self):
         """Test close_db_connections helper"""
-        from src.config import db_config
+        from src.config import supabase_config as db_config
 
         # Reset global
         db_config._db_config = None
@@ -548,7 +548,7 @@ class TestGlobalFunctions:
 
     def test_is_db_available(self):
         """Test is_db_available helper"""
-        from src.config import db_config
+        from src.config import supabase_config as db_config
 
         # Reset global
         db_config._db_config = None

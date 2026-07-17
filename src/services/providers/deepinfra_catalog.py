@@ -23,6 +23,7 @@ MODALITY_TEXT_TO_TEXT = "text->text"
 MODALITY_TEXT_TO_IMAGE = "text->image"
 MODALITY_TEXT_TO_AUDIO = "text->audio"
 
+
 def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
     """Normalize DeepInfra model to our schema"""
     from src.services.pricing_lookup import enrich_model_with_pricing

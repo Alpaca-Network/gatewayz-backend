@@ -14,11 +14,6 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.utils.pricing_normalization import (
-    PricingFormat,
-    get_provider_format,
-    normalize_to_per_token,
-)
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
@@ -37,6 +32,11 @@ from src.services.providers.together_catalog import fetch_models_from_together
 from src.services.providers.xai_client import fetch_models_from_xai
 from src.services.providers.xiaomi_catalog import fetch_models_from_xiaomi
 from src.services.providers.zai_catalog import fetch_models_from_zai
+from src.utils.pricing_normalization import (
+    PricingFormat,
+    get_provider_format,
+    normalize_to_per_token,
+)
 
 logger = logging.getLogger(__name__)
 
