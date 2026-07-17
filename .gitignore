@@ -61,6 +61,7 @@ gatewayz/
 !SYNC_QUICKSTART.md
 !PRODUCTION_VERIFICATION_CHECKLIST.md
 !scripts/README_VERIFICATION.md
+!supabase/staged-migrations/README.md
 
 # Temp and output files
 tmp/
