@@ -46,9 +46,8 @@ sentry-sdk[fastapi]>=2.20.0
 # Scheduled Jobs (Phase 3 - Issue #996)
 APScheduler==3.10.4
 
-# Loki Logging
+# Structured (JSON) Logging
 python-json-logger>=2.0.7
-python-logging-loki>=0.3.1
 
 # Testing dependencies
 pytest==7.4.3

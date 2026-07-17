@@ -8,9 +8,7 @@ every 15 minutes on next access (stale-while-revalidate — never blocks a reque
 This replaces the following hardcoded Python structures:
   - MODEL_MAX_TOKENS in credit_precheck.py
   - ANONYMOUS_ALLOWED_MODELS in anonymous_rate_limiter.py
-  - QUALITY_PRIORS in model_selector.py (module removed in the MVP refactor)
   - SMALL_TIER_POOL / MEDIUM_TIER_POOL in health_snapshots.py
-  - STABLE_FALLBACK_MODELS in prompt_router.py (module removed in the MVP refactor)
   - ULTRA_LOW_LATENCY_MODELS in request_prioritization.py
 
 Usage:

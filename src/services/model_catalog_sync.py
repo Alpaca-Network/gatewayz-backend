@@ -160,7 +160,7 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
     Capability resolution strategy (metadata-first, name-based fallback):
     1. Check explicit capability fields on the model dict (set by provider clients
-       that have authoritative knowledge, e.g. cohere_client.py).
+       that have authoritative knowledge).
     2. Check architecture metadata (input_modalities for vision; supported_parameters
        for function calling) — derived from provider API responses.
     3. Fall back to model-name heuristics only when metadata is absent.

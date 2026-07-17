@@ -11,7 +11,7 @@ from prometheus_client import REGISTRY
 
 from src.config import Config
 
-# Initialize logging with Loki integration
+# Initialize structured logging
 from src.config.logging_config import configure_logging
 from src.constants import (
     FRONTEND_BETA_URL,
