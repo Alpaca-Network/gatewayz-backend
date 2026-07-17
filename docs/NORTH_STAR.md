@@ -137,3 +137,25 @@ Modifiers: BYOK keys pin to the user's provider (fee applies); explicit `provide
 ## 7. Amendment Process
 
 This document changes by deliberate amendment (PR titled `north-star:`), not by drift. When reality contradicts it — a revenue stream underperforms, a provider tier shifts, latency budgets prove wrong — amend the document with the evidence, then change the code.
+
+---
+
+## Amendments
+
+### 2026-07-17 — MVP North Star alignment refactor
+
+Decisions baked into `docs/superpowers/plans/2026-07-16-mvp-refactor.md` and executed on branch `refactor/mvp-north-star`:
+
+| # | Decision | Call |
+|---|---|---|
+| D1 | Plans/subscriptions | **KEEP** — live prod billing/tier dependency; slimming deferred post-MVP |
+| D2 | Prompt/code auto-router cluster (9 files, ~3.2k LOC) | **CUT** — second router engine violated §5 "one router"; `smart_router` is canonical |
+| D3 | IP/bot fingerprinting | **TRIM** — kept key-auth + rate-limit path in `security_middleware`; deleted fingerprinting/bot-tier machinery + `datacenter_ips` + `ip_classification` |
+| D4 | Status surface | **KEEP** `status_page.py`, `model_health.py`; **CUT** `health_timeline.py`, `downtime_logs.py`, `detailed_status.py`, `error_monitor.py`, `diagnostics.py`, `optimization_monitor.py` |
+| D5 | Non-roster providers | **KEEP** `zai_client.py` (key in hand, GLM demand — Z.ai admitted to the Tier-3/4 roster) + `featherless_client.py` (Tier 4); **CUT** `cloudflare_workers_ai_client.py`, `nebius_client.py` (rejected) |
+
+**Adapter consolidation — reduced scope from the original plan**: instead of moving all 10 OpenAI-compatible clients onto one shared adapter, the executed scope was **5 consolidated onto `openai_compat.py`** (deepinfra, together, fireworks, groq, zai) **+ 4 kept bespoke** (cerebras, xai, featherless, alibaba — each had provider-specific quirks not worth abstracting for one caller) **+ novita kept fetch-only** (catalog/pricing ingestion only, no consolidated request/stream path). Tier-2 providers added in Task 18 (deepseek, moonshot, minimax, xiaomi) were built directly as `adapter_configs.py` entries on the shared adapter from day one.
+
+**huggingface — OPEN roster decision, not resolved by this refactor**: `huggingface_client.py` was deleted (Task 10) and removed from `FALLBACK_PROVIDER_PRIORITY` (no client to fail over into), but its catalog-fetch entry in `PROVIDER_FETCH_FUNCTIONS` is still alive — models keep appearing in the catalog with no way to actually serve them. This is flagged, not fixed; needs a product call on whether to re-add a client, drop the catalog entry, or keep it as a "coming soon" listing.
+
+**Parked pending user/product decision** (frontend actively uses these paths; not deleted, not confirmed as permanent keeps): `chat_history` / `share` / `feedback` / `user_memory` / `chat_context` routes and DB tables, plus `audio` (Whisper transcription), `tools` (server-side TTS/calculator/code-exec), and `activity` routes. All still boot and serve traffic; none were evaluated against the admission/removal criteria in §3 because they're outside provider strategy — they need an explicit product decision on whether they belong in the MVP surface at all.

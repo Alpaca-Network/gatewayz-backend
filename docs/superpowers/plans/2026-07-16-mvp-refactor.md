@@ -282,3 +282,11 @@ ProviderConfig(slug="xiaomi", base_url="<verify: Xiaomi MiMo open platform>", ap
 - Full `scripts/` triage (122 loose root scripts) beyond the artifacts removed in Tasks 1–2.
 - Slimming plans/subscriptions (D1) and the sentry-context/perf-tracker utils MAYBE cluster.
 - Applying drop-table migrations to production (human-gated, weeks after deploy soak).
+
+## Outcome
+
+- LOC: `src/` ~161k → 123.8k (Task 19 measurement); adapter consolidation reduced scope to 5 consolidated + 4 bespoke clients + novita fetch-only (not the full 10→ adapter sweep originally scoped).
+- Parked, not deleted (frontend-active, needs product decision): chat_history/share/feedback/user_memory/chat_context, audio, tools, activity routes; huggingface left as an open roster decision (client gone, catalog-fetch still live).
+- Key deviations: T15 kept `DetailedErrorFactory` byte-identical rather than inventing a new `classify_provider_error` interface; drop/seed/deactivate migrations shipped to `supabase/staged-migrations/` (human-gated) instead of `supabase/migrations/` to avoid CI auto-push to production.
+- Verification: ~2190 tests pass / 0 unexplained failures across the chunked suite; e2e smoke clean; app boots with 311 routes.
+- Ops follow-ups outstanding: fund DeepSeek/Moonshot/MiniMax provider accounts, provision `XIAOMI_API_KEY`, add tier-2 slugs to `ENABLED_PROVIDERS`, and manually apply `supabase/staged-migrations/*.sql` per its README once each deploy has soaked.

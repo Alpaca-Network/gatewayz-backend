@@ -6,24 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-**Gatewayz v2.0.4** - Enterprise FastAPI gateway providing unified access to 100+ AI models from 30+ providers (OpenRouter, Portkey, Featherless, Chutes, DeepInfra, Fireworks, Together, HuggingFace, Google Vertex, Groq, Cerebras, Cloudflare Workers, etc).
+**Gatewayz v2.0.4** - Enterprise FastAPI gateway providing unified access to 100+ AI models from 17 providers (OpenAI, Anthropic, Google Vertex, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, MiniMax, Xiaomi, Z.ai, DeepInfra, Novita, Together, Fireworks, Groq, Cerebras, Featherless), with OpenRouter kept as an aggregator-of-last-resort fallback, never primary supply.
 
-**Core Features**: OpenAI/Anthropic API compatibility, multi-provider routing, credit-based billing, encrypted API keys, IP allowlists, audit logging, chat history, image generation, trials, subscriptions, referrals, Prometheus/Grafana/Sentry/Arize observability, OpenTelemetry tracing, rate limiting, health monitoring, provider failover.
+**Core Features**: OpenAI/Anthropic API compatibility, multi-provider routing, credit-based billing, encrypted API keys, IP allowlists, audit logging, chat history, subscriptions, Prometheus/Sentry observability, rate limiting, health monitoring, provider failover.
 
-**Stack**: FastAPI 0.104.1, Python 3.10-3.12, Supabase (PostgreSQL), Redis, Stripe, Resend, OpenTelemetry, Prometheus.
+**Stack**: FastAPI 0.104.1, Python 3.10-3.12, Supabase (PostgreSQL), Redis, Stripe, Resend, Prometheus.
 
 ---
 
 ## Architecture
 
-**Layered Design**: Middleware → Routes (43) → Services (95) → Database (24) → Supabase/Redis/External Providers
+**Layered Design**: Middleware → Routes (43) → Services (42 + providers/) → Database (30) → Supabase/Redis/External Providers
 
 **Flow**: Request → Auth/Rate Limit Middleware → Route Handler → Service (business logic, provider routing, pricing) → DB Layer (Supabase) → Response
 
 **Key Principles**:
 - Modularity (strict layer separation)
 - Async/await throughout
-- Provider abstraction (30 client modules)
+- Provider abstraction (bespoke clients + shared OpenAI-compatible adapter)
 - Security (Fernet encryption, HMAC, RBAC)
 - Scalability (Redis caching, connection pooling)
 
@@ -34,31 +34,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```
 src/                           # Python source
 ├── main.py                   # FastAPI app factory
-├── config/                   # 8 files: config, db, redis, supabase, arize, logging, opentelemetry
-├── middleware/               # 6 files: sentry, observability, timeout, security, gzip, trace
-├── db/                       # 24 modules: users, api_keys, chat_history, payments, plans, trials,
-│                             # coupons, referral, activity, rate_limits, roles, ranking, credits, etc
-├── routes/                   # 43 endpoints: chat, messages, images, catalog, health, ping, auth,
-│                             # users, api_keys, admin, payments, plans, analytics, monitoring, etc
-├── services/                 # 95 modules organized by function:
-│   ├── *_client.py          # 30 provider clients (openrouter, featherless, chutes, etc)
+├── config/                   # 5 files: config, redis, supabase, logging, usage_limits
+├── middleware/               # 8 files: auto_sentry, concurrency, observability (Prometheus
+│                             # request metrics), request_id, timeout, security, gzip, staging
+├── db/                       # 30 modules: users, api_keys, chat_history, payments, plans,
+│                             # activity, rate_limits, roles, ranking, credits, etc
+├── routes/                   # 43 endpoints: chat, messages, catalog, health, auth, users,
+│                             # api_keys, admin, payments, plans, monitoring, etc
+├── services/                 # 42 top-level modules + services/providers/ (client adapters):
+│   ├── providers/            # bespoke clients (openai, anthropic, google_vertex, xai,
+│   │                         # openrouter, cerebras, featherless, novita, alibaba) +
+│   │                         # openai_compat.py adapter with adapter_configs.py driving
+│   │                         # deepinfra/together/fireworks/groq/zai/deepseek/moonshot/
+│   │                         # minimax/xiaomi off one shared trio
 │   ├── models.py, providers.py, pricing.py, rate_limiting.py  # Core services
-│   ├── *_monitor.py         # 7 health monitoring services
-│   ├── *_cache.py           # 6 caching services
-│   ├── prometheus_*, grafana_*, metrics_*  # 12 observability services
-│   └── trial_*, referral.py, payments.py, notification.py  # 23 feature/utility services
-├── schemas/                  # 15 Pydantic models
+│   ├── *_monitor.py         # health monitoring services
+│   ├── *_cache.py           # caching services
+│   └── payments.py, model_catalog_sync.py, scheduled_sync.py, price_refresh.py, etc
+├── schemas/                  # 14 Pydantic models
 ├── security/                 # security.py (encryption/HMAC), deps.py (auth dependencies)
-├── models/                   # health_models.py, image_models.py
-└── utils/                    # 15 utilities: validators, auto_sentry, crypto, retry, etc
+├── models/                   # health_models.py
+└── utils/                    # 25 utilities: validators, crypto, retry, errors, etc
 
-tests/                        # 228+ tests in 13 directories (unit, integration, e2e, health, smoke, etc)
-├── conceptual_model/         # 186 tests verifying code matches Conceptual Model spec (see README.md inside)
-docs/                         # 121 files (architecture, api, setup, deployment, integrations)
-supabase/migrations/          # 36 SQL migrations
+tests/                        # 187+ test files across unit, integration, e2e, health, smoke, etc
+├── conceptual_model/         # tests verifying code matches Conceptual Model spec (see README.md inside)
+docs/                         # architecture, api, setup, deployment, integrations
+supabase/migrations/          # SQL migrations (+ supabase/staged-migrations/ for human-gated drops/seeds)
 scripts/                      # checks, database, integration-tests, utilities
 api/index.py                  # Vercel serverless entry
-.github/workflows/            # 9 CI/CD workflows
+.github/workflows/            # CI/CD workflows
 ```
 
 ---
@@ -81,14 +85,14 @@ api/index.py                  # Vercel serverless entry
 
 **Database**: `config/supabase_config.py`, `config/config.py` (30+ env vars), `config/redis_config.py`
 
-**Monitoring**: `routes/{health.py, system.py, metrics.py, grafana_metrics.py, model_health.py}`,
+**Monitoring**: `routes/{health.py, system.py, status_page.py, model_health.py, monitoring.py}`,
 `services/{intelligent_health_monitor.py, autonomous_monitor.py}`
 
 ---
 
 ## Key Tables (20+)
 
-users, api_keys, payments, plans, chat_history, coupons, referrals, trials, credit_transactions, rate_limits, roles, activity, ranking, gateway_analytics, ping, feedback, model_health, models_catalog, providers, subscription_products, webhook_events, failover
+users, api_keys, payments, plans, chat_history, shared_chats, user_memory, credit_transactions, rate_limits, roles, activity, ranking, gateway_analytics, feedback, model_health, models_catalog, providers, subscription_products, webhook_events, failover, velocity_mode_events
 
 ---
 
@@ -143,7 +147,7 @@ See `tests/conceptual_model/README.md` for details. Uses `@pytest.mark.cm_verifi
 
 ## Performance & Security
 
-**Performance**: Redis multi-layer caching, connection pooling, request prioritization, selective GZip, async I/O, multi-provider load balancing, Prometheus metrics, OpenTelemetry tracing, query timeouts
+**Performance**: Redis multi-layer caching, connection pooling, request prioritization, selective GZip, async I/O, multi-provider load balancing, Prometheus metrics, query timeouts
 
 **Security**: Fernet (AES-128) encryption, HMAC-SHA256 hashing, API key auth, RBAC, audit logging, IP allowlists, domain restrictions, per-user/key/system rate limits
 
@@ -153,15 +157,16 @@ See `tests/conceptual_model/README.md` for details. Uses `@pytest.mark.cm_verifi
 
 | Component | Location | Count |
 |-----------|----------|-------|
-| Routes | `src/routes/` | 60 |
-| Services | `src/services/` | 75 |
-| DB Modules | `src/db/` | 35 |
-| Schemas | `src/schemas/` | 15 |
-| Config | `src/config/` | 8 |
-| Middleware | `src/middleware/` | 6 |
-| Utils | `src/utils/` | 15 |
-| Test Files | `tests/` | 200+ |
-| Migrations | `supabase/migrations/` | 36 |
+| Routes | `src/routes/` | 43 |
+| Services | `src/services/` (top-level) | 42 |
+| Provider clients/adapters | `src/services/providers/` | 26 |
+| DB Modules | `src/db/` | 30 |
+| Schemas | `src/schemas/` | 14 |
+| Config | `src/config/` | 5 |
+| Middleware | `src/middleware/` | 8 |
+| Utils | `src/utils/` | 25 |
+| Test Files | `tests/` | 187 |
+| Migrations | `supabase/migrations/` | 145 |
 
 ---
 
@@ -202,10 +207,10 @@ Frontend auto-discovers from `GET /gateways` endpoint.
 4. **DB**: Schema changes require migrations in `supabase/migrations/`
 5. **Tests**: Add tests (follow existing structure by test type)
 6. **Config**: Use env vars via `src/config/config.py`
-7. **Multi-Provider**: Consider impact across all 30 providers
+7. **Multi-Provider**: Consider impact across all 17 providers
 8. **Rate Limiting**: Account for Redis availability + fallback
 9. **Performance**: Use async/await; leverage caching; monitor pools
-10. **Observability**: Add Prometheus metrics, OpenTelemetry traces, Sentry tracking
+10. **Observability**: Add Prometheus metrics, Sentry tracking
 11. **Health**: Consider health check impacts for new providers/services
 12. **Docs**: Update docs for major features
 
