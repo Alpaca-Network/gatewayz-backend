@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+
 # ---------------------------------------------------------------------------
 # CM-7.8  Plan tiers exist: Trial, Dev, Team, Enterprise
 # ---------------------------------------------------------------------------

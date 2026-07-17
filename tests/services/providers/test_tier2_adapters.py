@@ -160,9 +160,7 @@ class TestTier2RequestTargeting:
         adapter = self._adapter(slug)
 
         with patch("src.services.providers.openai_compat.OpenAI") as mock_openai:
-            mock_openai.return_value.chat.completions.create.return_value = (
-                _mock_openai_response()
-            )
+            mock_openai.return_value.chat.completions.create.return_value = _mock_openai_response()
             adapter.request(MESSAGES, "test-model")
 
             kwargs = mock_openai.call_args[1]

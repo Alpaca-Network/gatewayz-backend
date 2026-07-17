@@ -71,8 +71,7 @@ class TestCM1802EachProviderHasClientModule:
                 failed.append((provider, str(e)))
 
         assert len(failed) == 0, (
-            f"All key providers must have a client module or adapter entry. "
-            f"Failed: {failed}"
+            f"All key providers must have a client module or adapter entry. " f"Failed: {failed}"
         )
         assert len(imported) == len(key_providers)
 
@@ -101,9 +100,9 @@ class TestCM1803ProviderClientImplementsRequiredInterface:
         for provider in key_providers:
             if provider in ADAPTERS:
                 adapter = ADAPTERS[provider]
-                assert callable(adapter.request) and callable(adapter.stream), (
-                    f"{provider} adapter must expose request/stream callables"
-                )
+                assert callable(adapter.request) and callable(
+                    adapter.stream
+                ), f"{provider} adapter must expose request/stream callables"
                 continue
 
             module = importlib.import_module(f"src.services.{provider}_client")
