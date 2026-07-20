@@ -595,7 +595,12 @@ class Config:
     # shown in the catalog, and synced.  Comma-separated slugs using the
     # hyphenated gateway names (e.g. "openrouter,openai,anthropic").
     # Empty string or unset means ALL providers are enabled.
-    _raw_enabled = os.environ.get("ENABLED_PROVIDERS", "openrouter")
+    _raw_enabled = os.environ.get(
+        "ENABLED_PROVIDERS",
+        "openai,anthropic,google-vertex,xai,deepseek,alibaba,xiaomi,moonshot,minimax,"
+        "deepinfra,novita,together,fireworks,groq,cerebras,perplexity,mistral,"
+        "featherless,openrouter",
+    )
     ENABLED_PROVIDERS: frozenset[str] | None = (
         frozenset(s.strip() for s in _raw_enabled.split(",") if s.strip())
         if _raw_enabled.strip()
