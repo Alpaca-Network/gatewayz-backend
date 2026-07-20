@@ -294,6 +294,12 @@ class Config:
     # Together.ai Configuration
     TOGETHER_API_KEY = os.environ.get("TOGETHER_API_KEY")
 
+    # Moonshot AI (Kimi) Configuration — OpenAI-compatible direct provider
+    MOONSHOT_API_KEY = os.environ.get("MOONSHOT_API_KEY")
+
+    # MiniMax Configuration — OpenAI-compatible direct provider (dark by default)
+    MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY")
+
     # Groq Configuration
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 

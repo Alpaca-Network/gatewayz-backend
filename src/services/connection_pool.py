@@ -460,6 +460,30 @@ def get_together_pooled_client() -> OpenAI:
     )
 
 
+def get_moonshot_pooled_client() -> OpenAI:
+    """Get pooled client for Moonshot AI (Kimi)."""
+    if not Config.MOONSHOT_API_KEY:
+        raise ValueError("Moonshot API key not configured")
+
+    return get_pooled_client(
+        provider="moonshot",
+        base_url="https://api.moonshot.ai/v1",
+        api_key=Config.MOONSHOT_API_KEY,
+    )
+
+
+def get_minimax_pooled_client() -> OpenAI:
+    """Get pooled client for MiniMax."""
+    if not Config.MINIMAX_API_KEY:
+        raise ValueError("MiniMax API key not configured")
+
+    return get_pooled_client(
+        provider="minimax",
+        base_url="https://api.minimaxi.com/v1",
+        api_key=Config.MINIMAX_API_KEY,
+    )
+
+
 def get_huggingface_pooled_client() -> OpenAI:
     """Get pooled client for HuggingFace (with extended timeout)."""
     if not Config.HUGGINGFACE_API_KEY:
