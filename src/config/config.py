@@ -597,9 +597,8 @@ class Config:
     # Empty string or unset means ALL providers are enabled.
     _raw_enabled = os.environ.get(
         "ENABLED_PROVIDERS",
-        "openai,anthropic,google-vertex,xai,deepseek,alibaba,xiaomi,moonshot,minimax,"
-        "deepinfra,novita,together,fireworks,groq,cerebras,perplexity,mistral,"
-        "featherless,openrouter",
+        "openai,anthropic,google-vertex,xai,alibaba,deepinfra,novita,together,"
+        "fireworks,groq,cerebras,featherless,openrouter",
     )
     ENABLED_PROVIDERS: frozenset[str] | None = (
         frozenset(s.strip() for s in _raw_enabled.split(",") if s.strip())
