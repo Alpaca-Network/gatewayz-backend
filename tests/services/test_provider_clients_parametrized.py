@@ -41,29 +41,16 @@ SIMPLE_PROVIDERS = [
         "Together API key not configured",
     ),
     (
-        "src.services.providers.akash_client",
-        "akash",
-        "AKASH_API_KEY",
-        "Akash API key not configured",
-    ),
-    (
         "src.services.providers.openai_client",
         "openai",
         "OPENAI_API_KEY",
         "OpenAI API key not configured",
     ),
-    ("src.services.providers.zai_client", "zai", "ZAI_API_KEY", "Z.AI API key not configured"),
     (
         "src.services.providers.featherless_client",
         "featherless",
         "FEATHERLESS_API_KEY",
         "Featherless API key not configured",
-    ),
-    (
-        "src.services.providers.morpheus_client",
-        "morpheus",
-        "MORPHEUS_API_KEY",
-        "Morpheus API key not configured",
     ),
     (
         "src.services.providers.anthropic_client",
@@ -299,20 +286,10 @@ ALL_PROVIDER_MODULES = [
     "src.services.providers.fireworks_client",
     "src.services.providers.groq_client",
     "src.services.providers.together_client",
-    "src.services.providers.akash_client",
     "src.services.providers.openai_client",
-    "src.services.providers.zai_client",
     "src.services.providers.featherless_client",
-    "src.services.providers.morpheus_client",
     "src.services.providers.anthropic_client",
-    "src.services.providers.near_client",
-    "src.services.providers.modelz_client",
     "src.services.providers.deepinfra_client",
-    "src.services.providers.chutes_client",
-    "src.services.providers.aimo_client",
-    "src.services.providers.nebius_client",
-    "src.services.providers.alpaca_network_client",
-    "src.services.providers.clarifai_client",
 ]
 
 

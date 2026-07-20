@@ -29,8 +29,8 @@ async def validate_model_availability(
 
     Args:
         model_id: The model identifier
-        provider: Provider name (e.g., "cerebras", "huggingface")
-        source_gateway: Source gateway name (e.g., "cerebras", "huggingface")
+        provider: Provider name (e.g., "cerebras", "openrouter")
+        source_gateway: Source gateway name (e.g., "cerebras", "openrouter")
 
     Returns:
         Dictionary with validation result:
@@ -65,8 +65,6 @@ async def validate_model_availability(
     try:
         if provider.lower() in ("cerebras", "cerebras-ai"):
             result = await _validate_cerebras_model(model_id)
-        elif provider.lower() in ("huggingface", "hf", "hugging-face"):
-            result = await _validate_huggingface_model(model_id)
         elif provider.lower() == "openrouter":
             result = await _validate_openrouter_model(model_id)
         else:
@@ -142,134 +140,6 @@ async def _validate_cerebras_model(model_id: str) -> dict[str, Any]:
         return {
             "model_id": model_id,
             "provider": "cerebras",
-            "available": False,
-            "checked_at": datetime.now(UTC),
-            "error": str(e),
-        }
-
-
-async def _validate_huggingface_model(model_id: str) -> dict[str, Any]:
-    """Validate model availability on HuggingFace"""
-    try:
-        import httpx
-
-        from src.config import Config
-
-        # Strip :hf-inference suffix if present
-        clean_model_id = model_id.replace(":hf-inference", "")
-
-        # Check if model exists via HuggingFace Hub API
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"https://huggingface.co/api/models/{clean_model_id}",
-                headers=(
-                    {"Authorization": f"Bearer {Config.HUG_API_KEY}"} if Config.HUG_API_KEY else {}
-                ),
-                timeout=10.0,
-            )
-
-            if response.status_code == 200:
-                # Model exists on HuggingFace Hub
-                # Now check if it's available on the Inference Router
-                return await _validate_hf_inference_availability(clean_model_id)
-            elif response.status_code == 404:
-                logger.warning(f"Model '{clean_model_id}' not found on HuggingFace Hub")
-                return {
-                    "model_id": model_id,
-                    "provider": "huggingface",
-                    "available": False,
-                    "checked_at": datetime.now(UTC),
-                    "error": "Model not found on HuggingFace Hub",
-                }
-            else:
-                logger.warning(f"Unexpected status code {response.status_code} checking HF model")
-                return {
-                    "model_id": model_id,
-                    "provider": "huggingface",
-                    "available": False,
-                    "checked_at": datetime.now(UTC),
-                    "error": f"HTTP {response.status_code}",
-                }
-
-    except Exception as e:
-        logger.error(f"Failed to validate HuggingFace model {model_id}: {e}")
-        return {
-            "model_id": model_id,
-            "provider": "huggingface",
-            "available": False,
-            "checked_at": datetime.now(UTC),
-            "error": str(e),
-        }
-
-
-async def _validate_hf_inference_availability(model_id: str) -> dict[str, Any]:
-    """Check if HuggingFace model is available on the Inference Router"""
-    try:
-        import httpx
-
-        from src.config import Config
-
-        if not Config.HUG_API_KEY:
-            # Can't validate without API key, assume available if on Hub
-            return {
-                "model_id": model_id,
-                "provider": "huggingface",
-                "available": True,
-                "checked_at": datetime.now(UTC),
-                "error": None,
-            }
-
-        # Try a minimal test request to the Inference Router
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://router.huggingface.co/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {Config.HUG_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": f"{model_id}:hf-inference",
-                    "messages": [{"role": "user", "content": "test"}],
-                    "max_tokens": 1,
-                },
-                timeout=10.0,
-            )
-
-            # 200 = available, 400/404 = not available on router
-            if response.status_code == 200:
-                return {
-                    "model_id": model_id,
-                    "provider": "huggingface",
-                    "available": True,
-                    "checked_at": datetime.now(UTC),
-                    "error": None,
-                }
-            elif response.status_code in (400, 404):
-                logger.warning(
-                    f"Model '{model_id}' exists on HF Hub but not available on Inference Router"
-                )
-                return {
-                    "model_id": model_id,
-                    "provider": "huggingface",
-                    "available": False,
-                    "checked_at": datetime.now(UTC),
-                    "error": "Model not available on HF Inference Router",
-                }
-            else:
-                # Other errors - assume unavailable
-                return {
-                    "model_id": model_id,
-                    "provider": "huggingface",
-                    "available": False,
-                    "checked_at": datetime.now(UTC),
-                    "error": f"HTTP {response.status_code}",
-                }
-
-    except Exception as e:
-        logger.error(f"Failed to validate HF Inference availability for {model_id}: {e}")
-        return {
-            "model_id": model_id,
-            "provider": "huggingface",
             "available": False,
             "checked_at": datetime.now(UTC),
             "error": str(e),

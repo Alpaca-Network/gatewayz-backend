@@ -1054,7 +1054,7 @@ def model_has_pricing(model_id: str) -> bool:
         # Mirror calculate_cost: only OpenRouter-shaped IDs are eligible for :free.
         is_openrouter_model = "/" in model_id or not any(
             provider in model_id.lower()
-            for provider in ("anthropic", "google", "cohere", "mistral", "deepseek")
+            for provider in ("anthropic", "google", "mistral", "deepseek")
         )
         if is_openrouter_model:
             return True
@@ -1146,7 +1146,7 @@ def calculate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) ->
                 "/" in model_id  # Has provider prefix (OpenRouter format)
                 or not any(
                     provider in model_id.lower()
-                    for provider in ["anthropic", "google", "cohere", "mistral", "deepseek"]
+                    for provider in ["anthropic", "google", "mistral", "deepseek"]
                 )  # Not obviously from another provider
             )
 
@@ -1295,7 +1295,7 @@ async def calculate_cost_async(model_id: str, prompt_tokens: int, completion_tok
                 "/" in model_id  # Has provider prefix (OpenRouter format)
                 or not any(
                     provider in model_id.lower()
-                    for provider in ["anthropic", "google", "cohere", "mistral", "deepseek"]
+                    for provider in ["anthropic", "google", "mistral", "deepseek"]
                 )  # Not obviously from another provider
             )
 

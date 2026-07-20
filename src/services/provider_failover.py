@@ -53,7 +53,6 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "google-vertex",
     "openrouter",  # Primary router / fallback for OpenAI/Anthropic models
     "cerebras",
-    "huggingface",
     "featherless",
     "alibaba",
     "fireworks",

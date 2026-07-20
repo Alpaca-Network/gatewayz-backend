@@ -537,7 +537,6 @@ def create_app() -> FastAPI:
         ("trial_analytics", "Trial Analytics"),  # Trial monitoring and abuse detection
         ("partner_trials", "Partner Trials"),  # Partner-specific trials (Redbeard 14-day Pro)
         ("prometheus_data", "Prometheus Data API"),  # Grafana stack telemetry endpoints
-        ("nosana", "Nosana GPU Computing"),  # Nosana deployments, jobs, and GPU marketplace
         ("provider_credits", "Provider Credit Monitoring"),  # Monitor provider account balances
         ("code_router", "Code Router Settings"),  # Code-optimized routing configuration
         ("downtime_logs", "Downtime Incident Logs"),  # Downtime tracking and log capture

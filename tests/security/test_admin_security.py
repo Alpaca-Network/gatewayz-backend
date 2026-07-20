@@ -20,8 +20,6 @@ def test_admin_endpoints():
         ("POST", "/admin/limit", {"api_key": "test", "rate_limits": {}}),
         ("POST", "/admin/refresh-providers", None),
         ("GET", "/admin/cache-status", None),
-        ("GET", "/admin/huggingface-cache-status", None),
-        ("POST", "/admin/refresh-huggingface-cache", None),
         ("GET", "/admin/test-huggingface/test-model", None),
         ("GET", "/admin/debug-models", None),
         ("GET", "/admin/trial/analytics", None),

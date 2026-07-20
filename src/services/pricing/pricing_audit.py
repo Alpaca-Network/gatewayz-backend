@@ -478,16 +478,6 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
             "url": "https://api.novita.ai/v3/openai/models",
             "key_attr": "NOVITA_API_KEY",
         },
-        "nebius": {
-            "url": "https://api.studio.nebius.ai/v1/models",
-            "key_attr": "NEBIUS_API_KEY",
-        },
-        "cohere": {
-            "url": "https://api.cohere.com/v2/models",
-            "key_attr": "COHERE_API_KEY",
-            "auth_header": "Authorization",
-            "auth_prefix": "Bearer ",
-        },
     }
 
     # DB-first: try to build config from gateway registry

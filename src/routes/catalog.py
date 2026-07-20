@@ -49,12 +49,6 @@ from src.services.models import (
 )
 from src.services.prometheus_metrics import set_gateway_model_count
 from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
-from src.services.providers.modelz_client import (
-    check_model_exists_on_modelz,
-    fetch_modelz_tokens,
-    get_modelz_model_details,
-    get_modelz_model_ids,
-)
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -694,13 +688,10 @@ async def get_providers(
         other_gateways = [
             "featherless",
             "deepinfra",
-            "chutes",
             "groq",
             "fireworks",
             "together",
             "google-vertex",
-            "fal",
-            "simplismart",
         ]
         all_models = {}  # Track models for each gateway
 
@@ -974,11 +965,7 @@ async def get_models(
                 models = merge_models_by_slug(*provider_models.values())
 
         if not models:
-            if gateway_value == "nebius":
-                logger.info(
-                    "Returning empty Nebius catalog response because no public model listing exists"
-                )
-            elif gateway_value == "xai":
+            if gateway_value == "xai":
                 logger.info(
                     "Returning empty xAI catalog response because no public model listing exists"
                 )
@@ -1039,7 +1026,7 @@ async def get_models(
         if is_private is not None:
             original_count = len(models)
             if is_private:
-                # Only show private models (Near AI models)
+                # Only show private models
                 models = [m for m in models if m.get("is_private") is True]
                 logger.info(f"Filtered for private models only: {original_count} -> {len(models)}")
             else:
@@ -1118,21 +1105,14 @@ async def get_models(
             "openrouter": "OpenRouter catalog",
             "featherless": "Featherless catalog",
             "deepinfra": "DeepInfra catalog",
-            "chutes": "Chutes.ai catalog",
             "groq": "Groq catalog",
             "fireworks": "Fireworks catalog",
             "together": "Together catalog",
             "google-vertex": "Google Vertex AI catalog",
             "cerebras": "Cerebras catalog",
-            "nebius": "Nebius catalog (no public listing is currently available)",
             "xai": "Xai catalog",
             "novita": "Novita catalog",
-            "hug": "Hugging Face catalog",
-            "aimo": "AIMO Network catalog",
-            "near": "Near AI catalog",
-            "fal": "Fal.ai catalog",
-            "simplismart": "Simplismart catalog",
-            "all": "Combined OpenRouter, Featherless, DeepInfra, Chutes, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Nebius, Xai, Novita, Hugging Face, AIMO, Near AI, Fal.ai, and Simplismart catalogs",
+            "all": "Combined OpenRouter, Featherless, DeepInfra, Groq, Fireworks, Together, Google Vertex AI, Cerebras, Xai, and Novita catalogs",
         }.get(gateway_value, "OpenRouter catalog")
 
         # Calculate pagination metadata
@@ -1197,18 +1177,13 @@ async def get_specific_model(
     - OpenRouter: Full model endpoint data including performance metrics
     - Featherless: Model catalog data
     - DeepInfra: Model catalog data from DeepInfra's API
-    - Chutes: Model catalog data from Chutes.ai
-    - Fal.ai: Image/video/audio generation models (e.g., fal-ai/stable-diffusion-v15)
-    - Hugging Face: Open-source models from Hugging Face Hub
-    - And other gateways: groq, fireworks, together, cerebras, nebius, xai, novita, aimo, near
+    - And other gateways: groq, fireworks, together, cerebras, xai, novita
 
     If gateway is not specified, it will automatically detect which gateway the model belongs to.
 
     Examples:
         GET /v1/models/openai/gpt-4?gateway=openrouter
         GET /v1/models/meta-llama/llama-3?gateway=featherless
-        GET /v1/models/fal-ai/stable-diffusion-v15?gateway=fal
-        GET /v1/models/fal-ai/stable-diffusion-v15 (auto-detects fal gateway)
     """
     # Prevent this route from catching /v1/* API endpoints
     normalized_provider = normalize_developer_segment(provider_name) or provider_name
@@ -1249,7 +1224,6 @@ async def get_specific_model(
         if detected_gateway in [
             "featherless",
             "deepinfra",
-            "chutes",
             "groq",
             "fireworks",
             "together",
@@ -1264,14 +1238,8 @@ async def get_specific_model(
         # Handle gateways that use derive_providers_from_models
         if detected_gateway in [
             "cerebras",
-            "nebius",
             "xai",
             "novita",
-            "hug",
-            "aimo",
-            "near",
-            "fal",
-            "simplismart",
         ]:
             gateway_models = get_cached_models(detected_gateway)
             if gateway_models:
@@ -1519,7 +1487,7 @@ async def get_gateway_statistics(
     **This fixes the "Top Provider: N/A" issue in your UI!**
 
     Args:
-        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'google-vertex', etc.)
+        gateway: Gateway name ('openrouter', 'featherless', 'deepinfra', 'groq', 'google-vertex', etc.)
         time_range: Time range for statistics
 
     Returns:
@@ -1546,12 +1514,10 @@ async def get_gateway_statistics(
             "openrouter",
             "featherless",
             "deepinfra",
-            "chutes",
             "groq",
             "fireworks",
             "together",
             "google-vertex",
-            "simplismart",
         ]
         if gateway.lower() not in valid_gateways:
             raise HTTPException(
@@ -1810,12 +1776,10 @@ async def compare_model_across_gateways(
                 "openrouter",
                 "featherless",
                 "deepinfra",
-                "chutes",
                 "groq",
                 "fireworks",
                 "together",
                 "google-vertex",
-                "simplismart",
             ]
 
         model_id = f"{provider_name}/{model_name}"
@@ -1959,7 +1923,6 @@ async def batch_compare_models(
                     "fireworks",
                     "together",
                     "google-vertex",
-                    "simplismart",
                 ]
                 models_data = []
 
@@ -2478,7 +2441,7 @@ async def search_models(
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
     gateway: str | None = Query(
         "all",
-        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, google-vertex, or all",
+        description="Gateway filter: openrouter, featherless, deepinfra, groq, fireworks, together, google-vertex, or all",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
@@ -2533,10 +2496,6 @@ async def search_models(
             deepinfra_models = get_cached_models("deepinfra") or []
             all_models.extend(deepinfra_models)
 
-        if gateway_value in ("chutes", "all"):
-            chutes_models = get_cached_models("chutes") or []
-            all_models.extend(chutes_models)
-
         if gateway_value in ("groq", "all"):
             groq_models = get_cached_models("groq") or []
             all_models.extend(groq_models)
@@ -2552,10 +2511,6 @@ async def search_models(
         if gateway_value in ("google-vertex", "all"):
             google_models = get_cached_models("google-vertex") or []
             all_models.extend(google_models)
-
-        if gateway_value in ("simplismart", "all"):
-            simplismart_models = get_cached_models("simplismart") or []
-            all_models.extend(simplismart_models)
 
         # Apply filters
         filtered_models = all_models
@@ -2587,7 +2542,7 @@ async def search_models(
         # Private models filter
         if is_private is not None:
             if is_private:
-                # Only show private models (Near AI models)
+                # Only show private models
                 filtered_models = [m for m in filtered_models if m.get("is_private") is True]
             else:
                 # Only show non-private models
@@ -2820,480 +2775,3 @@ def _extract_availability_comparison(
         availability[item["gateway"]] = True
     return availability
 
-
-# ============================================================================
-# MODELZ INTEGRATION ENDPOINTS
-# ============================================================================
-
-
-@router.get("/modelz/models")
-async def get_modelz_models(
-    is_graduated: bool | None = Query(
-        None,
-        description="Filter for graduated (singularity) models: true=graduated only, false=non-graduated only, null=all models",
-    )
-):
-    """
-    Get models that exist on Modelz with optional graduation filter.
-
-    This endpoint bridges Gatewayz with Modelz by fetching model token data
-    from the Modelz API and applying the same filters as the original Modelz API.
-
-    Query Parameters:
-    - is_graduated: Filter for graduated models
-      - true: Only graduated/singularity models
-      - false: Only non-graduated models
-      - null: All models (default)
-
-    Returns:
-    - List of models with their token data from Modelz
-    - Includes model IDs, graduation status, and other metadata
-    """
-    try:
-        logger.info("Fetching Modelz models with is_graduated=%s", is_graduated)
-
-        # Fetch token data from Modelz API
-        tokens = await fetch_modelz_tokens(is_graduated)
-
-        # Transform the data to a consistent format
-        models = []
-        for token in tokens:
-            model_data = {
-                "model_id": (
-                    token.get("Token")
-                    or token.get("model_id")
-                    or token.get("modelId")
-                    or token.get("id")
-                    or token.get("name")
-                    or token.get("model")
-                ),
-                "is_graduated": token.get("isGraduated") or token.get("is_graduated"),
-                "token_data": token,
-                "source": "modelz",
-                "has_token": True,
-            }
-
-            # Only include models with valid model IDs
-            if model_data["model_id"]:
-                models.append(model_data)
-
-        logger.info(f"Successfully processed {len(models)} models from Modelz")
-
-        return {
-            "models": models,
-            "total_count": len(models),
-            "filter": {
-                "is_graduated": is_graduated,
-                "description": (
-                    DESC_ALL_MODELS
-                    if is_graduated is None
-                    else (
-                        DESC_GRADUATED_MODELS_ONLY
-                        if is_graduated
-                        else DESC_NON_GRADUATED_MODELS_ONLY
-                    )
-                ),
-            },
-            "source": "modelz",
-            "api_reference": "https://backend.alpacanetwork.ai/api/tokens",
-        }
-
-    except HTTPException:
-        # Re-raise HTTP exceptions from the client
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in get_modelz_models: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch models from Modelz: {str(e)}")
-
-
-@router.get("/modelz/ids")
-async def get_modelz_model_ids_endpoint(
-    is_graduated: bool | None = Query(
-        None,
-        description="Filter for graduated models: true=graduated only, false=non-graduated only, null=all models",
-    )
-):
-    """
-    Get a list of model IDs that exist on Modelz.
-
-    This is a lightweight endpoint that returns only the model IDs,
-    useful for checking which models have tokens on Modelz.
-
-    Query Parameters:
-    - is_graduated: Filter for graduated models (same as /models/modelz)
-
-    Returns:
-    - List of model IDs from Modelz
-    """
-    try:
-        logger.info("Fetching Modelz model IDs with is_graduated=%s", is_graduated)
-
-        model_ids = await get_modelz_model_ids(is_graduated)
-
-        return {
-            "model_ids": model_ids,
-            "total_count": len(model_ids),
-            "filter": {
-                "is_graduated": is_graduated,
-                "description": (
-                    DESC_ALL_MODELS
-                    if is_graduated is None
-                    else (
-                        DESC_GRADUATED_MODELS_ONLY
-                        if is_graduated
-                        else DESC_NON_GRADUATED_MODELS_ONLY
-                    )
-                ),
-            },
-            "source": "modelz",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in get_modelz_model_ids_endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to fetch model IDs from Modelz: {str(e)}"
-        )
-
-
-@router.get("/modelz/check/{model_id}")
-async def check_model_on_modelz(
-    model_id: str,
-    is_graduated: bool | None = Query(
-        None, description="Filter for graduated models when checking"
-    ),
-):
-    """
-    Check if a specific model exists on Modelz.
-
-    Path Parameters:
-    - model_id: The model ID to check
-
-    Query Parameters:
-    - is_graduated: Filter for graduated models when checking
-
-    Returns:
-    - Boolean indicating if model exists on Modelz
-    - Additional model details if found
-    """
-    try:
-        logger.info(
-            "Checking if model '%s' exists on Modelz with is_graduated=%s",
-            sanitize_for_logging(model_id),
-            is_graduated,
-        )
-
-        exists = await check_model_exists_on_modelz(model_id, is_graduated)
-
-        result = {
-            "model_id": model_id,
-            "exists_on_modelz": exists,
-            "filter": {
-                "is_graduated": is_graduated,
-                "description": (
-                    DESC_ALL_MODELS
-                    if is_graduated is None
-                    else (
-                        DESC_GRADUATED_MODELS_ONLY
-                        if is_graduated
-                        else DESC_NON_GRADUATED_MODELS_ONLY
-                    )
-                ),
-            },
-            "source": "modelz",
-        }
-
-        # If model exists, get additional details
-        if exists:
-            model_details = await get_modelz_model_details(model_id)
-            if model_details:
-                result["model_details"] = model_details
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error in check_model_on_modelz: {str(e)}")
-
-
-# HuggingFace Hub SDK Discovery Endpoints
-@router.get("/huggingface/discovery", tags=["huggingface-discovery"])
-async def discover_huggingface_models(
-    task: str | None = Query(
-        "text-generation",
-        description="Filter by task type (e.g., 'text-generation', 'text2text-generation', 'conversational')",
-    ),
-    sort: str = Query("likes", description="Sort by: 'likes' or 'downloads'"),
-    limit: int = Query(50, description="Number of models to return", ge=1, le=500),
-    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
-):
-    """
-    Discover HuggingFace models using the official Hub SDK.
-
-    This endpoint provides advanced model discovery with filtering by task type
-    and sorting by popularity metrics (likes/downloads). Great for exploring
-    available models on HuggingFace Hub.
-
-    Uses the official huggingface_hub SDK for direct API access to Hub metadata.
-    """
-    try:
-        from src.services.huggingface_hub_service import list_huggingface_models
-
-        logger.info(
-            f"Discovering HuggingFace models: task={task}, sort={sort}, limit={limit}, offset={offset}"
-        )
-
-        # Fetch a large result set so total_count reflects the true number of
-        # results regardless of pagination params.
-        _HF_DISCOVER_BUFFER = 200
-        models = list_huggingface_models(
-            task=task,
-            sort=sort,
-            limit=_HF_DISCOVER_BUFFER,
-        )
-
-        if not models:
-            logger.warning(f"No HuggingFace models found for task={task}")
-            return {
-                "models": [],
-                "count": 0,
-                "source": "huggingface-hub",
-                "task": task,
-                "sort": sort,
-                "pagination": {
-                    "limit": limit,
-                    "offset": offset,
-                    "total": 0,
-                    "has_more": False,
-                },
-            }
-
-        # Get total count BEFORE slicing so pagination metadata is accurate
-        total_count = len(models)
-        paginated_models = models[offset : offset + limit]
-
-        return {
-            "models": paginated_models,
-            "count": len(paginated_models),
-            "source": "huggingface-hub",
-            "task": task,
-            "sort": sort,
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": total_count,
-                "has_more": offset + limit < total_count,
-            },
-        }
-
-    except Exception as e:
-        logger.error(f"Error discovering HuggingFace models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to discover HuggingFace models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/search", tags=["huggingface-discovery"])
-async def search_huggingface_models_endpoint(
-    q: str = Query(..., description="Search query (model name, description, etc.)", min_length=1),
-    task: str | None = Query(None, description="Optional task filter"),
-    limit: int = Query(20, description="Number of results to return", ge=1, le=100),
-    offset: int = Query(default=0, ge=0, description="Number of results to skip"),
-):
-    """
-    Search for HuggingFace models by query.
-
-    Searches across model names, descriptions, and other metadata.
-    Uses the official huggingface_hub SDK.
-    """
-    try:
-        from src.services.huggingface_hub_service import search_models_by_query
-
-        logger.info(
-            f"Searching HuggingFace models: q='{q}', task={task}, limit={limit}, offset={offset}"
-        )
-
-        # Fetch a large result set so total_count reflects the true number of
-        # results regardless of pagination params.
-        _HF_SEARCH_BUFFER = 200
-        models = search_models_by_query(
-            query=q,
-            task=task,
-            limit=_HF_SEARCH_BUFFER,
-        )
-
-        # Get total count BEFORE slicing so pagination metadata is accurate
-        total_count = len(models)
-        paginated_models = models[offset : offset + limit]
-
-        return {
-            "query": q,
-            "models": paginated_models,
-            "count": len(paginated_models),
-            "source": "huggingface-hub",
-            "pagination": {
-                "limit": limit,
-                "offset": offset,
-                "total": total_count,
-                "has_more": offset + limit < total_count,
-            },
-        }
-
-    except Exception as e:
-        logger.error(f"Error searching HuggingFace models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to search HuggingFace models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/details", tags=["huggingface-discovery"])
-async def get_huggingface_model_details_endpoint(
-    model_id: str,
-):
-    """
-    Get detailed information about a specific HuggingFace model.
-
-    Returns comprehensive metadata including model card, library info, and metrics.
-    Uses the official huggingface_hub SDK for direct Hub access.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_details
-
-        logger.info(f"Fetching details for HuggingFace model: {model_id}")
-
-        model_info = get_model_details(model_id)
-
-        if not model_info:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model not found: {model_id}",
-            )
-
-        return {
-            "model": model_info,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model details: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model details: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/card", tags=["huggingface-discovery"])
-async def get_huggingface_model_card_endpoint(
-    model_id: str,
-):
-    """
-    Retrieve the model card (README) for a HuggingFace model.
-
-    The model card contains documentation, usage instructions, and metadata
-    about the model in Markdown format.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_card
-
-        logger.info(f"Fetching model card for: {model_id}")
-
-        card_content = get_model_card(model_id)
-
-        if not card_content:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model card not found for: {model_id}",
-            )
-
-        return {
-            "model_id": model_id,
-            "card": card_content,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model card: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model card: {str(e)}",
-        )
-
-
-@router.get("/huggingface/author/{author}/models", tags=["huggingface-discovery"])
-async def list_author_models_endpoint(
-    author: str,
-    limit: int = Query(50, description="Number of models to return", ge=1, le=500),
-):
-    """
-    List all models from a specific HuggingFace author or organization.
-
-    Returns all public models published by the specified author/org.
-    """
-    try:
-        from src.services.huggingface_hub_service import list_models_by_author
-
-        logger.info(f"Listing models from author: {author}, limit={limit}")
-
-        models = list_models_by_author(author=author, limit=limit)
-
-        return {
-            "author": author,
-            "models": models,
-            "count": len(models),
-            "source": "huggingface-hub",
-        }
-
-    except Exception as e:
-        logger.error(f"Error listing author models: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to list author models: {str(e)}",
-        )
-
-
-@router.get("/huggingface/models/{model_id:path}/files", tags=["huggingface-discovery"])
-async def get_model_files_endpoint(
-    model_id: str,
-):
-    """
-    Get information about all files in a HuggingFace model repository.
-
-    Returns a list of files with sizes and metadata, useful for understanding
-    what's available in the model repository.
-    """
-    try:
-        from src.services.huggingface_hub_service import get_model_files
-
-        logger.info(f"Fetching files for model: {model_id}")
-
-        files = get_model_files(model_id)
-
-        if files is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Model not found: {model_id}",
-            )
-
-        return {
-            "model_id": model_id,
-            "files": files,
-            "count": len(files) if files else 0,
-            "source": "huggingface-hub",
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching model files: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch model files: {str(e)}",
-        )

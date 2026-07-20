@@ -187,7 +187,6 @@ class ErrorMonitor:
                 "featherless",
                 "deepinfra",
                 "together",
-                "huggingface",
                 "vertexai",
             ]
         ):

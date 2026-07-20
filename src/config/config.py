@@ -267,9 +267,7 @@ class Config:
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
     NOVITA_API_KEY = os.environ.get("NOVITA_API_KEY")
-    NEBIUS_API_KEY = os.environ.get("NEBIUS_API_KEY")
     CEREBRAS_API_KEY = os.environ.get("CEREBRAS_API_KEY")
-    HUG_API_KEY = os.environ.get("HUG_API_KEY")
 
     # Featherless.ai Configuration
     FEATHERLESS_API_KEY = os.environ.get("FEATHERLESS_API_KEY")
@@ -284,9 +282,6 @@ class Config:
     # Model to use for Anthropic API calls (bug fix generator, autonomous monitoring)
     # Valid models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
-
-    # Chutes.ai Configuration
-    CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
 
     # Fireworks.ai Configuration
     FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY")
@@ -303,34 +298,11 @@ class Config:
     # Groq Configuration
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-    # AIMO Configuration
-    AIMO_API_KEY = os.environ.get("AIMO_API_KEY")
-    AIMO_FETCH_TIMEOUT = float(os.environ.get("AIMO_FETCH_TIMEOUT", "5.0"))  # 5 second timeout
-    AIMO_CONNECT_TIMEOUT = float(
-        os.environ.get("AIMO_CONNECT_TIMEOUT", "3.0")
-    )  # 3 second connect timeout
-    AIMO_MAX_RETRIES = int(os.environ.get("AIMO_MAX_RETRIES", "2"))  # Retry up to 2 times
-    AIMO_ENABLE_HTTP_FALLBACK = (
-        os.environ.get("AIMO_ENABLE_HTTP_FALLBACK", "true").lower() == "true"
-    )
-    AIMO_BASE_URLS = [
-        "https://beta.aimo.network/api/v1",
-    ]  # Primary URL (beta.aimo.network is the active endpoint)
-
-    # Near AI Configuration
-    NEAR_API_KEY = os.environ.get("NEAR_API_KEY")
-
-    # Fal.ai Configuration
-    FAL_API_KEY = os.environ.get("FAL_API_KEY")
-
     # Resemble AI / Chatterbox TTS Configuration
     RESEMBLE_API_KEY = os.environ.get("RESEMBLE_API_KEY")
 
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
-
-    # Alpaca Network Configuration
-    ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")
 
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
@@ -340,42 +312,8 @@ class Config:
         "ALIBABA_CLOUD_REGION", "international"
     )  # 'international' or 'china'
 
-    # Clarifai Configuration
-    CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")
-    CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
-    CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
-
-    # Akash ML Configuration
-    AKASH_API_KEY = os.environ.get("AKASH_API_KEY")
-
-    # Morpheus AI Gateway Configuration
-    MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
-
-    # Simplismart AI Configuration
-    SIMPLISMART_API_KEY = os.environ.get("SIMPLISMART_API_KEY")
-
-    # Sybil AI Configuration
-    SYBIL_API_KEY = os.environ.get("SYBIL_API_KEY")
-
-    # Canopy Wave AI Configuration
-    CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
-    CANOPYWAVE_BASE_URL = os.environ.get(
-        "CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1"
-    )
-
-    # Nosana GPU Computing Network Configuration
-    NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
-    NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
-
-    # Z.AI Configuration (Zhipu AI - GLM models)
-    ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
-
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
-
-    # Cloudflare Workers AI Configuration
-    CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN")
-    CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID")
 
     # Google Vertex AI Configuration (for image generation & generative APIs)
     GOOGLE_PROJECT_ID = os.environ.get("GOOGLE_PROJECT_ID", "gatewayz-468519")

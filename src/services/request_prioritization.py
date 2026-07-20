@@ -59,15 +59,12 @@ PROVIDER_LATENCY_TIERS: dict[str, int] = {
     # Tier 2 - Fast (optimized infrastructure)
     "fireworks": 2,
     "together": 2,
-    "cloudflare-workers-ai": 2,
     # Tier 3 - Standard (good general performance)
     "openrouter": 3,
     "deepinfra": 3,
     "google-vertex": 3,
     # Tier 4 - Variable (depends on model/load)
-    "huggingface": 4,
     "featherless": 4,
-    "near": 4,
     "alibaba": 4,
 }
 

@@ -297,26 +297,16 @@ class ModelHealthMonitor:
                     "openrouter",
                     "featherless",
                     "deepinfra",
-                    "huggingface",
                     "groq",
                     "fireworks",
                     "together",
                     "xai",
                     "novita",
-                    "chutes",
-                    "aimo",
-                    "near",
-                    "fal",
                     "google-vertex",
                     "cerebras",
-                    "nebius",
-                    "cloudflare-workers-ai",
                     "openai",
                     "anthropic",
-                    "clarifai",
                     "alibaba",
-                    "simplismart",
-                    "modelz",
                 ]
 
             for gateway in gateways:
@@ -491,15 +481,11 @@ class ModelHealthMonitor:
             "openrouter": Config.OPENROUTER_API_KEY,
             "featherless": Config.FEATHERLESS_API_KEY,
             "deepinfra": Config.DEEPINFRA_API_KEY,
-            "huggingface": Config.HUG_API_KEY,
             "groq": Config.GROQ_API_KEY,
             "fireworks": Config.FIREWORKS_API_KEY,
             "together": Config.TOGETHER_API_KEY,
             "xai": Config.XAI_API_KEY,
             "novita": Config.NOVITA_API_KEY,
-            "chutes": Config.CHUTES_API_KEY,
-            "aimo": Config.AIMO_API_KEY,
-            "nebius": Config.NEBIUS_API_KEY,
             "cerebras": Config.CEREBRAS_API_KEY,
         }
         return api_key_mapping.get(gateway)
@@ -530,7 +516,6 @@ class ModelHealthMonitor:
                 "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "featherless": "https://api.featherless.ai/v1/chat/completions",
                 "deepinfra": "https://api.deepinfra.com/v1/openai/chat/completions",
-                "huggingface": "https://router.huggingface.co/v1/chat/completions",
                 "groq": "https://api.groq.com/openai/v1/chat/completions",
                 "fireworks": "https://api.fireworks.ai/inference/v1/chat/completions",
                 "together": "https://api.together.xyz/v1/chat/completions",
@@ -561,9 +546,6 @@ class ModelHealthMonitor:
                 "User-Agent": "HealthMonitor/1.0",
                 "Authorization": f"Bearer {api_key}",
             }
-
-            # HuggingFace now uses OpenAI-compatible format via router.huggingface.co
-            # No special payload format needed - the default OpenAI format works
 
             # Perform the actual HTTP request
             async with httpx.AsyncClient(timeout=30.0) as client:

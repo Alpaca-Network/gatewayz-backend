@@ -19,7 +19,6 @@ from src.cache import (  # Cache helper functions
 from src.config import Config
 from src.config.redis_config import get_redis_manager
 from src.services.google_models_config import register_google_models_in_canonical_registry
-from src.services.huggingface_models import get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
@@ -45,7 +44,7 @@ def get_fallback_models_from_db(provider_slug: str) -> list[dict] | None:
     synced models from the database.
 
     Args:
-        provider_slug: The provider slug (e.g., 'near', 'cerebras', 'openai')
+        provider_slug: The provider slug (e.g., 'deepinfra', 'cerebras', 'openai')
 
     Returns:
         List of model dictionaries in raw format (ready for normalization),
@@ -119,27 +118,12 @@ def _convert_db_model_to_raw(db_model: dict, provider_slug: str) -> dict | None:
             raw_model["metadata"]["contextLength"] = raw_model["context_length"]
             raw_model["metadata"]["context_length"] = raw_model["context_length"]
 
-        # Handle pricing based on provider expectations
-        if provider_slug == "near":
-            # Near AI expects inputCostPerToken/outputCostPerToken with amount and scale
-            if pricing_prompt is not None:
-                # Convert per-token price back to amount with scale -6 (per million tokens)
-                raw_model["inputCostPerToken"] = {
-                    "amount": float(pricing_prompt) * 1_000_000,
-                    "scale": -6,
-                }
-            if pricing_completion is not None:
-                raw_model["outputCostPerToken"] = {
-                    "amount": float(pricing_completion) * 1_000_000,
-                    "scale": -6,
-                }
-        else:
-            # Most providers use simple pricing dict or per-token values
-            raw_model["pricing"] = {}
-            if pricing_prompt is not None:
-                raw_model["pricing"]["prompt"] = str(pricing_prompt)
-            if pricing_completion is not None:
-                raw_model["pricing"]["completion"] = str(pricing_completion)
+        # Most providers use simple pricing dict or per-token values
+        raw_model["pricing"] = {}
+        if pricing_prompt is not None:
+            raw_model["pricing"]["prompt"] = str(pricing_prompt)
+        if pricing_completion is not None:
+            raw_model["pricing"]["completion"] = str(pricing_completion)
 
         # Add provider-specific fields
         if provider_slug in ["openai", "anthropic", "xai"]:
@@ -966,91 +950,6 @@ def normalize_featherless_model(featherless_model: dict) -> dict:
     return enrich_model_with_pricing(normalized, "featherless")
 
 
-def normalize_chutes_model(chutes_model: dict) -> dict:
-    """Normalize Chutes catalog entries to resemble OpenRouter model shape"""
-    provider_model_id = chutes_model.get("id", "")
-    if not provider_model_id:
-        return {"source_gateway": "chutes", "raw_chutes": chutes_model or {}}
-
-    provider_slug = chutes_model.get("provider", "chutes")
-    model_type = chutes_model.get("type", "LLM")
-    pricing_per_hour = chutes_model.get("pricing_per_hour", 0.0)
-
-    # FIXED: Convert hourly pricing to per-token pricing (rough estimate)
-    # Assume ~1M tokens per hour at average speed
-    # pricing_per_hour / 1,000,000 = per-token price
-    prompt_price = str(pricing_per_hour / 1000000) if pricing_per_hour > 0 else "0"
-
-    raw_display_name = chutes_model.get(
-        "name", provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-
-    description = f"Chutes.ai hosted {model_type} model: {provider_model_id}. Pricing: ${pricing_per_hour}/hr."
-
-    # Determine modality based on type
-    modality_map = {
-        "LLM": MODALITY_TEXT_TO_TEXT,
-        "Image Generation": MODALITY_TEXT_TO_IMAGE,
-        "Text to Speech": MODALITY_TEXT_TO_AUDIO,
-        "Speech to Text": "audio->text",
-        "Video": "text->video",
-        "Music Generation": MODALITY_TEXT_TO_AUDIO,
-        "Embeddings": "text->embedding",
-        "Content Moderation": MODALITY_TEXT_TO_TEXT,
-        "Other": "multimodal",
-    }
-
-    modality = modality_map.get(model_type, MODALITY_TEXT_TO_TEXT)
-
-    pricing = {
-        "prompt": prompt_price,
-        "completion": prompt_price,
-        "request": "0",
-        "image": str(pricing_per_hour) if model_type == "Image Generation" else "0",
-        "web_search": "0",
-        "internal_reasoning": "0",
-        "hourly_rate": str(pricing_per_hour),
-    }
-
-    architecture = {
-        "modality": modality,
-        "input_modalities": ["text"],
-        "output_modalities": ["text"],
-        "tokenizer": None,
-        "instruct_type": None,
-    }
-
-    tags = chutes_model.get("tags", [])
-
-    normalized = {
-        "id": provider_model_id,
-        "slug": provider_model_id,
-        "canonical_slug": provider_model_id,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": None,
-        "description": description,
-        "context_length": 0,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": [],
-        "default_parameters": {},
-        "provider_slug": provider_slug,
-        "provider_site_url": None,
-        "model_logo_url": None,
-        "source_gateway": "chutes",
-        "model_type": model_type,
-        "tags": tags,
-        "raw_chutes": chutes_model,
-    }
-
-    # Enrich with manual pricing if available (overrides hourly pricing)
-    return enrich_model_with_pricing(normalized, "chutes")
-
-
 def normalize_groq_model(groq_model: dict) -> dict:
     """Normalize Groq catalog entries to resemble OpenRouter model shape"""
     provider_model_id = groq_model.get("id")
@@ -1138,97 +1037,6 @@ def normalize_groq_model(groq_model: dict) -> dict:
     }
 
     return enrich_model_with_pricing(normalized, "groq")
-
-
-def normalize_zai_model(zai_model: dict) -> dict | None:
-    """Normalize Z.AI catalog entries to resemble OpenRouter model shape.
-
-    Z.AI provides GLM models (GLM-4.7, GLM-4.5-Air, etc.) with OpenAI-compatible format.
-    """
-    provider_model_id = zai_model.get("id")
-    if not provider_model_id:
-        return {"source_gateway": "zai", "raw_zai": zai_model or {}}
-
-    slug = f"zai/{provider_model_id}"
-    provider_slug = "zai"
-
-    raw_display_name = (
-        zai_model.get("display_name")
-        or zai_model.get("name")
-        or provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    owned_by = zai_model.get("owned_by", "zai")
-    base_description = zai_model.get("description") or f"Z.AI GLM model {provider_model_id}."
-    if owned_by and owned_by.lower() not in base_description.lower():
-        description = f"{base_description} Provided by Z.AI."
-    else:
-        description = base_description
-
-    metadata = zai_model.get("metadata") or {}
-
-    # Z.AI models typically have large context windows
-    context_length = (
-        metadata.get("context_length")
-        or zai_model.get("context_length")
-        or zai_model.get("context_window")
-        or 128000  # Default for GLM models
-    )
-
-    # Z.AI pricing - check for various formats
-    pricing_info = zai_model.get("pricing") or {}
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Check for direct dollar-based pricing
-    if "input" in pricing_info or "output" in pricing_info:
-        if pricing_info.get("input"):
-            pricing["prompt"] = str(pricing_info["input"])
-        if pricing_info.get("output"):
-            pricing["completion"] = str(pricing_info["output"])
-    elif "prompt" in pricing_info or "completion" in pricing_info:
-        if pricing_info.get("prompt"):
-            pricing["prompt"] = str(pricing_info["prompt"])
-        if pricing_info.get("completion"):
-            pricing["completion"] = str(pricing_info["completion"])
-
-    architecture = {
-        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
-        "input_modalities": metadata.get("input_modalities") or ["text"],
-        "output_modalities": metadata.get("output_modalities") or ["text"],
-        "tokenizer": metadata.get("tokenizer"),
-        "instruct_type": metadata.get("instruct_type"),
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": zai_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": metadata.get("supported_parameters", []),
-        "default_parameters": metadata.get("default_parameters", {}),
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://z.ai",
-        "model_logo_url": metadata.get("model_logo_url"),
-        "source_gateway": "zai",
-        "raw_zai": zai_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "zai")
 
 
 def normalize_fireworks_model(fireworks_model: dict) -> dict:
@@ -1429,359 +1237,6 @@ def normalize_together_model(together_model: dict) -> dict:
     }
 
     return enrich_model_with_pricing(normalized, "together")
-
-
-def normalize_aimo_model(aimo_model: dict) -> dict:
-    """Normalize AIMO catalog entries to resemble OpenRouter model shape
-
-    AIMO models use format: provider_pubkey:model_name
-    Model data structure:
-    - name: base model name (e.g., "DeepSeek-V3-1")
-    - display_name: human-readable name
-    - providers: list of provider objects with id, name, and pricing
-    """
-    model_name = aimo_model.get("name")
-    if not model_name:
-        logger.warning("AIMO model missing 'name' field: %s", sanitize_for_logging(str(aimo_model)))
-        return None
-
-    # Normalize model name by stripping common provider prefixes
-    # AIMO may return model names like "google/gemini-2.5-pro" or just "gemini-2.5-pro"
-    model_name_normalized = model_name
-    provider_prefixes = ["google/", "openai/", "anthropic/", "meta/", "meta-llama/", "mistralai/"]
-    for prefix in provider_prefixes:
-        if model_name.lower().startswith(prefix):
-            model_name_normalized = model_name[len(prefix) :]
-            break
-
-    # Get provider information (use first provider if multiple)
-    providers = aimo_model.get("providers", [])
-    if not providers:
-        logger.warning("AIMO model '%s' has no providers", sanitize_for_logging(model_name))
-        return None
-
-    # For now, use the first provider
-    provider = providers[0]
-    provider_id = provider.get("id")
-    provider_name = provider.get("name", "unknown")
-
-    # Create user-friendly model ID in format: aimo/model_name
-    # Use the normalized model name (without provider prefix) for consistency
-    # Store the original AIMO format (provider_pubkey:model_name) in raw metadata
-    original_aimo_id = f"{provider_id}:{model_name}"
-    provider_model_id = f"aimo/{model_name_normalized}"
-
-    slug = provider_model_id
-    # Always use "aimo" as the provider slug for AIMO Network models
-    provider_slug = "aimo"
-
-    # Create canonical slug from the base model name (without the provider prefix)
-    # This allows the model to be grouped with same models from other providers
-    canonical_slug = model_name_normalized.lower()
-
-    # Get display name from API or generate from model name
-    raw_display_name = (
-        aimo_model.get("display_name") or model_name_normalized.replace("-", " ").title()
-    )
-    # Clean malformed model names (remove company prefix with colon, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    base_description = (
-        f"AIMO Network decentralized model {model_name_normalized} provided by {provider_name}."
-    )
-    description = base_description
-
-    context_length = aimo_model.get("context_length", 0)
-
-    # Extract pricing from provider object
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # AIMO provider pricing
-    provider_pricing = provider.get("pricing", {})
-    if provider_pricing:
-        prompt_price = provider_pricing.get("prompt")
-        completion_price = provider_pricing.get("completion")
-        # Convert to string if not None
-        pricing["prompt"] = str(prompt_price) if prompt_price is not None else None
-        pricing["completion"] = str(completion_price) if completion_price is not None else None
-
-    # Extract architecture from AIMO model
-    aimo_arch = aimo_model.get("architecture", {})
-    input_modalities = aimo_arch.get("input_modalities", ["text"])
-    output_modalities = aimo_arch.get("output_modalities", ["text"])
-
-    # Determine modality string
-    if input_modalities == ["text"] and output_modalities == ["text"]:
-        modality = MODALITY_TEXT_TO_TEXT
-    else:
-        modality = "multimodal"
-
-    architecture = {
-        "modality": modality,
-        "input_modalities": input_modalities,
-        "output_modalities": output_modalities,
-        "tokenizer": None,
-        "instruct_type": None,
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": canonical_slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": aimo_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": [],
-        "default_parameters": {},
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://aimo.network",
-        "model_logo_url": None,
-        "source_gateway": "aimo",
-        "raw_aimo": aimo_model,
-        "aimo_native_id": original_aimo_id,  # Store original AIMO format for routing
-    }
-
-    return enrich_model_with_pricing(normalized, "aimo")
-
-
-def normalize_near_model(near_model: dict) -> dict:
-    """Normalize Near AI catalog entries to resemble OpenRouter model shape
-
-    Near AI features:
-    - Private, verifiable AI infrastructure
-    - Decentralized execution
-    - User-owned AI services
-    - Cryptographic verification and on-chain auditing
-    """
-    provider_model_id = near_model.get("modelId")
-    if not provider_model_id:
-        # Fallback to 'id' for backward compatibility
-        provider_model_id = near_model.get("id")
-        if not provider_model_id:
-            logger.warning(
-                "Near AI model missing 'modelId' field: %s", sanitize_for_logging(str(near_model))
-            )
-            return None
-
-    slug = f"near/{provider_model_id}"
-    provider_slug = "near"
-
-    # Extract metadata from Near AI API response
-    metadata = near_model.get("metadata") or {}
-    raw_display_name = (
-        metadata.get("displayName")
-        or near_model.get("display_name")
-        or provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    near_model.get("owned_by", "Near Protocol")
-
-    # Highlight security features in description
-    base_description = (
-        metadata.get("description")
-        or near_model.get("description")
-        or f"Near AI hosted model {provider_model_id}."
-    )
-    security_features = " Security: Private AI inference with decentralized execution, cryptographic verification, and on-chain auditing."
-    description = f"{base_description}{security_features}"
-
-    context_length = (
-        metadata.get("contextLength")
-        or metadata.get("context_length")
-        or near_model.get("context_length")
-        or 0
-    )
-
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Extract pricing from Near AI API response
-    # FIXED: Near AI provides pricing as inputCostPerToken and outputCostPerToken with amount and scale
-    # Scale is in powers of 10 (e.g., -9 means 10^-9 = per token)
-    # Database stores per-token pricing, so just use amount × 10^scale
-    input_cost = near_model.get("inputCostPerToken", {})
-    output_cost = near_model.get("outputCostPerToken", {})
-
-    if input_cost and isinstance(input_cost, dict):
-        input_amount = input_cost.get("amount", 0)
-        input_scale = input_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Per-token price = amount × 10^scale
-        if input_amount > 0:
-            pricing["prompt"] = str(input_amount * (10**input_scale))
-
-    if output_cost and isinstance(output_cost, dict):
-        output_amount = output_cost.get("amount", 0)
-        output_scale = output_cost.get("scale", -9)  # Default scale is -9 (per token)
-        # Per-token price = amount × 10^scale
-        if output_amount > 0:
-            pricing["completion"] = str(output_amount * (10**output_scale))
-
-    # Fallback to old pricing format for backward compatibility
-    if not pricing["prompt"] and not pricing["completion"]:
-        pricing_info = near_model.get("pricing", {})
-        if pricing_info:
-            pricing["prompt"] = (
-                str(pricing_info.get("prompt")) if pricing_info.get("prompt") is not None else None
-            )
-            pricing["completion"] = (
-                str(pricing_info.get("completion"))
-                if pricing_info.get("completion") is not None
-                else None
-            )
-
-    architecture = {
-        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
-        "input_modalities": metadata.get("input_modalities") or ["text"],
-        "output_modalities": metadata.get("output_modalities") or ["text"],
-        "tokenizer": metadata.get("tokenizer"),
-        "instruct_type": metadata.get("instruct_type"),
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": metadata.get("huggingface_repo"),
-        "name": display_name,
-        "created": near_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": metadata.get("supported_parameters", []),
-        "default_parameters": metadata.get("default_parameters", {}),
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://near.ai",
-        "model_logo_url": None,
-        "source_gateway": "near",
-        "raw_near": near_model,
-        # Mark all Near AI models as private
-        "is_private": True,  # NEAR models support private inference
-        "tags": ["Private"],
-        # Highlight security features as metadata
-        "security_features": {
-            "private_inference": True,
-            "decentralized": True,
-            "verifiable": True,
-            "on_chain_auditing": True,
-            "user_owned": True,
-        },
-    }
-
-    return enrich_model_with_pricing(normalized, "near")
-
-
-def normalize_fal_model(fal_model: dict) -> dict | None:
-    """Normalize Fal.ai catalog entries to resemble OpenRouter model shape
-
-    Fal.ai features:
-    - 839+ models across text-to-image, text-to-video, image-to-video, etc.
-    - Models include FLUX, Stable Diffusion, Veo, Sora, and many more
-    - Supports image, video, audio, and 3D generation
-
-    Handles both static catalog format (uses "id") and API format (uses "endpoint_id")
-    """
-    # API returns "endpoint_id", static catalog uses "id"
-    provider_model_id = fal_model.get("endpoint_id") or fal_model.get("id")
-    if not provider_model_id:
-        logger.warning(
-            "Fal.ai model missing 'id'/'endpoint_id' field: %s",
-            sanitize_for_logging(str(fal_model)),
-        )
-        return None
-
-    # Extract provider from model ID (e.g., "fal-ai/flux-pro" -> "fal-ai")
-    provider_slug = provider_model_id.split("/")[0] if "/" in provider_model_id else "fal-ai"
-
-    # Use title (API) or name (catalog) or derive from ID
-    raw_display_name = (
-        fal_model.get("title") or fal_model.get("name") or provider_model_id.split("/")[-1]
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-
-    # Get description
-    description = fal_model.get("description", f"Fal.ai {display_name} model")
-
-    # Determine modality based on type or category (API uses "category")
-    model_type = fal_model.get("type") or fal_model.get("category", "text-to-image")
-    modality_map = {
-        "text-to-image": MODALITY_TEXT_TO_IMAGE,
-        "text-to-video": "text->video",
-        "image-to-image": "image->image",
-        "image-to-video": "image->video",
-        "video-to-video": "video->video",
-        "text-to-audio": MODALITY_TEXT_TO_AUDIO,
-        "text-to-speech": MODALITY_TEXT_TO_AUDIO,
-        "audio-to-audio": "audio->audio",
-        "image-to-3d": "image->3d",
-        "vision": "image->text",
-    }
-    modality = modality_map.get(model_type, MODALITY_TEXT_TO_IMAGE)
-
-    # Parse input/output modalities
-    input_mod, output_mod = modality.split("->") if "->" in modality else ("text", "image")
-
-    architecture = {
-        "modality": modality,
-        "input_modalities": [input_mod],
-        "output_modalities": [output_mod],
-        "model_type": model_type,
-        "tags": fal_model.get("tags", []),
-    }
-
-    # Fal.ai doesn't expose pricing in catalog, set to null
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-    }
-
-    slug = provider_model_id
-    canonical_slug = provider_model_id
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": canonical_slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": None,
-        "description": description,
-        "context_length": None,  # Not applicable for image/video models
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": [],
-        "default_parameters": {},
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://fal.ai",
-        "model_logo_url": None,
-        "source_gateway": "fal",
-        "raw_fal": fal_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "fal")
 
 
 def fetch_specific_model_from_together(provider_name: str, model_name: str):
@@ -2011,40 +1466,6 @@ def normalize_deepinfra_model(deepinfra_model: dict) -> dict:
     return enrich_model_with_pricing(normalized, "deepinfra")
 
 
-def fetch_specific_model_from_chutes(provider_name: str, model_name: str):
-    """Fetch specific model data from Chutes by searching cached models"""
-    try:
-        # Construct the model ID
-        provider_model_id = f"{provider_name}/{model_name}"
-
-        # First check cache
-        chutes_models = get_cached_models("chutes")
-        if chutes_models:
-            for model in chutes_models:
-                if model.get("id", "").lower() == provider_model_id.lower():
-                    return model
-
-        # If not in cache, try to fetch fresh data
-        fresh_models = fetch_models_from_chutes()  # noqa: F821
-        if fresh_models:
-            for model in fresh_models:
-                if model.get("id", "").lower() == provider_model_id.lower():
-                    return model
-
-        logger.warning(
-            "Model %s not found in Chutes catalog", sanitize_for_logging(provider_model_id)
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Chutes: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
 def fetch_specific_model_from_groq(provider_name: str, model_name: str):
     """Fetch specific model data from Groq by searching cached models"""
     try:
@@ -2107,66 +1528,6 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
         return None
 
 
-def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
-    """Fetch specific model data from Hugging Face by using direct lookup or cached models"""
-    try:
-        provider_model_id = f"{provider_name}/{model_name}"
-        provider_model_id_lower = provider_model_id.lower()
-
-        # Try lightweight direct lookup first
-        model_data = get_huggingface_model_info(provider_model_id)
-        if model_data:
-            model_data.setdefault("source_gateway", "hug")
-            return model_data
-
-        # Fall back to cached catalog (may trigger a full fetch on first call)
-        huggingface_models = get_cached_models("huggingface") or get_cached_models("hug")
-        if huggingface_models:
-            for model in huggingface_models:
-                if model.get("id", "").lower() == provider_model_id_lower:
-                    return model
-
-        logger.warning(
-            "Model %s not found in Hugging Face catalog", sanitize_for_logging(provider_model_id)
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Hugging Face: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
-def fetch_specific_model_from_fal(provider_name: str, model_name: str):
-    """Fetch specific model data from Fal.ai by using cached catalog"""
-    try:
-        provider_model_id = f"{provider_name}/{model_name}"
-        provider_model_id_lower = provider_model_id.lower()
-
-        # Fall back to cached Fal catalog
-        fal_models = get_cached_models("fal")
-        if fal_models:
-            for model in fal_models:
-                if model.get("id", "").lower() == provider_model_id_lower:
-                    return model
-
-        logger.warning(
-            "Model %s not found in Fal.ai catalog", sanitize_for_logging(provider_model_id)
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Fal.ai: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
 def fetch_specific_model_from_google_vertex(provider_name: str, model_name: str):
     """Fetch specific model data from Google Vertex AI by searching cached models
 
@@ -2208,7 +1569,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'xai', 'novita', or 'openrouter' (default)
     """
     try:
         provider_model_id = f"{provider_name}/{model_name}".lower()
@@ -2223,7 +1584,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             if models:
                 for model in models:
                     if model.get("id", "").lower() == provider_model_id:
-                        return "huggingface" if gateway in ("hug", "huggingface") else gateway
+                        return gateway
 
         # Default to openrouter if not found
         return "openrouter"
@@ -2258,10 +1619,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         def normalize_gateway(value: str) -> str:
             if not value:
                 return None
-            value = value.lower()
-            if value == "hug":
-                return "huggingface"
-            return value
+            return value.lower()
 
         candidate_gateways = []
 
@@ -2285,9 +1643,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         if not explicit_gateway:
             if "openrouter" not in candidate_gateways:
                 candidate_gateways.append("openrouter")
-            # "huggingface" is the fetch-function key (not the normalized slug "hug")
-            if "huggingface" not in candidate_gateways:
-                candidate_gateways.append("huggingface")
 
         # fetch_specific_model_from_* functions live in this file (models.py),
         # not in individual client modules, so dynamic import doesn't apply here.
@@ -2295,13 +1650,10 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "openrouter": fetch_specific_model_from_openrouter,
             "featherless": fetch_specific_model_from_featherless,
             "deepinfra": fetch_specific_model_from_deepinfra,
-            "chutes": fetch_specific_model_from_chutes,
             "groq": fetch_specific_model_from_groq,
             "fireworks": fetch_specific_model_from_fireworks,
             "together": fetch_specific_model_from_together,
             "google-vertex": fetch_specific_model_from_google_vertex,
-            "huggingface": fetch_specific_model_from_huggingface,
-            "fal": fetch_specific_model_from_fal,
         }
 
         for candidate in candidate_gateways:
@@ -2311,8 +1663,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             fetcher = fetchers.get(candidate, fetch_specific_model_from_openrouter)
             model_data = fetcher(provider_name, model_name)
             if model_data:
-                if candidate == "huggingface":
-                    model_data.setdefault("source_gateway", "hug")
                 return model_data
 
         logger.warning(
@@ -2471,7 +1821,6 @@ def _normalize_provider_slug(provider: Any) -> str | None:
       - Accepts a plain string slug or a dict with "slug"/"id"/"provider_slug"/"name" keys
       - Lower-cases the result
       - Strips leading "@" characters
-      - Resolves known aliases (e.g. "hug" -> "huggingface")
 
     Importers: use the public alias ``normalize_provider_slug`` exported from
     this module.  Client modules that cannot import at module level (to avoid
@@ -2494,13 +1843,7 @@ def _normalize_provider_slug(provider: Any) -> str | None:
     if not slug:
         return None
 
-    normalized = str(slug).lower().lstrip("@")
-
-    # Normalize known aliases
-    _SLUG_ALIASES = {
-        "hug": "huggingface",
-    }
-    return _SLUG_ALIASES.get(normalized, normalized)
+    return str(slug).lower().lstrip("@")
 
 
 # Public alias — preferred import for callers outside this module.

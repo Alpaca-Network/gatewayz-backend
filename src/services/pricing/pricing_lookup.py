@@ -64,11 +64,8 @@ def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
 # These need cross-reference pricing from OpenRouter if no manual pricing exists
 # Models without valid pricing will be filtered out to avoid appearing as "free"
 GATEWAY_PROVIDERS = {
-    "akash",
     "alibaba-cloud",
     "anthropic",  # Direct Anthropic API - needs cross-reference for model ID matching
-    "clarifai",
-    "cloudflare-workers-ai",
     "deepinfra",
     "featherless",
     "fireworks",

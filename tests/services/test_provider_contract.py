@@ -23,10 +23,15 @@ def test_contract_module_exposes_types():
 
 def test_every_provider_declares_a_full_trio():
     """PROVIDER_FUNCTIONS: each provider declares one request, one process,
-    and one (sync) stream function name. Env-independent (static source of truth)."""
+    and one (sync) stream function name. Env-independent (static source of truth).
+
+    Post North-Star-convergence roster: openrouter (fallback) + 11 live roster
+    providers (novita is DB-registry-driven, not in this static dict) + 2 dark
+    scaffolds (moonshot, minimax) = 14. See docs/NORTH_STAR.md §3.
+    """
     from src.handlers.provider_registry import PROVIDER_FUNCTIONS
 
-    assert len(PROVIDER_FUNCTIONS) >= 25, "expected ~30 providers declared"
+    assert len(PROVIDER_FUNCTIONS) >= 13, "expected ~14 providers declared (North Star roster)"
     for slug, fns in PROVIDER_FUNCTIONS.items():
         has_process = any(f.startswith("process_") for f in fns)
         has_stream = any(f.endswith("_stream") for f in fns)
@@ -56,7 +61,9 @@ def test_provider_routing_entries_are_shape_consistent(monkeypatch):
     try:
         reg = importlib.reload(reg)
         routing = reg.PROVIDER_ROUTING
-        assert len(routing) >= 25, f"expected ~30 providers enabled, got {len(routing)}"
+        assert len(routing) >= 13, (
+            f"expected ~14 providers enabled (North Star roster), got {len(routing)}"
+        )
         for slug, entry in routing.items():
             assert set(entry.keys()) == {"request", "process", "stream"}, f"{slug}: wrong keys"
             for key in ("request", "process", "stream"):

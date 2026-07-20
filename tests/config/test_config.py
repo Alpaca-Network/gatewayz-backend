@@ -159,26 +159,18 @@ class TestConfigProviderKeys:
             "DEEPINFRA_API_KEY": "deepinfra_key",
             "XAI_API_KEY": "xai_key",
             "NOVITA_API_KEY": "novita_key",
-            "NEBIUS_API_KEY": "nebius_key",
             "CEREBRAS_API_KEY": "cerebras_key",
-            "HUG_API_KEY": "hug_key",
             "FEATHERLESS_API_KEY": "featherless_key",
-            "CHUTES_API_KEY": "chutes_key",
             "FIREWORKS_API_KEY": "fireworks_key",
             "TOGETHER_API_KEY": "together_key",
             "GROQ_API_KEY": "groq_key",
-            "AIMO_API_KEY": "aimo_key",
-            "NEAR_API_KEY": "near_key",
             "VERCEL_AI_GATEWAY_API_KEY": "vercel_key",
             "HELICONE_API_KEY": "helicone_key",
             "AIHUBMIX_API_KEY": "aihubmix_key",
-            "FAL_API_KEY": "fal_key",
             "ANANNAS_API_KEY": "anannas_key",
-            "ALPACA_NETWORK_API_KEY": "alpaca_key",
             "ALIBABA_CLOUD_API_KEY": "alibaba_key",
             "ALIBABA_CLOUD_API_KEY_INTERNATIONAL": "intl_key",
             "ALIBABA_CLOUD_API_KEY_CHINA": "china_key",
-            "CLARIFAI_API_KEY": "clarifai_key",
         }
 
         for key, value in providers.items():
@@ -192,7 +184,6 @@ class TestConfigProviderKeys:
         assert config.Config.XAI_API_KEY == "xai_key"
         assert config.Config.CEREBRAS_API_KEY == "cerebras_key"
         assert config.Config.FEATHERLESS_API_KEY == "featherless_key"
-        assert config.Config.CHUTES_API_KEY == "chutes_key"
         assert config.Config.ALIBABA_CLOUD_API_KEY_INTERNATIONAL == "intl_key"
         assert config.Config.ALIBABA_CLOUD_API_KEY_CHINA == "china_key"
 
@@ -614,26 +605,6 @@ class TestConfigGetSupabaseConfig:
         url, key = config_mod.Config.get_supabase_config()
         assert url == "https://test.supabase.co"
         assert key == "test_key_123"
-
-
-class TestConfigClarifai:
-    """Test Clarifai configuration"""
-
-    def test_clarifai_configuration(self, monkeypatch):
-        """Test Clarifai API configuration"""
-        from src.config import config
-
-        monkeypatch.setenv("CLARIFAI_API_KEY", "test_clarifai_key")
-        monkeypatch.setenv("CLARIFAI_USER_ID", "test_user_id")
-        monkeypatch.setenv("CLARIFAI_APP_ID", "test_app_id")
-
-        import importlib
-
-        importlib.reload(config)
-
-        assert config.Config.CLARIFAI_API_KEY == "test_clarifai_key"
-        assert config.Config.CLARIFAI_USER_ID == "test_user_id"
-        assert config.Config.CLARIFAI_APP_ID == "test_app_id"
 
 
 class TestConfigAdminAndAnalytics:

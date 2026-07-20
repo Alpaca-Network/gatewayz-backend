@@ -68,30 +68,17 @@ class _CacheWrapper:
 # Create cache wrapper instances for all providers
 _models_cache = _CacheWrapper("openrouter")
 _featherless_models_cache = _CacheWrapper("featherless")
-_chutes_models_cache = _CacheWrapper("chutes")
 _groq_models_cache = _CacheWrapper("groq")
 _fireworks_models_cache = _CacheWrapper("fireworks")
 _together_models_cache = _CacheWrapper("together")
 _deepinfra_models_cache = _CacheWrapper("deepinfra")
 _cerebras_models_cache = _CacheWrapper("cerebras")
 _xai_models_cache = _CacheWrapper("xai")
-_nebius_models_cache = _CacheWrapper("nebius")
 _novita_models_cache = _CacheWrapper("novita")
-_huggingface_models_cache = _CacheWrapper("huggingface")
-_aimo_models_cache = _CacheWrapper("aimo")
-_near_models_cache = _CacheWrapper("near")
-_fal_models_cache = _CacheWrapper("fal")
 _google_vertex_models_cache = _CacheWrapper("google-vertex")
-_cloudflare_workers_ai_models_cache = _CacheWrapper("cloudflare-workers-ai")
 _openai_models_cache = _CacheWrapper("openai")
 _anthropic_models_cache = _CacheWrapper("anthropic")
-_clarifai_models_cache = _CacheWrapper("clarifai")
 _alibaba_models_cache = _CacheWrapper("alibaba")
-_simplismart_models_cache = _CacheWrapper("simplismart")
-_modelz_cache = _CacheWrapper("modelz")
-_canopywave_models_cache = _CacheWrapper("canopywave")
-_sybil_models_cache = _CacheWrapper("sybil")
-_morpheus_models_cache = _CacheWrapper("morpheus")
 
 # Gateway configuration with API endpoints
 GATEWAY_CONFIG = {
@@ -111,15 +98,6 @@ GATEWAY_CONFIG = {
         "api_key": Config.FEATHERLESS_API_KEY,
         "cache": _featherless_models_cache,
         "min_expected_models": 10,
-        "header_type": "bearer",
-    },
-    "chutes": {
-        "name": "Chutes",
-        "url": "https://llm.chutes.ai/v1/models",
-        "api_key_env": "CHUTES_API_KEY",
-        "api_key": getattr(Config, "CHUTES_API_KEY", None),
-        "cache": _chutes_models_cache,
-        "min_expected_models": 5,
         "header_type": "bearer",
     },
     "groq": {
@@ -176,15 +154,6 @@ GATEWAY_CONFIG = {
         "min_expected_models": 2,
         "header_type": "bearer",
     },
-    "nebius": {
-        "name": "Nebius",
-        "url": "https://api.studio.nebius.ai/v1/models",
-        "api_key_env": "NEBIUS_API_KEY",
-        "api_key": Config.NEBIUS_API_KEY,
-        "cache": _nebius_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
     "novita": {
         "name": "Novita",
         "url": "https://api.novita.ai/v3/openai/models",
@@ -192,42 +161,6 @@ GATEWAY_CONFIG = {
         "api_key": Config.NOVITA_API_KEY,
         "cache": _novita_models_cache,
         "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "huggingface": {
-        "name": "Hugging Face",
-        "url": "https://huggingface.co/api/models",
-        "api_key_env": "HUG_API_KEY",
-        "api_key": Config.HUG_API_KEY,
-        "cache": _huggingface_models_cache,
-        "min_expected_models": 100,
-        "header_type": "bearer",
-    },
-    "aimo": {
-        "name": "AIMO",
-        "url": "https://beta.aimo.network/api/v1/models",
-        "api_key_env": "AIMO_API_KEY",
-        "api_key": getattr(Config, "AIMO_API_KEY", None),
-        "cache": _aimo_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "near": {
-        "name": "NEAR",
-        "url": "https://cloud-api.near.ai/v1/models",
-        "api_key_env": "NEAR_API_KEY",
-        "api_key": Config.NEAR_API_KEY,
-        "cache": _near_models_cache,
-        "min_expected_models": 4,
-        "header_type": "bearer",
-    },
-    "fal": {
-        "name": "Fal.ai",
-        "url": None,  # Fal uses static catalog, no direct API endpoint
-        "api_key_env": "FAL_KEY",
-        "api_key": getattr(Config, "FAL_KEY", "static_catalog"),
-        "cache": _fal_models_cache,
-        "min_expected_models": 50,
         "header_type": "bearer",
     },
     "google-vertex": {
@@ -238,15 +171,6 @@ GATEWAY_CONFIG = {
         "cache": _google_vertex_models_cache,
         "min_expected_models": 10,
         "header_type": "google",
-    },
-    "cloudflare-workers-ai": {
-        "name": "Cloudflare Workers AI",
-        "url": None,  # Cloudflare uses account-specific URLs
-        "api_key_env": "CLOUDFLARE_API_TOKEN",
-        "api_key": getattr(Config, "CLOUDFLARE_API_TOKEN", None),
-        "cache": _cloudflare_workers_ai_models_cache,
-        "min_expected_models": 10,
-        "header_type": "bearer",
     },
     "openai": {
         "name": "OpenAI",
@@ -266,15 +190,6 @@ GATEWAY_CONFIG = {
         "min_expected_models": 3,
         "header_type": "bearer",
     },
-    "clarifai": {
-        "name": "Clarifai",
-        "url": None,  # Clarifai uses custom API
-        "api_key_env": "CLARIFAI_API_KEY",
-        "api_key": getattr(Config, "CLARIFAI_API_KEY", None),
-        "cache": _clarifai_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
     "alibaba": {
         "name": "Alibaba Cloud",
         "url": None,  # Alibaba uses Dashscope API
@@ -282,51 +197,6 @@ GATEWAY_CONFIG = {
         "api_key": getattr(Config, "ALIBABA_API_KEY", None),
         "cache": _alibaba_models_cache,
         "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "simplismart": {
-        "name": "SimpliSmart",
-        "url": "https://api.simplismart.ai/v1/models",
-        "api_key_env": "SIMPLISMART_API_KEY",
-        "api_key": getattr(Config, "SIMPLISMART_API_KEY", None),
-        "cache": _simplismart_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "modelz": {
-        "name": "Modelz",
-        "url": None,  # Modelz uses custom deployment API
-        "api_key_env": "MODELZ_API_KEY",
-        "api_key": getattr(Config, "MODELZ_API_KEY", None),
-        "cache": _modelz_cache,
-        "min_expected_models": 3,
-        "header_type": "bearer",
-    },
-    "canopywave": {
-        "name": "Canopy Wave",
-        "url": "https://inference.canopywave.io/v1/models",
-        "api_key_env": "CANOPYWAVE_API_KEY",
-        "api_key": getattr(Config, "CANOPYWAVE_API_KEY", None),
-        "cache": _canopywave_models_cache,
-        "min_expected_models": 5,
-        "header_type": "bearer",
-    },
-    "sybil": {
-        "name": "Sybil",
-        "url": None,  # Sybil uses static catalog
-        "api_key_env": "SYBIL_API_KEY",
-        "api_key": getattr(Config, "SYBIL_API_KEY", None),
-        "cache": _sybil_models_cache,
-        "min_expected_models": 3,
-        "header_type": "bearer",
-    },
-    "morpheus": {
-        "name": "Morpheus",
-        "url": None,  # Morpheus uses custom API
-        "api_key_env": "MORPHEUS_API_KEY",
-        "api_key": getattr(Config, "MORPHEUS_API_KEY", None),
-        "cache": _morpheus_models_cache,
-        "min_expected_models": 3,
         "header_type": "bearer",
     },
 }

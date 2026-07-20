@@ -18,9 +18,6 @@ from openai import AsyncOpenAI, OpenAI
 
 from src.config import Config
 
-# Simplismart base URL constant (duplicated here to avoid circular import with simplismart_client.py)
-SIMPLISMART_BASE_URL = "https://api.simplismart.live"
-
 logger = logging.getLogger(__name__)
 
 # Global connection pool instances with LRU tracking
@@ -44,13 +41,6 @@ DEFAULT_TIMEOUT = httpx.Timeout(
     read=60.0,  # Read timeout for streaming
     write=10.0,  # Write timeout
     pool=5.0,  # Pool acquisition timeout
-)
-
-HUGGINGFACE_TIMEOUT = httpx.Timeout(
-    connect=10.0,
-    read=120.0,  # HuggingFace models can be slow
-    write=10.0,
-    pool=5.0,
 )
 
 # xAI timeout for reasoning models (Grok 4.x with extended thinking)
@@ -484,19 +474,6 @@ def get_minimax_pooled_client() -> OpenAI:
     )
 
 
-def get_huggingface_pooled_client() -> OpenAI:
-    """Get pooled client for HuggingFace (with extended timeout)."""
-    if not Config.HUGGINGFACE_API_KEY:
-        raise ValueError("HuggingFace API key not configured")
-
-    return get_pooled_client(
-        provider="huggingface",
-        base_url="https://router.huggingface.co/v1",
-        api_key=Config.HUGGINGFACE_API_KEY,
-        timeout=HUGGINGFACE_TIMEOUT,
-    )
-
-
 def get_xai_pooled_client() -> OpenAI:
     """Get pooled client for X.AI.
 
@@ -527,34 +504,6 @@ def get_deepinfra_pooled_client() -> OpenAI:
     )
 
 
-def get_chutes_pooled_client() -> OpenAI:
-    """Get pooled client for Chutes.ai."""
-    if not Config.CHUTES_API_KEY:
-        raise ValueError("Chutes API key not configured")
-
-    return get_pooled_client(
-        provider="chutes",
-        base_url="https://llm.chutes.ai/v1",
-        api_key=Config.CHUTES_API_KEY,
-    )
-
-
-def get_clarifai_pooled_client() -> OpenAI:
-    """Get pooled client for Clarifai.
-
-    Uses Clarifai's OpenAI-compatible API endpoint.
-    See: https://docs.clarifai.com/compute/inference/open-ai/
-    """
-    if not Config.CLARIFAI_API_KEY:
-        raise ValueError("Clarifai API key not configured")
-
-    return get_pooled_client(
-        provider="clarifai",
-        base_url="https://api.clarifai.com/v2/ext/openai/v1",
-        api_key=Config.CLARIFAI_API_KEY,
-    )
-
-
 def get_groq_pooled_client() -> OpenAI:
     """Get pooled client for Groq."""
     if not Config.GROQ_API_KEY:
@@ -564,75 +513,6 @@ def get_groq_pooled_client() -> OpenAI:
         provider="groq",
         base_url="https://api.groq.com/openai/v1",
         api_key=Config.GROQ_API_KEY,
-    )
-
-
-def get_zai_pooled_client() -> OpenAI:
-    """Get pooled client for Z.AI (Zhipu AI).
-
-    Z.AI provides OpenAI-compatible API endpoints for the GLM model family.
-    See: https://docs.z.ai
-    """
-    if not Config.ZAI_API_KEY:
-        raise ValueError("Z.AI API key not configured")
-
-    return get_pooled_client(
-        provider="zai",
-        base_url="https://api.z.ai/api/paas/v4/",
-        api_key=Config.ZAI_API_KEY,
-    )
-
-
-def get_cloudflare_workers_ai_pooled_client() -> OpenAI:
-    """Get pooled client for Cloudflare Workers AI.
-
-    Cloudflare Workers AI provides an OpenAI-compatible API endpoint.
-    See: https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/
-    """
-    if not Config.CLOUDFLARE_API_TOKEN:
-        raise ValueError("Cloudflare API token not configured")
-    if not Config.CLOUDFLARE_ACCOUNT_ID:
-        raise ValueError("Cloudflare Account ID not configured")
-
-    # Cloudflare's OpenAI-compatible base URL includes the account ID
-    base_url = f"https://api.cloudflare.com/client/v4/accounts/{Config.CLOUDFLARE_ACCOUNT_ID}/ai/v1"
-
-    return get_pooled_client(
-        provider="cloudflare-workers-ai",
-        base_url=base_url,
-        api_key=Config.CLOUDFLARE_API_TOKEN,
-    )
-
-
-def get_akash_pooled_client() -> OpenAI:
-    """Get pooled client for Akash ML.
-
-    Akash ML provides an OpenAI-compatible API endpoint.
-    See: https://api.akashml.com/v1
-    """
-    if not Config.AKASH_API_KEY:
-        raise ValueError("Akash API key not configured")
-
-    return get_pooled_client(
-        provider="akash",
-        base_url="https://api.akashml.com/v1",
-        api_key=Config.AKASH_API_KEY,
-    )
-
-
-def get_morpheus_pooled_client() -> OpenAI:
-    """Get pooled client for Morpheus AI Gateway.
-
-    Morpheus provides an OpenAI-compatible API endpoint for decentralized AI.
-    See: https://api.mor.org/api/v1
-    """
-    if not Config.MORPHEUS_API_KEY:
-        raise ValueError("Morpheus API key not configured")
-
-    return get_pooled_client(
-        provider="morpheus",
-        base_url="https://api.mor.org/api/v1",
-        api_key=Config.MORPHEUS_API_KEY,
     )
 
 
@@ -669,80 +549,6 @@ def get_anthropic_pooled_client() -> OpenAI:
     )
 
 
-def get_simplismart_pooled_client() -> OpenAI:
-    """Get pooled client for Simplismart AI.
-
-    Simplismart provides an OpenAI-compatible API endpoint for various LLM models
-    including Llama, Gemma, Qwen, DeepSeek, Mixtral, and more.
-    See: https://docs.simplismart.ai/overview
-    """
-    if not Config.SIMPLISMART_API_KEY:
-        raise ValueError("Simplismart API key not configured")
-
-    return get_pooled_client(
-        provider="simplismart",
-        base_url=SIMPLISMART_BASE_URL,
-        api_key=Config.SIMPLISMART_API_KEY,
-    )
-
-
-# Sybil base URL constant
-SYBIL_BASE_URL = "https://api.sybil.com/v1"
-
-
-def get_sybil_pooled_client() -> OpenAI:
-    """Get pooled client for Sybil AI.
-
-    Sybil provides an OpenAI-compatible API endpoint for fast, open-source models
-    with GPU infrastructure for efficient inference.
-    See: https://docs.sybil.com/
-    """
-    if not Config.SYBIL_API_KEY:
-        raise ValueError("Sybil API key not configured")
-
-    return get_pooled_client(
-        provider="sybil",
-        base_url=SYBIL_BASE_URL,
-        api_key=Config.SYBIL_API_KEY,
-    )
-
-
-def get_canopywave_pooled_client() -> OpenAI:
-    """Get pooled client for Canopy Wave AI.
-
-    Canopy Wave provides an OpenAI-compatible API endpoint for open-source models
-    with serverless GPU infrastructure for efficient inference.
-    See: https://canopywave.com/docs/get-started/openai-compatible
-    """
-    if not Config.CANOPYWAVE_API_KEY:
-        raise ValueError("Canopy Wave API key not configured")
-
-    return get_pooled_client(
-        provider="canopywave",
-        base_url=Config.CANOPYWAVE_BASE_URL,
-        api_key=Config.CANOPYWAVE_API_KEY,
-    )
-
-
-# Nosana base URL constant
-NOSANA_BASE_URL = "https://dashboard.k8s.prd.nos.ci/api/v1"
-
-
-def get_nosana_pooled_client() -> OpenAI:
-    """Get pooled client for Nosana GPU Computing Network.
-
-    Nosana provides a distributed GPU computing network with OpenAI-compatible
-    API endpoints for AI model inference.
-    See: https://learn.nosana.com/api
-    """
-    if not Config.NOSANA_API_KEY:
-        raise ValueError("Nosana API key not configured")
-
-    return get_pooled_client(
-        provider="nosana",
-        base_url=NOSANA_BASE_URL,
-        api_key=Config.NOSANA_API_KEY,
-    )
 
 
 # =============================================================================

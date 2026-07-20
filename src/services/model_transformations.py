@@ -30,14 +30,11 @@ logger = logging.getLogger(__name__)
 # to a widely available general-purpose chat model for that provider.
 OPENROUTER_AUTO_FALLBACKS = {
     "cerebras": "llama-3.3-70b",
-    "huggingface": "meta-llama/llama-3.3-70b",
-    "hug": "meta-llama/llama-3.3-70b",
     "featherless": "meta-llama/llama-3.3-70b",
     "fireworks": "meta-llama/llama-3.3-70b",
     "together": "meta-llama/llama-3.3-70b",
     "google-vertex": "gemini-2.5-flash",  # Updated from retired gemini-1.5-pro
     "alibaba-cloud": "qwen/qwen-plus",
-    "simplismart": "meta-llama/Llama-3.3-70B-Instruct",
 }
 
 
@@ -188,7 +185,6 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
         "groq": "groq/",
         "cerebras": "cerebras/",
         "xai": "xai/",
-        "nebius": "nebius/",
     }
     strip_prefix = _STRIP_PREFIX_PROVIDERS.get(provider_lower)
     if strip_prefix and model_id.startswith(strip_prefix):
@@ -230,32 +226,11 @@ def transform_model_id(model_id: str, provider: str, use_multi_provider: bool = 
                 f"Preserving '{model_id}' - this OpenRouter meta-model requires the full ID"
             )
 
-    # Special handling for Near: strip 'near/' prefix if present
-    if provider_lower == "near" and model_id.startswith("near/"):
-        stripped = model_id[len("near/") :]
-        logger.info(f"Stripped 'near/' prefix: '{model_id}' -> '{stripped}' for Near")
-        model_id = stripped
-
-    # Special handling for AIMO: strip 'aimo/' prefix if present
-    # AIMO models need to be in provider_pubkey:model_name format for actual API calls
-    # The aimo_native_id field contains the correct format
-    if provider_lower == "aimo" and model_id.startswith("aimo/"):
-        stripped = model_id[len("aimo/") :]
-        logger.info(f"Stripped 'aimo/' prefix: '{model_id}' -> '{stripped}' for AIMO")
-        model_id = stripped
-
     # Special handling for Groq: strip 'groq/' prefix if present
     # Groq API expects just the model name without the provider prefix
     if provider_lower == "groq" and model_id.startswith("groq/"):
         stripped = model_id[len("groq/") :]
         logger.info(f"Stripped 'groq/' prefix: '{model_id}' -> '{stripped}' for Groq")
-        model_id = stripped
-
-    # Special handling for Morpheus: strip 'morpheus/' prefix if present
-    # Morpheus API expects just the model name without the provider prefix
-    if provider_lower == "morpheus" and model_id.startswith("morpheus/"):
-        stripped = model_id[len("morpheus/") :]
-        logger.info(f"Stripped 'morpheus/' prefix: '{model_id}' -> '{stripped}' for Morpheus")
         model_id = stripped
 
     # Get the mapping for this provider
@@ -474,12 +449,6 @@ def detect_provider_from_model_id(
     # Normalize to lowercase for consistency in all @ prefix checks
     normalized_model = model_id.lower()
 
-    # Check for Cloudflare Workers AI models (use @cf/ prefix)
-    # IMPORTANT: This must come before the general @ prefix check below
-    if normalized_model.startswith("@cf/"):
-        logger.info(f"Detected Cloudflare Workers AI model: {model_id}")
-        return "cloudflare-workers-ai"
-
     # Check for Google Vertex AI models first (before Portkey check)
     if model_id.startswith("projects/") and "/models/" in model_id:
         return "google-vertex"
@@ -559,19 +528,10 @@ def detect_provider_from_model_id(
         "openrouter",
         "featherless",
         "together",
-        "huggingface",
-        "hug",
-        "chutes",
         "google-vertex",
-        "near",
-        "alpaca-network",
         "alibaba-cloud",
-        "fal",
         "xai",
         "groq",
-        "cloudflare-workers-ai",
-        "morpheus",
-        "simplismart",
     ]:
         mapping = get_provider_mappings(provider)
         if model_id in mapping:
@@ -594,10 +554,6 @@ def detect_provider_from_model_id(
         # if org == "google":
         #     return "google-vertex"
 
-        # Near AI models (e.g., "near/deepseek-ai/DeepSeek-V3", "near/deepseek-ai/DeepSeek-R1")
-        if org == "near":
-            return "near"
-
         # Cerebras models (e.g., "cerebras/llama-3.3-70b")
         if org == "cerebras":
             return "cerebras"
@@ -605,20 +561,6 @@ def detect_provider_from_model_id(
         # OpenRouter models (e.g., "openrouter/auto")
         if org == "openrouter":
             return "openrouter"
-
-        # Morpheus models (e.g., "morpheus/llama-3.1-8b")
-        if org == "morpheus":
-            return "morpheus"
-
-        # Z-AI / Zhipu AI GLM models (e.g., "z-ai/glm-4-flash", "z-ai/glm-4.6")
-        # These are hosted on OpenRouter with the z-ai/ prefix
-        if org == "z-ai" or org == "zai":
-            logger.info(f"Detected OpenRouter provider for Zhipu AI model '{model_id}'")
-            return "openrouter"
-
-        # Alpaca Network models (e.g., "alpaca-network/deepseek-v3-1")
-        if org == "alpaca-network" or org == "alpaca":
-            return "alpaca-network"
 
         # Alibaba Cloud / Qwen models (e.g., "qwen/qwen-plus", "alibaba-cloud/qwen-max")
         # IMPORTANT: Check if this is a Cerebras-specific Qwen model first
@@ -655,17 +597,6 @@ def detect_provider_from_model_id(
         # Failover to OpenRouter is handled by provider_failover.py
         if org == "anthropic":
             return "anthropic"
-
-        # Fal.ai models (e.g., "fal-ai/stable-diffusion-v15", "minimax/video-01")
-        if org == "fal-ai" or org in [
-            "fal",
-            "minimax",
-            "stabilityai",
-            "hunyuan3d",
-            "meshy",
-            "tripo3d",
-        ]:
-            return "fal"
 
         # XAI models (e.g., "xai/grok-2" or "x-ai/grok-2-1212")
         if org in ("xai", "x-ai"):

@@ -307,7 +307,7 @@ def get_all_gateways_summary(time_range: str = "24h", user_id: int | None = None
         Dictionary with statistics for each gateway
     """
     try:
-        gateways = ["openrouter", "featherless", "deepinfra", "chutes"]
+        gateways = ["openrouter", "featherless", "deepinfra"]
 
         summary = {
             "time_range": time_range,

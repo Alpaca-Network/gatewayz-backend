@@ -34,7 +34,6 @@ from src.security.deps import require_admin
 from src.services.model_catalog_cache import (
     get_gateway_cache_metadata,
     get_provider_cache_metadata,
-    invalidate_gateway_catalog,
     invalidate_provider_catalog,
 )
 from src.services.models import (
@@ -314,53 +313,6 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
     except Exception as e:
         logger.error(f"Failed to get cache status: {e}")
         raise HTTPException(status_code=500, detail="Failed to get cache status") from e
-
-
-@router.get("/admin/huggingface-cache-status", tags=["admin"])
-async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
-    """Get Hugging Face cache status and statistics"""
-    try:
-        hf_cache = get_gateway_cache_metadata("huggingface")
-        cache_age = None
-        if hf_cache.get("timestamp"):
-            cache_age = (datetime.now(UTC) - hf_cache["timestamp"]).total_seconds()
-
-        hf_data = hf_cache.get("data") or []
-        cached_ids = [
-            model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")
-        ]
-
-        return {
-            "huggingface_cache": {
-                "age_seconds": cache_age,
-                "is_valid": cache_age is not None and cache_age < hf_cache.get("ttl", 1800),
-                "total_cached_models": len(hf_data),
-                "cached_model_ids": cached_ids,
-            },
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get Hugging Face cache status: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to get Hugging Face cache status"
-        ) from e
-
-
-@router.post("/admin/refresh-huggingface-cache", tags=["admin"])
-async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
-    """Clear Hugging Face cache to force refresh on the next request"""
-    try:
-        invalidate_gateway_catalog("huggingface")
-
-        return {
-            "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to clear Hugging Face cache: {e}")
-        raise HTTPException(status_code=500, detail="Failed to clear Hugging Face cache") from e
 
 
 @router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])

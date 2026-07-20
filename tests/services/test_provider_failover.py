@@ -152,11 +152,11 @@ except ImportError:
 class TestBuildProviderFailoverChain:
     """Test provider failover chain construction"""
 
-    def test_chain_with_huggingface_first(self):
-        """Test chain starting with huggingface"""
-        chain = build_provider_failover_chain("huggingface")
+    def test_chain_with_cerebras_first(self):
+        """Test chain starting with cerebras"""
+        chain = build_provider_failover_chain("cerebras")
 
-        assert chain[0] == "huggingface"
+        assert chain[0] == "cerebras"
         assert "featherless" in chain
         assert "fireworks" in chain
         assert "together" in chain
@@ -180,7 +180,7 @@ class TestBuildProviderFailoverChain:
         chain = build_provider_failover_chain("featherless")
 
         assert chain[0] == "featherless"
-        assert "huggingface" in chain
+        assert "cerebras" in chain
         assert "fireworks" in chain
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
@@ -214,9 +214,9 @@ class TestBuildProviderFailoverChain:
 
     def test_chain_case_insensitive(self):
         """Test chain building is case insensitive"""
-        chain_lower = build_provider_failover_chain("huggingface")
-        chain_upper = build_provider_failover_chain("HUGGINGFACE")
-        chain_mixed = build_provider_failover_chain("HuggingFace")
+        chain_lower = build_provider_failover_chain("cerebras")
+        chain_upper = build_provider_failover_chain("CEREBRAS")
+        chain_mixed = build_provider_failover_chain("Cerebras")
 
         assert chain_lower == chain_upper == chain_mixed
 
@@ -228,7 +228,6 @@ class TestBuildProviderFailoverChain:
 
     def test_fallback_provider_priority_constants(self):
         """Test fallback provider constants are defined correctly"""
-        assert "huggingface" in FALLBACK_PROVIDER_PRIORITY
         assert "featherless" in FALLBACK_PROVIDER_PRIORITY
         assert "fireworks" in FALLBACK_PROVIDER_PRIORITY
         assert "together" in FALLBACK_PROVIDER_PRIORITY

@@ -14,43 +14,26 @@ from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
 from src.services.pricing_normalization import (
     PricingFormat,
     get_provider_format,
     normalize_to_per_token,
 )
-from src.services.providers.aimo_client import fetch_models_from_aimo
 from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
 from src.services.providers.anthropic_client import fetch_models_from_anthropic
-from src.services.providers.canopywave_client import fetch_models_from_canopywave
 from src.services.providers.cerebras_client import fetch_models_from_cerebras
-from src.services.providers.chutes_client import fetch_models_from_chutes
-from src.services.providers.clarifai_client import fetch_models_from_clarifai
-from src.services.providers.cloudflare_workers_ai_client import (
-    fetch_models_from_cloudflare_workers_ai,
-)
-from src.services.providers.cohere_client import fetch_models_from_cohere
 from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
-from src.services.providers.fal_image_client import fetch_models_from_fal
 from src.services.providers.featherless_client import fetch_models_from_featherless
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_client import fetch_models_from_groq
 from src.services.providers.minimax_client import fetch_models_from_minimax
-from src.services.providers.modelz_client import fetch_models_from_modelz
 from src.services.providers.moonshot_client import fetch_models_from_moonshot
-from src.services.providers.morpheus_client import fetch_models_from_morpheus
-from src.services.providers.near_client import fetch_models_from_near
-from src.services.providers.nebius_client import fetch_models_from_nebius
 from src.services.providers.novita_client import fetch_models_from_novita
 from src.services.providers.openai_client import fetch_models_from_openai
 from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.providers.simplismart_client import fetch_models_from_simplismart
-from src.services.providers.sybil_client import fetch_models_from_sybil
 from src.services.providers.together_client import fetch_models_from_together
 from src.services.providers.xai_client import fetch_models_from_xai
-from src.services.providers.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +45,6 @@ _PROVIDER_TIERS: dict[str, int] = {
     "cerebras": 1,
     "fireworks": 2,
     "together": 2,
-    "cloudflare-workers-ai": 2,
 }
 
 
@@ -72,35 +54,18 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "openrouter": fetch_models_from_openrouter,
     "deepinfra": fetch_models_from_deepinfra,
     "featherless": fetch_models_from_featherless,
-    "chutes": fetch_models_from_chutes,
     "groq": fetch_models_from_groq,
     "fireworks": fetch_models_from_fireworks,
     "together": fetch_models_from_together,
     "moonshot": fetch_models_from_moonshot,
     "minimax": fetch_models_from_minimax,
-    "aimo": fetch_models_from_aimo,
-    "near": fetch_models_from_near,
-    "fal": fetch_models_from_fal,
     "alibaba": fetch_models_from_alibaba,
-    "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,
     "google-vertex": fetch_models_from_google_vertex,
     "xai": fetch_models_from_xai,
-    "nebius": fetch_models_from_nebius,
     "novita": fetch_models_from_novita,
-    # Additional providers that were missing
     "openai": fetch_models_from_openai,
     "anthropic": fetch_models_from_anthropic,
-    "clarifai": fetch_models_from_clarifai,
-    "simplismart": fetch_models_from_simplismart,
-    "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
-    "modelz": fetch_models_from_modelz,
-    "cohere": fetch_models_from_cohere,
-    # Recently added providers
-    "zai": fetch_models_from_zai,
-    "morpheus": fetch_models_from_morpheus,
-    "sybil": fetch_models_from_sybil,
-    "canopywave": fetch_models_from_canopywave,
 }
 
 
@@ -571,14 +536,6 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "site_url": "https://www.minimaxi.com",
                 "supports_streaming": True,
             },
-            "huggingface": {
-                "name": "HuggingFace",
-                "description": "HuggingFace inference API",
-                "base_url": "https://router.huggingface.co",
-                "api_key_env_var": "HUGGINGFACE_API_KEY",
-                "site_url": "https://huggingface.co",
-                "supports_streaming": True,
-            },
             "cerebras": {
                 "name": "Cerebras",
                 "description": "Cerebras AI ultra-fast inference",
@@ -623,52 +580,12 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "supports_function_calling": True,
                 "supports_vision": True,
             },
-            "clarifai": {
-                "name": "Clarifai",
-                "description": "Clarifai AI platform",
-                "base_url": "https://api.clarifai.com",
-                "api_key_env_var": "CLARIFAI_API_KEY",
-                "site_url": "https://clarifai.com",
-                "supports_streaming": True,
-            },
-            "simplismart": {
-                "name": "SimpliSmart",
-                "description": "SimpliSmart AI inference",
-                "base_url": "https://api.simplismart.ai/v1",
-                "api_key_env_var": "SIMPLISMART_API_KEY",
-                "site_url": "https://simplismart.ai",
-                "supports_streaming": True,
-            },
-            "cloudflare-workers-ai": {
-                "name": "Cloudflare Workers AI",
-                "description": "Cloudflare Workers AI inference",
-                "base_url": None,
-                "api_key_env_var": "CLOUDFLARE_API_TOKEN",
-                "site_url": "https://developers.cloudflare.com/workers-ai",
-                "supports_streaming": True,
-            },
-            "nebius": {
-                "name": "Nebius",
-                "description": "Nebius AI Studio",
-                "base_url": "https://api.studio.nebius.ai/v1",
-                "api_key_env_var": "NEBIUS_API_KEY",
-                "site_url": "https://studio.nebius.ai",
-                "supports_streaming": True,
-            },
             "novita": {
                 "name": "Novita",
                 "description": "Novita AI inference",
                 "base_url": "https://api.novita.ai/v3/openai",
                 "api_key_env_var": "NOVITA_API_KEY",
                 "site_url": "https://novita.ai",
-                "supports_streaming": True,
-            },
-            "modelz": {
-                "name": "Modelz",
-                "description": "Modelz AI model deployment platform",
-                "base_url": "https://backend.alpacanetwork.ai",
-                "api_key_env_var": "MODELZ_API_KEY",
-                "site_url": "https://modelz.ai",
                 "supports_streaming": True,
             },
         }

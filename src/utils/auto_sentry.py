@@ -392,26 +392,16 @@ def _extract_provider_from_module(module_name: str) -> str:
         return "portkey"
     elif "featherless" in module_name:
         return "featherless"
-    elif "chutes" in module_name:
-        return "chutes"
     elif "deepinfra" in module_name:
         return "deepinfra"
     elif "fireworks" in module_name:
         return "fireworks"
     elif "together" in module_name:
         return "together"
-    elif "huggingface" in module_name:
-        return "huggingface"
     elif "google_vertex" in module_name:
         return "google_vertex"
     elif "xai" in module_name:
         return "xai"
-    elif "aimo" in module_name:
-        return "aimo"
-    elif "near" in module_name:
-        return "near"
-    elif "fal" in module_name:
-        return "fal"
     return "unknown"
 
 

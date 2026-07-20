@@ -16,7 +16,6 @@ from src.models import ImageGenerationRequest, ImageGenerationResponse
 from src.security.deps import get_api_key
 from src.security.inference_gates import enforce_subscription_status_gate
 from src.services.pricing_lookup import get_image_pricing
-from src.services.providers.fal_image_client import make_fal_image_request
 from src.services.providers.image_generation_client import (
     make_deepinfra_image_request,
     make_google_vertex_image_request,
@@ -34,7 +33,6 @@ router = APIRouter()
 # Image provider dispatch table (module-level to avoid per-request allocation)
 IMAGE_PROVIDER_ROUTING = {
     "deepinfra": make_deepinfra_image_request,
-    "fal": make_fal_image_request,
 }
 
 # DEPRECATED: Hardcoded image pricing fallback.
@@ -50,15 +48,6 @@ _HARDCODED_IMAGE_COST_PER_IMAGE = {
         "stabilityai/sd3.5": 0.035,
         "stabilityai/sd3.5-large": 0.035,
         "stabilityai/sd3.5-medium": 0.02,
-        "default": 0.025,
-    },
-    "fal": {
-        "flux/schnell": 0.003,
-        "flux/dev": 0.025,
-        "flux-pro": 0.05,
-        "fal-ai/flux/schnell": 0.003,
-        "fal-ai/flux/dev": 0.025,
-        "fal-ai/flux-pro": 0.05,
         "default": 0.025,
     },
     "google-vertex": {
@@ -99,7 +88,7 @@ def get_image_cost(
       4. Unknown-provider     (``UNKNOWN_PROVIDER_DEFAULT_COST``)
 
     Args:
-        provider: Image generation provider (deepinfra, fal, google-vertex)
+        provider: Image generation provider (deepinfra, google-vertex)
         model: Model name
         num_images: Number of images to generate
         size: Image resolution string (e.g. "1024x1024"). If None, uses default multiplier of 1.0.
@@ -210,17 +199,6 @@ async def generate_images(
         "google_project_id": "gatewayz-468519",
         "google_location": "us-central1",
         "google_endpoint_id": "6072619212881264640"
-    }
-    ```
-
-    Fal.ai:
-    ```json
-    {
-        "prompt": "A serene mountain landscape at sunset",
-        "model": "fal-ai/stable-diffusion-v15",
-        "size": "1024x1024",
-        "n": 1,
-        "provider": "fal"
     }
     ```
     """

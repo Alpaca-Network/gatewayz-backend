@@ -86,11 +86,12 @@ class TestFailoverChain:
     """CM 5.1 - Failover chain configuration and status-code triggers."""
 
     @pytest.mark.cm_verified
-    def test_failover_chain_has_10_providers(self):
-        """CM-5.1.1: build_provider_failover_chain produces a chain with 10 providers."""
+    def test_failover_chain_has_9_providers(self):
+        """CM-5.1.1: build_provider_failover_chain produces a chain with 9 providers
+        (North Star roster convergence dropped huggingface from FALLBACK_PROVIDER_PRIORITY)."""
         with _all_providers_enabled():
             chain = build_provider_failover_chain("openrouter")
-        assert len(chain) == 10
+        assert len(chain) == 9
 
     @pytest.mark.cm_verified
     def test_failover_chain_ordered_by_reliability(self):
@@ -103,7 +104,6 @@ class TestFailoverChain:
             "anthropic",
             "google-vertex",
             "cerebras",
-            "huggingface",
             "featherless",
             "alibaba",
             "fireworks",

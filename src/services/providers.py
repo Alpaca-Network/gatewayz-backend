@@ -27,7 +27,6 @@ MANUAL_LOGO_DB = {
     "meta": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/meta.svg",
     "microsoft": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/microsoft.svg",
     "nvidia": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/nvidia.svg",
-    "cohere": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/cohere.svg",
     "mistralai": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/mistralai.svg",
     "perplexity": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/perplexity.svg",
     "amazon": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/amazon.svg",
@@ -36,32 +35,17 @@ MANUAL_LOGO_DB = {
     "alibaba": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/alibabacloud.svg",
     "ai21": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/ai21labs.svg",
     "inflection": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/inflection.svg",
-    "alpaca-network": "https://console.anyscale.com/favicon.ico",
-    "simplismart": "https://simplismart.ai/favicon.ico",
     # Gateway-slug entries (matching provider slugs in DB providers table)
     "openrouter": "https://openrouter.ai/favicon.ico",
     "groq": "https://groq.com/favicon.ico",
     "together": "https://together.ai/favicon.ico",
     "fireworks": "https://fireworks.ai/favicon.ico",
     "featherless": "https://featherless.ai/favicon.ico",
-    "chutes": "https://chutes.ai/favicon.ico",
     "deepinfra": "https://deepinfra.com/favicon.ico",
     "google-vertex": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/google.svg",
     "cerebras": "https://cerebras.ai/favicon.ico",
-    "nebius": "https://nebius.ai/favicon.ico",
     "xai": "https://x.ai/favicon.ico",
     "novita": "https://novita.ai/favicon.ico",
-    "huggingface": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/huggingface.svg",
-    "aimo": "https://aimo.network/favicon.ico",
-    "near": "https://near.ai/favicon.ico",
-    "fal": "https://fal.ai/favicon.ico",
-    "alpaca": "https://alpaca.network/favicon.ico",
-    "clarifai": "https://clarifai.com/favicon.ico",
-    "zai": "https://z.ai/favicon.ico",
-    "sybil": "https://sybil.com/favicon.ico",
-    "cloudflare-workers-ai": "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/cloudflare.svg",
-    "morpheus": "https://mor.org/favicon.ico",
-    "canopywave": "https://canopywave.io/favicon.ico",
     # Additional model-developer slugs (appear as provider_slug derived from model IDs)
     "deepseek": "https://deepseek.com/favicon.ico",
     "qwen": "https://qwen.ai/favicon.ico",
@@ -331,29 +315,8 @@ def fetch_models_from_xai():
     return _fetch()
 
 
-def fetch_models_from_nebius():
-    """Fetch models from Nebius client"""
-    from src.services.providers.nebius_client import fetch_models_from_nebius as _fetch
-
-    return _fetch()
-
-
 def fetch_models_from_novita():
     """Fetch models from Novita client"""
     from src.services.providers.novita_client import fetch_models_from_novita as _fetch
-
-    return _fetch()
-
-
-def fetch_models_from_morpheus():
-    """Fetch models from Morpheus AI Gateway client"""
-    from src.services.providers.morpheus_client import fetch_models_from_morpheus as _fetch
-
-    return _fetch()
-
-
-def fetch_models_from_simplismart():
-    """Fetch models from Simplismart client"""
-    from src.services.providers.simplismart_client import fetch_models_from_simplismart as _fetch
 
     return _fetch()

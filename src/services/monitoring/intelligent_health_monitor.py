@@ -459,7 +459,6 @@ class IntelligentHealthMonitor:
             "xai": "https://api.x.ai/v1/chat/completions",
             "novita": "https://api.novita.ai/v3/openai/chat/completions",
             "cerebras": "https://api.cerebras.ai/v1/chat/completions",
-            "huggingface": None,  # Different per model
             "portkey": "https://api.portkey.ai/v1/chat/completions",
         }
         return _fallback_endpoints.get(gateway)
