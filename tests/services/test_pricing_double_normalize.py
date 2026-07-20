@@ -11,7 +11,9 @@ from src.services.model_catalog_sync import transform_normalized_model_to_db_sch
 
 
 def _pricing_raw(model):
-    rec = transform_normalized_model_to_db_schema(model, provider_id=1, provider_slug=model["provider_slug"])
+    rec = transform_normalized_model_to_db_schema(
+        model, provider_id=1, provider_slug=model["provider_slug"]
+    )
     assert rec is not None
     return rec["metadata"]["pricing_raw"]
 

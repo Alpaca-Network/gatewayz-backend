@@ -770,8 +770,7 @@ def sync_provider_models(
         if not normalized_models:
             total_duration = time.time() - start_time
             logger.warning(
-                f"[{provider_slug.upper()}] No models returned | "
-                f"Duration: {total_duration:.2f}s"
+                f"[{provider_slug.upper()}] No models returned | Duration: {total_duration:.2f}s"
             )
             return {
                 "success": True,
@@ -1064,12 +1063,12 @@ def sync_all_providers(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
                 )
 
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'STARTING PROVIDER SYNC':^80}")
-        logger.info(f"{'='*80}")
+        logger.info(f"{'=' * 80}")
         logger.info(f"Providers to sync: {len(providers_to_sync)}")
         logger.info(f"Dry run mode: {dry_run}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         results = []
         total_fetched = 0
@@ -1082,7 +1081,7 @@ def sync_all_providers(
 
         for i, provider_slug in enumerate(providers_to_sync, 1):
             logger.info(
-                f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}"
+                f"\n{'=' * 80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'=' * 80}"
             )
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
@@ -1138,9 +1137,9 @@ def sync_all_providers(
         success_rate = (success_count / len(results) * 100) if results else 0
 
         # Print comprehensive dashboard
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'SYNC SUMMARY DASHBOARD':^80}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         # Overall Statistics
         logger.info(f"{'OVERALL STATISTICS':-<80}")
@@ -1154,13 +1153,13 @@ def sync_all_providers(
         logger.info(f"{'MODEL STATISTICS':-<80}")
         logger.info(f"{'Total Fetched':<40} {total_fetched:>20}")
         logger.info(
-            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n"
+            f"{'Total Synced':<40} {total_synced:>20} ({total_synced / max(total_transformed, 1) * 100:>6.1f}%)\n"
         )
 
         # Performance Metrics
@@ -1199,7 +1198,7 @@ def sync_all_providers(
                 logger.error(f"{i}. {error['provider']:<25} {error['error']}")
             logger.info("")
 
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         return {
             "success": success,
