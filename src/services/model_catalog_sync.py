@@ -369,9 +369,22 @@ def transform_normalized_model_to_db_schema(
         # Normalize pricing to per-token if the provider uses a different format
         # (e.g., per-1M for NEAR, DeepInfra, etc.)
         # This prevents storing inflated values in metadata.pricing_raw
+        #
+        # CRITICAL (North Star §4.2 unit-error landmine): pricing produced by
+        # enrichment — tier "manual" (get_model_pricing), "database", or
+        # "cross_reference" (OpenRouter) — is ALREADY per-token. Only inline
+        # provider pricing (e.g. xai's hardcoded per-1M "5"/"15", which sets no
+        # pricing_source) still needs normalization here. Re-normalizing enriched
+        # pricing divides by the provider factor a SECOND time (per-1M => 1e-12),
+        # silently making every closed-provider model ~1e6x too cheap.
         source_gateway = normalized_model.get("source_gateway", provider_slug)
+        already_per_token = normalized_model.get("pricing_source") in (
+            "manual",
+            "database",
+            "cross_reference",
+        )
         provider_format = get_provider_format(source_gateway)
-        if provider_format != PricingFormat.PER_TOKEN:
+        if not already_per_token and provider_format != PricingFormat.PER_TOKEN:
             for field in ("prompt", "completion", "image", "request"):
                 if pricing[field] is not None and pricing[field] != Decimal("0"):
                     normalized_val = normalize_to_per_token(pricing[field], provider_format)
@@ -757,8 +770,7 @@ def sync_provider_models(
         if not normalized_models:
             total_duration = time.time() - start_time
             logger.warning(
-                f"[{provider_slug.upper()}] No models returned | "
-                f"Duration: {total_duration:.2f}s"
+                f"[{provider_slug.upper()}] No models returned | Duration: {total_duration:.2f}s"
             )
             return {
                 "success": True,
@@ -1051,12 +1063,12 @@ def sync_all_providers(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
                 )
 
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'STARTING PROVIDER SYNC':^80}")
-        logger.info(f"{'='*80}")
+        logger.info(f"{'=' * 80}")
         logger.info(f"Providers to sync: {len(providers_to_sync)}")
         logger.info(f"Dry run mode: {dry_run}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         results = []
         total_fetched = 0
@@ -1069,7 +1081,7 @@ def sync_all_providers(
 
         for i, provider_slug in enumerate(providers_to_sync, 1):
             logger.info(
-                f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}"
+                f"\n{'=' * 80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'=' * 80}"
             )
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
@@ -1125,9 +1137,9 @@ def sync_all_providers(
         success_rate = (success_count / len(results) * 100) if results else 0
 
         # Print comprehensive dashboard
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'SYNC SUMMARY DASHBOARD':^80}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         # Overall Statistics
         logger.info(f"{'OVERALL STATISTICS':-<80}")
@@ -1141,13 +1153,13 @@ def sync_all_providers(
         logger.info(f"{'MODEL STATISTICS':-<80}")
         logger.info(f"{'Total Fetched':<40} {total_fetched:>20}")
         logger.info(
-            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n"
+            f"{'Total Synced':<40} {total_synced:>20} ({total_synced / max(total_transformed, 1) * 100:>6.1f}%)\n"
         )
 
         # Performance Metrics
@@ -1186,7 +1198,7 @@ def sync_all_providers(
                 logger.error(f"{i}. {error['provider']:<25} {error['error']}")
             logger.info("")
 
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         return {
             "success": success,
