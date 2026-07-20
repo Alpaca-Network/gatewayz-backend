@@ -369,9 +369,22 @@ def transform_normalized_model_to_db_schema(
         # Normalize pricing to per-token if the provider uses a different format
         # (e.g., per-1M for NEAR, DeepInfra, etc.)
         # This prevents storing inflated values in metadata.pricing_raw
+        #
+        # CRITICAL (North Star §4.2 unit-error landmine): pricing produced by
+        # enrichment — tier "manual" (get_model_pricing), "database", or
+        # "cross_reference" (OpenRouter) — is ALREADY per-token. Only inline
+        # provider pricing (e.g. xai's hardcoded per-1M "5"/"15", which sets no
+        # pricing_source) still needs normalization here. Re-normalizing enriched
+        # pricing divides by the provider factor a SECOND time (per-1M => 1e-12),
+        # silently making every closed-provider model ~1e6x too cheap.
         source_gateway = normalized_model.get("source_gateway", provider_slug)
+        already_per_token = normalized_model.get("pricing_source") in (
+            "manual",
+            "database",
+            "cross_reference",
+        )
         provider_format = get_provider_format(source_gateway)
-        if provider_format != PricingFormat.PER_TOKEN:
+        if not already_per_token and provider_format != PricingFormat.PER_TOKEN:
             for field in ("prompt", "completion", "image", "request"):
                 if pricing[field] is not None and pricing[field] != Decimal("0"):
                     normalized_val = normalize_to_per_token(pricing[field], provider_format)
