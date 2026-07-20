@@ -80,7 +80,7 @@ Each PR: green `pytest` / build before hand-off. Nothing deployed by this work.
 
 ## 8. Success criteria
 
-- Backend registers exactly: 18 roster + `openrouter` + 6 dark; zero off-roster references (grep + pytest clean).
-- `ENABLED_PROVIDERS` default = the 18 roster + openrouter (dark 6 excluded).
+- Backend registers exactly: 12 live roster + `openrouter` + 6 dark = 19 fetch-mapped; zero off-roster references (grep + pytest clean).
+- `ENABLED_PROVIDERS` default = live roster (12, = roster minus dark 6) + openrouter = 13. `PROVIDER_ENV_VAR_MAP` = full 18 roster + openrouter = 19. Dark 6 mapped but not enabled.
 - Frontend has no hardcoded provider/model tables; catalog UI reads the DB API.
 - With roster `ENABLED_PROVIDERS`, startup sync deactivates every non-roster DB provider (verified on staging).

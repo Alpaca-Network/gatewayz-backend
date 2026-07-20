@@ -14,7 +14,9 @@
 - `openrouter` is **retained** as fallback-only (§5) — enabled, never deleted, not counted in the 18.
 - Cut set (19): `chutes, aimo, near, fal, huggingface, nebius, clarifai, simplismart, cloudflare-workers-ai, modelz, cohere, zai, morpheus, sybil, canopywave, akash, alpaca-network, nosana, code-router`.
 - Scaffold-dark (6): `deepseek, moonshot, minimax, xiaomi, perplexity, mistral` — registered but **excluded from `ENABLED_PROVIDERS`** so `is_active=False`.
-- `ENABLED_PROVIDERS` default value = the 18 roster + `openrouter` (dark 6 excluded).
+- **Live roster (12)** = roster minus the dark 6 = `openai, anthropic, google-vertex, xai, alibaba, deepinfra, novita, together, fireworks, groq, cerebras, featherless`.
+- `ENABLED_PROVIDERS` default = live roster (12) + `openrouter` = **13**. `_FALLBACK_PROVIDER_SLUGS` = same **13**. Dark 6 excluded from both (they have no client code + no keys yet).
+- `PROVIDER_ENV_VAR_MAP` keys = 18 roster + `openrouter` = **19** (dark 6 keep their env-var entries; only their enablement is withheld).
 - No hand-written prod DB migration. No prod env flip. Each PR: `pytest` green before hand-off.
 - Verification discipline for deletions: `grep` clean + full `pytest` green (the existing suite is the regression test).
 
@@ -37,36 +39,42 @@
 
 ```python
 # tests/services/test_provider_roster.py
-ROSTER = {
+ROSTER = {  # full North Star §3 roster (18); dark 6 included here
     "openai","anthropic","google-vertex","xai","deepseek","alibaba","xiaomi",
     "moonshot","minimax","deepinfra","novita","together","fireworks","groq",
     "cerebras","perplexity","mistral","featherless",
 }
-ENABLED_DEFAULT = ROSTER | {"openrouter"}
+DARK = {"deepseek","moonshot","minimax","xiaomi","perplexity","mistral"}
+LIVE_ROSTER = ROSTER - DARK  # 12 providers that have client code + keys today
+ENABLED_DEFAULT = LIVE_ROSTER | {"openrouter"}  # 13 — dark 6 withheld until keys land
+ENV_MAP_KEYS = ROSTER | {"openrouter"}  # 19 — dark 6 keep their env-var mapping
 CUT = {
     "chutes","aimo","near","fal","huggingface","nebius","clarifai","simplismart",
     "cloudflare-workers-ai","modelz","cohere","zai","morpheus","sybil","canopywave",
     "akash","alpaca-network","nosana","code-router",
 }
 
-def test_fallback_slugs_are_roster_plus_openrouter():
+def test_fallback_slugs_are_live_roster_plus_openrouter():
     from src.db.providers_db import _FALLBACK_PROVIDER_SLUGS
     assert set(_FALLBACK_PROVIDER_SLUGS) == ENABLED_DEFAULT
 
-def test_env_var_map_has_no_cut_providers():
+def test_env_var_map_is_roster_plus_openrouter_no_cut():
     from src.services.provider_model_sync_service import PROVIDER_ENV_VAR_MAP
-    assert CUT.isdisjoint(PROVIDER_ENV_VAR_MAP.keys())
+    keys = set(PROVIDER_ENV_VAR_MAP.keys())
+    assert CUT.isdisjoint(keys)
+    assert keys == ENV_MAP_KEYS
 
-def test_enabled_providers_default_is_roster():
+def test_enabled_providers_default_excludes_dark():
     import os, importlib
     os.environ.pop("ENABLED_PROVIDERS", None)
     import src.config.config as c; importlib.reload(c)
     assert c.Config.ENABLED_PROVIDERS == frozenset(ENABLED_DEFAULT)
+    assert DARK.isdisjoint(c.Config.ENABLED_PROVIDERS)  # dark 6 not enabled
 ```
 
 - [ ] **Step 2: Run — expect FAIL** — `pytest tests/services/test_provider_roster.py -o addopts="" -v`
-- [ ] **Step 3:** Set `config.py:598` default string to `"openai,anthropic,google-vertex,xai,deepseek,alibaba,xiaomi,moonshot,minimax,deepinfra,novita,together,fireworks,groq,cerebras,perplexity,mistral,featherless,openrouter"`. Rewrite `_FALLBACK_PROVIDER_SLUGS` to the same 19. Rewrite `PROVIDER_ENV_VAR_MAP` to roster + openrouter + dark-6 env vars (add `DEEPSEEK_API_KEY, MOONSHOT_API_KEY, MINIMAX_API_KEY, XIAOMI_API_KEY, PERPLEXITY_API_KEY, MISTRAL_API_KEY`; drop all CUT entries).
-- [ ] **Step 4: Run — expect PASS** (dark-6 keys allowed in env map; test only checks CUT disjoint).
+- [ ] **Step 3:** Set `config.py:598` default string to the 13 live-roster+openrouter slugs: `"openai,anthropic,google-vertex,xai,alibaba,deepinfra,novita,together,fireworks,groq,cerebras,featherless,openrouter"`. Set `_FALLBACK_PROVIDER_SLUGS` to the same 13. Set `PROVIDER_ENV_VAR_MAP` to the 19 (full roster + openrouter, incl. dark-6 env vars `DEEPSEEK_API_KEY, MOONSHOT_API_KEY, MINIMAX_API_KEY, XIAOMI_API_KEY, PERPLEXITY_API_KEY, MISTRAL_API_KEY`; drop all CUT entries).
+- [ ] **Step 4: Run — expect PASS**
 - [ ] **Step 5: Commit** — `git commit -am "feat(providers): roster constants + ENABLED_PROVIDERS default to North Star §3"`
 
 ### Task 2: Fetch map + imports (`model_catalog_sync.py`)
