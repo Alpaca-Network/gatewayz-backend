@@ -37,7 +37,9 @@ from src.services.providers.featherless_client import fetch_models_from_featherl
 from src.services.providers.fireworks_client import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_client import fetch_models_from_groq
+from src.services.providers.minimax_client import fetch_models_from_minimax
 from src.services.providers.modelz_client import fetch_models_from_modelz
+from src.services.providers.moonshot_client import fetch_models_from_moonshot
 from src.services.providers.morpheus_client import fetch_models_from_morpheus
 from src.services.providers.near_client import fetch_models_from_near
 from src.services.providers.nebius_client import fetch_models_from_nebius
@@ -74,6 +76,8 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "groq": fetch_models_from_groq,
     "fireworks": fetch_models_from_fireworks,
     "together": fetch_models_from_together,
+    "moonshot": fetch_models_from_moonshot,
+    "minimax": fetch_models_from_minimax,
     "aimo": fetch_models_from_aimo,
     "near": fetch_models_from_near,
     "fal": fetch_models_from_fal,
@@ -549,6 +553,22 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "base_url": "https://api.together.xyz/v1",
                 "api_key_env_var": "TOGETHER_API_KEY",
                 "site_url": "https://together.ai",
+                "supports_streaming": True,
+            },
+            "moonshot": {
+                "name": "Moonshot AI",
+                "description": "Moonshot AI (Kimi) models",
+                "base_url": "https://api.moonshot.ai/v1",
+                "api_key_env_var": "MOONSHOT_API_KEY",
+                "site_url": "https://www.moonshot.ai",
+                "supports_streaming": True,
+            },
+            "minimax": {
+                "name": "MiniMax",
+                "description": "MiniMax AI models",
+                "base_url": "https://api.minimaxi.com/v1",
+                "api_key_env_var": "MINIMAX_API_KEY",
+                "site_url": "https://www.minimaxi.com",
                 "supports_streaming": True,
             },
             "huggingface": {

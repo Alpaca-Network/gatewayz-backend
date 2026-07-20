@@ -96,6 +96,16 @@ PROVIDER_FUNCTIONS = {
         "process_together_response",
         "make_together_request_openai_stream",
     ],
+    "moonshot": [
+        "make_moonshot_request_openai",
+        "process_moonshot_response",
+        "make_moonshot_request_openai_stream",
+    ],
+    "minimax": [
+        "make_minimax_request_openai",
+        "process_minimax_response",
+        "make_minimax_request_openai_stream",
+    ],
     "huggingface": [
         "make_huggingface_request_openai",
         "process_huggingface_response",
@@ -240,6 +250,16 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
         "request": _loaded_functions.get("make_together_request_openai"),
         "process": _loaded_functions.get("process_together_response"),
         "stream": _loaded_functions.get("make_together_request_openai_stream"),
+    },
+    "moonshot": {
+        "request": _loaded_functions.get("make_moonshot_request_openai"),
+        "process": _loaded_functions.get("process_moonshot_response"),
+        "stream": _loaded_functions.get("make_moonshot_request_openai_stream"),
+    },
+    "minimax": {
+        "request": _loaded_functions.get("make_minimax_request_openai"),
+        "process": _loaded_functions.get("process_minimax_response"),
+        "stream": _loaded_functions.get("make_minimax_request_openai_stream"),
     },
     "huggingface": {
         "request": _loaded_functions.get("make_huggingface_request_openai"),
