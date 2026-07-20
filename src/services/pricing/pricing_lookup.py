@@ -16,12 +16,17 @@ If you add a new pricing source, use normalize_pricing_dict() with the correct
 PricingFormat constant before returning values from this module.
 """
 
+import json
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Manual pricing seed: src/data/manual_pricing.json (this file is src/services/pricing/).
+_MANUAL_PRICING_PATH = Path(__file__).resolve().parents[2] / "data" / "manual_pricing.json"
 
 
 def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
@@ -94,13 +99,47 @@ _openrouter_pricing_index: dict[str, dict] | None = None
 
 
 def load_manual_pricing() -> dict[str, Any]:
-    """Manual pricing file fallback is removed.
+    """Load the manual pricing seed from ``src/data/manual_pricing.json``.
 
-    All pricing now comes from the database (models_catalog via model sync).
-    This stub is kept so existing callers continue to work — they all handle
-    the empty-dict return gracefully (return None / skip to next tier).
+    This is the tier-3 fallback in :func:`get_model_pricing` for providers whose
+    upstream ``/models`` API returns no pricing (e.g. OpenAI, Anthropic). Without
+    it, those models sync with ``None`` pricing and get filtered out of the served
+    catalog (and blocked at the inference gate). Model keys are lowercased at load
+    time so lookups are O(1) and case-insensitive. Result is cached in-memory for
+    ``PRICING_CACHE_TTL``; thread-safe. On any read/parse error, caches and returns
+    an empty dict so callers degrade gracefully to the next tier.
     """
-    return {}
+    global _pricing_cache, _pricing_cache_timestamp
+
+    now = time.monotonic()
+    with _pricing_cache_lock:
+        if (
+            _pricing_cache is not None
+            and _pricing_cache_timestamp is not None
+            and (now - _pricing_cache_timestamp) < PRICING_CACHE_TTL
+        ):
+            return _pricing_cache
+
+        try:
+            with open(_MANUAL_PRICING_PATH, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load manual pricing from {_MANUAL_PRICING_PATH}: {e}")
+            _pricing_cache = {}
+            _pricing_cache_timestamp = now
+            return _pricing_cache
+
+        normalized: dict[str, Any] = {}
+        for gateway, models in raw.items():
+            gw = str(gateway).lower()
+            if isinstance(models, dict):
+                normalized[gw] = {str(k).lower(): v for k, v in models.items()}
+            else:
+                normalized[gw] = models
+
+        _pricing_cache = normalized
+        _pricing_cache_timestamp = now
+        return _pricing_cache
 
 
 def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
