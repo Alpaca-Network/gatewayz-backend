@@ -96,6 +96,9 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         base_url="https://api.moonshot.ai/v1",
         api_key_env="MOONSHOT_API_KEY",
         display_name="Moonshot AI",
+        # Catalog stores ids as "moonshot/kimi-k2.6"; Moonshot's API expects the
+        # bare id ("kimi-k2.6"). Strip the slug prefix before the upstream call.
+        model_prefix="moonshot/",
     ),
     "minimax": ProviderConfig(
         slug="minimax",
