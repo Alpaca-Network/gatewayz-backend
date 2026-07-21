@@ -3,8 +3,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from src.services.cache import catalog_response_cache
-from src.services.cache import model_catalog_cache
+from src.services.cache import catalog_response_cache, model_catalog_cache
 
 
 @pytest.mark.asyncio
