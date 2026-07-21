@@ -24,6 +24,8 @@ MOCK_MODELS = [
         "description": "OpenAI flagship model",
         "provider": "openai",
         "provider_slug": "openai",
+        "source_gateway": "openai",
+        "health_status": "healthy",
         "context_length": 128000,
         "pricing": {"prompt": 0.01, "completion": 0.03},
     }
@@ -80,7 +82,9 @@ class TestModelsSearchRouteOrder:
         client = _make_client()
 
         with (
-            patch("src.routes.catalog.get_cached_models", return_value=MOCK_MODELS),
+            patch(
+                "src.routes.catalog.get_cached_models", return_value=MOCK_MODELS
+            ) as get_cached_models,
             patch(
                 "src.services.cache.catalog_response_cache.get_redis_client",
                 return_value=None,
@@ -96,7 +100,28 @@ class TestModelsSearchRouteOrder:
         assert "data" in body
         assert "meta" in body
         assert body["meta"]["filters_applied"]["query"] == "gpt"
+        get_cached_models.assert_called_once_with("all")
 
         # Must NOT be the get_developer_models_api() shadowed shape, which
         # has a "developer" key and no "success"/"meta" keys.
         assert "developer" not in body
+
+    def test_models_search_does_not_read_disabled_provider_cache(self):
+        client = _make_client()
+
+        with (
+            patch(
+                "src.routes.catalog.get_enabled_providers",
+                return_value=frozenset({"openai"}),
+            ),
+            patch("src.routes.catalog.is_provider_enabled", return_value=False),
+            patch("src.routes.catalog.get_cached_models") as get_cached_models,
+        ):
+            resp = client.get(
+                "/v1/models/search",
+                params={"q": "command", "gateway": "openrouter"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+        get_cached_models.assert_not_called()
