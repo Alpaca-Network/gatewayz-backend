@@ -141,13 +141,20 @@ def audit_pricing_drift() -> dict[str, Any]:
 
     provider_slugs = get_active_provider_slugs()
 
+    # Only providers that actually route + bill matter for margin. ENABLED_PROVIDERS
+    # gates routing (src/utils/provider_filter.py); a provider active in the DB but
+    # not enabled (e.g. openrouter as dormant fallback) never bills a user, so its
+    # unpriced/underpriced models are noise, not a margin risk. Filter to enabled.
+    enabled = Config.ENABLED_PROVIDERS
+    if enabled:
+        provider_slugs = [s for s in provider_slugs if s in enabled]
+
     for provider_slug in provider_slugs:
         try:
             models = get_models_by_provider_slug(provider_slug, is_active_only=True)
         except Exception as e:
             logger.error(
-                f"[pricing-drift] Failed to load active models for provider "
-                f"'{provider_slug}': {e}"
+                f"[pricing-drift] Failed to load active models for provider '{provider_slug}': {e}"
             )
             continue
 
