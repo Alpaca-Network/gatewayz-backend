@@ -48,6 +48,7 @@ from src.services.models import (
 )
 from src.services.prometheus_metrics import set_gateway_model_count
 from src.services.providers import enhance_providers_with_logos_and_sites, get_cached_providers
+from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
 from src.utils.security_validators import sanitize_for_logging
 
 # Initialize logging
@@ -2249,7 +2250,7 @@ async def search_models(
     max_price: float | None = Query(None, description="Maximum price per token (USD)"),
     gateway: str | None = Query(
         "all",
-        description="Gateway filter: openrouter, featherless, deepinfra, chutes, groq, fireworks, together, google-vertex, or all",
+        description="Enabled provider/gateway slug, or all for the configured aggregate catalog",
     ),
     sort_by: str = Query("price", description="Sort by: price, context, popularity, name"),
     order: str = Query("asc", description="Sort order: asc or desc"),
@@ -2265,7 +2266,7 @@ async def search_models(
     **Examples:**
     - Search for cheap models: `?max_price=0.0001&sort_by=price`
     - Find models with large context: `?min_context=100000&sort_by=context&order=desc`
-    - Search by name: `?q=gpt-4&gateway=openrouter`
+    - Search by name: `?q=gpt-4&gateway=openai`
     - Filter by modality: `?modality=image&sort_by=popularity`
     - Filter for private models only: `?is_private=true`
     - Exclude private models: `?is_private=false`
@@ -2276,7 +2277,14 @@ async def search_models(
     - Applied filters
     """
     try:
-        validate_gateway(gateway)
+        gateway_value = (gateway or "all").lower()
+        gateway_value = get_gateway_slug_resolution().get(gateway_value, gateway_value)
+
+        # With an explicit allowlist, ENABLED_PROVIDERS is authoritative even
+        # before a newly configured provider has been bootstrapped into the DB
+        # registry. Without an allowlist, retain registry validation.
+        if gateway_value != "all" and get_enabled_providers() is None:
+            validate_gateway(gateway)
 
         # Validate sort_by; silently fall back to default for backwards compatibility
         valid_search_sort = {"price", "context", "popularity", "name"}
@@ -2287,46 +2295,20 @@ async def search_models(
             )
             sort_by = "price"
 
-        # Get all models from specified gateways
-        all_models = []
-        gateway_value = gateway.lower() if gateway else "all"
+        # Read from the same DB-backed catalog as GET /v1/models. The aggregated
+        # cache is assembled from active DB providers and filtered by
+        # ENABLED_PROVIDERS, so search cannot resurrect legacy provider caches.
+        if gateway_value == "all":
+            all_models = get_cached_models("all") or []
+        elif is_provider_enabled(gateway_value):
+            all_models = get_cached_models(gateway_value) or []
+        else:
+            logger.info("Search skipped disabled provider catalog: %s", gateway_value)
+            all_models = []
 
-        # Fetch from selected gateways
-        if gateway_value in ("openrouter", "all"):
-            openrouter_models = get_cached_models("openrouter") or []
-            all_models.extend(openrouter_models)
-
-        if gateway_value in ("featherless", "all"):
-            featherless_models = get_cached_models("featherless") or []
-            all_models.extend(featherless_models)
-
-        if gateway_value in ("deepinfra", "all"):
-            deepinfra_models = get_cached_models("deepinfra") or []
-            all_models.extend(deepinfra_models)
-
-        if gateway_value in ("chutes", "all"):
-            chutes_models = get_cached_models("chutes") or []
-            all_models.extend(chutes_models)
-
-        if gateway_value in ("groq", "all"):
-            groq_models = get_cached_models("groq") or []
-            all_models.extend(groq_models)
-
-        if gateway_value in ("fireworks", "all"):
-            fireworks_models = get_cached_models("fireworks") or []
-            all_models.extend(fireworks_models)
-
-        if gateway_value in ("together", "all"):
-            together_models = get_cached_models("together") or []
-            all_models.extend(together_models)
-
-        if gateway_value in ("google-vertex", "all"):
-            google_models = get_cached_models("google-vertex") or []
-            all_models.extend(google_models)
-
-        if gateway_value in ("simplismart", "all"):
-            simplismart_models = get_cached_models("simplismart") or []
-            all_models.extend(simplismart_models)
+        # Match the primary catalog's health contract before applying search
+        # filters, counts, sorting, or pagination.
+        all_models = _apply_health_gating(all_models)
 
         # Apply filters
         filtered_models = all_models

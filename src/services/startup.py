@@ -388,7 +388,7 @@ async def lifespan(app):
                 except Exception as e:
                     logger.warning(f"Provider connection warmup warning: {e}")
 
-                # Phase 5: Warm catalog response cache (Redis catalog:v2:* keys)
+                # Phase 5: Warm catalog response cache (Redis catalog:v3:* keys)
                 # This pre-populates the exact cache hit by GET /v1/models?gateway=all
                 # so the first request after deployment does not incur a cold-cache penalty.
                 # Runs after Phase 2 has already loaded the model catalog into Redis, so no
