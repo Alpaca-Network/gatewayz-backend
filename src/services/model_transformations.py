@@ -602,9 +602,10 @@ def detect_provider_from_model_id(
         if org == "moonshot":
             return "moonshot"
 
-        # MiniMax models (e.g., "minimax/MiniMax-Text-01")
-        if org == "minimax":
-            return "minimax"
+        # NOTE: `minimax/` is intentionally NOT routed here. fal hosts MiniMax
+        # *video* models under the minimax/ prefix (see test_fal_related_orgs),
+        # so a blanket rule would mis-route them. MiniMax's direct text provider
+        # routing is handled when that provider ships its own adapter.
 
         # Cerebras models (e.g., "cerebras/llama-3.3-70b")
         if org == "cerebras":
