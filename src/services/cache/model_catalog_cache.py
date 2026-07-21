@@ -181,7 +181,7 @@ _invalidation_debouncer = InvalidationDebouncer(delay=1.0)
 # overlap a bare prefix like "models:" or "providers:".
 #
 # Key schema:
-#   gw:models:catalog:full          - full aggregated catalog
+#   gw:models:catalog:v2:full       - full aggregated catalog
 #   gw:models:provider:{name}       - per-provider catalog list
 #   gw:models:model:{key}           - individual model metadata
 #   gw:models:pricing:{key}         - pricing data
@@ -216,7 +216,7 @@ class ModelCatalogCache:
 
     # Cache key prefixes — all include CACHE_NAMESPACE ("gw:") to avoid
     # collisions with provider slugs or keys from other services.
-    PREFIX_FULL_CATALOG = f"{CACHE_NAMESPACE}models:catalog:full"
+    PREFIX_FULL_CATALOG = f"{CACHE_NAMESPACE}models:catalog:v2:full"
     PREFIX_PROVIDER = f"{CACHE_NAMESPACE}models:provider"
     PREFIX_MODEL = f"{CACHE_NAMESPACE}models:model"
     PREFIX_PRICING = f"{CACHE_NAMESPACE}models:pricing"
@@ -310,7 +310,6 @@ class ModelCatalogCache:
                 self._stats["hits"] += 1
                 self._record_cache_operation("hit")
                 logger.debug("Cache HIT: Full model catalog")
-                self.redis_client.expire(key, self.TTL_FULL_CATALOG)
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
@@ -3149,7 +3148,7 @@ def invalidate_catalog_caches(gateway: str = None) -> dict[str, Any]:
         # L1 — shared response-level keys (always cleared regardless of scope)
         # ------------------------------------------------------------------
         l1_exact_keys = [
-            ModelCatalogCache.PREFIX_FULL_CATALOG,  # gw:models:catalog:full
+            ModelCatalogCache.PREFIX_FULL_CATALOG,  # gw:models:catalog:v2:full
             ModelCatalogCache.PREFIX_STATS,  # gw:models:stats
             ModelCatalogCache.PREFIX_UNIQUE,  # gw:models:unique
         ]

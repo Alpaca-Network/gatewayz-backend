@@ -156,15 +156,98 @@ def test_sync_provider_models_inactive_provider_delists_previously_active_models
             "src.services.model_catalog_sync.deactivate_models_by_provider",
             return_value=3,
         ) as mock_deactivate,
+        patch(
+            "src.services.model_catalog_cache.invalidate_provider_catalog"
+        ) as invalidate_provider,
+        patch("src.services.model_catalog_cache.invalidate_unique_models") as invalidate_unique,
+        patch("src.services.model_catalog_cache.invalidate_catalog_stats") as invalidate_stats,
+        patch(
+            "src.services.cache.catalog_response_cache.invalidate_catalog_cache"
+        ) as invalidate_response,
     ):
         result = sync_provider_models("vendor")
 
     mock_deactivate.assert_called_once_with(42)
+    invalidate_provider.assert_called_once_with("vendor", cascade=True)
+    invalidate_unique.assert_called_once_with()
+    invalidate_stats.assert_called_once_with()
+    invalidate_response.assert_called_once_with("vendor")
     assert result["success"] is True
     assert result["models_delisted"] == 3
     assert result["reason"] == "provider_inactive"
     assert result["models_fetched"] == 0
     assert result["models_synced"] == 0
+
+
+def test_batch_sync_invalidates_all_catalog_layers_after_delisting():
+    inactive_result = {
+        "success": True,
+        "provider": "vendor",
+        "models_fetched": 0,
+        "models_transformed": 0,
+        "models_skipped": 0,
+        "models_synced": 0,
+        "models_delisted": 3,
+    }
+
+    with (
+        patch("src.utils.provider_filter.is_provider_enabled", return_value=True),
+        patch(
+            "src.services.model_catalog_sync.sync_provider_models",
+            return_value=inactive_result,
+        ),
+        patch("src.services.model_catalog_cache.invalidate_full_catalog") as invalidate_full,
+        patch("src.services.model_catalog_cache.invalidate_unique_models") as invalidate_unique,
+        patch("src.services.model_catalog_cache.invalidate_catalog_stats") as invalidate_stats,
+        patch(
+            "src.services.cache.catalog_response_cache.invalidate_catalog_cache"
+        ) as invalidate_response,
+    ):
+        from src.services.model_catalog_sync import sync_all_providers
+
+        result = sync_all_providers(["vendor"])
+
+    invalidate_full.assert_called_once_with()
+    invalidate_unique.assert_called_once_with()
+    invalidate_stats.assert_called_once_with()
+    invalidate_response.assert_called_once_with()
+    assert result["total_models_delisted"] == 3
+
+
+def test_batch_sync_bootstraps_enabled_provider_missing_from_registry():
+    synced_result = {
+        "success": True,
+        "provider": "moonshot",
+        "models_fetched": 1,
+        "models_transformed": 1,
+        "models_skipped": 0,
+        "models_synced": 1,
+        "models_delisted": 0,
+    }
+
+    with (
+        patch(
+            "src.utils.provider_filter.get_enabled_providers",
+            return_value=frozenset({"moonshot"}),
+        ),
+        patch("src.utils.provider_filter.is_provider_enabled", return_value=True),
+        patch(
+            "src.services.model_catalog_sync.sync_provider_models",
+            return_value=synced_result,
+        ) as sync_provider,
+        patch("src.config.config.Config.MODEL_SYNC_SKIP_PROVIDERS", set()),
+        patch("src.services.model_catalog_cache.invalidate_full_catalog"),
+        patch("src.services.model_catalog_cache.invalidate_unique_models"),
+        patch("src.services.model_catalog_cache.invalidate_catalog_stats"),
+        patch("src.services.cache.catalog_response_cache.invalidate_catalog_cache"),
+    ):
+        from src.services.model_catalog_sync import sync_all_providers
+
+        result = sync_all_providers()
+
+    sync_provider.assert_called_once_with("moonshot", dry_run=False, batch_mode=True)
+    assert result["providers_processed"] == 1
+    assert result["total_models_synced"] == 1
 
 
 def test_sync_provider_models_active_provider_does_not_bulk_delist():

@@ -738,6 +738,25 @@ def sync_provider_models(
                 f"[{provider_slug.upper()}] Provider inactive | "
                 f"Delisted {delisted_count} previously-active model(s)"
             )
+            try:
+                from src.services.model_catalog_cache import (
+                    invalidate_catalog_stats,
+                    invalidate_provider_catalog,
+                    invalidate_unique_models,
+                )
+
+                invalidate_provider_catalog(provider_slug, cascade=not batch_mode)
+                if not batch_mode:
+                    from src.services.cache.catalog_response_cache import invalidate_catalog_cache
+
+                    invalidate_unique_models()
+                    invalidate_catalog_stats()
+                    invalidate_catalog_cache(provider_slug)
+            except Exception as cache_e:
+                logger.warning(
+                    f"[{provider_slug.upper()}] Inactive-provider cache invalidation failed: "
+                    f"{cache_e}"
+                )
             return {
                 "success": True,
                 "provider": provider_slug,
@@ -958,9 +977,12 @@ def sync_provider_models(
                     logger.debug(f"[{provider_slug.upper()}] Cache INVALIDATE (batch, no cascade)")
                 else:
                     # Single-provider sync: full cascade
+                    from src.services.cache.catalog_response_cache import invalidate_catalog_cache
+
                     invalidate_provider_catalog(provider_slug, cascade=True)
                     invalidate_unique_models()
                     invalidate_catalog_stats()
+                    invalidate_catalog_cache(provider_slug)
                     logger.info(f"[{provider_slug.upper()}] Cache INVALIDATE (full cascade)")
 
             except Exception as cache_e:
@@ -1033,28 +1055,36 @@ def sync_all_providers(
         sync_start_time = time.time()
 
         # Get providers to sync
-        from src.utils.provider_filter import is_provider_enabled
+        from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
 
         if provider_slugs:
             # Even explicit slugs must pass the enabled filter
             providers_to_sync = [p for p in provider_slugs if is_provider_enabled(p)]
         else:
-            # Use all active providers with fetch functions, minus skipped ones
+            # ENABLED_PROVIDERS is the routing/catalog source of truth. Starting
+            # from it also bootstraps a newly enabled provider whose DB registry
+            # row does not exist yet; sync_provider_models creates that row.
             skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
-            try:
-                from src.db.providers_db import get_active_provider_slugs
-                from src.services.gateway_registry import get_gateway_registry
+            enabled_providers = get_enabled_providers()
+            if enabled_providers is not None:
+                all_providers = sorted(enabled_providers)
+            else:
+                try:
+                    from src.db.providers_db import get_active_provider_slugs
+                    from src.services.gateway_registry import get_gateway_registry
 
-                all_providers = get_active_provider_slugs()
-                registry = get_gateway_registry()
-                all_providers = [
-                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", False)
-                ]
-                if not all_providers:
-                    logger.info("DB returned zero fetchable providers; nothing to sync")
-            except Exception:
-                logger.warning("Failed to load providers from DB; using hardcoded fallback")
-                all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+                    all_providers = get_active_provider_slugs()
+                    registry = get_gateway_registry()
+                    all_providers = [
+                        s
+                        for s in all_providers
+                        if registry.get(s, {}).get("has_fetch_function", False)
+                    ]
+                    if not all_providers:
+                        logger.info("DB returned zero fetchable providers; nothing to sync")
+                except Exception:
+                    logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                    all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
             providers_to_sync = [
                 p for p in all_providers if p not in skip_set and is_provider_enabled(p)
             ]
@@ -1075,6 +1105,7 @@ def sync_all_providers(
         total_transformed = 0
         total_skipped = 0
         total_synced = 0
+        total_delisted = 0
         errors = []
 
         import gc
@@ -1091,6 +1122,7 @@ def sync_all_providers(
                 total_transformed += result.get("models_transformed", 0)
                 total_skipped += result.get("models_skipped", 0)
                 total_synced += result.get("models_synced", 0)
+                total_delisted += result.get("models_delisted", 0)
             else:
                 errors.append({"provider": provider_slug, "error": result.get("error")})
 
@@ -1102,8 +1134,9 @@ def sync_all_providers(
 
         # Invalidate global caches ONCE after all providers are done
         # (instead of 35+ times per provider in the loop)
-        if total_synced > 0 and not dry_run:
+        if (total_synced > 0 or total_delisted > 0) and not dry_run:
             try:
+                from src.services.cache.catalog_response_cache import invalidate_catalog_cache
                 from src.services.model_catalog_cache import (
                     invalidate_catalog_stats,
                     invalidate_full_catalog,
@@ -1113,6 +1146,7 @@ def sync_all_providers(
                 invalidate_full_catalog()
                 invalidate_unique_models()
                 invalidate_catalog_stats()
+                invalidate_catalog_cache()
                 logger.info(
                     f"Global caches invalidated once after syncing {len(providers_to_sync)} providers"
                 )
@@ -1210,6 +1244,7 @@ def sync_all_providers(
             "total_models_transformed": total_transformed,
             "total_models_skipped": total_skipped,
             "total_models_synced": total_synced,
+            "total_models_delisted": total_delisted,
             "total_duration": round(total_duration, 2),
             "avg_duration_per_provider": round(avg_duration_per_provider, 2),
             "overall_models_per_sec": round(overall_models_per_sec, 2),
