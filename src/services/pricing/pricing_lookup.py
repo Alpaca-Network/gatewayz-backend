@@ -79,6 +79,24 @@ GATEWAY_PROVIDERS = {
     "fireworks",
     "groq",
     "together",
+    # Direct open-weight providers whose /models API returns no pricing — must be
+    # priced (via OpenRouter cross-reference) or hidden, never shown as free.
+    "moonshot",
+    "minimax",
+    "deepseek",
+    "xiaomi",
+}
+
+# Map our provider slug -> the org prefix OpenRouter uses, for precise
+# cross-reference matching (e.g. our "moonshot/kimi-k3" == OpenRouter's
+# "moonshotai/kimi-k3"). Adding a provider here is all it takes to auto-price
+# its models from OpenRouter on every sync — the scalable path. Providers whose
+# slug already matches OpenRouter's org need no entry (base-id match still works).
+OPENROUTER_PROVIDER_ALIASES: dict[str, str] = {
+    "moonshot": "moonshotai",
+    "alibaba": "qwen",
+    "alibaba-cloud": "qwen",
+    "google-vertex": "google",
 }
 
 # Pricing lookup tier order (checked in sequence, first match wins)
@@ -322,21 +340,25 @@ def invalidate_openrouter_pricing_index() -> None:
 def _get_cross_reference_pricing(
     model_id: str,
     openrouter_index: dict[str, dict] | None = None,
+    provider: str | None = None,
 ) -> dict[str, str] | None:
     """
-    Get pricing for a gateway provider model by cross-referencing OpenRouter's catalog.
+    Get pricing for a provider model by cross-referencing OpenRouter's catalog.
 
-    Gateway providers route to underlying providers
-    like OpenAI, Anthropic, Google etc. This function extracts the underlying model ID
-    and looks up its pricing from the OpenRouter pricing index.
+    Extracts the underlying model ID and looks up its pricing from the OpenRouter
+    pricing index. When ``provider`` is supplied and has an OpenRouter org alias
+    (OPENROUTER_PROVIDER_ALIASES), the fully-qualified aliased id is tried first
+    for a precise match (e.g. our "moonshot/kimi-k3" -> OpenRouter
+    "moonshotai/kimi-k3") before falling back to base-id matching.
 
     Uses an O(1) index lookup when `openrouter_index` is provided (batch path).
     Falls back to building the index on demand for single-model lookups.
 
     Args:
-        model_id: Model ID from gateway provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
+        model_id: Model ID from the provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
         openrouter_index: Pre-built pricing index from _build_openrouter_pricing_index().
                           Pass None to have the function build/fetch the index itself.
+        provider: Optional provider slug, used for org-alias precise matching.
 
     Returns:
         Pricing dictionary (normalized to per-token format) or None if not found
@@ -358,6 +380,15 @@ def _get_cross_reference_pricing(
         # Extract the base model name from the gateway model ID
         # e.g., "openai/gpt-4o" -> "gpt-4o", "anthropic/claude-3-opus" -> "claude-3-opus"
         base_model_id = model_id.split("/")[-1] if "/" in model_id else model_id
+
+        # --- Precise: provider org-alias fully-qualified match (lowest collision risk) ---
+        if provider:
+            alias = OPENROUTER_PROVIDER_ALIASES.get(provider.lower())
+            if alias:
+                aliased = f"{alias}/{base_model_id}"
+                for candidate in (aliased, aliased.lower()):
+                    if candidate in index:
+                        return normalize_pricing_dict(index[candidate], PricingFormat.PER_TOKEN)
 
         # --- O(1) exact-match attempts ---
         # OpenRouter's API returns prices already in per-token format (e.g. 0.000000055),
@@ -415,8 +446,7 @@ def _resolve_pricing_from_db(
 
         client = get_supabase_client()
         select_cols = (
-            "id, model_name, metadata, "
-            "model_pricing(price_per_input_token, price_per_output_token)"
+            "id, model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)"
         )
 
         for candidate in candidate_ids:
@@ -707,9 +737,16 @@ def enrich_model_with_pricing(
             logger.debug(f"Enriched {model_id} with manual pricing from {gateway}")
             return model_data
 
-        # For gateway providers, try cross-reference with OpenRouter
-        if is_gateway_provider:
-            cross_ref_pricing = _get_cross_reference_pricing(model_id, openrouter_index)
+        # Tier 4 — cross-reference with OpenRouter (universal fallback). Any provider
+        # whose models OpenRouter also lists gets exact pricing here even without a
+        # manual/DB entry. Only runs after the DB and manual tiers miss. Skip
+        # openrouter itself (its own catalog is the source). This is the scalable
+        # path: a new direct provider needs no per-model pricing work — if OpenRouter
+        # lists the model, it is priced automatically on every sync.
+        if gateway_lower != "openrouter":
+            cross_ref_pricing = _get_cross_reference_pricing(
+                model_id, openrouter_index, provider=gateway_lower
+            )
             if cross_ref_pricing:
                 # Verify cross-reference pricing has non-zero values
                 # Models with zero pricing from OpenRouter should still be filtered out
@@ -726,16 +763,15 @@ def enrich_model_with_pricing(
                     )
                     return model_data
                 else:
-                    logger.debug(f"Cross-reference pricing for {model_id} is zero, filtering out")
+                    logger.debug(f"Cross-reference pricing for {model_id} is zero")
 
-            # During catalog build, return the model with zero pricing instead of filtering
-            # This prevents models from disappearing during initial build. They'll get
-            # proper pricing during background refresh when cross-reference is available.
+        # Gateway providers must be priced or hidden — never shown as free.
+        if is_gateway_provider:
+            # During catalog build, keep with zero pricing instead of filtering; the
+            # background refresh prices it once cross-reference is available.
             if _is_building_catalog():
                 logger.debug(f"Catalog building: keeping {model_id} with zero pricing")
                 return model_data
-
-            # No pricing found for gateway provider - filter out this model
             logger.debug(f"No pricing found for gateway provider model {model_id}, filtering out")
             return None
 
