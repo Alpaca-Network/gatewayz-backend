@@ -175,108 +175,10 @@ async def get_intelligent_routers():
     - use_cases: Recommended use cases
     """
     try:
-        routers = [
-            {
-                "id": "general",
-                "name": "General Router",
-                "description": "Intelligent routing for general-purpose tasks",
-                "modes": [
-                    {
-                        "value": "balanced",
-                        "label": "Balanced",
-                        "description": "Balance quality, cost, and latency",
-                    },
-                    {
-                        "value": "quality",
-                        "label": "Quality",
-                        "description": "Optimize for response quality",
-                    },
-                    {
-                        "value": "cost",
-                        "label": "Cost",
-                        "description": "Optimize for lowest cost",
-                    },
-                    {
-                        "value": "latency",
-                        "label": "Latency",
-                        "description": "Optimize for fastest response",
-                    },
-                ],
-                "syntax": {
-                    "primary": "router:general:<mode>",
-                    "examples": [
-                        "router:general",
-                        "router:general:quality",
-                        "router:general:cost",
-                        "router:general:latency",
-                    ],
-                    "aliases": [
-                        "gatewayz-general",
-                        "gatewayz-general-quality",
-                        "gatewayz-general-cost",
-                        "gatewayz-general-latency",
-                    ],
-                },
-                "use_cases": [
-                    "creative writing",
-                    "summarization",
-                    "Q&A",
-                    "general chat",
-                    "data analysis",
-                ],
-            },
-            {
-                "id": "code",
-                "name": "Code Router",
-                "description": "Code-optimized routing with benchmark-based model selection",
-                "powered_by": "Gatewayz",
-                "modes": [
-                    {
-                        "value": "auto",
-                        "label": "Auto",
-                        "description": "Automatically select best model for task",
-                    },
-                    {
-                        "value": "price",
-                        "label": "Price",
-                        "description": "Optimize for lowest cost",
-                    },
-                    {
-                        "value": "quality",
-                        "label": "Quality",
-                        "description": "Optimize for highest quality",
-                    },
-                    {
-                        "value": "agentic",
-                        "label": "Agentic",
-                        "description": "Premium models for complex multi-step tasks",
-                    },
-                ],
-                "syntax": {
-                    "primary": "router:code:<mode>",
-                    "examples": [
-                        "router:code",
-                        "router:code:price",
-                        "router:code:quality",
-                        "router:code:agentic",
-                    ],
-                    "aliases": [
-                        "gatewayz-code",
-                        "gatewayz-code-price",
-                        "gatewayz-code-quality",
-                        "gatewayz-code-agentic",
-                    ],
-                },
-                "use_cases": [
-                    "code generation",
-                    "debugging",
-                    "refactoring",
-                    "code review",
-                    "architecture design",
-                ],
-            },
-        ]
-
+        # Prompt-router engine removed in the MVP refactor (commit e94e095c). The
+        # router:* / gatewayz-* aliases no longer resolve, so advertise nothing
+        # until task-based routing is rebuilt (see the rebuild plan).
+        routers: list[dict] = []
         return {
             "data": routers,
             "total": len(routers),
@@ -343,65 +245,11 @@ async def get_gateways():
         # Sort by priority (fast first), then by name
         gateways.sort(key=lambda g: (0 if g["priority"] == "fast" else 1, g["name"]))
 
-        # Add intelligent routers section
-        routers = [
-            {
-                "id": "general",
-                "name": "General Router",
-                "description": "Intelligent routing for general-purpose tasks",
-                "modes": ["balanced", "quality", "cost", "latency"],
-                "syntax": {
-                    "primary": "router:general:<mode>",
-                    "examples": [
-                        "router:general",
-                        "router:general:quality",
-                        "router:general:cost",
-                        "router:general:latency",
-                    ],
-                    "aliases": [
-                        "gatewayz-general",
-                        "gatewayz-general-quality",
-                        "gatewayz-general-cost",
-                        "gatewayz-general-latency",
-                    ],
-                },
-                "use_cases": [
-                    "creative writing",
-                    "summarization",
-                    "Q&A",
-                    "general chat",
-                    "data analysis",
-                ],
-            },
-            {
-                "id": "code",
-                "name": "Code Router",
-                "description": "Code-optimized routing with benchmark-based model selection",
-                "modes": ["auto", "price", "quality", "agentic"],
-                "syntax": {
-                    "primary": "router:code:<mode>",
-                    "examples": [
-                        "router:code",
-                        "router:code:price",
-                        "router:code:quality",
-                        "router:code:agentic",
-                    ],
-                    "aliases": [
-                        "gatewayz-code",
-                        "gatewayz-code-price",
-                        "gatewayz-code-quality",
-                        "gatewayz-code-agentic",
-                    ],
-                },
-                "use_cases": [
-                    "code generation",
-                    "debugging",
-                    "refactoring",
-                    "code review",
-                    "architecture design",
-                ],
-            },
-        ]
+        # Intelligent routers: the prompt-router engine was removed in the MVP
+        # refactor (commit e94e095c, ~3.2k LOC), so advertising router:* / gatewayz-*
+        # aliases here was misleading — every one 404s at inference. Return an empty
+        # list until task-based routing is rebuilt (see the rebuild plan).
+        routers: list[dict] = []
 
         return {
             "data": gateways,
@@ -1607,7 +1455,7 @@ async def get_trending_models_endpoint(
 
 @router.get("/gateways/summary", tags=["statistics"])
 async def get_all_gateways_summary_endpoint(
-    time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL)
+    time_range: str = Query("24h", description=DESC_TIME_RANGE_ALL),
 ):
     """
     Get summary statistics for all gateways
