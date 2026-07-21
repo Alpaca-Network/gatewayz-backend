@@ -628,34 +628,10 @@ async def create_subscription_checkout(
         "status": "open"
     }
     """
-    try:
-        user_id = current_user["id"]
-        logger.info(
-            f"Creating subscription checkout for user {user_id}, price_id: {request.price_id}, product_id: {request.product_id}"
-        )
-
-        session = stripe_service.create_subscription_checkout(user_id=user_id, request=request)
-
-        logger.info(
-            f"Subscription checkout session created for user {user_id}: {session.session_id}"
-        )
-
-        return {
-            "session_id": session.session_id,
-            "url": session.url,
-            "customer_id": session.customer_id,
-            "status": session.status,
-        }
-
-    except ValueError as e:
-        logger.error(f"Validation error creating subscription checkout: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Error creating subscription checkout: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Failed to create subscription checkout: {str(e)}"
-        )
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )
 
 
 # ==================== Subscription Management ====================
@@ -684,36 +660,10 @@ async def get_current_subscription(
         "price_id": "price_xxxxx"
     }
     """
-    try:
-        user_id = current_user["id"]
-        subscription = stripe_service.get_current_subscription(user_id)
-
-        return {
-            "has_subscription": subscription.has_subscription,
-            "subscription_id": subscription.subscription_id,
-            "status": subscription.status,
-            "tier": subscription.tier,
-            "current_period_start": (
-                subscription.current_period_start.isoformat()
-                if subscription.current_period_start
-                else None
-            ),
-            "current_period_end": (
-                subscription.current_period_end.isoformat()
-                if subscription.current_period_end
-                else None
-            ),
-            "cancel_at_period_end": subscription.cancel_at_period_end,
-            "canceled_at": (
-                subscription.canceled_at.isoformat() if subscription.canceled_at else None
-            ),
-            "product_id": subscription.product_id,
-            "price_id": subscription.price_id,
-        }
-
-    except Exception as e:
-        logger.error(f"Error getting subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to get subscription: {str(e)}")
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )
 
 
 @router.post("/subscription/upgrade", response_model=dict[str, Any])
@@ -749,31 +699,10 @@ async def upgrade_subscription(
         "message": "Successfully upgraded to max tier"
     }
     """
-    try:
-        user_id = current_user["id"]
-        logger.info(
-            f"Upgrading subscription for user {user_id} to product {request.new_product_id}"
-        )
-
-        result = stripe_service.upgrade_subscription(user_id=user_id, request=request)
-
-        return {
-            "success": result.success,
-            "subscription_id": result.subscription_id,
-            "status": result.status,
-            "current_tier": result.current_tier,
-            "message": result.message,
-            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
-            "proration_amount": result.proration_amount,
-        }
-
-    except ValueError as e:
-        logger.error(f"Validation error upgrading subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Error upgrading subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to upgrade subscription: {str(e)}")
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )
 
 
 @router.post("/subscription/downgrade", response_model=dict[str, Any])
@@ -809,31 +738,10 @@ async def downgrade_subscription(
         "message": "Successfully downgraded to pro tier. Credit applied for unused time."
     }
     """
-    try:
-        user_id = current_user["id"]
-        logger.info(
-            f"Downgrading subscription for user {user_id} to product {request.new_product_id}"
-        )
-
-        result = stripe_service.downgrade_subscription(user_id=user_id, request=request)
-
-        return {
-            "success": result.success,
-            "subscription_id": result.subscription_id,
-            "status": result.status,
-            "current_tier": result.current_tier,
-            "message": result.message,
-            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
-            "proration_amount": result.proration_amount,
-        }
-
-    except ValueError as e:
-        logger.error(f"Validation error downgrading subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Error downgrading subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to downgrade subscription: {str(e)}")
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )
 
 
 @router.post("/subscription/cancel", response_model=dict[str, Any])
@@ -870,28 +778,7 @@ async def cancel_subscription(
         "effective_date": "2024-02-01T00:00:00Z"
     }
     """
-    try:
-        user_id = current_user["id"]
-        logger.info(
-            f"Canceling subscription for user {user_id} "
-            f"(cancel_at_period_end: {request.cancel_at_period_end})"
-        )
-
-        result = stripe_service.cancel_subscription(user_id=user_id, request=request)
-
-        return {
-            "success": result.success,
-            "subscription_id": result.subscription_id,
-            "status": result.status,
-            "current_tier": result.current_tier,
-            "message": result.message,
-            "effective_date": result.effective_date.isoformat() if result.effective_date else None,
-        }
-
-    except ValueError as e:
-        logger.error(f"Validation error canceling subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
-
-    except Exception as e:
-        logger.error(f"Error canceling subscription: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to cancel subscription: {str(e)}")
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )
