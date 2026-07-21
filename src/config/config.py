@@ -157,9 +157,7 @@ class Config:
         "ENABLE_PRICING_DRIFT_MONITOR", "true"
     ).lower() in {"1", "true", "yes"}
     # Default: once every 1440 minutes (24h) — nightly.
-    PRICING_DRIFT_INTERVAL_MINUTES = int(
-        os.environ.get("PRICING_DRIFT_INTERVAL_MINUTES", "1440")
-    )
+    PRICING_DRIFT_INTERVAL_MINUTES = int(os.environ.get("PRICING_DRIFT_INTERVAL_MINUTES", "1440"))
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {
         "1",

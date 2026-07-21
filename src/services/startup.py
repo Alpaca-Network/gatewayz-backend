@@ -576,7 +576,7 @@ async def lifespan(app):
                     event_loop_lag_seconds.set(lag)
                     if lag > 0.1:
                         logger.warning(
-                            f"[EVENT LOOP LAG] {lag*1000:.1f}ms — event loop is under pressure"
+                            f"[EVENT LOOP LAG] {lag * 1000:.1f}ms — event loop is under pressure"
                         )
                     await asyncio.sleep(5)  # Check every 5 seconds
             except Exception as e:

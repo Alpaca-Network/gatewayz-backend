@@ -38,7 +38,9 @@ def _run(
     with (
         patch(f"{MODULE}.Config") as mock_config,
         patch(f"{MODULE}.get_active_provider_slugs", return_value=provider_slugs),
-        patch(f"{MODULE}.get_models_by_provider_slug", side_effect=fake_get_models_by_provider_slug),
+        patch(
+            f"{MODULE}.get_models_by_provider_slug", side_effect=fake_get_models_by_provider_slug
+        ),
         patch(f"{MODULE}._resolve_pricing_from_db", side_effect=fake_resolve_pricing),
         patch(f"{MODULE}._build_openrouter_pricing_index", return_value={"stub": True}),
         patch(f"{MODULE}._get_cross_reference_pricing", side_effect=fake_cross_reference),
@@ -53,12 +55,8 @@ def test_below_cost_model_is_flagged_as_drift():
     report = _run(
         provider_slugs=["featherless"],
         models_by_provider={"featherless": [_model(model_id)]},
-        our_pricing_by_model={
-            model_id: {"prompt": "0.0000009", "completion": "0.0000009"}
-        },
-        ref_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
+        our_pricing_by_model={model_id: {"prompt": "0.0000009", "completion": "0.0000009"}},
+        ref_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
         markup=1.03,
     )
 
@@ -79,12 +77,8 @@ def test_at_or_above_cost_model_is_not_flagged():
     report = _run(
         provider_slugs=["featherless"],
         models_by_provider={"featherless": [_model(model_id)]},
-        our_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
-        ref_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
+        our_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
+        ref_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
         markup=1.03,
     )
 
@@ -102,9 +96,7 @@ def test_unpriced_active_model_is_flagged():
         provider_slugs=["deepinfra"],
         models_by_provider={"deepinfra": [_model(model_id)]},
         our_pricing_by_model={},  # _resolve_pricing_from_db returns None
-        ref_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
+        ref_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
         markup=1.03,
     )
 
@@ -124,9 +116,7 @@ def test_zero_priced_model_is_flagged_as_unpriced():
         provider_slugs=["deepinfra"],
         models_by_provider={"deepinfra": [_model(model_id)]},
         our_pricing_by_model={model_id: {"prompt": "0", "completion": "0"}},
-        ref_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
+        ref_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
         markup=1.03,
     )
 
@@ -149,12 +139,8 @@ def test_markup_is_applied_in_drift_threshold():
     report = _run(
         provider_slugs=["featherless"],
         models_by_provider={"featherless": [_model(model_id)]},
-        our_pricing_by_model={
-            model_id: {"prompt": str(our_price), "completion": str(our_price)}
-        },
-        ref_pricing_by_model={
-            model_id: {"prompt": str(ref_price), "completion": str(ref_price)}
-        },
+        our_pricing_by_model={model_id: {"prompt": str(our_price), "completion": str(our_price)}},
+        ref_pricing_by_model={model_id: {"prompt": str(ref_price), "completion": str(ref_price)}},
         markup=markup,
     )
 
@@ -165,12 +151,8 @@ def test_markup_is_applied_in_drift_threshold():
     report_no_markup = _run(
         provider_slugs=["featherless"],
         models_by_provider={"featherless": [_model(model_id)]},
-        our_pricing_by_model={
-            model_id: {"prompt": str(our_price), "completion": str(our_price)}
-        },
-        ref_pricing_by_model={
-            model_id: {"prompt": str(ref_price), "completion": str(ref_price)}
-        },
+        our_pricing_by_model={model_id: {"prompt": str(our_price), "completion": str(our_price)}},
+        ref_pricing_by_model={model_id: {"prompt": str(ref_price), "completion": str(ref_price)}},
         markup=1.0,
     )
     assert not report_no_markup["ok"]
@@ -184,12 +166,8 @@ def test_openrouter_provider_is_never_compared_against_itself():
     report = _run(
         provider_slugs=["openrouter"],
         models_by_provider={"openrouter": [_model(model_id)]},
-        our_pricing_by_model={
-            model_id: {"prompt": "0.0000001", "completion": "0.0000001"}
-        },
-        ref_pricing_by_model={
-            model_id: {"prompt": "0.000001", "completion": "0.000001"}
-        },
+        our_pricing_by_model={model_id: {"prompt": "0.0000001", "completion": "0.0000001"}},
+        ref_pricing_by_model={model_id: {"prompt": "0.000001", "completion": "0.000001"}},
         markup=1.03,
     )
 

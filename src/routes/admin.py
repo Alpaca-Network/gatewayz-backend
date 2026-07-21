@@ -2217,9 +2217,7 @@ async def get_chat_requests_summary_admin(
 
         # Create cache key based on filters
         filter_str = f"{model_id}:{provider_id}:{model_name}:{start_date}:{end_date}"
-        filter_hash = hashlib.md5(
-            filter_str.encode()
-        ).hexdigest()  # nosec B324 - MD5 for cache key, not security
+        filter_hash = hashlib.md5(filter_str.encode()).hexdigest()  # nosec B324 - MD5 for cache key, not security
         cache_key = f"chat_summary:filters:{filter_hash}"
 
         redis_client = get_redis_client()
@@ -2268,7 +2266,9 @@ async def get_chat_requests_summary_admin(
         if redis_client:
             try:
                 redis_client.setex(
-                    cache_key, 60, json.dumps(response, default=str)  # 60 second TTL
+                    cache_key,
+                    60,
+                    json.dumps(response, default=str),  # 60 second TTL
                 )
                 logger.info(f"Cached chat summary for filter_hash={filter_hash} (TTL: 60s)")
             except Exception as cache_error:

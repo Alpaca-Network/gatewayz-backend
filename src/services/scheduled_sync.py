@@ -73,9 +73,7 @@ async def warm_caches_after_sync(changed_providers: list[str]) -> None:
         warm_unique_models_cache_all_variants,
     )
 
-    logger.info(
-        f"Cache warming started after sync " f"(providers with changes: {changed_providers})"
-    )
+    logger.info(f"Cache warming started after sync (providers with changes: {changed_providers})")
 
     # Brief delay to let DB writes propagate
     await asyncio.sleep(2)
@@ -415,8 +413,7 @@ async def run_scheduled_price_refresh():
             _last_price_refresh_status["last_error"] = None
             _last_price_refresh_status["last_prices_updated"] = result.get("prices_updated", 0)
             logger.info(
-                "Price refresh SUCCESSFUL in %.2fs | updated=%s unchanged=%s "
-                "checked=%s failed=%s",
+                "Price refresh SUCCESSFUL in %.2fs | updated=%s unchanged=%s checked=%s failed=%s",
                 duration,
                 result.get("prices_updated", 0),
                 result.get("prices_unchanged", 0),
@@ -736,9 +733,7 @@ def start_pricing_drift_scheduler():
         return
 
     interval_minutes = Config.PRICING_DRIFT_INTERVAL_MINUTES
-    logger.info(
-        "Starting pricing drift monitor scheduler (interval: %s min)", interval_minutes
-    )
+    logger.info("Starting pricing drift monitor scheduler (interval: %s min)", interval_minutes)
     try:
         _pricing_drift_scheduler = AsyncIOScheduler()
         _pricing_drift_scheduler.add_job(
