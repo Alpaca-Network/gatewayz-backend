@@ -627,6 +627,17 @@ async def lifespan(app):
         logger.warning(f"Failed to start ledger reconciliation scheduler: {e}")
         # Don't fail startup if reconciliation fails to start
 
+    # Start nightly pricing-drift monitor (read-only; alerts if catalog price *
+    # markup would ever bill below current provider/reference cost)
+    try:
+        from src.services.scheduled_sync import start_pricing_drift_scheduler
+
+        start_pricing_drift_scheduler()
+        logger.info("Pricing drift monitor service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start pricing drift monitor scheduler: {e}")
+        # Don't fail startup if the drift monitor fails to start
+
     # ---------------------------------------------------------------------------
     # Additional startup work (migrated from @app.on_event("startup"))
     # ---------------------------------------------------------------------------
@@ -733,6 +744,15 @@ async def lifespan(app):
         logger.info("Ledger reconciliation service stopped")
     except Exception as e:
         logger.warning(f"Ledger reconciliation shutdown warning: {e}")
+
+    # Stop nightly pricing-drift monitor
+    try:
+        from src.services.scheduled_sync import stop_pricing_drift_scheduler
+
+        stop_pricing_drift_scheduler()
+        logger.info("Pricing drift monitor service stopped")
+    except Exception as e:
+        logger.warning(f"Pricing drift monitor shutdown warning: {e}")
 
     # Cancel any pending background tasks
     if _background_tasks:
