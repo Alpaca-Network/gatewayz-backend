@@ -598,6 +598,14 @@ def detect_provider_from_model_id(
         if org == "near":
             return "near"
 
+        # Moonshot (Kimi) models (e.g., "moonshot/kimi-k2.6", "moonshot/kimi-k3")
+        if org == "moonshot":
+            return "moonshot"
+
+        # MiniMax models (e.g., "minimax/MiniMax-Text-01")
+        if org == "minimax":
+            return "minimax"
+
         # Cerebras models (e.g., "cerebras/llama-3.3-70b")
         if org == "cerebras":
             return "cerebras"
