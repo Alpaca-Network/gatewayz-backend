@@ -46,6 +46,9 @@ def _run(
         patch(f"{MODULE}._get_cross_reference_pricing", side_effect=fake_cross_reference),
     ):
         mock_config.PRICING_MARKUP = markup
+        # None = no ENABLED_PROVIDERS filter, so the mocked provider list drives
+        # the population (tests assert against get_active_provider_slugs directly).
+        mock_config.ENABLED_PROVIDERS = None
         return drift_mod.audit_pricing_drift()
 
 
