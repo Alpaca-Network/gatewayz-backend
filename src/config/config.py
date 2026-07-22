@@ -149,6 +149,15 @@ class Config:
     LEDGER_RECONCILIATION_WINDOW_HOURS = int(
         os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
     )
+    # Nightly pricing-drift monitor: audits active-provider catalog pricing against
+    # current OpenRouter reference pricing so we never bill below provider cost even
+    # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when
+    # drift/unpriced models are found; never mutates prices or models.
+    ENABLE_PRICING_DRIFT_MONITOR = os.environ.get(
+        "ENABLE_PRICING_DRIFT_MONITOR", "true"
+    ).lower() in {"1", "true", "yes"}
+    # Default: once every 1440 minutes (24h) — nightly.
+    PRICING_DRIFT_INTERVAL_MINUTES = int(os.environ.get("PRICING_DRIFT_INTERVAL_MINUTES", "1440"))
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {
         "1",

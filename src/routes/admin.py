@@ -2268,7 +2268,9 @@ async def get_chat_requests_summary_admin(
         if redis_client:
             try:
                 redis_client.setex(
-                    cache_key, 60, json.dumps(response, default=str)  # 60 second TTL
+                    cache_key,
+                    60,
+                    json.dumps(response, default=str),  # 60 second TTL
                 )
                 logger.info(f"Cached chat summary for filter_hash={filter_hash} (TTL: 60s)")
             except Exception as cache_error:
@@ -2533,6 +2535,35 @@ async def run_pricing_audit(
         threshold_percent=threshold,
     )
 
+    return report
+
+
+# ============================================================================
+# ADMIN PRICING DRIFT MONITOR - Catch below-cost billing before it leaks margin
+# ============================================================================
+
+
+@router.get("/admin/pricing-drift", tags=["admin"])
+async def run_pricing_drift_audit(
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Audit active-provider catalog pricing against current OpenRouter reference
+    pricing to catch margin leaks.
+
+    We bill inference at ``catalog_price * Config.PRICING_MARKUP``. If a
+    provider raises its price and our catalog goes stale, we could bill below
+    the provider's real cost even with markup applied. This endpoint flags:
+
+    - ``drift``: models where ``catalog_price * markup`` is still below the
+      current OpenRouter reference price (worst deficit first).
+    - ``unpriced``: active models with no usable catalog price (None/0).
+
+    Read-only: never mutates prices or models. Requires admin authentication.
+    """
+    from src.services.billing.pricing_drift_monitor import audit_pricing_drift
+
+    report = await asyncio.to_thread(audit_pricing_drift)
     return report
 
 
