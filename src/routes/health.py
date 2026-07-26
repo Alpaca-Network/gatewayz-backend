@@ -709,6 +709,30 @@ async def get_catalog_models(
         }
 
 
+@router.get("/health/catalog/unpriced", tags=["health", "catalog"])
+async def get_unpriced_catalog_models():
+    """Models dropped from the catalog because they have no price.
+
+    A model with no price cannot be billed, so it is never listed (North Star
+    §5). That is correct, but it used to happen in silence: Claude Opus 5 was
+    invisible for two days after launch and the only trace was a debug log.
+    This surfaces the drop set so a launch without pricing is caught the same
+    day.
+    """
+    from src.services.pricing.pricing_lookup import get_unpriced_models
+
+    unpriced = get_unpriced_models()
+    return {
+        "count": len(unpriced),
+        "models": unpriced,
+        "note": (
+            "These are offered by their provider but carry no price, so they are "
+            "not listed or sellable. Add pricing to make them available."
+        ),
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+
+
 @router.get("/health/catalog/providers", tags=["health", "catalog"])
 async def get_catalog_providers(
     priority: str | None = Query(None, description="Filter by priority ('fast' or 'slow')"),

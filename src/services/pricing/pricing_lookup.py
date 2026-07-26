@@ -285,6 +285,72 @@ def _is_building_catalog() -> bool:
         return False
 
 
+_unpriced_models: set[str] = set()
+_unpriced_lock = threading.Lock()
+
+
+def record_unpriced_model(model_id: str) -> None:
+    """Remember a model that was dropped for having no price."""
+    if not model_id:
+        return
+    with _unpriced_lock:
+        _unpriced_models.add(str(model_id))
+
+
+def get_unpriced_models() -> list[str]:
+    """Models dropped from the catalog for want of a price, since process start.
+
+    Exposed so a launch that lands without pricing is visible the same day
+    instead of being discovered weeks later, which is how Claude Opus 5 went
+    missing.
+    """
+    with _unpriced_lock:
+        return sorted(_unpriced_models)
+
+
+def clear_unpriced_models() -> None:
+    """Reset the set — called at the start of a full catalog sync."""
+    with _unpriced_lock:
+        _unpriced_models.clear()
+
+
+def _load_price_reference_catalog() -> list[dict]:
+    """Load the aggregator catalog used purely as a price reference.
+
+    Deliberately reads models regardless of ``is_active``. Being *listed* and
+    being a *price reference* are different jobs: OpenRouter is delisted as
+    supply (North Star §5 bars an aggregator as primary supply, and
+    ENABLED_PROVIDERS blocks routing to it), but its catalog is the only place
+    that carries prices for models whose own provider publishes none — OpenAI,
+    Anthropic and xAI all return catalogs with no pricing at all.
+
+    Coupling the two is what silently broke intake: delisting OpenRouter as
+    supply emptied this index, so newly released models — Claude Opus 5 among
+    them — could no longer acquire a price and were filtered out of the catalog
+    entirely. Nothing routes here; only prices are read.
+    """
+    try:
+        from src.db.models_catalog_db import get_models_by_gateway_for_catalog
+
+        rows = get_models_by_gateway_for_catalog(gateway_slug="openrouter", include_inactive=True)
+    except Exception as e:
+        logger.warning("Price reference catalog unavailable: %s", e)
+        return []
+
+    catalog: list[dict] = []
+    for row in rows or []:
+        metadata = row.get("metadata") or {}
+        pricing = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
+        if not isinstance(pricing, dict) or not pricing:
+            continue
+        model_id = row.get("provider_model_id") or row.get("model_name")
+        if model_id:
+            catalog.append({"id": model_id, "pricing": pricing})
+
+    logger.info("Price reference catalog: %d priced models loaded", len(catalog))
+    return catalog
+
+
 def _build_openrouter_pricing_index() -> dict[str, dict]:
     """Build an O(1) lookup index from OpenRouter models.
 
@@ -307,9 +373,7 @@ def _build_openrouter_pricing_index() -> dict[str, dict]:
 
     index: dict[str, dict] = {}
     try:
-        from src.services.models import get_cached_models
-
-        openrouter_models = get_cached_models("openrouter") or []
+        openrouter_models = _load_price_reference_catalog()
         for model in openrouter_models:
             if not isinstance(model, dict):
                 continue
@@ -772,7 +836,15 @@ def enrich_model_with_pricing(
             if _is_building_catalog():
                 logger.debug(f"Catalog building: keeping {model_id} with zero pricing")
                 return model_data
-            logger.debug(f"No pricing found for gateway provider model {model_id}, filtering out")
+            # WARNING, not debug: this silently removes a model from everything
+            # we sell. Claude Opus 5 was invisible for two days after launch and
+            # the only trace was a debug line nobody reads. record_unpriced_model
+            # keeps the running set so it can be surfaced and alerted on.
+            record_unpriced_model(model_id)
+            logger.warning(
+                "No pricing for %s — model will NOT be listed. Add pricing or it stays invisible.",
+                model_id,
+            )
             return None
 
         return model_data

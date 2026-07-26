@@ -744,7 +744,21 @@ def sync_provider_models(
                 "models_synced": 0,
             }
 
-        if not provider.get("is_active"):
+        # A price-reference provider keeps syncing while inactive. Its models are
+        # written is_active=False so nothing is ever routed to or listed from it
+        # (North Star §5 bars an aggregator as supply), but the catalog stays
+        # fresh so newly released models can still acquire a price.
+        #
+        # Without this the reference freezes on the day the provider is delisted:
+        # OpenRouter's catalog stopped at 2026-07-20, so Claude Opus 5 — released
+        # on the 24th — had no price anywhere and was filtered out of everything
+        # we sell. Being unsellable supply and being a useful price book are
+        # different things.
+        from src.config.config import Config as _SyncConfig
+
+        is_price_reference = provider_slug in _SyncConfig.PRICE_REFERENCE_PROVIDERS
+
+        if not provider.get("is_active") and not is_price_reference:
             # Sync-time delisting: an inactive (unroutable) provider is not
             # skipped as a pure no-op — its previously-synced models are
             # bulk-deactivated so the live catalog reflects routable reality
@@ -1135,9 +1149,18 @@ def _sync_all_providers_inner(
         # Get providers to sync
         from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
 
+        # Price-reference providers sync alongside the enabled roster. They are
+        # never routed to or listed — their rows are written is_active=False —
+        # but their catalogs are the only machine-readable source of prices for
+        # models whose own provider publishes none.
+        price_refs = Config.PRICE_REFERENCE_PROVIDERS
+
+        def _syncable(slug: str) -> bool:
+            return is_provider_enabled(slug) or slug in price_refs
+
         if provider_slugs:
             # Even explicit slugs must pass the enabled filter
-            providers_to_sync = [p for p in provider_slugs if is_provider_enabled(p)]
+            providers_to_sync = [p for p in provider_slugs if _syncable(p)]
         else:
             # ENABLED_PROVIDERS is the routing/catalog source of truth. Starting
             # from it also bootstraps a newly enabled provider whose DB registry
@@ -1163,9 +1186,8 @@ def _sync_all_providers_inner(
                 except Exception:
                     logger.warning("Failed to load providers from DB; using hardcoded fallback")
                     all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
-            providers_to_sync = [
-                p for p in all_providers if p not in skip_set and is_provider_enabled(p)
-            ]
+            all_providers = list(dict.fromkeys(list(all_providers) + sorted(price_refs)))
+            providers_to_sync = [p for p in all_providers if p not in skip_set and _syncable(p)]
             if skip_set:
                 logger.info(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
