@@ -669,6 +669,37 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
         return None
 
 
+def _load_unservable_model_ids(provider_id: int) -> set[str]:
+    """provider_model_ids an operator has marked unservable on our contract.
+
+    Read fresh each sync so re-listing a model is a database edit (clear the
+    flag) rather than a deploy. Fails open: on error the sync proceeds with its
+    normal price/routability gate rather than aborting.
+    """
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        response = (
+            get_client_for_query(read_only=True)
+            .table("models")
+            .select("provider_model_id, metadata")
+            .eq("provider_id", provider_id)
+            .eq("is_active", False)
+            .execute()
+        )
+        return {
+            row["provider_model_id"]
+            for row in (response.data or [])
+            if row.get("provider_model_id")
+            and (row.get("metadata") or {}).get("delist_reason") == "unservable"
+        }
+    except Exception as e:
+        logger.warning(
+            "Could not load operator-delisted models for provider %s: %s", provider_id, e
+        )
+        return set()
+
+
 def sync_provider_models(
     provider_slug: str, dry_run: bool = False, batch_mode: bool = False
 ) -> dict[str, Any]:
@@ -850,6 +881,33 @@ def sync_provider_models(
                 continue
 
         metrics["transform_duration"] = time.time() - transform_start
+
+        # Honour operator delistings. The gate above can only judge price and
+        # provider routability; it cannot tell that a model the provider happily
+        # lists is unusable on our contract — OpenAI's /models returns gpt-audio,
+        # o1-pro and gpt-3.5-turbo-instruct alongside ordinary chat models, but
+        # they need the audio, responses and completions endpoints respectively,
+        # so a user who picks one gets an error.
+        #
+        # Marking such a row unservable makes the delisting survive the next sync
+        # instead of being recomputed away every hour. Kept in the database rather
+        # than a hardcoded list in code (North Star §4.2).
+        unservable = _load_unservable_model_ids(provider["id"])
+        if unservable:
+            resurrected = 0
+            for db_model in db_models:
+                if db_model.get("provider_model_id") in unservable and db_model.get("is_active"):
+                    db_model["is_active"] = False
+                    md = db_model.get("metadata") or {}
+                    md["delist_reason"] = "unservable"
+                    db_model["metadata"] = md
+                    resurrected += 1
+                    delisted += 1
+            if resurrected:
+                logger.info(
+                    f"[{provider_slug.upper()}] Kept {resurrected} operator-delisted "
+                    f"model(s) inactive (delist_reason=unservable)"
+                )
 
         if not db_models:
             total_duration = time.time() - start_time
