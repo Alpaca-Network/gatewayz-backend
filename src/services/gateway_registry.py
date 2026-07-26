@@ -476,6 +476,10 @@ def refresh_registry_cache() -> None:
     global _cache_timestamp
     _cache_timestamp = 0.0
     _load_registry_from_db()
+    # Declared pricing formats come from the same providers table, so they go
+    # stale on exactly the same events. Refreshing one without the other is how
+    # a corrected unit would keep being ignored.
+    invalidate_pricing_format_cache()
     try:
         from src.services.dynamic_provider_loader import invalidate_loader_cache
 

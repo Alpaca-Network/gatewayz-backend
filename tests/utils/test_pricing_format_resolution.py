@@ -85,3 +85,19 @@ class TestConversionArithmetic:
 
         assert wrong == pytest.approx(5e-12)
         assert wrong != pytest.approx(5e-6)
+
+
+def test_registry_refresh_also_clears_the_format_cache(monkeypatch):
+    """Both caches read the same providers table, so both go stale together.
+
+    Refreshing one without the other would keep serving a unit that has since
+    been corrected — the failure this whole change exists to prevent.
+    """
+    from src.services import gateway_registry
+
+    gateway_registry._pricing_format_cache = {"openrouter": "per_1m"}
+    monkeypatch.setattr(gateway_registry, "_load_registry_from_db", lambda: {})
+
+    gateway_registry.refresh_registry_cache()
+
+    assert gateway_registry._pricing_format_cache is None
