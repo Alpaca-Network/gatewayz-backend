@@ -35,7 +35,7 @@ def test_enrich_prices_direct_provider_from_openrouter():
         model, gateway="moonshot", pricing_batch={}, openrouter_index=_index()
     )
     assert out is not None
-    assert out["pricing_source"] == "cross-reference"
+    assert out["pricing_source"] == "cross_reference"
     assert float(out["pricing"]["prompt"]) == 3e-6
 
 

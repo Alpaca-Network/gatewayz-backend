@@ -378,17 +378,41 @@ def transform_normalized_model_to_db_schema(
         # pricing divides by the provider factor a SECOND time (per-1M => 1e-12),
         # silently making every closed-provider model ~1e6x too cheap.
         source_gateway = normalized_model.get("source_gateway", provider_slug)
-        already_per_token = normalized_model.get("pricing_source") in (
-            "manual",
-            "database",
-            "cross_reference",
-        )
+        # Normalise separators before comparing: this guard once read
+        # "cross_reference" while the enricher wrote "cross-reference", so it
+        # never matched and every cross-referenced price was divided by the
+        # provider factor twice — claude-opus-5 listed at 5E-12 instead of
+        # 5E-6. Matching on a canonical form makes the check typo-proof.
+        _pricing_source = str(normalized_model.get("pricing_source") or "").replace("-", "_")
+        already_per_token = _pricing_source in ("manual", "database", "cross_reference")
         provider_format = get_provider_format(source_gateway)
         if not already_per_token and provider_format != PricingFormat.PER_TOKEN:
             for field in ("prompt", "completion", "image", "request"):
                 if pricing[field] is not None and pricing[field] != Decimal("0"):
                     normalized_val = normalize_to_per_token(pricing[field], provider_format)
                     pricing[field] = normalized_val if normalized_val is not None else Decimal("0")
+
+        # Sanity-gate the result (North Star §4.2: "sanity-gate every ingested
+        # price against cross-provider medians"). A unit error is silent — nothing
+        # throws, the gateway simply bills a millionth of cost — so the only
+        # defence is refusing to store an implausible number.
+        #
+        # The floor is three orders of magnitude below the cheapest real model:
+        # $0.01 per 1M tokens is 1e-8 per token, so anything non-zero under 1e-11
+        # is a conversion artefact, not a price. Storing None instead lets the
+        # model be re-priced from a trustworthy tier next sync rather than
+        # persisting a corrupt value that tier 1 then reads back forever.
+        for _field in ("prompt", "completion", "image", "request"):
+            _val = pricing.get(_field)
+            if _val is not None and _val != Decimal("0") and _val < Decimal("1e-11"):
+                logger.error(
+                    "Implausible %s price for %s: %s — refusing to store "
+                    "(likely a unit-conversion error)",
+                    _field,
+                    normalized_model.get("id"),
+                    _val,
+                )
+                pricing[_field] = None
 
         # Extract capabilities
         capabilities = extract_capabilities(normalized_model)
