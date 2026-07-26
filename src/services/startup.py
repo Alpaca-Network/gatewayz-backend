@@ -724,6 +724,27 @@ async def lifespan(app):
 
     _create_background_task(_setup_admin_user_background(), name="setup_admin_user")
 
+    # Live per-model health probing. Off by default — every probe is a real
+    # billable request. When off, model_health_history stays empty and
+    # /v1/status/stats reports "not measured" rather than inventing a number.
+    try:
+        from src.config.config import Config as _HealthCfg
+
+        if _HealthCfg.ENABLE_HEALTH_MONITOR:
+            from src.services.monitoring.intelligent_health_monitor import (
+                intelligent_health_monitor,
+            )
+
+            await intelligent_health_monitor.start_monitoring()
+            logger.info("  health_monitor    started (live probing enabled)")
+        else:
+            logger.info(
+                "  health_monitor    DISABLED (ENABLE_HEALTH_MONITOR=false); "
+                "/v1/status/stats will report monitoring_active=false"
+            )
+    except Exception as e:
+        logger.warning(f"Health monitor startup warning (non-fatal): {e}")
+
     logger.info("\n🎉 Application startup complete!")
     logger.info(" API Documentation: http://localhost:8000/docs")
     logger.info(" Health Check: http://localhost:8000/health")
@@ -733,6 +754,21 @@ async def lifespan(app):
 
     # Shutdown
     logger.info("Shutting down monitoring and observability services...")
+
+    # Stop live health probing before anything else so in-flight probes do not
+    # outlive the event loop they were scheduled on.
+    try:
+        from src.config.config import Config as _HealthCfg
+
+        if _HealthCfg.ENABLE_HEALTH_MONITOR:
+            from src.services.monitoring.intelligent_health_monitor import (
+                intelligent_health_monitor,
+            )
+
+            await intelligent_health_monitor.stop_monitoring()
+            logger.info("Health monitor stopped")
+    except Exception as e:
+        logger.warning(f"Health monitor shutdown warning: {e}")
 
     # Stop scheduled model sync (Phase 3 - Issue #996)
     try:
