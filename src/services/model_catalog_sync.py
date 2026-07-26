@@ -1064,6 +1064,32 @@ def sync_provider_models(
             except Exception as cache_e:
                 logger.warning(f"[{provider_slug.upper()}] Cache invalidation failed: {cache_e}")
 
+            # A refreshed price book is useless while the index built from it is
+            # still cached — that index has no TTL, so without this the new prices
+            # only take effect after a restart. Syncing the book then syncing a
+            # provider in the same process would price it from the stale copy,
+            # which is how claude-opus-5 came back at 0.0 right after the units
+            # were corrected.
+            #
+            # Kept out of the catalog-cache try above deliberately: a Redis hiccup
+            # there must not leave the price index stale, because the consequence
+            # is wrong prices rather than a slow request.
+            if provider_slug in _SyncConfig.PRICE_REFERENCE_PROVIDERS:
+                try:
+                    from src.services.pricing.pricing_lookup import (
+                        invalidate_openrouter_pricing_index,
+                    )
+
+                    invalidate_openrouter_pricing_index()
+                    logger.info(
+                        f"[{provider_slug.upper()}] Price index invalidated "
+                        f"(price-reference sync)"
+                    )
+                except Exception as price_e:
+                    logger.warning(
+                        f"[{provider_slug.upper()}] Price index invalidation failed: {price_e}"
+                    )
+
             metrics["cache_invalidation_duration"] = time.time() - cache_invalidation_start
         else:
             models_synced = 0
