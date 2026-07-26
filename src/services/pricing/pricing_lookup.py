@@ -18,6 +18,7 @@ PricingFormat constant before returning values from this module.
 
 import json
 import logging
+import re
 import threading
 import time
 from pathlib import Path
@@ -444,6 +445,43 @@ def invalidate_openrouter_pricing_index() -> None:
     _openrouter_pricing_index = None
 
 
+# Anthropic and OpenRouter spell the same model differently: Anthropic ships
+# "claude-opus-4-6" and dated snapshots like "claude-haiku-4-5-20251001", while
+# OpenRouter lists "claude-opus-4.6" and "claude-haiku-4.5". normalize_model_name
+# cannot bridge them — it maps "." to "p" but leaves "-" alone, so "4.6" becomes
+# "4p6" and "4-6" stays "4-6" and the two never meet. It also drives provider
+# dispatch, so widening it there risks mis-routing an inference call.
+#
+# These candidates are therefore built only for the price lookup. Four Anthropic
+# models sat unpriced — and so unlistable — purely because of this, with the
+# price sitting in the index under a dotted name.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+_VERSION_SEGMENT = re.compile(r"(?<=\d)-(?=\d)")
+
+
+def _cross_reference_candidates(model_id: str, base_model_id: str) -> list[str]:
+    """Lookup keys to try, most literal first."""
+    candidates: list[str] = []
+
+    def add(value: str) -> None:
+        for form in (value, value.lower()):
+            if form and form not in candidates:
+                candidates.append(form)
+
+    for value in (model_id, base_model_id):
+        if not value:
+            continue
+        add(value)
+        # "claude-haiku-4-5-20251001" -> "claude-haiku-4-5"
+        undated = _DATE_SUFFIX.sub("", value)
+        add(undated)
+        # "claude-opus-4-6" -> "claude-opus-4.6" (a hyphen BETWEEN DIGITS only,
+        # so "gpt-4" and "claude-3-opus" are untouched)
+        add(_VERSION_SEGMENT.sub(".", undated))
+
+    return candidates
+
+
 def _get_cross_reference_pricing(
     model_id: str,
     openrouter_index: dict[str, dict] | None = None,
@@ -502,7 +540,7 @@ def _get_cross_reference_pricing(
         # so we must normalize using PER_TOKEN — not PER_1M_TOKENS.
         # This is the canonical format used everywhere in the billing pipeline.
         # See PROVIDER_PRICING_FORMATS["openrouter"] in pricing_normalization.py.
-        for candidate in (model_id, model_id.lower(), base_model_id, base_model_id.lower()):
+        for candidate in _cross_reference_candidates(model_id, base_model_id):
             if candidate and candidate in index:
                 return normalize_pricing_dict(index[candidate], PricingFormat.PER_TOKEN)
 
