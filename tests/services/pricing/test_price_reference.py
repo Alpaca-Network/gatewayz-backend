@@ -8,8 +8,6 @@ of everything we sell. Being unsellable supply and being a useful price book
 are different jobs.
 """
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from src.services.pricing import pricing_lookup
