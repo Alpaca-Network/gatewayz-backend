@@ -181,6 +181,16 @@ class ProxyRequest(BaseModel):
     service_tier: Literal["auto", "default"] | None = Field(
         default=None, description="Latency tier for processing the request"
     )
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "How much reasoning the model should spend before answering. "
+            "Normalized across providers: forwarded as reasoning_effort to OpenAI, "
+            "xAI and Moonshot, and translated to extended thinking for Anthropic. "
+            "Silently ignored by models that do not reason. Reasoning tokens are "
+            "billed as output tokens, so higher effort costs more."
+        ),
+    )
 
     # Gateway-specific parameters (not part of OpenAI API)
     provider: str | None = Field(

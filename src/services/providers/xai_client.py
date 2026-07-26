@@ -104,6 +104,15 @@ def get_xai_client():
         raise
 
 
+def _prepare_xai_kwargs(model: str, kwargs: dict) -> dict:
+    """grok-4 accepts reasoning_effort and reports usage.reasoning_tokens."""
+    from src.services.providers.reasoning_effort import apply_reasoning_effort
+
+    prepared = dict(kwargs)
+    effort = prepared.pop("reasoning_effort", None)
+    return apply_reasoning_effort(prepared, "xai", model, effort)
+
+
 def make_xai_request_openai(messages, model, **kwargs):
     """Make request to xAI using official SDK or OpenAI-compatible client
 
@@ -125,6 +134,7 @@ def make_xai_request_openai(messages, model, **kwargs):
             kwargs.update(reasoning_params)
             logger.debug(f"xAI request for {model} with reasoning params: {reasoning_params}")
 
+        kwargs = _prepare_xai_kwargs(model, kwargs)
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
         return response
     except Exception as e:
@@ -155,6 +165,7 @@ def make_xai_request_openai_stream(messages, model, **kwargs):
                 f"xAI streaming request for {model} with reasoning params: {reasoning_params}"
             )
 
+        kwargs = _prepare_xai_kwargs(model, kwargs)
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
         )

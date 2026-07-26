@@ -45,6 +45,24 @@ def get_openai_client():
         raise
 
 
+def _prepare_openai_kwargs(model: str, kwargs: dict) -> dict:
+    """Adapt request params to what the target OpenAI model actually accepts.
+
+    The reasoning generations (o-series, gpt-5*) reject `max_tokens` outright
+    and are the only ones that take `reasoning_effort`; sending either to the
+    wrong model is a 400, not a silently ignored field.
+    """
+    from src.services.providers.reasoning_effort import (
+        apply_reasoning_effort,
+        normalize_token_limit,
+    )
+
+    prepared = dict(kwargs)
+    effort = prepared.pop("reasoning_effort", None)
+    prepared = normalize_token_limit(prepared, "openai", model)
+    return apply_reasoning_effort(prepared, "openai", model, effort)
+
+
 def make_openai_request(messages, model, **kwargs):
     """Make request to OpenAI using the official client.
 
@@ -58,6 +76,7 @@ def make_openai_request(messages, model, **kwargs):
         logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
         client = get_openai_client()
+        kwargs = _prepare_openai_kwargs(model, kwargs)
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
 
         logger.info(f"OpenAI request successful for model: {model}")
@@ -86,6 +105,7 @@ def make_openai_request_stream(messages, model, **kwargs):
         logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
         client = get_openai_client()
+        kwargs = _prepare_openai_kwargs(model, kwargs)
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
         )
