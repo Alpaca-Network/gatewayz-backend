@@ -264,6 +264,20 @@ class IntelligentHealthMonitor:
 
             models = response.data or []
 
+            # model_health_tracking outlives the roster: rows persist after a
+            # provider is switched off, and nothing prunes them. Probing those
+            # burns requests on providers we cannot route to and republishes
+            # their failures on the public status page.
+            from src.utils.provider_filter import is_provider_enabled
+
+            before = len(models)
+            models = [m for m in models if is_provider_enabled(m.get("provider") or "")]
+            if before != len(models):
+                logger.info(
+                    "Health monitor skipped %d model(s) on providers outside ENABLED_PROVIDERS",
+                    before - len(models),
+                )
+
             if self.redis_coordination:
                 # Filter out models being checked by other workers
                 models = await self._filter_with_redis_locks(models)
@@ -336,12 +350,15 @@ class IntelligentHealthMonitor:
         response_time_ms = None
 
         try:
-            # Build test payload
+            # Smallest body every provider accepts. Deliberately no temperature:
+            # it tells a liveness probe nothing, and providers disagree about it
+            # per model — Moonshot rejects 0.1 on kimi-k2.6 with
+            # "only 1 is allowed for this model", which would have marked a
+            # perfectly healthy model failed on every single check.
             test_payload = {
                 "model": model_id,
                 "messages": [{"role": "user", "content": "test"}],
                 "max_tokens": max_tokens,
-                "temperature": 0.1,
             }
 
             # Get endpoint URL for gateway
@@ -448,6 +465,24 @@ class IntelligentHealthMonitor:
         except Exception:
             pass
 
+        # Derive from the registry's base_url before reaching for hardcoded values.
+        # Only xai carries an explicit chat_completions_endpoint today, so without
+        # this every other provider on the roster — openai, anthropic, moonshot —
+        # resolves to None, the probe is skipped, and the status page reports
+        # nothing for three quarters of production.
+        try:
+            from src.services.gateway_registry import get_gateway_registry
+
+            base_url = (get_gateway_registry().get(gateway) or {}).get("base_url")
+            if base_url:
+                base = base_url.rstrip("/")
+                if gateway == "anthropic":
+                    # Anthropic speaks /v1/messages, not the OpenAI chat shape.
+                    return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+                return f"{base}/chat/completions"
+        except Exception:
+            pass
+
         # Fallback to hardcoded endpoints
         _fallback_endpoints = {
             "openrouter": "https://openrouter.ai/api/v1/chat/completions",
@@ -474,7 +509,14 @@ class IntelligentHealthMonitor:
 
             api_key = get_provider_api_key(gateway)
             if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+                if gateway == "anthropic":
+                    # Anthropic authenticates with x-api-key and requires a version
+                    # header; a Bearer token is rejected with 401, which would look
+                    # like a broken key rather than a broken probe.
+                    headers["x-api-key"] = api_key
+                    headers["anthropic-version"] = "2023-06-01"
+                else:
+                    headers["Authorization"] = f"Bearer {api_key}"
                 return headers
         except Exception:
             pass

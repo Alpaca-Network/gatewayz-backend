@@ -491,6 +491,21 @@ class Config:
         "yes",
     }
 
+    # Live per-model health probing (src/services/monitoring/intelligent_health_monitor.py).
+    # Feeds model_health_history, which is what /v1/status/stats reports. With it
+    # off that table stays empty and the status page honestly reports
+    # "not measured" (success_rate: null, monitoring_active: false).
+    #
+    # DEFAULT OFF: probing sends a real billable request per model per tier
+    # interval. It never hides a model — the monitor writes only
+    # model_health_tracking / model_health_history, while catalog gating reads
+    # models.health_status, which only the sweep writes.
+    ENABLE_HEALTH_MONITOR: bool = os.environ.get("ENABLE_HEALTH_MONITOR", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
     # How often to sync models from provider APIs (in minutes)
     # Recommended: 15-30 minutes for balance between freshness and API rate limits
     MODEL_SYNC_INTERVAL_MINUTES: int = int(os.environ.get("MODEL_SYNC_INTERVAL_MINUTES", "30"))
