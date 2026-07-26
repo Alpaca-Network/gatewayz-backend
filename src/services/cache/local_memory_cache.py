@@ -28,6 +28,7 @@ Usage:
 """
 
 import logging
+import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -257,6 +258,78 @@ def get_local_cache() -> LocalMemoryCache:
 # Convenience functions for catalog caching
 
 
+# --- Cross-process invalidation -------------------------------------------
+#
+# This cache is per-process, so deleting a Redis key cannot reach it. With a
+# 15-minute fresh window and a 1-hour stale grace, a worker could serve a
+# superseded catalog for up to 75 minutes — every catalog correction made today
+# needed a container restart before it became visible, and one of them was a
+# model priced a million-fold too low.
+#
+# So entries carry the epoch they were written under. Invalidation bumps a
+# shared counter in Redis; a local entry stamped with an older epoch is treated
+# as a miss. The epoch read is itself memoised briefly, so the common path stays
+# in-process and staleness is bounded by that interval rather than by the TTL.
+
+CATALOG_EPOCH_KEY = "gw:models:catalog:epoch"
+_EPOCH_RECHECK_SECONDS = 5.0
+
+_epoch_value: int = 0
+_epoch_checked_at: float = 0.0
+_epoch_lock = threading.Lock()
+
+
+def get_catalog_epoch(force: bool = False) -> int:
+    """Current catalog epoch, re-read from Redis at most every few seconds.
+
+    Fails closed to the last known value: if Redis is unreachable we keep
+    serving local entries rather than throwing the cache away on every read.
+    """
+    global _epoch_value, _epoch_checked_at
+
+    now = time.time()
+    with _epoch_lock:
+        if not force and (now - _epoch_checked_at) < _EPOCH_RECHECK_SECONDS:
+            return _epoch_value
+
+    try:
+        from src.config.redis_config import get_redis_client, is_redis_available
+
+        client = get_redis_client()
+        if client and is_redis_available():
+            raw = client.get(CATALOG_EPOCH_KEY)
+            value = int(raw) if raw not in (None, b"", "") else 0
+        else:
+            value = _epoch_value
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug("Catalog epoch read failed, keeping %s: %s", _epoch_value, e)
+        value = _epoch_value
+
+    with _epoch_lock:
+        _epoch_value = value
+        _epoch_checked_at = now
+    return value
+
+
+def bump_catalog_epoch() -> int:
+    """Invalidate every worker's local catalog. Call alongside Redis invalidation."""
+    try:
+        from src.config.redis_config import get_redis_client, is_redis_available
+
+        client = get_redis_client()
+        if not client or not is_redis_available():
+            return _epoch_value
+
+        new_epoch = int(client.incr(CATALOG_EPOCH_KEY))
+        logger.info("Catalog epoch bumped to %s (local caches invalidated)", new_epoch)
+        # Reflect it locally at once so the caller does not serve its own stale copy.
+        get_catalog_epoch(force=True)
+        return new_epoch
+    except Exception as e:
+        logger.warning("Could not bump catalog epoch: %s", e)
+        return _epoch_value
+
+
 def get_local_catalog(provider: str) -> tuple[list[dict] | None, bool]:
     """
     Get cached catalog from local memory.
@@ -266,7 +339,21 @@ def get_local_catalog(provider: str) -> tuple[list[dict] | None, bool]:
     """
     cache = get_local_cache()
     key = f"catalog:{provider}"
-    return cache.get(key)
+    entry, is_stale = cache.get(key)
+    if entry is None:
+        return None, False
+
+    stamped_epoch, catalog = entry
+    current = get_catalog_epoch()
+    if stamped_epoch != current:
+        # Written before the last invalidation — discard rather than serve it.
+        cache.delete(key)
+        logger.debug(
+            "Local catalog for %s dropped: epoch %s != %s", provider, stamped_epoch, current
+        )
+        return None, False
+
+    return catalog, is_stale
 
 
 def set_local_catalog(
@@ -275,7 +362,7 @@ def set_local_catalog(
     ttl: float = 900.0,  # 15 minutes fresh
     stale_ttl: float = 3600.0,  # 1 hour stale
 ) -> None:
-    """Cache catalog in local memory."""
+    """Cache catalog in local memory, stamped with the current epoch."""
     cache = get_local_cache()
     key = f"catalog:{provider}"
-    cache.set(key, catalog, ttl=ttl, stale_ttl=stale_ttl)
+    cache.set(key, (get_catalog_epoch(), catalog), ttl=ttl, stale_ttl=stale_ttl)

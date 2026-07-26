@@ -1369,7 +1369,24 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
 def invalidate_full_catalog() -> bool:
     """Invalidate the full catalog cache"""
     cache = get_model_catalog_cache()
-    return cache.invalidate_full_catalog()
+    result = cache.invalidate_full_catalog()
+    _bump_local_cache_epoch()
+    return result
+
+
+def _bump_local_cache_epoch() -> None:
+    """Reach the per-process local caches that a Redis delete cannot.
+
+    Deleting a Redis key leaves every worker's in-process copy untouched, and
+    that copy is good for 15 minutes fresh plus an hour of stale grace. Bumping
+    the shared epoch makes them all treat their entry as a miss.
+    """
+    try:
+        from src.services.cache.local_memory_cache import bump_catalog_epoch
+
+        bump_catalog_epoch()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Local cache epoch bump failed: %s", e)
 
 
 def cache_provider_catalog(
@@ -1511,6 +1528,7 @@ def invalidate_provider_catalog(
         True if successful (or scheduled via debouncing), False otherwise
     """
     cache = get_model_catalog_cache()
+    _bump_local_cache_epoch()
     return cache.invalidate_provider_catalog(provider_name, cascade=cascade, debounce=debounce)
 
 
