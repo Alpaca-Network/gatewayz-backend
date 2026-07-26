@@ -111,6 +111,64 @@ class ModelHealthConfig:
     priority_score: float
 
 
+# Servable-model cache. Refreshed on a short interval so a newly listed model
+# starts being probed without a restart, while the hot path stays in-process.
+_servable_ids: set[str] = set()
+_servable_loaded_at: float = 0.0
+_SERVABLE_TTL_SECONDS = 300.0
+
+
+def _get_servable_model_ids() -> set[str]:
+    """Model ids currently listed in the catalog for an enabled provider.
+
+    Returns an empty set on failure, which the caller treats as "no opinion" and
+    skips the filter — better to probe too much than to stop monitoring entirely
+    because a query failed.
+    """
+    global _servable_ids, _servable_loaded_at
+
+    now = time.time()
+    if _servable_ids and (now - _servable_loaded_at) < _SERVABLE_TTL_SECONDS:
+        return _servable_ids
+
+    try:
+        from src.config.supabase_config import get_client_for_query
+        from src.utils.provider_filter import is_provider_enabled
+
+        supabase = get_client_for_query(read_only=True)
+        providers = supabase.table("providers").select("id, slug").eq("is_active", True).execute()
+        enabled_ids = {
+            row["id"]
+            for row in (providers.data or [])
+            if row.get("slug") and is_provider_enabled(row["slug"])
+        }
+        if not enabled_ids:
+            return set()
+
+        ids: set[str] = set()
+        for provider_id in enabled_ids:
+            response = (
+                supabase.table("models")
+                .select("provider_model_id")
+                .eq("provider_id", provider_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            ids.update(
+                row["provider_model_id"]
+                for row in (response.data or [])
+                if row.get("provider_model_id")
+            )
+    except Exception as e:
+        logger.warning("Could not load servable model ids; probing unfiltered: %s", e)
+        return set()
+
+    _servable_ids = ids
+    _servable_loaded_at = now
+    logger.info("Health monitor scope: %d servable models", len(ids))
+    return ids
+
+
 class IntelligentHealthMonitor:
     """
     Scalable health monitoring service for 10,000+ models
@@ -292,6 +350,22 @@ class IntelligentHealthMonitor:
                     "Health monitor skipped %d model(s) on providers outside ENABLED_PROVIDERS",
                     before - len(models),
                 )
+
+            # Probe only what we actually sell. The provider filter above is not
+            # enough: 79 of 110 tracked rows were models delisted from the
+            # catalog — old Claude 3 and GPT-4 entries — and each one fails every
+            # probe by design. That dragged the PUBLIC status page down to 6%
+            # success while every served model was healthy, which is a worse lie
+            # than the "0%" it replaced.
+            servable = await asyncio.to_thread(_get_servable_model_ids)
+            if servable:
+                before = len(models)
+                models = [m for m in models if (m.get("model") or "") in servable]
+                if before != len(models):
+                    logger.info(
+                        "Health monitor skipped %d model(s) no longer in the served catalog",
+                        before - len(models),
+                    )
 
             if self.redis_coordination:
                 # Filter out models being checked by other workers

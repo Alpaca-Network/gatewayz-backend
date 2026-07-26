@@ -8,6 +8,8 @@ of everything we sell. Being unsellable supply and being a useful price book
 are different jobs.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
 from src.services.pricing import pricing_lookup
@@ -158,3 +160,49 @@ class TestIndexInvalidation:
 
         # ...and after it, the refreshed book is what gets used.
         assert pricing_lookup._build_openrouter_pricing_index()["a/b"] == {"prompt": "0.000009"}
+
+
+class TestUnpricedIsSharedAcrossWorkers:
+    """A per-process set only reflected whichever worker answered.
+
+    The sync that discovers a drop is rarely the worker serving
+    /health/catalog/unpriced, so the endpoint could report 0 while models were
+    being dropped — the exact blindness it was added to remove.
+    """
+
+    @pytest.fixture
+    def redis(self, monkeypatch):
+        client = MagicMock()
+        store = set()
+        client.sadd.side_effect = lambda _k, v: store.add(v)
+        client.smembers.side_effect = lambda _k: set(store)
+        client.delete.side_effect = lambda _k: store.clear()
+        monkeypatch.setattr("src.config.redis_config.get_redis_client", lambda: client)
+        monkeypatch.setattr("src.config.redis_config.is_redis_available", lambda: True)
+        return client
+
+    def test_a_drop_recorded_anywhere_is_readable_everywhere(self, redis):
+        pricing_lookup.record_unpriced_model("anthropic/claude-opus-9")
+
+        # Simulate a different worker: its local set is empty.
+        pricing_lookup._unpriced_models.clear()
+
+        assert pricing_lookup.get_unpriced_models() == ["anthropic/claude-opus-9"]
+
+    def test_the_set_expires_so_priced_models_do_not_linger(self, redis):
+        pricing_lookup.record_unpriced_model("a/b")
+
+        redis.expire.assert_called_with(pricing_lookup.UNPRICED_MODELS_KEY, 7 * 24 * 3600)
+
+    def test_clear_removes_the_shared_set(self, redis):
+        pricing_lookup.record_unpriced_model("a/b")
+        pricing_lookup.clear_unpriced_models()
+
+        assert pricing_lookup.get_unpriced_models() == []
+
+    def test_falls_back_to_the_local_set_without_redis(self, monkeypatch):
+        monkeypatch.setattr("src.config.redis_config.get_redis_client", lambda: None)
+
+        pricing_lookup.record_unpriced_model("local/only")
+
+        assert pricing_lookup.get_unpriced_models() == ["local/only"]
