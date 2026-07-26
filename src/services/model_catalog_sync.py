@@ -728,6 +728,38 @@ def _load_unservable_model_ids(provider_id: int) -> set[str]:
         return set()
 
 
+def pin_unservable_models(db_models: list[dict[str, Any]], unservable: set[str]) -> tuple[int, int]:
+    """Hold operator-delisted models down across a sync.
+
+    Re-stamps the marker on EVERY flagged model, not only the ones this pass
+    would have left active. Requiring is_active before stamping silently lost the
+    flag: a model that is unservable AND unpriced is already inactive by the time
+    this runs, so it was skipped, the transform's own delist_reason="unpriced"
+    stood, and _load_unservable_model_ids stopped matching it. The next sync able
+    to price the model then brought it back — which is how all ten
+    operator-delisted models returned to the catalog once their prices were
+    repaired.
+
+    Returns (models pinned, models newly flipped inactive).
+    """
+    if not unservable:
+        return 0, 0
+
+    pinned = 0
+    newly_delisted = 0
+    for db_model in db_models:
+        if db_model.get("provider_model_id") not in unservable:
+            continue
+        if db_model.get("is_active"):
+            db_model["is_active"] = False
+            newly_delisted += 1
+        metadata = db_model.get("metadata") or {}
+        metadata["delist_reason"] = "unservable"
+        db_model["metadata"] = metadata
+        pinned += 1
+    return pinned, newly_delisted
+
+
 def sync_provider_models(
     provider_slug: str, dry_run: bool = False, batch_mode: bool = False
 ) -> dict[str, Any]:
@@ -943,23 +975,13 @@ def sync_provider_models(
         # back — which is how all ten operator-delisted models returned to the
         # catalog after their prices were repaired.
         unservable = _load_unservable_model_ids(provider["id"])
-        if unservable:
-            pinned = 0
-            for db_model in db_models:
-                if db_model.get("provider_model_id") not in unservable:
-                    continue
-                if db_model.get("is_active"):
-                    db_model["is_active"] = False
-                    delisted += 1
-                md = db_model.get("metadata") or {}
-                md["delist_reason"] = "unservable"
-                db_model["metadata"] = md
-                pinned += 1
-            if pinned:
-                logger.info(
-                    f"[{provider_slug.upper()}] Kept {pinned} operator-delisted "
-                    f"model(s) inactive (delist_reason=unservable)"
-                )
+        pinned, newly_delisted = pin_unservable_models(db_models, unservable)
+        delisted += newly_delisted
+        if pinned:
+            logger.info(
+                f"[{provider_slug.upper()}] Kept {pinned} operator-delisted "
+                f"model(s) inactive (delist_reason=unservable)"
+            )
 
         if not db_models:
             total_duration = time.time() - start_time
