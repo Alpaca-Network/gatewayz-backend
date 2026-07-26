@@ -130,12 +130,19 @@ def get_provider_format(provider_slug: str) -> str:
         PricingFormat constant
     """
     try:
-        from src.services.gateway_registry import get_gateway_registry
+        # Deliberately the UNFILTERED registry. get_gateway_registry() drops
+        # anything outside ENABLED_PROVIDERS, but a pricing format is a fact
+        # about the provider's API, not about whether we route to it. Reading
+        # the filtered view made a disabled provider fall through to the
+        # PER_1M default: OpenRouter declares per_token and publishes
+        # 0.000005 for a $5/Mtok model, so the fallback divided every one of
+        # its prices by a million — and the price book propagated that to
+        # every model priced from it. §4.2 calls a unit error the hardest
+        # data-quality problem in the system for exactly this reason.
+        from src.services.gateway_registry import get_declared_pricing_formats
 
-        registry = get_gateway_registry()
-        entry = registry.get(provider_slug.lower())
-        if entry and entry.get("pricing_format"):
-            fmt = entry["pricing_format"]
+        fmt = get_declared_pricing_formats().get(provider_slug.lower())
+        if fmt:
             if fmt == "per_token":
                 return PricingFormat.PER_TOKEN
             elif fmt == "per_1k":

@@ -299,6 +299,51 @@ def get_gateway_registry() -> dict[str, dict]:
     return filter_provider_dict(_get_registry())
 
 
+_pricing_format_cache: dict[str, str] | None = None
+
+
+def get_declared_pricing_formats() -> dict[str, str]:
+    """Map provider slug -> declared pricing format, for EVERY provider.
+
+    The registry is built from active providers only and then filtered again by
+    ENABLED_PROVIDERS, which is right for routing and wrong for this: the units
+    a provider's API quotes prices in are true whether or not we route to it.
+    A disabled provider fell through to the PER_1M default, so OpenRouter — which
+    declares per_token and publishes 0.000005 for a $5/Mtok model — had every
+    price divided by a million. Read straight from the table instead.
+    """
+    global _pricing_format_cache
+    if _pricing_format_cache is not None:
+        return _pricing_format_cache
+
+    formats: dict[str, str] = {}
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        response = (
+            get_client_for_query(read_only=True)
+            .table("providers")
+            .select("slug, metadata")
+            .execute()
+        )
+        for row in response.data or []:
+            slug = (row.get("slug") or "").lower()
+            fmt = (row.get("metadata") or {}).get("pricing_format")
+            if slug and fmt:
+                formats[slug] = fmt
+    except Exception as e:
+        logger.warning("Could not load declared pricing formats: %s", e)
+        return {}
+
+    _pricing_format_cache = formats
+    return formats
+
+
+def invalidate_pricing_format_cache() -> None:
+    global _pricing_format_cache
+    _pricing_format_cache = None
+
+
 def get_valid_gateway_values() -> set[str]:
     """Compute the set of all accepted gateway identifiers.
 
