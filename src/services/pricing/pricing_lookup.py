@@ -288,6 +288,24 @@ def _is_building_catalog() -> bool:
 _unpriced_models: set[str] = set()
 _unpriced_lock = threading.Lock()
 
+# Shared across workers. A per-process set only ever showed whichever worker
+# happened to answer /health/catalog/unpriced, and the sync that discovered the
+# drop is rarely the worker serving the request — so the endpoint could read 0
+# while models were being dropped. The local set is kept as a fallback for when
+# Redis is unavailable.
+UNPRICED_MODELS_KEY = "gw:models:unpriced"
+_UNPRICED_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _unpriced_redis():
+    try:
+        from src.config.redis_config import get_redis_client, is_redis_available
+
+        client = get_redis_client()
+        return client if (client and is_redis_available()) else None
+    except Exception:
+        return None
+
 
 def record_unpriced_model(model_id: str) -> None:
     """Remember a model that was dropped for having no price."""
@@ -296,14 +314,32 @@ def record_unpriced_model(model_id: str) -> None:
     with _unpriced_lock:
         _unpriced_models.add(str(model_id))
 
+    client = _unpriced_redis()
+    if client:
+        try:
+            client.sadd(UNPRICED_MODELS_KEY, str(model_id))
+            # Expire the whole set so a model that later gets priced does not
+            # linger in the report forever.
+            client.expire(UNPRICED_MODELS_KEY, _UNPRICED_TTL_SECONDS)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not record unpriced model in Redis: %s", e)
+
 
 def get_unpriced_models() -> list[str]:
-    """Models dropped from the catalog for want of a price, since process start.
+    """Models dropped from the catalog for want of a price.
 
     Exposed so a launch that lands without pricing is visible the same day
     instead of being discovered weeks later, which is how Claude Opus 5 went
     missing.
     """
+    client = _unpriced_redis()
+    if client:
+        try:
+            members = client.smembers(UNPRICED_MODELS_KEY) or set()
+            return sorted(m.decode() if isinstance(m, bytes) else str(m) for m in members)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not read unpriced models from Redis: %s", e)
+
     with _unpriced_lock:
         return sorted(_unpriced_models)
 
@@ -312,6 +348,13 @@ def clear_unpriced_models() -> None:
     """Reset the set — called at the start of a full catalog sync."""
     with _unpriced_lock:
         _unpriced_models.clear()
+
+    client = _unpriced_redis()
+    if client:
+        try:
+            client.delete(UNPRICED_MODELS_KEY)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not clear unpriced models in Redis: %s", e)
 
 
 def _load_price_reference_catalog() -> list[dict]:
