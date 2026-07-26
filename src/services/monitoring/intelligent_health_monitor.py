@@ -350,13 +350,33 @@ class IntelligentHealthMonitor:
         response_time_ms = None
 
         try:
+            # model_health_tracking stores the gateway-prefixed catalog id
+            # ("openai/gpt-5.5-pro"), but provider APIs want the native id
+            # ("gpt-5.5-pro") — OpenAI answers "invalid model ID", Anthropic and
+            # Moonshot answer 404. Resolve it the same way the inference path
+            # does, so a probe tests exactly what the router would dispatch.
+            probe_model_id = model_id
+            try:
+                from src.services.model_transformations import transform_model_id
+
+                probe_model_id = transform_model_id(model_id, gateway) or model_id
+            except Exception as e:
+                logger.debug("Model id transform failed for %s: %s", model_id, e)
+
+            # Some gateways have no mapping table, so the prefix survives the
+            # transform. Strip only an exact "<gateway>/" head: a native id that
+            # genuinely contains a slash (openrouter's "openai/gpt-4") is left
+            # alone because its gateway is openrouter, not openai.
+            if probe_model_id.startswith(f"{gateway}/"):
+                probe_model_id = probe_model_id[len(gateway) + 1 :]
+
             # Smallest body every provider accepts. Deliberately no temperature:
             # it tells a liveness probe nothing, and providers disagree about it
             # per model — Moonshot rejects 0.1 on kimi-k2.6 with
             # "only 1 is allowed for this model", which would have marked a
             # perfectly healthy model failed on every single check.
             test_payload = {
-                "model": model_id,
+                "model": probe_model_id,
                 "messages": [{"role": "user", "content": "test"}],
                 "max_tokens": max_tokens,
             }

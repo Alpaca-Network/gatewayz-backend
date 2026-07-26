@@ -117,3 +117,43 @@ class TestDisabledProvidersAreNotProbed:
         result = await monitor._get_models_for_checking()
 
         assert [r["provider"] for r in result] == ["openai"]
+
+
+class TestProbeUsesNativeModelId:
+    """model_health_tracking stores gateway-prefixed catalog ids; provider APIs
+    want the native id. Probing the prefixed form failed 89 of 100 checks in
+    production — OpenAI answers "invalid model ID", Anthropic and Moonshot 404.
+    """
+
+    @pytest.mark.parametrize(
+        "gateway,stored,expected",
+        [
+            ("openai", "openai/gpt-5.5-pro", "gpt-5.5-pro"),
+            ("openai", "openai/gpt-4o-mini", "gpt-4o-mini"),
+            ("anthropic", "anthropic/claude-opus-4-8", "claude-opus-4-8"),
+            # No mapping table for moonshot, so the prefix survives the
+            # transform and the explicit strip has to catch it.
+            ("moonshot", "moonshot/kimi-k2.6", "kimi-k2.6"),
+            # Already native — must pass through untouched.
+            ("xai", "grok-4", "grok-4"),
+        ],
+    )
+    def test_prefix_is_resolved_to_native_id(self, gateway, stored, expected):
+        from src.services.model_transformations import transform_model_id
+
+        probe_id = transform_model_id(stored, gateway) or stored
+        if probe_id.startswith(f"{gateway}/"):
+            probe_id = probe_id[len(gateway) + 1 :]
+
+        assert probe_id == expected
+
+    def test_slash_in_a_genuine_native_id_is_preserved(self):
+        """OpenRouter serves "openai/gpt-4" as its native id. The strip keys on
+        the gateway name, so an unrelated vendor prefix must survive."""
+        gateway, stored = "openrouter", "openai/gpt-4"
+
+        probe_id = stored
+        if probe_id.startswith(f"{gateway}/"):
+            probe_id = probe_id[len(gateway) + 1 :]
+
+        assert probe_id == "openai/gpt-4"
