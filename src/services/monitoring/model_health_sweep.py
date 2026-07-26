@@ -7,15 +7,16 @@ live-model-test sweep (``src/routes/live_model_test.py``) into:
 
 1. A precise per-model call record in ``model_health_tracking`` (via
    ``record_model_call``) so soft failures (429 / timeout / auth) stay
-   distinguishable from hard failures (404 / 5xx / dead model).
+   distinguishable from hard failures (404 / dead model).
 2. A conservative catalog verdict written to the ``models`` table
    (``health_status`` column) via ``update_model_health``.
 
 Safety property
 ---------------
-The pipeline NEVER hides a model that merely rate-limits (429), times out, or has
-auth problems — those recover or are config issues. Only models that *consistently
-hard-fail* (dead / 404 / 5xx) reach ``health_status='down'``, and only after
+The pipeline NEVER hides a model that merely rate-limits (429), times out, has
+auth problems, or returns a 5xx — those recover or are config issues. Hiding a
+model asserts it does not exist, so only a 404 / explicit not-found body
+supports it: those reach ``health_status='down'``, and only after
 ``HARD_FAIL_THRESHOLD`` consecutive hard failures. Everything is wrapped
 defensively: this runs from an admin endpoint / cron and must never raise.
 """
@@ -75,9 +76,18 @@ def classify_probe_result(status: str, status_code: int | None, error: str | Non
             return "soft"
         if status_code in (401, 403) or any(p in err for p in _AUTH_PATTERNS):
             return "soft"
-        if isinstance(status_code, int) and status_code >= 500:
-            return "hard_fail"
-        # Anything else (400, unknown) → soft: never hide on ambiguous evidence.
+        # 5xx is NOT evidence a model is dead. Hiding a model asserts it does not
+        # exist, and only a 404 / explicit not-found body supports that claim. A
+        # 5xx says the request failed — usually our own gateway wrapping an
+        # upstream hiccup as "Provider 'X' returned an error for model 'Y'"
+        # (North Star §4.1), which is about the moment, not the model.
+        #
+        # Treating it as hard evidence hid nine live flagship models in
+        # production — GPT-5.6 sol/luna/terra, GPT-5.5-pro, Claude Opus 4.8 and
+        # Kimi K2.6 each hit exactly HARD_FAIL_THRESHOLD 502s during one bad
+        # window and stayed invisible long after the upstreams recovered. All
+        # nine answered a direct provider probe while marked down.
+        # Anything else (400, 5xx, unknown) → soft: never hide on ambiguous evidence.
         return "soft"
 
     if s == "error":

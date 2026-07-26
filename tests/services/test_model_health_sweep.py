@@ -34,11 +34,31 @@ class TestClassifyProbeResult:
     def test_fail_403_is_soft(self):
         assert classify_probe_result("fail", 403, "HTTP 403: forbidden") == "soft"
 
-    def test_fail_503_is_hard_fail(self):
-        assert classify_probe_result("fail", 503, "HTTP 503: upstream error") == "hard_fail"
+    def test_fail_503_is_soft(self):
+        assert classify_probe_result("fail", 503, "HTTP 503: upstream error") == "soft"
 
-    def test_fail_500_is_hard_fail(self):
-        assert classify_probe_result("fail", 500, "HTTP 500: server error") == "hard_fail"
+    def test_fail_500_is_soft(self):
+        assert classify_probe_result("fail", 500, "HTTP 500: server error") == "soft"
+
+    def test_gateway_502_wrapper_is_soft(self):
+        """The exact shape that hid nine live models in production.
+
+        Our own gateway wraps an upstream hiccup as a 502 (North Star §4.1).
+        GPT-5.6 sol/luna/terra, GPT-5.5-pro, Claude Opus 4.8 and Kimi K2.6 each
+        collected exactly HARD_FAIL_THRESHOLD of these during one bad window and
+        stayed hidden long after the upstreams recovered — every one of them
+        answered a direct provider probe while marked down.
+        """
+        assert (
+            classify_probe_result(
+                "fail", 502, "HTTP 502: Provider 'openai' returned an error for model 'gpt-5.6-sol'"
+            )
+            == "soft"
+        )
+
+    def test_5xx_with_not_found_text_is_still_hard_fail(self):
+        """Downgrading 5xx must not lose an explicit not-found body."""
+        assert classify_probe_result("fail", 500, "No endpoints found for model X") == "hard_fail"
 
     def test_timeout_is_soft(self):
         assert classify_probe_result("timeout", None, "Timed out after 60s") == "soft"
