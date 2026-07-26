@@ -543,9 +543,16 @@ async def get_stats():
                 "total": total_checks,
                 "successful": successful_checks,
                 "failed": total_checks - successful_checks,
-                "success_rate": round(
-                    (successful_checks / total_checks * 100) if total_checks > 0 else 0, 2
+                # null, not 0, when there are no samples. This endpoint is public
+                # and unauthenticated: reporting 0 for "no data" told every reader
+                # the gateway failed 100% of its checks. Nothing writes
+                # model_health_history today — IntelligentHealthMonitor exists as a
+                # module-level singleton but .start_monitoring() is never called —
+                # so this branch is the one production actually takes.
+                "success_rate": (
+                    round(successful_checks / total_checks * 100, 2) if total_checks > 0 else None
                 ),
+                "monitoring_active": total_checks > 0,
             },
             "last_updated": datetime.now(UTC).isoformat(),
         }
