@@ -480,8 +480,10 @@ class IntelligentHealthMonitor:
                     # Anthropic speaks /v1/messages, not the OpenAI chat shape.
                     return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
                 return f"{base}/chat/completions"
-        except Exception:
-            pass
+        except Exception as e:
+            # Registry unavailable (DB down, cache cold). Fall through to the
+            # hardcoded map rather than skipping the probe entirely.
+            logger.debug("Could not derive endpoint for %s from registry: %s", gateway, e)
 
         # Fallback to hardcoded endpoints
         _fallback_endpoints = {
