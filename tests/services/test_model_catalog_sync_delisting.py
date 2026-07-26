@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from src.services.model_catalog_sync import (
     sync_provider_models,
     transform_normalized_model_to_db_schema,
@@ -268,3 +270,73 @@ def test_sync_provider_models_active_provider_does_not_bulk_delist():
 
     mock_deactivate.assert_not_called()
     assert result["success"] is True
+
+
+class TestSyncHoldsCatalogGuard:
+    """The sync and the cache guard must interlock.
+
+    Fix A (suppress writes during sync) is worthless if the sync forgets to
+    raise the marker, and it deadlocks the catalog if it forgets to clear it.
+    """
+
+    def test_sync_wraps_batch_in_guard_and_releases_it(self, monkeypatch):
+        from src.services import model_catalog_sync
+
+        events = []
+        monkeypatch.setattr(
+            "src.services.cache.catalog_sync_guard.mark_sync_started",
+            lambda ttl=900: events.append("start") or True,
+        )
+        monkeypatch.setattr(
+            "src.services.cache.catalog_sync_guard.mark_sync_finished",
+            lambda: events.append("finish") or True,
+        )
+        monkeypatch.setattr(
+            model_catalog_sync,
+            "_sync_all_providers_inner",
+            lambda *a, **k: events.append("sync") or {"success": True},
+        )
+
+        model_catalog_sync.sync_all_providers(dry_run=False)
+
+        assert events == ["start", "sync", "finish"]
+
+    def test_guard_released_when_sync_raises(self, monkeypatch):
+        from src.services import model_catalog_sync
+
+        events = []
+        monkeypatch.setattr(
+            "src.services.cache.catalog_sync_guard.mark_sync_started",
+            lambda ttl=900: events.append("start") or True,
+        )
+        monkeypatch.setattr(
+            "src.services.cache.catalog_sync_guard.mark_sync_finished",
+            lambda: events.append("finish") or True,
+        )
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("provider API down")
+
+        monkeypatch.setattr(model_catalog_sync, "_sync_all_providers_inner", _boom)
+
+        with pytest.raises(RuntimeError):
+            model_catalog_sync.sync_all_providers(dry_run=False)
+
+        assert events == ["start", "finish"]
+
+    def test_dry_run_does_not_take_the_guard(self, monkeypatch):
+        """A dry run mutates nothing, so it must not suppress anyone's caching."""
+        from src.services import model_catalog_sync
+
+        events = []
+        monkeypatch.setattr(
+            "src.services.cache.catalog_sync_guard.mark_sync_started",
+            lambda ttl=900: events.append("start") or True,
+        )
+        monkeypatch.setattr(
+            model_catalog_sync, "_sync_all_providers_inner", lambda *a, **k: {"success": True}
+        )
+
+        model_catalog_sync.sync_all_providers(dry_run=True)
+
+        assert events == []

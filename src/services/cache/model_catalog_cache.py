@@ -329,6 +329,40 @@ class ModelCatalogCache:
             )
             return None
 
+    @staticmethod
+    def _should_skip_catalog_write(label: str, payload: list[Any]) -> bool:
+        """Reject catalog cache writes that would persist a known-bad snapshot.
+
+        Two cases, both learned the hard way:
+
+        1. A sync is rewriting ``models`` right now, so any rebuild reads a
+           half-written table. Caching that pins a wrong catalog for the whole
+           TTL — a 12s sync served 30 minutes of bad data.
+        2. The payload is empty. No caller benefits from a cached empty catalog,
+           and it is exactly how a failing query hides: ``get_all_unique_models_
+           for_catalog`` swallowed a schema error into ``[]`` and the warm step
+           cached it, so the emptiness looked deliberate.
+
+        Reads are never blocked — callers fall through to the database.
+        """
+        if not payload:
+            logger.warning(
+                "Cache SET skipped: %s payload is empty (refusing to cache nothing)", label
+            )
+            return True
+
+        from src.services.cache.catalog_sync_guard import is_sync_in_progress
+
+        if is_sync_in_progress():
+            logger.info(
+                "Cache SET skipped: %s — catalog sync in progress, "
+                "refusing to cache a half-written database",
+                label,
+            )
+            return True
+
+        return False
+
     def set_full_catalog(
         self,
         catalog: list[dict[str, Any]],
@@ -344,6 +378,9 @@ class ModelCatalogCache:
             True if successful, False otherwise
         """
         if not self.redis_client or not is_redis_available():
+            return False
+
+        if self._should_skip_catalog_write("full catalog", catalog):
             return False
 
         key = self.PREFIX_FULL_CATALOG
@@ -446,6 +483,9 @@ class ModelCatalogCache:
             True if successful, False otherwise
         """
         if not self.redis_client or not is_redis_available():
+            return False
+
+        if self._should_skip_catalog_write(f"provider catalog ({provider_name})", catalog):
             return False
 
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
@@ -1045,6 +1085,9 @@ class ModelCatalogCache:
             True if successful, False otherwise
         """
         if not self.redis_client or not is_redis_available():
+            return False
+
+        if self._should_skip_catalog_write("unique models", unique_models):
             return False
 
         key = self.PREFIX_UNIQUE

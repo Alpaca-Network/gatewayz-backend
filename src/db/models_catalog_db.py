@@ -2313,6 +2313,41 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
             logger.info("No unique models found in database")
             return []
 
+        # Provider lookup for the in-Python join below (see the mappings query).
+        # ~40 rows, one round-trip.
+        #
+        # Restricted to active + ENABLED_PROVIDERS so this catalog agrees with
+        # rebuild_full_catalog_from_providers. Without the filter the unique
+        # view is the one surface that still exposes deactivated providers —
+        # including the aggregator North Star §5 bars as primary supply — while
+        # every other endpoint hides them. Mappings for excluded providers are
+        # dropped by the `if not provider` guard in the grouping loop.
+        providers_by_id: dict[Any, dict[str, Any]] = {}
+        try:
+            from src.utils.provider_filter import is_provider_enabled
+
+            providers_response = (
+                supabase.table("providers").select("id, slug, name").eq("is_active", True).execute()
+            )
+            providers_by_id = {
+                row["id"]: row
+                for row in (providers_response.data or [])
+                if row.get("slug") and is_provider_enabled(row["slug"])
+            }
+        except Exception as provider_e:
+            logger.error(
+                "get_all_unique_models_for_catalog: failed to load providers for join: %s",
+                provider_e,
+            )
+            return []
+
+        if not providers_by_id:
+            logger.warning(
+                "get_all_unique_models_for_catalog: no active enabled providers; "
+                "returning empty unique catalog"
+            )
+            return []
+
         # Note: These two queries are not atomic. Brief inconsistency is possible during model updates.
         # Supabase (PostgREST) does not support multi-statement transactions via the REST API,
         # so unique_models and unique_models_provider are fetched in separate round-trips.
@@ -2337,12 +2372,24 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
                 )
                 break
 
+            # providers is joined in Python, not embedded. unique_models_provider
+            # has an index on provider_id but no foreign key to providers (see
+            # 20260129000001_create_unique_models_provider_table.sql), so
+            # PostgREST cannot resolve a `providers!inner(...)` embed and answers
+            # PGRST200 — which this function swallowed into an empty list,
+            # silently emptying the unique-models catalog. The provider table is
+            # tiny and already fetched above, so the join is free.
             ump_query = supabase.table("unique_models_provider").select(
-                "unique_model_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active), providers!inner(id, slug, name)"
+                "unique_model_id, provider_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active)"
             )
 
             if not include_inactive:
                 ump_query = ump_query.eq("models.is_active", True)
+
+            # Push the provider filter into the query instead of discarding rows
+            # after transfer: without it every mapping for every retired provider
+            # is paged over (13k rows, ~10s) just to be dropped in the join.
+            ump_query = ump_query.in_("provider_id", list(providers_by_id.keys()))
 
             ump_query = ump_query.range(ump_offset, ump_offset + page_size - 1)
             ump_response = ump_query.execute()
@@ -2384,7 +2431,12 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
                 continue
 
             model = ump.get("models", {})
-            provider = ump.get("providers", {})
+            provider = providers_by_id.get(ump.get("provider_id"))
+            if not provider:
+                # Mapping points at a provider row that no longer exists. Skip it
+                # rather than emitting an offer with a null provider — the router
+                # cannot route to it and the catalog would show a blank source.
+                continue
 
             # NOTE: pricing_prompt/pricing_completion/pricing_image/pricing_request
             # and architecture columns were dropped from the models table
