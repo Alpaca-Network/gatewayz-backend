@@ -30,6 +30,21 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# A 400 carrying one of these means the model executed and hit the probe's own
+# token ceiling — liveness proven, not a failure. Reasoning models trip it
+# routinely because reasoning tokens count against the budget.
+_OUTPUT_BUDGET_EXHAUSTED_PATTERNS = (
+    "max_tokens or model output limit was reached",
+    "please try again with higher max_tokens",
+)
+
+
+def _is_output_budget_exhausted(body: str | None) -> bool:
+    """True when a 400 body says the model ran out of *our* token budget."""
+    text = (body or "").lower()
+    return any(p in text for p in _OUTPUT_BUDGET_EXHAUSTED_PATTERNS)
+
+
 class MonitoringTier(str, Enum):  # noqa: UP042
     """Model monitoring tiers"""
 
@@ -378,8 +393,16 @@ class IntelligentHealthMonitor:
             test_payload = {
                 "model": probe_model_id,
                 "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": max_tokens,
             }
+            # OpenAI's reasoning generations reject max_tokens outright
+            # ("Unsupported parameter: 'max_tokens' is not supported") — gpt-5*,
+            # o1, o3 all 400 on it. max_completion_tokens is accepted by every
+            # OpenAI model tested, old and new (gpt-3.5-turbo and gpt-4o-mini
+            # included), so it is the safe choice for the whole gateway.
+            if gateway == "openai":
+                test_payload["max_completion_tokens"] = max_tokens
+            else:
+                test_payload["max_tokens"] = max_tokens
 
             # Get endpoint URL for gateway
             endpoint_url = self._get_gateway_endpoint(gateway)
@@ -409,6 +432,13 @@ class IntelligentHealthMonitor:
                 elif response.status_code == 404:
                     status = HealthCheckStatus.NOT_FOUND
                     error_message = "Model not found"
+                elif response.status_code == 400 and _is_output_budget_exhausted(response.text):
+                    # The model ran and spent our (deliberately tiny) token budget
+                    # before finishing. Reasoning models do this routinely because
+                    # reasoning tokens count against the limit. It proves liveness
+                    # just as well as a 200 — the opposite reading would mark every
+                    # reasoning model permanently down.
+                    status = HealthCheckStatus.SUCCESS
                 else:
                     status = HealthCheckStatus.ERROR
                     error_message = f"HTTP {response.status_code}: {response.text[:200]}"
