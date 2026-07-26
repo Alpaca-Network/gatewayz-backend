@@ -177,3 +177,22 @@ def test_no_mappings_short_circuits_before_touching_unique_models(monkeypatch, f
 
     assert models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False) == []
     assert not [c for c in fake_supabase.get("in_", []) if c[0] == "unique_models"]
+
+
+def test_deadline_truncation_is_not_reported_as_missing_rows(monkeypatch, fake_supabase, caplog):
+    """A timeout must not be blamed on a data inconsistency.
+
+    The chunk loop can stop early on the wall-clock deadline. Ids it never got
+    to are absent from the result for a reason that has nothing to do with rows
+    being removed between the two non-atomic reads.
+    """
+    import time as _time
+
+    monkeypatch.setattr(models_catalog_db, "DB_QUERY_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(_time, "monotonic", lambda: 10_000.0)
+
+    with caplog.at_level("WARNING"):
+        models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False)
+
+    consistency_warnings = [r for r in caplog.records if "Catalog consistency warning" in r.message]
+    assert not consistency_warnings, "truncated ids must not be reported as removed rows"

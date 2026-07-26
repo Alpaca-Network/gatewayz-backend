@@ -2394,14 +2394,18 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
             logger.info("No provider mappings survived the provider join; unique catalog is empty")
             return []
         unique_models_data: list[dict[str, Any]] = []
+        queried_ids: set[Any] = set()
         UNIQUE_MODEL_ID_CHUNK = 200
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
         for chunk_start in range(0, len(referenced_ids), UNIQUE_MODEL_ID_CHUNK):
-            if time.monotonic() > start + DB_QUERY_TIMEOUT_SECONDS:
+            if time.monotonic() > deadline:
                 logger.warning(
                     f"get_all_unique_models_for_catalog (unique_models lookup): wall-clock "
                     f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
-                    f"{len(unique_models_data)} unique models; returning partial results"
+                    f"{len(unique_models_data)} unique models "
+                    f"({len(referenced_ids) - len(queried_ids)} id(s) never queried); "
+                    f"returning partial results"
                 )
                 break
 
@@ -2413,6 +2417,7 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
                 .execute()
             )
             unique_models_data.extend(um_response.data or [])
+            queried_ids.update(chunk)
 
         if not unique_models_data:
             logger.info("No unique models found in database")
@@ -2421,8 +2426,13 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
         # Consistency check: a mapping may reference a unique_models row that was
         # deleted between the two non-atomic reads. Usable, but worth surfacing —
         # those mappings are skipped when the result is assembled below.
+        #
+        # Scoped to ids we actually queried. A deadline break above leaves the
+        # rest unqueried, and reporting those as "removed" would blame a data
+        # inconsistency for what is really a timeout — the truncation is already
+        # logged on its own terms.
         found_ids = {row["id"] for row in unique_models_data}
-        orphaned_ids = {mid for mid in referenced_ids if mid not in found_ids}
+        orphaned_ids = queried_ids - found_ids
         if orphaned_ids:
             logger.warning(
                 f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) referenced "
