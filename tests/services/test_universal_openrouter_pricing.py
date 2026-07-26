@@ -28,8 +28,14 @@ def test_base_id_match_without_provider():
     assert p is not None and float(p["prompt"]) == 3e-6
 
 
-def test_enrich_prices_direct_provider_from_openrouter():
+def test_enrich_prices_direct_provider_from_openrouter(monkeypatch):
     # A moonshot model with no DB/manual pricing gets cross-referenced automatically.
+    #
+    # The manual tier is emptied explicitly rather than relying on this model
+    # being absent from manual_pricing.json: that file is refreshed from the
+    # served catalog, so an entry appearing there would otherwise satisfy tier 2
+    # and silently stop this test exercising cross-reference at all.
+    monkeypatch.setattr(pl, "load_manual_pricing", dict)
     model = {"id": "moonshot/kimi-k3", "pricing": {"prompt": None, "completion": None}}
     out = pl.enrich_model_with_pricing(
         model, gateway="moonshot", pricing_batch={}, openrouter_index=_index()
