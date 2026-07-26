@@ -282,8 +282,13 @@ _epoch_lock = threading.Lock()
 def get_catalog_epoch(force: bool = False) -> int:
     """Current catalog epoch, re-read from Redis at most every few seconds.
 
-    Fails closed to the last known value: if Redis is unreachable we keep
-    serving local entries rather than throwing the cache away on every read.
+    The value only ever moves FORWARD. A read that races a bump — or a replica
+    that lags — can return an older number, and letting that overwrite a newer
+    one would silently un-invalidate a catalog we had just superseded, which is
+    the exact failure this mechanism exists to prevent.
+
+    Fails closed to the last known value: if Redis is unreachable we keep serving
+    local entries rather than discarding every worker's cache on each read.
     """
     global _epoch_value, _epoch_checked_at
 
@@ -291,28 +296,32 @@ def get_catalog_epoch(force: bool = False) -> int:
     with _epoch_lock:
         if not force and (now - _epoch_checked_at) < _EPOCH_RECHECK_SECONDS:
             return _epoch_value
+        # Claim the refresh before releasing the lock so concurrent readers do
+        # not all fire their own Redis GET when the interval lapses.
+        _epoch_checked_at = now
+        known = _epoch_value
 
     try:
         from src.config.redis_config import get_redis_client, is_redis_available
 
         client = get_redis_client()
-        if client and is_redis_available():
-            raw = client.get(CATALOG_EPOCH_KEY)
-            value = int(raw) if raw not in (None, b"", "") else 0
-        else:
-            value = _epoch_value
+        if not client or not is_redis_available():
+            return known
+        raw = client.get(CATALOG_EPOCH_KEY)
+        observed = int(raw) if raw not in (None, b"", "") else 0
     except Exception as e:  # pragma: no cover - defensive
-        logger.debug("Catalog epoch read failed, keeping %s: %s", _epoch_value, e)
-        value = _epoch_value
+        logger.debug("Catalog epoch read failed, keeping %s: %s", known, e)
+        return known
 
     with _epoch_lock:
-        _epoch_value = value
-        _epoch_checked_at = now
-    return value
+        _epoch_value = max(_epoch_value, observed)
+        return _epoch_value
 
 
 def bump_catalog_epoch() -> int:
     """Invalidate every worker's local catalog. Call alongside Redis invalidation."""
+    global _epoch_value, _epoch_checked_at
+
     try:
         from src.config.redis_config import get_redis_client, is_redis_available
 
@@ -320,14 +329,20 @@ def bump_catalog_epoch() -> int:
         if not client or not is_redis_available():
             return _epoch_value
 
+        # INCR already returns the authoritative new value; re-reading it would
+        # cost a round-trip and could observe a lagging replica.
         new_epoch = int(client.incr(CATALOG_EPOCH_KEY))
-        logger.info("Catalog epoch bumped to %s (local caches invalidated)", new_epoch)
-        # Reflect it locally at once so the caller does not serve its own stale copy.
-        get_catalog_epoch(force=True)
-        return new_epoch
     except Exception as e:
         logger.warning("Could not bump catalog epoch: %s", e)
         return _epoch_value
+
+    with _epoch_lock:
+        _epoch_value = max(_epoch_value, new_epoch)
+        _epoch_checked_at = time.time()
+        current = _epoch_value
+
+    logger.info("Catalog epoch bumped to %s (local caches invalidated)", current)
+    return current
 
 
 def get_local_catalog(provider: str) -> tuple[list[dict] | None, bool]:

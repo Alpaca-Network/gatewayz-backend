@@ -97,3 +97,59 @@ class TestDegradation:
         monkeypatch.setattr("src.config.redis_config.get_redis_client", lambda: None)
 
         assert lmc.bump_catalog_epoch() == lmc._epoch_value
+
+
+class TestEpochNeverRegresses:
+    """A stale read must not un-invalidate a catalog we just superseded.
+
+    get_catalog_epoch releases the lock to do its Redis read, so a slow reader —
+    or a lagging replica — can return a number older than one another thread
+    already recorded. Overwriting with it would silently resurrect a superseded
+    catalog, defeating the entire mechanism.
+    """
+
+    def test_a_lagging_read_cannot_lower_the_epoch(self, redis, monkeypatch):
+        monkeypatch.setattr(lmc, "_epoch_value", 9)
+        redis.get.return_value = b"4"  # replica behind, or a raced read
+
+        assert lmc.get_catalog_epoch(force=True) == 9
+
+    def test_a_newer_read_does_advance_it(self, redis, monkeypatch):
+        monkeypatch.setattr(lmc, "_epoch_value", 2)
+        redis.get.return_value = b"11"
+
+        assert lmc.get_catalog_epoch(force=True) == 11
+
+    def test_bump_uses_the_incr_result_without_a_second_read(self, redis):
+        """INCR already returns the authoritative value; re-reading can lag."""
+        redis.incr.return_value = 5
+        redis.get.reset_mock()
+
+        assert lmc.bump_catalog_epoch() == 5
+        redis.get.assert_not_called()
+
+    def test_bump_cannot_lower_the_epoch_either(self, redis, monkeypatch):
+        monkeypatch.setattr(lmc, "_epoch_value", 8)
+        redis.incr.return_value = 3
+
+        assert lmc.bump_catalog_epoch() == 8
+
+
+class TestConcurrentRefresh:
+    def test_only_one_thread_fires_the_redis_read_per_interval(self, redis):
+        """The refresh window is claimed under the lock, so a lapsed interval
+        does not produce a burst of GETs from every concurrent reader."""
+        import threading
+
+        lmc.get_catalog_epoch(force=True)
+        redis.get.reset_mock()
+        # Expire the memo window.
+        lmc._epoch_checked_at = 0.0
+
+        threads = [threading.Thread(target=lmc.get_catalog_epoch) for _ in range(12)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert redis.get.call_count == 1

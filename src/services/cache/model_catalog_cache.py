@@ -424,6 +424,9 @@ class ModelCatalogCache:
         try:
             self.redis_client.delete(key)
             self._stats["invalidations"] += 1
+            # After the delete, and here rather than in the module wrapper so
+            # the cascade path (which calls this method directly) also bumps.
+            _bump_local_cache_epoch()
             logger.info("Cache INVALIDATE: Full model catalog")
             return True
 
@@ -546,6 +549,11 @@ class ModelCatalogCache:
             self._stats["invalidations"] += 1
             if cascade:
                 self.invalidate_full_catalog()
+            # After the delete, so no request can re-read the stale Redis value
+            # and re-stamp it locally under the new epoch. Placed here rather
+            # than in the module-level wrapper because a debounced invalidation
+            # re-enters this method directly when it finally runs.
+            _bump_local_cache_epoch()
             logger.info(
                 f"Cache INVALIDATE: Provider catalog for {provider_name} (cascade={cascade})"
             )
@@ -1369,9 +1377,8 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
 def invalidate_full_catalog() -> bool:
     """Invalidate the full catalog cache"""
     cache = get_model_catalog_cache()
-    result = cache.invalidate_full_catalog()
-    _bump_local_cache_epoch()
-    return result
+    # The epoch bump lives inside the method so the cascade path bumps too.
+    return cache.invalidate_full_catalog()
 
 
 def _bump_local_cache_epoch() -> None:
@@ -1528,7 +1535,8 @@ def invalidate_provider_catalog(
         True if successful (or scheduled via debouncing), False otherwise
     """
     cache = get_model_catalog_cache()
-    _bump_local_cache_epoch()
+    # The epoch bump lives inside the method, after the Redis delete, so it also
+    # fires for a debounced invalidation when that finally runs.
     return cache.invalidate_provider_catalog(provider_name, cascade=cascade, debounce=debounce)
 
 
