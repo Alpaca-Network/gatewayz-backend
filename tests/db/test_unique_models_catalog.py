@@ -152,3 +152,47 @@ def test_provider_filter_is_pushed_into_the_query(fake_supabase):
     pushed = [c for c in fake_supabase["in_"] if c[0] == "unique_models_provider"]
     assert pushed, "provider_id filter must be applied server-side"
     assert set(pushed[0][2]) == {10, 99}
+
+
+def test_unique_models_are_looked_up_by_referenced_ids(fake_supabase):
+    """The mappings drive the unique_models fetch, not the other way round.
+
+    unique_models is sized by every model ever seen (11k rows in production);
+    the result is sized by the current roster (60). Paging the whole table to
+    keep 60 rows cost 12 round-trips and dominated the query.
+    """
+    models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False)
+
+    by_table = {table: field for table, field, _ in fake_supabase["in_"]}
+    assert by_table.get("unique_models") == "id", "unique_models must be filtered by id"
+
+    lookup = [c for c in fake_supabase["in_"] if c[0] == "unique_models"][0]
+    # Only the mapping that survives the provider join is referenced.
+    assert lookup[2] == [1]
+
+
+def test_no_mappings_short_circuits_before_touching_unique_models(monkeypatch, fake_supabase):
+    """Nothing to join means nothing to look up — skip the round-trip."""
+    monkeypatch.setattr("src.utils.provider_filter.is_provider_enabled", lambda slug: False)
+
+    assert models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False) == []
+    assert not [c for c in fake_supabase.get("in_", []) if c[0] == "unique_models"]
+
+
+def test_deadline_truncation_is_not_reported_as_missing_rows(monkeypatch, fake_supabase, caplog):
+    """A timeout must not be blamed on a data inconsistency.
+
+    The chunk loop can stop early on the wall-clock deadline. Ids it never got
+    to are absent from the result for a reason that has nothing to do with rows
+    being removed between the two non-atomic reads.
+    """
+    import time as _time
+
+    monkeypatch.setattr(models_catalog_db, "DB_QUERY_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(_time, "monotonic", lambda: 10_000.0)
+
+    with caplog.at_level("WARNING"):
+        models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False)
+
+    consistency_warnings = [r for r in caplog.records if "Catalog consistency warning" in r.message]
+    assert not consistency_warnings, "truncated ids must not be reported as removed rows"
