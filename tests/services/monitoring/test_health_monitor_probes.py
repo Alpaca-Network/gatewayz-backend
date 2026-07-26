@@ -157,3 +157,62 @@ class TestProbeUsesNativeModelId:
             probe_id = probe_id[len(gateway) + 1 :]
 
         assert probe_id == "openai/gpt-4"
+
+
+class TestTokenBudgetParameter:
+    """OpenAI's reasoning generations reject `max_tokens` outright."""
+
+    @pytest.mark.parametrize(
+        "gateway,expected",
+        [
+            ("openai", "max_completion_tokens"),
+            ("anthropic", "max_tokens"),
+            ("moonshot", "max_tokens"),
+            ("xai", "max_tokens"),
+        ],
+    )
+    def test_openai_uses_max_completion_tokens(self, gateway, expected):
+        payload = {"model": "m", "messages": [{"role": "user", "content": "test"}]}
+        if gateway == "openai":
+            payload["max_completion_tokens"] = 5
+        else:
+            payload["max_tokens"] = 5
+
+        assert expected in payload
+        assert ("max_tokens" in payload) is (gateway != "openai")
+
+
+class TestOutputBudgetExhaustedIsAlive:
+    """A 400 saying the model spent our token budget proves it ran.
+
+    Reading it as a failure would mark every reasoning model permanently down —
+    the same mistake that hid nine flagship models in #2190.
+    """
+
+    def test_openai_budget_message_counts_as_alive(self):
+        from src.services.monitoring.intelligent_health_monitor import (
+            _is_output_budget_exhausted,
+        )
+
+        body = (
+            '{"error":{"message":"Could not finish the message because max_tokens '
+            'or model output limit was reached. Please try again with higher max_tokens."}}'
+        )
+        assert _is_output_budget_exhausted(body) is True
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            '{"error":{"message":"invalid model ID"}}',
+            '{"error":{"message":"Unsupported parameter: max_tokens is not supported"}}',
+            '{"code":"invalid-argument","error":"Model not found: grok-2-vision"}',
+            "",
+            None,
+        ],
+    )
+    def test_real_failures_are_not_swallowed(self, body):
+        from src.services.monitoring.intelligent_health_monitor import (
+            _is_output_budget_exhausted,
+        )
+
+        assert _is_output_budget_exhausted(body) is False
