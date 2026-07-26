@@ -1047,6 +1047,22 @@ def sync_all_providers(
     Returns:
         Dictionary with overall sync results and performance metrics
     """
+    from src.services.cache.catalog_sync_guard import catalog_sync_guard
+
+    # Hold the guard for the whole batch, not per provider: the aggregate catalog
+    # spans every provider, so it is only coherent once the last one is written.
+    # A dry run mutates nothing and needs no guard.
+    if dry_run:
+        return _sync_all_providers_inner(provider_slugs, dry_run)
+
+    with catalog_sync_guard():
+        return _sync_all_providers_inner(provider_slugs, dry_run)
+
+
+def _sync_all_providers_inner(
+    provider_slugs: list[str] | None = None, dry_run: bool = False
+) -> dict[str, Any]:
+    """Body of :func:`sync_all_providers`, run inside the catalog sync guard."""
     import time
 
     try:
