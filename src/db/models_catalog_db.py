@@ -2275,44 +2275,14 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
         start = time.monotonic()
         logger.debug(f"Fetching unique models (include_inactive={include_inactive})")
 
-        # OPTIMIZATION: Fetch all unique models with pagination
-        # to avoid Supabase's 1000-row default truncation
-        unique_models_data = []
         page_size = SUPABASE_PAGE_SIZE
-        um_offset = 0
-        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
-        while True:
-            if time.monotonic() > deadline:
-                logger.warning(
-                    f"get_all_unique_models_for_catalog (unique_models loop): wall-clock "
-                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
-                    f"{len(unique_models_data)} unique models; returning partial results"
-                )
-                break
-
-            um_query = (
-                supabase.table("unique_models")
-                .select("id, model_name, model_count, sample_model_id")
-                .range(um_offset, um_offset + page_size - 1)
-            )
-            um_response = um_query.execute()
-            batch = um_response.data or []
-
-            if not batch:
-                break
-
-            unique_models_data.extend(batch)
-
-            if len(batch) < page_size:
-                break
-
-            um_offset += page_size
-
-        if not unique_models_data:
-            logger.info("No unique models found in database")
-            return []
-
+        # Order matters: the mappings are fetched FIRST and the unique_models rows
+        # are then looked up by the ids they reference. Fetching unique_models
+        # first meant paging the whole table (11k rows, 12 round-trips) to keep
+        # the handful the enabled providers actually offer — the table is sized by
+        # every model ever seen, the result by the current roster.
+        #
         # Provider lookup for the in-Python join below (see the mappings query).
         # ~40 rows, one round-trip.
         #
@@ -2352,9 +2322,6 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
         # Supabase (PostgREST) does not support multi-statement transactions via the REST API,
         # so unique_models and unique_models_provider are fetched in separate round-trips.
         # In practice this window is milliseconds and only affects catalog reads, not writes.
-
-        # Record the set of unique_model_ids from the first query for staleness detection below.
-        unique_model_ids_from_first_query = {row["id"] for row in unique_models_data}
 
         # OPTIMIZATION: Fetch ALL provider mappings with pagination
         # This replaces N individual queries (one per unique model)
@@ -2405,19 +2372,62 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
 
             ump_offset += page_size
 
-        # Staleness check: warn if the second query references unique_model_ids that were not
-        # present in the first query. This can happen when a model is inserted between the two
-        # queries (non-atomic reads). The data is still usable but may be slightly inconsistent.
-        orphaned_ids = {
-            ump.get("unique_model_id")
-            for ump in all_provider_mappings
-            if ump.get("unique_model_id") not in unique_model_ids_from_first_query
-        }
+        if not all_provider_mappings:
+            logger.info("No provider mappings for enabled providers; unique catalog is empty")
+            return []
+
+        # Fetch only the unique_models rows the mappings actually reference.
+        # `in_` filters are URL parameters, so chunk the ids to keep the request
+        # line well inside the server's limit.
+        # Only ids whose provider survives the join — a mapping to a dropped
+        # provider contributes nothing, so looking its unique_models row up is
+        # wasted work. The provider filter is already pushed into the mappings
+        # query; this also covers a provider deleted between the two reads.
+        referenced_ids = sorted(
+            {
+                ump["unique_model_id"]
+                for ump in all_provider_mappings
+                if ump.get("unique_model_id") and ump.get("provider_id") in providers_by_id
+            }
+        )
+        if not referenced_ids:
+            logger.info("No provider mappings survived the provider join; unique catalog is empty")
+            return []
+        unique_models_data: list[dict[str, Any]] = []
+        UNIQUE_MODEL_ID_CHUNK = 200
+
+        for chunk_start in range(0, len(referenced_ids), UNIQUE_MODEL_ID_CHUNK):
+            if time.monotonic() > start + DB_QUERY_TIMEOUT_SECONDS:
+                logger.warning(
+                    f"get_all_unique_models_for_catalog (unique_models lookup): wall-clock "
+                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
+                    f"{len(unique_models_data)} unique models; returning partial results"
+                )
+                break
+
+            chunk = referenced_ids[chunk_start : chunk_start + UNIQUE_MODEL_ID_CHUNK]
+            um_response = (
+                supabase.table("unique_models")
+                .select("id, model_name, model_count, sample_model_id")
+                .in_("id", chunk)
+                .execute()
+            )
+            unique_models_data.extend(um_response.data or [])
+
+        if not unique_models_data:
+            logger.info("No unique models found in database")
+            return []
+
+        # Consistency check: a mapping may reference a unique_models row that was
+        # deleted between the two non-atomic reads. Usable, but worth surfacing —
+        # those mappings are skipped when the result is assembled below.
+        found_ids = {row["id"] for row in unique_models_data}
+        orphaned_ids = {mid for mid in referenced_ids if mid not in found_ids}
         if orphaned_ids:
             logger.warning(
-                f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) returned "
-                f"by unique_models_provider were not present in the unique_models snapshot "
-                f"(ids: {sorted(orphaned_ids)}). This indicates a model was added between the "
+                f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) referenced "
+                f"by unique_models_provider have no unique_models row "
+                f"(ids: {sorted(orphaned_ids)}). This indicates a row was removed between the "
                 f"two non-atomic queries. The affected provider mappings will be skipped."
             )
 

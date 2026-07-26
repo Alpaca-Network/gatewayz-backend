@@ -152,3 +152,28 @@ def test_provider_filter_is_pushed_into_the_query(fake_supabase):
     pushed = [c for c in fake_supabase["in_"] if c[0] == "unique_models_provider"]
     assert pushed, "provider_id filter must be applied server-side"
     assert set(pushed[0][2]) == {10, 99}
+
+
+def test_unique_models_are_looked_up_by_referenced_ids(fake_supabase):
+    """The mappings drive the unique_models fetch, not the other way round.
+
+    unique_models is sized by every model ever seen (11k rows in production);
+    the result is sized by the current roster (60). Paging the whole table to
+    keep 60 rows cost 12 round-trips and dominated the query.
+    """
+    models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False)
+
+    by_table = {table: field for table, field, _ in fake_supabase["in_"]}
+    assert by_table.get("unique_models") == "id", "unique_models must be filtered by id"
+
+    lookup = [c for c in fake_supabase["in_"] if c[0] == "unique_models"][0]
+    # Only the mapping that survives the provider join is referenced.
+    assert lookup[2] == [1]
+
+
+def test_no_mappings_short_circuits_before_touching_unique_models(monkeypatch, fake_supabase):
+    """Nothing to join means nothing to look up — skip the round-trip."""
+    monkeypatch.setattr("src.utils.provider_filter.is_provider_enabled", lambda slug: False)
+
+    assert models_catalog_db.get_all_unique_models_for_catalog(include_inactive=False) == []
+    assert not [c for c in fake_supabase.get("in_", []) if c[0] == "unique_models"]
