@@ -122,3 +122,39 @@ class TestPriceReferenceProvidersConfig:
         importlib.reload(config)
 
         assert config.Config.PRICE_REFERENCE_PROVIDERS == frozenset()
+
+
+class TestIndexInvalidation:
+    """A refreshed price book must not be shadowed by a cached index.
+
+    The index has no TTL, so a stale copy survives until something clears it.
+    Syncing the book and then a provider in the same process priced the provider
+    from the old copy — claude-opus-5 came back at 0.0 that way, moments after
+    its units were corrected.
+    """
+
+    def test_invalidation_clears_the_cached_index(self, monkeypatch):
+        monkeypatch.setattr(
+            pricing_lookup,
+            "_load_price_reference_catalog",
+            lambda: [{"id": "a/b", "pricing": {"prompt": "0.000005"}}],
+        )
+        monkeypatch.setattr(pricing_lookup, "_is_building_catalog", lambda: False)
+
+        first = pricing_lookup._build_openrouter_pricing_index()
+        assert first["a/b"] == {"prompt": "0.000005"}
+
+        # New book, same process.
+        monkeypatch.setattr(
+            pricing_lookup,
+            "_load_price_reference_catalog",
+            lambda: [{"id": "a/b", "pricing": {"prompt": "0.000009"}}],
+        )
+
+        # Without invalidation the old value persists...
+        assert pricing_lookup._build_openrouter_pricing_index()["a/b"] == {"prompt": "0.000005"}
+
+        pricing_lookup.invalidate_openrouter_pricing_index()
+
+        # ...and after it, the refreshed book is what gets used.
+        assert pricing_lookup._build_openrouter_pricing_index()["a/b"] == {"prompt": "0.000009"}

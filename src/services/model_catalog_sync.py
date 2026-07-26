@@ -1061,6 +1061,23 @@ def sync_provider_models(
                     invalidate_catalog_cache(provider_slug)
                     logger.info(f"[{provider_slug.upper()}] Cache INVALIDATE (full cascade)")
 
+                # A refreshed price book is useless while the index built from it
+                # is still cached — that index has no TTL, so without this the new
+                # prices only take effect after a restart. Syncing the book then
+                # syncing a provider in the same process would price it from the
+                # stale copy, which is how claude-opus-5 came back at 0.0 right
+                # after the units were corrected.
+                if provider_slug in _SyncConfig.PRICE_REFERENCE_PROVIDERS:
+                    from src.services.pricing.pricing_lookup import (
+                        invalidate_openrouter_pricing_index,
+                    )
+
+                    invalidate_openrouter_pricing_index()
+                    logger.info(
+                        f"[{provider_slug.upper()}] Price index invalidated "
+                        f"(price-reference sync)"
+                    )
+
             except Exception as cache_e:
                 logger.warning(f"[{provider_slug.upper()}] Cache invalidation failed: {cache_e}")
 
