@@ -14,12 +14,6 @@ from src.services.monitoring import intelligent_health_monitor as ihm
 from src.services.monitoring.intelligent_health_monitor import IntelligentHealthMonitor
 
 
-@pytest.fixture(autouse=True)
-def _reset_scope_cache(monkeypatch):
-    monkeypatch.setattr(ihm, "_servable_ids", set())
-    monkeypatch.setattr(ihm, "_servable_loaded_at", 0.0)
-
-
 @pytest.fixture
 def monitor():
     return IntelligentHealthMonitor(redis_coordination=False)
@@ -59,7 +53,7 @@ class TestScopeFilter:
         rows = [{"provider": "anthropic", "model": "anthropic/anything", "gateway": "anthropic"}]
         monkeypatch.setattr("src.config.supabase_config.supabase", _tracking_client(rows))
         monkeypatch.setattr("src.utils.provider_filter.is_provider_enabled", lambda s: True)
-        monkeypatch.setattr(ihm, "_get_servable_model_ids", lambda: set())
+        monkeypatch.setattr(ihm, "_get_servable_model_ids", set)
 
         result = await monitor._get_models_for_checking()
 
