@@ -113,6 +113,13 @@ class TestDisabledProvidersAreNotProbed:
         monkeypatch.setattr(
             "src.utils.provider_filter.is_provider_enabled", lambda slug: slug == "openai"
         )
+        # Isolate the provider filter. Without pinning the scope, the servable
+        # lookup would query whatever database the environment happens to have
+        # and drop these fixtures for not being in it — an empty scope disables
+        # that second filter by design.
+        monkeypatch.setattr(
+            "src.services.monitoring.intelligent_health_monitor._get_servable_model_ids", set
+        )
 
         result = await monitor._get_models_for_checking()
 
