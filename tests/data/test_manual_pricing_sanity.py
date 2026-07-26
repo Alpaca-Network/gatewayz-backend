@@ -27,24 +27,47 @@ def pricing():
     return json.loads(_PRICING_PATH.read_text())
 
 
+# Both directions are billed, so an entry is only usable with both fields. The
+# validators below deliberately do NOT default a missing price to "0": that is
+# how a record with no completion price would sail through every check as if
+# completion were free. Absence is its own failure, asserted separately.
+_PRICE_FIELDS = ("prompt", "completion")
+
+
 def _entries(pricing):
+    """Yield (gateway, model_id, entry) for anything that looks like a price record."""
     for gateway, models in pricing.items():
         if gateway in _SKIP or not isinstance(models, dict):
             continue
         for model_id, entry in models.items():
-            if isinstance(entry, dict) and "prompt" in entry:
+            if isinstance(entry, dict) and any(f in entry for f in _PRICE_FIELDS):
                 yield gateway, model_id, entry
 
 
+def _priced_fields(entry):
+    """(field, raw value) for the price fields actually present."""
+    return [(f, entry[f]) for f in _PRICE_FIELDS if f in entry]
+
+
 class TestPricingValues:
+    def test_every_entry_declares_both_directions(self, pricing):
+        """A missing price is not a free one — it must fail, not default to zero."""
+        incomplete = [
+            f"{gateway}/{model_id} missing {field}"
+            for gateway, model_id, entry in _entries(pricing)
+            for field in _PRICE_FIELDS
+            if field not in entry
+        ]
+        assert not incomplete, incomplete
+
     def test_every_price_parses_as_a_number(self, pricing):
         bad = []
         for gateway, model_id, entry in _entries(pricing):
-            for field in ("prompt", "completion"):
+            for field, raw in _priced_fields(entry):
                 try:
-                    Decimal(str(entry.get(field, "0")))
+                    Decimal(str(raw))
                 except Exception:
-                    bad.append(f"{gateway}/{model_id}.{field}={entry.get(field)!r}")
+                    bad.append(f"{gateway}/{model_id}.{field}={raw!r}")
         assert not bad, bad
 
     def test_no_entry_is_written_in_per_token_units(self, pricing):
@@ -55,8 +78,8 @@ class TestPricingValues:
         """
         suspect = []
         for gateway, model_id, entry in _entries(pricing):
-            for field in ("prompt", "completion"):
-                value = Decimal(str(entry.get(field, "0")))
+            for field, raw in _priced_fields(entry):
+                value = Decimal(str(raw))
                 if value != 0 and value < Decimal("0.0001"):
                     suspect.append(f"{gateway}/{model_id}.{field}={value}")
         assert not suspect, f"per-token values in a per-1M file: {suspect}"
@@ -64,20 +87,20 @@ class TestPricingValues:
     def test_no_price_is_absurdly_high(self, pricing):
         """Catches the inverse error — a per-1M value multiplied again."""
         suspect = [
-            f"{g}/{m}.{f}={entry[f]}"
+            f"{g}/{m}.{f}={raw}"
             for g, m, entry in _entries(pricing)
-            for f in ("prompt", "completion")
-            if Decimal(str(entry.get(f, "0"))) > Decimal("1000")
+            for f, raw in _priced_fields(entry)
+            if Decimal(str(raw)) > Decimal("1000")
         ]
         assert not suspect, f"implausibly expensive: {suspect}"
 
     def test_no_scientific_notation(self, pricing):
         """Plain decimals only — this file is edited by hand."""
         sci = [
-            f"{g}/{m}.{f}={entry[f]}"
+            f"{g}/{m}.{f}={raw}"
             for g, m, entry in _entries(pricing)
-            for f in ("prompt", "completion")
-            if "e" in str(entry.get(f, "")).lower()
+            for f, raw in _priced_fields(entry)
+            if "e" in str(raw).lower()
         ]
         assert not sci, sci
 
