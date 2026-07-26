@@ -216,7 +216,15 @@ async def lifespan(app):
                     "  providers        ENABLED_PROVIDERS is UNSET — leaving the providers "
                     "table untouched. Set it explicitly to manage the roster from config."
                 )
-            elif enabled is not None:
+            elif enabled is None:
+                # Explicitly empty means "no restriction", not "activate all 37
+                # rows" — most have no API key configured. The filter already
+                # lets every provider through; the DB roster stays authoritative.
+                logger.info(
+                    "  providers        ENABLED_PROVIDERS is empty (no restriction) — "
+                    "provider activity left to the DB roster"
+                )
+            else:
                 supabase = get_client_for_query()
                 # Deactivate providers not in ENABLED_PROVIDERS
                 resp = supabase.table("providers").select("slug, is_active").execute()
