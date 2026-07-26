@@ -58,3 +58,38 @@ class TestLoadUnservableModelIds:
         )
 
         assert model_catalog_sync._load_unservable_model_ids(1) == set()
+
+
+def test_flag_on_a_currently_active_row_still_pins_it(monkeypatch):
+    """The flag is the operator's intent and must stand on its own.
+
+    Filtering the lookup on is_active=false would mean a flag set on a live row
+    never takes effect, and a row a previous sync re-activated could never be
+    pinned back down — the exact loop this fix exists to close.
+    """
+    rows = [
+        {"provider_model_id": "openai/gpt-audio", "metadata": {"delist_reason": "unservable"}},
+    ]
+    captured = {}
+
+    def _client_recording_filters(**_k):
+        q = MagicMock()
+        q.select.return_value = q
+
+        def _eq(field, value):
+            captured[field] = value
+            return q
+
+        q.eq.side_effect = _eq
+        q.execute.return_value = MagicMock(data=rows)
+        client = MagicMock()
+        client.table.return_value = q
+        return client
+
+    monkeypatch.setattr(
+        "src.config.supabase_config.get_client_for_query", _client_recording_filters
+    )
+
+    assert model_catalog_sync._load_unservable_model_ids(7) == {"openai/gpt-audio"}
+    assert "is_active" not in captured, "lookup must not require the row to be inactive already"
+    assert captured["provider_id"] == 7

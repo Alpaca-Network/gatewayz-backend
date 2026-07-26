@@ -679,12 +679,16 @@ def _load_unservable_model_ids(provider_id: int) -> set[str]:
     try:
         from src.config.supabase_config import get_client_for_query
 
+        # Deliberately not filtered on is_active: the metadata flag is the
+        # operator's intent and has to stand on its own. Requiring the row to be
+        # inactive already would mean a flag set on a live row never takes
+        # effect — and a row the previous sync re-activated could never be
+        # pinned back down.
         response = (
             get_client_for_query(read_only=True)
             .table("models")
             .select("provider_model_id, metadata")
             .eq("provider_id", provider_id)
-            .eq("is_active", False)
             .execute()
         )
         return {
