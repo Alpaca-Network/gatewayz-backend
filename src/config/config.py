@@ -491,6 +491,18 @@ class Config:
         "yes",
     }
 
+    # Providers synced purely as a price book. They stay delisted as supply —
+    # ENABLED_PROVIDERS still governs routing and listing — but their catalogs
+    # keep refreshing so models whose own provider publishes no pricing (OpenAI,
+    # Anthropic and xAI all return catalogs with no prices) can still acquire
+    # one. Aggregators are the only place those prices exist in machine-readable
+    # form; §5 bars them as supply, not as data.
+    PRICE_REFERENCE_PROVIDERS: frozenset[str] = frozenset(
+        s.strip()
+        for s in os.environ.get("PRICE_REFERENCE_PROVIDERS", "openrouter").split(",")
+        if s.strip()
+    )
+
     # Live per-model health probing (src/services/monitoring/intelligent_health_monitor.py).
     # Feeds model_health_history, which is what /v1/status/stats reports. With it
     # off that table stays empty and the status page honestly reports

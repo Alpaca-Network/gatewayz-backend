@@ -238,6 +238,9 @@ def test_batch_sync_bootstraps_enabled_provider_missing_from_registry():
             return_value=synced_result,
         ) as sync_provider,
         patch("src.config.config.Config.MODEL_SYNC_SKIP_PROVIDERS", set()),
+        # Keep this test about bootstrapping. Price-reference providers also
+        # sync (covered separately below) and would otherwise add a second call.
+        patch("src.config.config.Config.PRICE_REFERENCE_PROVIDERS", frozenset()),
         patch("src.services.model_catalog_cache.invalidate_full_catalog"),
         patch("src.services.model_catalog_cache.invalidate_unique_models"),
         patch("src.services.model_catalog_cache.invalidate_catalog_stats"),
@@ -340,3 +343,49 @@ class TestSyncHoldsCatalogGuard:
         model_catalog_sync.sync_all_providers(dry_run=True)
 
         assert events == []
+
+
+def test_price_reference_provider_syncs_even_though_it_is_not_enabled():
+    """The price book has to stay fresh or new models can never be priced.
+
+    OpenRouter is delisted as supply — ENABLED_PROVIDERS excludes it and nothing
+    routes there — but its catalog is the only machine-readable source of prices
+    for models whose own provider publishes none. Freezing it is what left
+    Claude Opus 5 unpriced and therefore unlistable.
+    """
+    synced = {
+        "success": True,
+        "provider": "openrouter",
+        "models_fetched": 1,
+        "models_transformed": 1,
+        "models_skipped": 0,
+        "models_synced": 1,
+        "models_delisted": 0,
+    }
+
+    with (
+        patch(
+            "src.utils.provider_filter.get_enabled_providers",
+            return_value=frozenset({"moonshot"}),
+        ),
+        patch(
+            "src.utils.provider_filter.is_provider_enabled",
+            side_effect=lambda slug: slug == "moonshot",
+        ),
+        patch(
+            "src.services.model_catalog_sync.sync_provider_models", return_value=synced
+        ) as sync_provider,
+        patch("src.config.config.Config.MODEL_SYNC_SKIP_PROVIDERS", set()),
+        patch("src.config.config.Config.PRICE_REFERENCE_PROVIDERS", frozenset({"openrouter"})),
+        patch("src.services.model_catalog_cache.invalidate_full_catalog"),
+        patch("src.services.model_catalog_cache.invalidate_unique_models"),
+        patch("src.services.model_catalog_cache.invalidate_catalog_stats"),
+        patch("src.services.cache.catalog_response_cache.invalidate_catalog_cache"),
+    ):
+        from src.services.model_catalog_sync import sync_all_providers
+
+        sync_all_providers()
+
+    synced_slugs = {call.args[0] for call in sync_provider.call_args_list}
+    assert "openrouter" in synced_slugs, "price reference must sync despite being disabled"
+    assert "moonshot" in synced_slugs
