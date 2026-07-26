@@ -47,7 +47,7 @@ def test_priced_paid_model_stays_active():
         {
             "id": "vendor/priced-model",
             "name": "Priced",
-            "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+            "pricing": {"prompt": "1.0", "completion": "2.0"},
         }
     )
     assert result is not None
@@ -76,7 +76,7 @@ def test_model_with_inactive_provider_is_delisted_even_if_priced():
         {
             "id": "vendor/priced-but-unroutable",
             "name": "Priced Unroutable",
-            "pricing": {"prompt": "0.000001"},
+            "pricing": {"prompt": "1.0"},
         },
         provider_active=False,
     )
@@ -92,7 +92,7 @@ def test_provider_active_defaults_true_for_backward_compat():
         {
             "id": "vendor/legacy-call-site",
             "name": "Legacy",
-            "pricing": {"prompt": "0.000001"},
+            "pricing": {"prompt": "1.0"},
         },
         provider_id=1,
         provider_slug="vendor",
@@ -108,7 +108,7 @@ def test_provider_active_defaults_true_for_backward_compat():
 
 def _fake_models():
     return [
-        {"id": "vendor/priced", "name": "Priced", "pricing": {"prompt": "0.000001"}},
+        {"id": "vendor/priced", "name": "Priced", "pricing": {"prompt": "1.0"}},
         {"id": "vendor/unpriced", "name": "Unpriced", "pricing": {}},
         {
             "id": "vendor/free:free",

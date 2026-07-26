@@ -821,7 +821,11 @@ def enrich_model_with_pricing(
                 )
                 if has_valid_pricing:
                     model_data["pricing"] = cross_ref_pricing
-                    model_data["pricing_source"] = "cross-reference"
+                    # Underscore form: model_catalog_sync guards on this exact
+                    # string to skip re-normalisation. A hyphen here silently
+                    # divides every cross-referenced price by the provider factor
+                    # a second time.
+                    model_data["pricing_source"] = "cross_reference"
                     logger.debug(
                         f"Enriched {model_id} with cross-reference pricing from OpenRouter"
                     )
