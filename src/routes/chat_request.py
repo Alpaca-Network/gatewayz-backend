@@ -44,6 +44,10 @@ async def prepare_upstream_request(
             "frequency_penalty",
             "presence_penalty",
             "tools",
+            # Carried through as a canonical value; each provider adapter
+            # translates it into its own dialect (or drops it for models that
+            # do not reason) — see services/providers/reasoning_effort.py.
+            "reasoning_effort",
         ):
             val = getattr(req, name, None)
             if val is not None:
