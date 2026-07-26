@@ -17,6 +17,7 @@ import pytest
 
 from src.services.providers.reasoning_effort import (
     apply_reasoning_effort,
+    apply_reasoning_effort_anthropic_native,
     is_reasoning_model,
     normalize_token_limit,
     uses_max_completion_tokens,
@@ -90,44 +91,60 @@ class TestOpenAIDialect:
         assert payload["reasoning_effort"] == "high"
 
 
-class TestAnthropicDialect:
+class TestAnthropicCompatSurface:
+    """The gateway reaches Anthropic over its OpenAI-compatible endpoint, which
+    takes reasoning_effort and rejects the native thinking shape:
+    "Adaptive thinking is not available via ..." (confirmed live)."""
+
+    @pytest.mark.parametrize("model", ["claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6"])
+    def test_effort_passes_through(self, model):
+        payload = apply_reasoning_effort({"max_tokens": 2000}, "anthropic", model, "medium")
+
+        assert payload["reasoning_effort"] == "medium"
+        assert "thinking" not in payload
+        assert "output_config" not in payload
+
+
+class TestAnthropicNativeSurface:
+    """/v1/messages needs the thinking shape, and two generations of it."""
+
     @pytest.mark.parametrize("model", ["claude-sonnet-5", "claude-opus-4-8", "claude-fable-5"])
     def test_new_generation_uses_adaptive_and_output_config(self, model):
-        payload = apply_reasoning_effort({"max_tokens": 2000}, "anthropic", model, "medium")
+        payload = apply_reasoning_effort_anthropic_native({"max_tokens": 2000}, model, "medium")
 
         assert payload["thinking"] == {"type": "adaptive"}
         assert payload["output_config"]["effort"] == "medium"
-        assert "budget_tokens" not in payload.get("thinking", {})
 
     def test_older_generation_uses_a_token_budget(self):
-        payload = apply_reasoning_effort(
-            {"max_tokens": 8000}, "anthropic", "claude-sonnet-4-6", "low"
+        payload = apply_reasoning_effort_anthropic_native(
+            {"max_tokens": 8000}, "claude-sonnet-4-6", "low"
         )
 
         assert payload["thinking"] == {"type": "enabled", "budget_tokens": 1024}
 
-    def test_budget_stays_below_max_tokens(self):
-        """The API rejects a budget that meets or exceeds max_tokens."""
-        payload = apply_reasoning_effort(
-            {"max_tokens": 2000}, "anthropic", "claude-sonnet-4-6", "high"
+    def test_budget_stays_strictly_below_max_tokens(self):
+        payload = apply_reasoning_effort_anthropic_native(
+            {"max_tokens": 2000}, "claude-sonnet-4-6", "high"
         )
 
         assert payload["thinking"]["budget_tokens"] < 2000
 
-    def test_budget_never_drops_below_the_api_minimum(self):
-        payload = apply_reasoning_effort(
-            {"max_tokens": 1000}, "anthropic", "claude-sonnet-4-6", "high"
+    @pytest.mark.parametrize("max_tokens", [100, 1000, 1024])
+    def test_dropped_when_max_tokens_cannot_fit_the_minimum(self, max_tokens):
+        """1024 <= budget < max_tokens is unsatisfiable here — emitting anything
+        would 400, so the effort is dropped instead."""
+        payload = apply_reasoning_effort_anthropic_native(
+            {"max_tokens": max_tokens}, "claude-sonnet-4-6", "high"
         )
 
-        assert payload["thinking"]["budget_tokens"] >= 1024
+        assert "thinking" not in payload
 
     def test_existing_output_config_is_preserved(self):
-        payload = apply_reasoning_effort(
-            {"output_config": {"something": 1}}, "anthropic", "claude-sonnet-5", "low"
+        payload = apply_reasoning_effort_anthropic_native(
+            {"output_config": {"something": 1}}, "claude-sonnet-5", "low"
         )
 
-        assert payload["output_config"]["something"] == 1
-        assert payload["output_config"]["effort"] == "low"
+        assert payload["output_config"] == {"something": 1, "effort": "low"}
 
 
 class TestOtherGateways:

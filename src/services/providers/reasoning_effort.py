@@ -5,16 +5,19 @@ provider spells that differently, and getting it wrong is not a soft failure —
 each of the shapes below was checked against the live APIs, and the wrong one
 returns 400:
 
-    OpenAI  reasoning models   reasoning_effort: low|medium|high
-                               "minimal" is rejected by gpt-5.6-*
-            non-reasoning      400 "Unrecognized request argument: reasoning_effort"
-    xAI     grok-4             reasoning_effort (reports usage.reasoning_tokens)
-    Claude 5 / Opus 4.7+       thinking:{type:"adaptive"} + output_config:{effort}
-    Claude 4.6 and older       thinking:{type:"enabled", budget_tokens:N}
-    Moonshot                   accepts reasoning_effort, reports no reasoning tokens
+On the OpenAI-COMPATIBLE chat surface — which is how this gateway reaches every
+provider, Anthropic included — the parameter is `reasoning_effort` everywhere:
 
-Anthropic states the split in its own 400: '"thinking.type.enabled" is not
-supported for this model. Use "thinking.type.adaptive" and "output_config.effort"'.
+    OpenAI  reasoning models   reasoning_effort: low|medium|high    200
+                               "minimal"                            400 unsupported value
+            non-reasoning      reasoning_effort                     400 Unrecognized argument
+    xAI     grok-4             reasoning_effort                     200 (usage.reasoning_tokens)
+    Anthropic (compat)         reasoning_effort                     200
+                               thinking + output_config             400 not available via compat
+    Moonshot                   reasoning_effort                     200
+
+Anthropic's NATIVE /v1/messages surface is the exception and needs a different
+shape entirely — see apply_reasoning_effort_anthropic_native.
 
 Because OpenAI rejects the parameter outright on models that do not reason, the
 effort is DROPPED rather than forwarded when a model does not support it. A user
@@ -47,7 +50,10 @@ _ANTHROPIC_ADAPTIVE_PATTERN = re.compile(
 # API's own minimum (budget_tokens must be >= 1024).
 _ANTHROPIC_BUDGET_BY_EFFORT = {"low": 1024, "medium": 4096, "high": 16384}
 
-_PASSTHROUGH_GATEWAYS = frozenset({"openai", "xai", "moonshot", "deepseek", "zai"})
+# Every gateway reached over an OpenAI-compatible chat endpoint takes the
+# parameter verbatim — Anthropic included, because the gateway talks to its
+# OpenAI-compatible surface rather than /v1/messages.
+_PASSTHROUGH_GATEWAYS = frozenset({"openai", "anthropic", "xai", "moonshot", "deepseek", "zai"})
 
 
 def _strip_gateway_prefix(model: str, gateway: str) -> str:
@@ -116,23 +122,50 @@ def apply_reasoning_effort(payload: dict, gateway: str, model: str, effort: str 
         logger.debug("Dropping reasoning_effort for non-reasoning model %s/%s", gw, model)
         return payload
 
-    if gw == "anthropic":
-        name = _strip_gateway_prefix(model or "", gw)
-        if _ANTHROPIC_ADAPTIVE_PATTERN.search(name):
-            payload["thinking"] = {"type": "adaptive"}
-            payload["output_config"] = {**(payload.get("output_config") or {}), "effort": effort}
-        else:
-            budget = _ANTHROPIC_BUDGET_BY_EFFORT[effort]
-            # budget_tokens must stay below max_tokens, or the API rejects it.
-            max_tokens = payload.get("max_tokens")
-            if isinstance(max_tokens, int) and max_tokens <= budget:
-                budget = max(1024, max_tokens - 1)
-            payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
-        return payload
-
     if gw in _PASSTHROUGH_GATEWAYS:
         payload["reasoning_effort"] = effort
         return payload
 
     logger.debug("No reasoning_effort dialect known for gateway %s; dropping", gw)
+    return payload
+
+
+def apply_reasoning_effort_anthropic_native(payload: dict, model: str, effort: str | None) -> dict:
+    """Translate effort for Anthropic's NATIVE /v1/messages surface.
+
+    Distinct from the OpenAI-compatible endpoint above, which takes
+    `reasoning_effort` and rejects this shape outright:
+    "Adaptive thinking is not available via ...". Both were confirmed live.
+
+    Two generations, and Anthropic names the split in its own 400:
+    '"thinking.type.enabled" is not supported for this model. Use
+    "thinking.type.adaptive" and "output_config.effort"'.
+    """
+    if not effort:
+        return payload
+    effort = str(effort).strip().lower()
+    if effort not in VALID_EFFORTS or not is_reasoning_model("anthropic", model):
+        return payload
+
+    name = _strip_gateway_prefix(model or "", "anthropic")
+    if _ANTHROPIC_ADAPTIVE_PATTERN.search(name):
+        payload["thinking"] = {"type": "adaptive"}
+        payload["output_config"] = {**(payload.get("output_config") or {}), "effort": effort}
+        return payload
+
+    # Older generation takes a raw budget, constrained by the API to
+    # 1024 <= budget_tokens < max_tokens. When max_tokens leaves no room for the
+    # minimum, drop the request rather than emit a payload that 400s — the same
+    # "drop, never break the call" rule applied everywhere else here.
+    budget = _ANTHROPIC_BUDGET_BY_EFFORT[effort]
+    max_tokens = payload.get("max_tokens")
+    if isinstance(max_tokens, int):
+        if max_tokens <= 1024:
+            logger.debug(
+                "Dropping thinking budget: max_tokens=%s leaves no room for the 1024 minimum",
+                max_tokens,
+            )
+            return payload
+        budget = min(budget, max_tokens - 1)
+    payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
     return payload

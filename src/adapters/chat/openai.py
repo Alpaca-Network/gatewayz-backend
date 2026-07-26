@@ -74,6 +74,7 @@ class OpenAIChatAdapter(BaseChatAdapter):
             tool_choice=external_request.get("tool_choice"),
             response_format=external_request.get("response_format"),
             user=external_request.get("user"),
+            reasoning_effort=external_request.get("reasoning_effort"),
         )
 
         logger.debug(
