@@ -11,6 +11,7 @@ models that cannot answer.
 from unittest.mock import MagicMock
 
 from src.services import model_catalog_sync
+from src.services.model_catalog_sync import pin_unservable_models
 
 
 def _client(rows):
@@ -93,3 +94,64 @@ def test_flag_on_a_currently_active_row_still_pins_it(monkeypatch):
     assert model_catalog_sync._load_unservable_model_ids(7) == {"openai/gpt-audio"}
     assert "is_active" not in captured, "lookup must not require the row to be inactive already"
     assert captured["provider_id"] == 7
+
+
+class TestMarkerSurvivesAnAlreadyInactiveModel:
+    """The marker must be re-stamped even when the model is already inactive.
+
+    Requiring is_active before stamping silently lost the flag: a model that is
+    unservable AND unpriced is already inactive by the time the gate runs, so it
+    was skipped, the transform's own delist_reason="unpriced" stood, and
+    _load_unservable_model_ids stopped matching it. The next sync able to price
+    the model then brought it back — which is exactly how all ten
+    operator-delisted models returned to the catalog once their prices were
+    repaired.
+
+    These exercise the production gate directly rather than a local copy, so a
+    regression in sync_provider_models cannot slip past them.
+    """
+
+    def test_already_inactive_model_keeps_the_unservable_marker(self):
+        rows = [
+            {
+                "provider_model_id": "openai/gpt-audio",
+                "is_active": False,  # already delisted this pass, e.g. unpriced
+                "metadata": {"delist_reason": "unpriced"},
+            }
+        ]
+
+        pinned, newly_delisted = pin_unservable_models(rows, {"openai/gpt-audio"})
+
+        assert pinned == 1
+        assert newly_delisted == 0, "it was already inactive; nothing was flipped"
+        assert rows[0]["metadata"]["delist_reason"] == "unservable"
+        assert rows[0]["is_active"] is False
+
+    def test_active_model_is_flipped_and_stamped(self):
+        rows = [{"provider_model_id": "openai/o1-pro", "is_active": True, "metadata": {}}]
+
+        pinned, newly_delisted = pin_unservable_models(rows, {"openai/o1-pro"})
+
+        assert (pinned, newly_delisted) == (1, 1)
+        assert rows[0]["is_active"] is False
+        assert rows[0]["metadata"]["delist_reason"] == "unservable"
+
+    def test_unflagged_models_are_untouched(self):
+        rows = [{"provider_model_id": "openai/gpt-4o-mini", "is_active": True, "metadata": {}}]
+
+        assert pin_unservable_models(rows, {"openai/o1-pro"}) == (0, 0)
+        assert rows[0]["is_active"] is True
+        assert "delist_reason" not in rows[0]["metadata"]
+
+    def test_an_empty_flag_set_is_a_no_op(self):
+        rows = [{"provider_model_id": "openai/gpt-4o-mini", "is_active": True, "metadata": {}}]
+
+        assert pin_unservable_models(rows, set()) == (0, 0)
+        assert rows[0]["is_active"] is True
+
+    def test_a_model_missing_metadata_entirely_still_gets_stamped(self):
+        rows = [{"provider_model_id": "openai/gpt-audio", "is_active": False}]
+
+        pin_unservable_models(rows, {"openai/gpt-audio"})
+
+        assert rows[0]["metadata"]["delist_reason"] == "unservable"
