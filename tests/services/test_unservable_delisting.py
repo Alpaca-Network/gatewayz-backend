@@ -93,3 +93,61 @@ def test_flag_on_a_currently_active_row_still_pins_it(monkeypatch):
     assert model_catalog_sync._load_unservable_model_ids(7) == {"openai/gpt-audio"}
     assert "is_active" not in captured, "lookup must not require the row to be inactive already"
     assert captured["provider_id"] == 7
+
+
+class TestMarkerSurvivesAnAlreadyInactiveModel:
+    """The marker must be re-stamped even when the model is already inactive.
+
+    Requiring is_active before stamping silently lost the flag: a model that is
+    unservable AND unpriced is already inactive by the time the gate runs, so it
+    was skipped, the transform's own delist_reason="unpriced" stood, and
+    _load_unservable_model_ids stopped matching it. The next sync able to price
+    the model then brought it back — which is exactly how all ten
+    operator-delisted models returned to the catalog once their prices were
+    repaired.
+    """
+
+    def _apply_gate(self, db_models, unservable):
+        """Mirror the gate in sync_provider_models over a list of rows."""
+        pinned = 0
+        for db_model in db_models:
+            if db_model.get("provider_model_id") not in unservable:
+                continue
+            if db_model.get("is_active"):
+                db_model["is_active"] = False
+            md = db_model.get("metadata") or {}
+            md["delist_reason"] = "unservable"
+            db_model["metadata"] = md
+            pinned += 1
+        return pinned
+
+    def test_already_inactive_model_keeps_the_unservable_marker(self):
+        rows = [
+            {
+                "provider_model_id": "openai/gpt-audio",
+                "is_active": False,  # already delisted this pass, e.g. unpriced
+                "metadata": {"delist_reason": "unpriced"},
+            }
+        ]
+
+        assert self._apply_gate(rows, {"openai/gpt-audio"}) == 1
+        assert rows[0]["metadata"]["delist_reason"] == "unservable"
+        assert rows[0]["is_active"] is False
+
+    def test_active_model_is_still_flipped_and_stamped(self):
+        rows = [
+            {"provider_model_id": "openai/o1-pro", "is_active": True, "metadata": {}},
+        ]
+
+        assert self._apply_gate(rows, {"openai/o1-pro"}) == 1
+        assert rows[0]["is_active"] is False
+        assert rows[0]["metadata"]["delist_reason"] == "unservable"
+
+    def test_unflagged_models_are_untouched(self):
+        rows = [
+            {"provider_model_id": "openai/gpt-4o-mini", "is_active": True, "metadata": {}},
+        ]
+
+        assert self._apply_gate(rows, {"openai/o1-pro"}) == 0
+        assert rows[0]["is_active"] is True
+        assert "delist_reason" not in rows[0]["metadata"]

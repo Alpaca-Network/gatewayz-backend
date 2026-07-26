@@ -934,20 +934,30 @@ def sync_provider_models(
         # Marking such a row unservable makes the delisting survive the next sync
         # instead of being recomputed away every hour. Kept in the database rather
         # than a hardcoded list in code (North Star §4.2).
+        # Re-stamp EVERY flagged model, not only the ones this pass would have
+        # left active. Requiring is_active here silently lost the marker: a model
+        # that is unservable AND (say) unpriced is already inactive by the time
+        # this runs, so the guard skipped it, the transform's own
+        # delist_reason="unpriced" stood, and _load_unservable_model_ids stopped
+        # matching it. The next sync that could price the model then brought it
+        # back — which is how all ten operator-delisted models returned to the
+        # catalog after their prices were repaired.
         unservable = _load_unservable_model_ids(provider["id"])
         if unservable:
-            resurrected = 0
+            pinned = 0
             for db_model in db_models:
-                if db_model.get("provider_model_id") in unservable and db_model.get("is_active"):
+                if db_model.get("provider_model_id") not in unservable:
+                    continue
+                if db_model.get("is_active"):
                     db_model["is_active"] = False
-                    md = db_model.get("metadata") or {}
-                    md["delist_reason"] = "unservable"
-                    db_model["metadata"] = md
-                    resurrected += 1
                     delisted += 1
-            if resurrected:
+                md = db_model.get("metadata") or {}
+                md["delist_reason"] = "unservable"
+                db_model["metadata"] = md
+                pinned += 1
+            if pinned:
                 logger.info(
-                    f"[{provider_slug.upper()}] Kept {resurrected} operator-delisted "
+                    f"[{provider_slug.upper()}] Kept {pinned} operator-delisted "
                     f"model(s) inactive (delist_reason=unservable)"
                 )
 
