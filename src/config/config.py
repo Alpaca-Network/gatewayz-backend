@@ -538,11 +538,19 @@ class Config:
     # Enabled providers — only these providers will be loaded, routed to,
     # shown in the catalog, and synced.  Comma-separated slugs using the
     # hyphenated gateway names (e.g. "openrouter,openai,anthropic").
-    # Empty string or unset means ALL providers are enabled.
-    _raw_enabled = os.environ.get("ENABLED_PROVIDERS", "openrouter")
+    # Empty string means ALL providers are enabled.
+    #
+    # Unset is deliberately NOT the same as a value. The roster is a business
+    # decision (North Star §3) and startup rewrites the providers table to match
+    # it, so a missing env var must never stand in for one — defaulting to a
+    # single slug once inverted the whole production roster to the aggregator
+    # that North Star §5 bars as primary supply. ENABLED_PROVIDERS_EXPLICIT
+    # tells startup to leave the DB roster alone instead.
+    _raw_enabled = os.environ.get("ENABLED_PROVIDERS")
+    ENABLED_PROVIDERS_EXPLICIT: bool = _raw_enabled is not None
     ENABLED_PROVIDERS: frozenset[str] | None = (
         frozenset(s.strip() for s in _raw_enabled.split(",") if s.strip())
-        if _raw_enabled.strip()
+        if _raw_enabled and _raw_enabled.strip()
         else None  # None = all providers enabled
     )
 

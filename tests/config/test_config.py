@@ -670,3 +670,47 @@ class TestCostRoutingDefaults:
         monkeypatch.setenv("SMART_ROUTER_ENABLED", "false")
         importlib.reload(config)
         assert config.Config.SMART_ROUTER_ENABLED is False
+
+
+class TestEnabledProvidersRoster:
+    """ENABLED_PROVIDERS must distinguish "unset" from "explicitly empty".
+
+    A dropped env var once fell back to a single-slug default and startup
+    rewrote the production providers table to match it, inverting the roster
+    to the aggregator North Star §5 bars as primary supply.
+    """
+
+    def test_unset_enables_all_and_is_not_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.delenv("ENABLED_PROVIDERS", raising=False)
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS is None
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is False
+
+    def test_explicit_empty_enables_all_but_is_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.setenv("ENABLED_PROVIDERS", "")
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS is None
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is True
+
+    def test_roster_is_parsed_and_marked_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.setenv("ENABLED_PROVIDERS", "openai, anthropic ,xai,moonshot")
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS == frozenset(
+            {"openai", "anthropic", "xai", "moonshot"}
+        )
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is True
