@@ -204,11 +204,19 @@ async def lifespan(app):
 
         # Sync DB providers table with ENABLED_PROVIDERS env var
         try:
+            from src.config.config import Config
             from src.config.supabase_config import get_client_for_query
             from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
 
             enabled = get_enabled_providers()
-            if enabled is not None:
+            if not Config.ENABLED_PROVIDERS_EXPLICIT:
+                # A dropped env var must not rewrite the roster. Leave the DB as
+                # the last deliberate state and make the omission loud instead.
+                logger.error(
+                    "  providers        ENABLED_PROVIDERS is UNSET — leaving the providers "
+                    "table untouched. Set it explicitly to manage the roster from config."
+                )
+            elif enabled is not None:
                 supabase = get_client_for_query()
                 # Deactivate providers not in ENABLED_PROVIDERS
                 resp = supabase.table("providers").select("slug, is_active").execute()
