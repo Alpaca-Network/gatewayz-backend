@@ -479,6 +479,9 @@ def create_app() -> FastAPI:
         ("messages", "Anthropic Messages API"),
         ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
         ("images", "Image Generation"),  # Image generation endpoints
+        # Embeddings proxy — Continue and other agents need one for codebase
+        # indexing; without it the "one key" promise breaks for those features.
+        ("embeddings", "Embeddings"),
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),

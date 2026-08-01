@@ -22,6 +22,7 @@ to be exactly one answer.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -30,6 +31,53 @@ logger = logging.getLogger(__name__)
 
 # Statuses that count as money actually received.
 SETTLED_STATUSES = frozenset({"succeeded", "completed", "paid"})
+
+
+def metrics_epoch() -> datetime | None:
+    """Clean Day 0 for reported metrics.
+
+    Everything before this date is excluded from every figure. Set
+    ``METRICS_EPOCH`` (ISO date) to the day the payment gate and zeroed signup
+    credits went live. The point is that a single dashboard cannot mix
+    pre- and post-cleanup data — that mixing is what made the old numbers
+    unusable, and a per-chart date filter is too easy to forget.
+
+    Returns None when unset, in which case all history is included.
+    """
+    raw = os.getenv("METRICS_EPOCH")
+    if not raw:
+        return None
+    parsed = _parse_ts(raw)
+    if parsed is None:
+        logger.warning("METRICS_EPOCH=%r is not a parseable date; ignoring it", raw)
+    return parsed
+
+
+def apply_epoch(payments: list[dict]) -> tuple[list[dict], str | None]:
+    """Drop payments before the metrics epoch.
+
+    Returns ``(filtered, note)`` where the note names how many rows were
+    excluded — silently dropping data is how a dashboard ends up disagreeing
+    with the database.
+    """
+    epoch = metrics_epoch()
+    if epoch is None:
+        return payments, None
+
+    kept: list[dict] = []
+    for payment in payments:
+        ts = _parse_ts(payment.get("created_at"))
+        if ts is None or ts >= epoch:
+            kept.append(payment)
+
+    dropped = len(payments) - len(kept)
+    note = (
+        f"Excluded {dropped} payment(s) before the metrics epoch "
+        f"({epoch.date().isoformat()})."
+        if dropped
+        else None
+    )
+    return kept, note
 
 
 @dataclass
@@ -237,6 +285,8 @@ def build_weekly_scorecard(
     if payments is None:
         payments = fetch_settled_payments()
 
+    payments, epoch_note = apply_epoch(payments)
+
     new_this_week = compute_new_paying_accounts(payments, week_start, end)
     new_prior_week = compute_new_paying_accounts(payments, prior_start, week_start)
 
@@ -254,6 +304,9 @@ def build_weekly_scorecard(
         total_paying_accounts=len(compute_paying_accounts(payments)),
         tokens_through_gateway=fetch_token_volume(week_start, end),
     )
+
+    if epoch_note:
+        scorecard.notes.append(epoch_note)
 
     # Surface the "growing from nothing" case explicitly instead of printing a
     # blank cell that reads as a bug.
