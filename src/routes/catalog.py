@@ -1139,7 +1139,17 @@ async def get_models(
         has_more = (offset_int + len(enhanced_models)) < total_models
         next_offset = offset_int + len(enhanced_models) if has_more else None
 
+        # OpenAI-shape discriminators. The payload already carries `data[]` with
+        # `id`, which most clients accept, but strict ones validate `object` on
+        # the envelope and on each entry and hard-fail model discovery without
+        # it. Additive, so every existing consumer is unaffected.
+        for _model in enhanced_models:
+            if isinstance(_model, dict):
+                _model.setdefault("object", "model")
+                _model.setdefault("owned_by", _model.get("provider_slug") or "gatewayz")
+
         result = {
+            "object": "list",
             "data": enhanced_models,
             "total": total_models,
             "returned": len(enhanced_models),
