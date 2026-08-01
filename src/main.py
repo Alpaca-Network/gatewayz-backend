@@ -493,6 +493,10 @@ def create_app() -> FastAPI:
         ("availability", "Model Availability"),
         ("ping", "Ping Service"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
+        # Payer-cohort metrics for the weekly scorecard and investor sheet.
+        # Kept separate from monitoring: that answers "is the gateway healthy",
+        # this answers "is the business growing".
+        ("payer_analytics", "Payer Analytics"),
         ("diagnostics", "Diagnostics API"),  # Real-time bottleneck diagnostics
         ("instrumentation", "Instrumentation & Observability"),  # Loki and Tempo endpoints
         ("grafana_metrics", "Grafana Metrics"),  # Prometheus/Loki/Tempo metrics endpoints

@@ -82,6 +82,26 @@ async def create_user_api_key(
                     detail=f"Invalid environment tag. Must be one of: {valid_environments}",
                 )
 
+            # Payment gate: live keys require a payment signal. Free signup
+            # credits and referral payouts are already zero, so an unpriced live
+            # key was the last remaining thing a credit-farming bot could mint
+            # at zero cost — and the thing that made "accounts" numbers
+            # unusable in diligence. 'test' keys stay free and rate limited.
+            from src.services.payment_gate import check_live_key_allowed, gate_error_detail
+
+            allowed, gate_reason = check_live_key_allowed(user, request.environment_tag)
+            if not allowed:
+                logger.info(
+                    "Payment gate blocked %s key for user %s (%s)",
+                    sanitize_for_logging(request.environment_tag),
+                    sanitize_for_logging(str(user["id"])),
+                    gate_reason,
+                )
+                raise HTTPException(
+                    status_code=402,
+                    detail=gate_error_detail(request.environment_tag),
+                )
+
             # Create a new API key with Phase 4 security features (using an existing working system)
             try:
                 # Use the existing create_api_key function for now (it works)
