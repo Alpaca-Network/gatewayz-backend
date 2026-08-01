@@ -474,6 +474,9 @@ def create_app() -> FastAPI:
     # Single canonical inference endpoint: POST /v1/chat/completions
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
+        # Anthropic Messages API compatibility — lets Claude Code point at the
+        # gateway via ANTHROPIC_BASE_URL with no translation proxy.
+        ("messages", "Anthropic Messages API"),
         ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
         ("images", "Image Generation"),  # Image generation endpoints
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints

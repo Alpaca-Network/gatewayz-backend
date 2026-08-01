@@ -72,7 +72,14 @@ class OpenAIChatAdapter(BaseChatAdapter):
             stream=external_request.get("stream", False),
             tools=external_request.get("tools"),
             tool_choice=external_request.get("tool_choice"),
+            parallel_tool_calls=external_request.get("parallel_tool_calls"),
             response_format=external_request.get("response_format"),
+            n=external_request.get("n"),
+            seed=external_request.get("seed"),
+            logprobs=external_request.get("logprobs"),
+            top_logprobs=external_request.get("top_logprobs"),
+            logit_bias=external_request.get("logit_bias"),
+            stream_options=external_request.get("stream_options"),
             user=external_request.get("user"),
         )
 
@@ -116,6 +123,16 @@ class OpenAIChatAdapter(BaseChatAdapter):
                 "total_tokens": internal_response.usage.total_tokens,
             },
         }
+
+        # Prompt-cache accounting, when the provider reported any. Emitted in
+        # both the Anthropic and the OpenAI spelling so either client library
+        # can read it without special-casing the gateway.
+        cache_read = getattr(internal_response.usage, "cache_read_input_tokens", 0) or 0
+        cache_write = getattr(internal_response.usage, "cache_creation_input_tokens", 0) or 0
+        if cache_read or cache_write:
+            response["usage"]["cache_read_input_tokens"] = cache_read
+            response["usage"]["cache_creation_input_tokens"] = cache_write
+            response["usage"]["prompt_tokens_details"] = {"cached_tokens": cache_read}
 
         # Add gateway-specific usage info
         response["gateway_usage"] = {

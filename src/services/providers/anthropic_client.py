@@ -40,13 +40,67 @@ def get_anthropic_client():
         raise
 
 
+def _use_native_transport() -> bool:
+    """Whether Claude traffic should take the native Messages API.
+
+    Anthropic's OpenAI-compatibility endpoint does not support prompt caching,
+    which is the dominant cost lever for coding agents. The native transport
+    does, so it is the default. Set ANTHROPIC_NATIVE_TRANSPORT=false to fall
+    back to the compatibility endpoint (kill switch for incident response).
+    """
+    import os
+
+    return os.getenv("ANTHROPIC_NATIVE_TRANSPORT", "true").strip().lower() not in (
+        "false",
+        "0",
+        "no",
+    )
+
+
 def make_anthropic_request(messages, model, **kwargs):
-    """Make request to Anthropic using the OpenAI-compatible client.
+    """Make request to Anthropic.
+
+    Routes to the native Messages API by default (prompt caching support),
+    falling back to the OpenAI-compatibility endpoint when disabled or when the
+    native call fails for a non-caching request.
 
     Args:
         messages: List of message objects
         model: Model name to use (e.g., 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229')
         **kwargs: Additional parameters like max_tokens, temperature, etc.
+    """
+    if _use_native_transport():
+        from src.services.providers.anthropic_native_client import (
+            make_anthropic_native_request,
+            request_uses_caching,
+        )
+
+        uses_caching = request_uses_caching(messages, **kwargs)
+        try:
+            return make_anthropic_native_request(messages, model, **kwargs)
+        except Exception as e:
+            if uses_caching:
+                # Falling back would silently discard the caller's cache
+                # breakpoints and bill them at the full input rate. Fail loudly
+                # instead.
+                logger.error(
+                    "Native Anthropic request failed for a cached request; not falling back: %s",
+                    sanitize_for_logging(str(e)),
+                )
+                raise
+            logger.warning(
+                "Native Anthropic request failed, falling back to compatibility endpoint: %s",
+                sanitize_for_logging(str(e)),
+            )
+
+    return _make_anthropic_request_compat(messages, model, **kwargs)
+
+
+def _make_anthropic_request_compat(messages, model, **kwargs):
+    """Request via Anthropic's OpenAI-compatible client.
+
+    No prompt-caching support -- see the module docstring on
+    anthropic_native_client for why that matters.
     """
     try:
         logger.info(f"Making Anthropic request with model: {model}")
@@ -69,7 +123,37 @@ def make_anthropic_request(messages, model, **kwargs):
 
 
 def make_anthropic_request_stream(messages, model, **kwargs):
-    """Make streaming request to Anthropic using the OpenAI-compatible client.
+    """Make streaming request to Anthropic.
+
+    Native Messages API by default (see make_anthropic_request); falls back to
+    the OpenAI-compatibility endpoint only for uncached requests.
+    """
+    if _use_native_transport():
+        from src.services.providers.anthropic_native_client import (
+            make_anthropic_native_request_stream,
+            request_uses_caching,
+        )
+
+        uses_caching = request_uses_caching(messages, **kwargs)
+        try:
+            return make_anthropic_native_request_stream(messages, model, **kwargs)
+        except Exception as e:
+            if uses_caching:
+                logger.error(
+                    "Native Anthropic stream failed for a cached request; not falling back: %s",
+                    sanitize_for_logging(str(e)),
+                )
+                raise
+            logger.warning(
+                "Native Anthropic stream failed, falling back to compatibility endpoint: %s",
+                sanitize_for_logging(str(e)),
+            )
+
+    return _make_anthropic_request_stream_compat(messages, model, **kwargs)
+
+
+def _make_anthropic_request_stream_compat(messages, model, **kwargs):
+    """Streaming request via Anthropic's OpenAI-compatible client.
 
     Args:
         messages: List of message objects
