@@ -30,7 +30,13 @@ logger = logging.getLogger(__name__)
 GATED_ENVIRONMENTS = frozenset({"live", "staging", "production"})
 
 # Minimum lifetime spend, in USD, that counts as a payment signal.
-MIN_TOPUP_USD = float(os.getenv("MIN_TOPUP_USD", "1.0"))
+#
+# Defaults to the smallest amount Stripe checkout will actually accept
+# (CreateCheckoutSessionRequest rejects anything under $5.00). Setting this
+# lower would produce a gate that tells the user to top up $1 and a checkout
+# that then refuses to take $1 — a dead end at the exact moment they were
+# willing to pay.
+MIN_TOPUP_USD = float(os.getenv("MIN_TOPUP_USD", "5.0"))
 
 
 def is_gate_enabled() -> bool:

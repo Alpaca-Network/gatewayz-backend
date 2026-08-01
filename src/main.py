@@ -477,6 +477,8 @@ def create_app() -> FastAPI:
         # Anthropic Messages API compatibility — lets Claude Code point at the
         # gateway via ANTHROPIC_BASE_URL with no translation proxy.
         ("messages", "Anthropic Messages API"),
+        # Legacy text-completions shim for tools that have not migrated.
+        ("completions", "Legacy Completions"),
         ("detailed_status", "System Detailed Status"),  # Real-time monitoring metrics
         ("images", "Image Generation"),  # Image generation endpoints
         # Embeddings proxy — Continue and other agents need one for codebase

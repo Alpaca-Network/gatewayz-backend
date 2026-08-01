@@ -875,6 +875,45 @@ class StripeService:
             logger.error(f"Webhook processing error: {e}")
             raise
 
+    def reconcile_checkout_session(self, session) -> bool:
+        """Grant credits for a paid session if the webhook has not already done so.
+
+        Called from the success-page status endpoint so a slow or dropped
+        ``checkout.session.completed`` delivery cannot leave a paying user
+        without credits. Delegates to the same handler the webhook uses, so
+        there is one credit-granting code path rather than two that can drift.
+
+        Returns True when this call is what actually granted the credits.
+        """
+        session_id = self._get_stripe_object_value(session, "id")
+        _, metadata = self._hydrate_checkout_session_metadata(session)
+        metadata = metadata or {}
+
+        payment_id = metadata.get("payment_id")
+        if payment_id is None:
+            logger.debug(
+                "Session %s has no payment_id metadata; nothing to reconcile", session_id
+            )
+            return False
+
+        try:
+            existing = get_payment(int(payment_id))
+        except (TypeError, ValueError):
+            logger.warning("Session %s has a non-numeric payment_id metadata", session_id)
+            return False
+
+        if existing and str(existing.get("status", "")).lower() == "completed":
+            # The webhook already landed. Nothing to do.
+            return False
+
+        logger.info(
+            "Reconciling checkout session %s from the status endpoint — the webhook "
+            "has not granted credits yet",
+            session_id,
+        )
+        self._handle_checkout_completed(session)
+        return True
+
     def _handle_checkout_completed(self, session):
         """Handle completed checkout session"""
         try:

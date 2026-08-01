@@ -294,6 +294,30 @@ async def get_checkout_session(
         object_id=session_id,
     )
 
+    # Reconcile a late or missed webhook.
+    #
+    # Credits are granted by the checkout.session.completed webhook. Stripe
+    # normally delivers that within seconds, but "normally" is not a guarantee:
+    # a retry backoff, a brief outage on our side, or a dropped delivery leaves
+    # a user who has just been charged sitting on the success page with no
+    # credits and no way to fix it except waiting. That is the single worst
+    # moment in the funnel to look broken.
+    #
+    # This page is polled by the success screen, so reconciling here converts a
+    # multi-minute wait into a sub-second one. The grant is idempotent twice
+    # over — a payment-status guard and a ledger-level request_id keyed on the
+    # Stripe session — so running it alongside the webhook cannot double-credit.
+    credits_reconciled = False
+    if session.get("payment_status") == "paid":
+        try:
+            credits_reconciled = stripe_service.reconcile_checkout_session(session)
+        except Exception as e:
+            # Never fail the status read because reconciliation failed; the
+            # webhook is still the primary path.
+            logger.warning(
+                "Checkout reconciliation failed for session %s: %s", session_id, e
+            )
+
     return {
         "session_id": session["id"],
         "payment_status": session["payment_status"],
@@ -301,6 +325,9 @@ async def get_checkout_session(
         "amount_total": session["amount_total"],
         "currency": session["currency"],
         "customer_email": session["customer_email"],
+        # True when this request is what actually granted the credits, i.e. the
+        # webhook had not landed yet. Useful signal for webhook-health alerting.
+        "credits_reconciled": credits_reconciled,
     }
 
 
