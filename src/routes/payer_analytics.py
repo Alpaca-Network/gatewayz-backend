@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.security.deps import require_admin_or_env_key
 from src.services.payer_metrics import (
+    PayerMetricsUnavailable,
     apply_epoch,
     build_weekly_scorecard,
     compute_new_paying_accounts,
@@ -40,6 +41,12 @@ async def weekly_scorecard(_: str = Depends(require_admin_or_env_key)):
     """
     try:
         return build_weekly_scorecard().to_dict()
+    except PayerMetricsUnavailable as e:
+        # 503, not a scorecard full of zeros. A zeroed scorecard is
+        # indistinguishable from a business with no customers, and that
+        # ambiguity is exactly what hid this bug for a full deploy cycle.
+        logger.error("Payer metrics unavailable: %s", e, exc_info=True)
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to build weekly scorecard: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to build scorecard") from e
@@ -86,6 +93,9 @@ async def payer_trend(
             "series": series,
             "notes": [epoch_note] if epoch_note else [],
         }
+    except PayerMetricsUnavailable as e:
+        logger.error("Payer metrics unavailable: %s", e, exc_info=True)
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.error("Failed to build payer trend: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to build trend") from e
