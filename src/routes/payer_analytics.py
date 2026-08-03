@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.security.deps import require_admin_or_env_key
 from src.services.payer_metrics import (
+    apply_epoch,
     build_weekly_scorecard,
     compute_new_paying_accounts,
     compute_paying_accounts,
@@ -57,6 +58,12 @@ async def payer_trend(
     """
     try:
         payments = fetch_settled_payments()
+        # Apply the same METRICS_EPOCH cutoff the scorecard uses. Without this
+        # the two endpoints report different totals for the same metric, which
+        # is exactly the disagreement docs/METRIC_DEFINITIONS.md exists to
+        # prevent — and the kind a diligence question surfaces at the worst
+        # possible moment.
+        payments, epoch_note = apply_epoch(payments)
         now = datetime.now(UTC)
 
         series = []
@@ -77,6 +84,7 @@ async def payer_trend(
             "total_paying_accounts": len(compute_paying_accounts(payments)),
             "second_topup_rate_pct": compute_second_topup_rate(payments),
             "series": series,
+            "notes": [epoch_note] if epoch_note else [],
         }
     except Exception as e:
         logger.error("Failed to build payer trend: %s", e, exc_info=True)

@@ -13,6 +13,7 @@ import pytest
 from src.services.payer_metrics import (
     _amount_usd,
     _wow_pct,
+    apply_epoch,
     build_weekly_scorecard,
     compute_new_paying_accounts,
     compute_paying_accounts,
@@ -173,3 +174,35 @@ class TestWeeklyScorecard:
         payments = [_payment(1, 1), _payment(1, 2), _payment(2, 1)]
         card = build_weekly_scorecard(as_of=NOW, payments=payments)
         assert card.second_topup_rate_pct == 50.0
+
+
+class TestEpochConsistency:
+    """Both payer endpoints must apply the same METRICS_EPOCH cutoff.
+
+    The scorecard applied it and the trend endpoint did not, so the two
+    reported different totals for the same metric — exactly the disagreement
+    docs/METRIC_DEFINITIONS.md exists to prevent, and the kind a diligence
+    question surfaces at the worst possible moment.
+    """
+
+    def test_apply_epoch_is_a_no_op_when_unset(self, monkeypatch):
+        monkeypatch.delenv("METRICS_EPOCH", raising=False)
+        payments = [_payment(1, 1), _payment(2, 30)]
+        filtered, note = apply_epoch(payments)
+        assert filtered == payments
+        assert note is None
+
+    def test_apply_epoch_drops_older_rows_and_says_how_many(self, monkeypatch):
+        monkeypatch.setenv("METRICS_EPOCH", (NOW - timedelta(days=5)).date().isoformat())
+        payments = [_payment(1, 1), _payment(2, 30)]
+        filtered, note = apply_epoch(payments)
+        assert len(filtered) == 1
+        assert "Excluded 1 payment" in note
+
+    def test_unparseable_epoch_is_ignored_rather_than_dropping_everything(self, monkeypatch):
+        """A typo in the env var must not silently zero every metric."""
+        monkeypatch.setenv("METRICS_EPOCH", "not-a-date")
+        payments = [_payment(1, 1), _payment(2, 30)]
+        filtered, note = apply_epoch(payments)
+        assert filtered == payments
+        assert note is None
