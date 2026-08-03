@@ -95,9 +95,7 @@ class TestScorekeeper:
 
     def test_scorecard_is_emitted_verbatim(self, tmp_path):
         scorecard = {"total_paying_accounts": 5, "credit_revenue_usd": 99.5}
-        agent = Scorekeeper(
-            client=_fake_client(), ledger=_ledger(tmp_path), scorecard=scorecard
-        )
+        agent = Scorekeeper(client=_fake_client(), ledger=_ledger(tmp_path), scorecard=scorecard)
         run = agent.run()
         emitted = next(o for o in run.outputs if o["kind"] == "scorecard")
         assert emitted["data"] == scorecard
@@ -199,9 +197,7 @@ class TestProspector:
         agent = Prospector(
             client=client,
             ledger=_ledger(tmp_path),
-            fetchers=[
-                lambda kw: [self._signal("https://a"), self._signal("https://b")]
-            ],
+            fetchers=[lambda kw: [self._signal("https://a"), self._signal("https://b")]],
         )
         run = agent.run()
         assert run.outputs[0]["score"] == 90
@@ -262,7 +258,9 @@ class TestConcierge:
 
     def test_answers_when_docs_cover_the_question(self, tmp_path):
         client = _fake_client(
-            json.dumps({"can_answer": True, "answer": "Set ANTHROPIC_BASE_URL", "citations": ["setup"]})
+            json.dumps(
+                {"can_answer": True, "answer": "Set ANTHROPIC_BASE_URL", "citations": ["setup"]}
+            )
         )
         agent = Concierge(client=client, ledger=_ledger(tmp_path), docs=self.DOCS)
         result = agent.answer(SupportQuestion("discord", "u", "how do I configure claude code"))
@@ -270,9 +268,7 @@ class TestConcierge:
         assert result["citations"] == ["setup"]
 
     def test_model_declining_results_in_escalation(self, tmp_path):
-        client = _fake_client(
-            json.dumps({"can_answer": False, "escalate_reason": "docs unclear"})
-        )
+        client = _fake_client(json.dumps({"can_answer": False, "escalate_reason": "docs unclear"}))
         agent = Concierge(client=client, ledger=_ledger(tmp_path), docs=self.DOCS)
         result = agent.answer(SupportQuestion("discord", "u", "configure claude code"))
         assert result["status"] == "escalated"
@@ -339,9 +335,7 @@ class TestDogfoodReport:
             "by_agent": {"publisher": {"calls": 1, "tokens": 10, "cost_usd": 7.77}},
         }
         md = render_markdown(summary, "July")
-        dollar_figures = {
-            token.strip("|").strip() for token in md.split() if token.startswith("$")
-        }
+        dollar_figures = {token.strip("|").strip() for token in md.split() if token.startswith("$")}
         assert dollar_figures == {"$7.77"}
 
 

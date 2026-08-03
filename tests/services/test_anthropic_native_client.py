@@ -93,9 +93,7 @@ class TestRequestConversion:
         assert payload["max_tokens"] > 0
 
     def test_explicit_max_tokens_respected(self):
-        payload = build_anthropic_payload(
-            [{"role": "user", "content": "hi"}], "m", max_tokens=99
-        )
+        payload = build_anthropic_payload([{"role": "user", "content": "hi"}], "m", max_tokens=99)
         assert payload["max_tokens"] == 99
 
     def test_stop_becomes_stop_sequences(self):
@@ -173,9 +171,7 @@ class TestRequestConversion:
             {
                 "role": "assistant",
                 "content": None,
-                "tool_calls": [
-                    {"id": "c", "function": {"name": "f", "arguments": "not json{"}}
-                ],
+                "tool_calls": [{"id": "c", "function": {"name": "f", "arguments": "not json{"}}],
             }
         ]
         payload = build_anthropic_payload(messages, "m")

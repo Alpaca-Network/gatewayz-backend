@@ -311,7 +311,9 @@ async def create_message(
         # surface a useful message instead of "unknown error shape".
         detail = exc.detail
         message = (
-            detail if isinstance(detail, str) else json.dumps(detail) if detail else "request failed"
+            detail
+            if isinstance(detail, str)
+            else json.dumps(detail) if detail else "request failed"
         )
         error_type = {
             400: "invalid_request_error",

@@ -122,10 +122,7 @@ def _truncate_result(value: Any) -> str:
     # Say that it was cut. A silently truncated result makes the model reason
     # confidently about data it never saw.
     kept = MAX_TOOL_RESULT_CHARS
-    return (
-        text[:kept]
-        + f"\n\n[truncated: {len(text) - kept} more characters not shown]"
-    )
+    return text[:kept] + f"\n\n[truncated: {len(text) - kept} more characters not shown]"
 
 
 async def _execute_one(
@@ -249,9 +246,7 @@ async def run_agent_loop(
 
         # Tool calls in a single turn are independent by construction, so run
         # them concurrently rather than serially.
-        results = await asyncio.gather(
-            *(_execute_one(executor, call) for call in tool_calls)
-        )
+        results = await asyncio.gather(*(_execute_one(executor, call) for call in tool_calls))
         turn.tool_results = list(results)
         conversation.extend(results)
         turns.append(turn)
@@ -268,9 +263,7 @@ async def run_agent_loop(
             model,
         )
     elif stop_reason == "timeout":
-        logger.warning(
-            "Agent loop timed out after %.0fs for model %s", timeout_seconds, model
-        )
+        logger.warning("Agent loop timed out after %.0fs for model %s", timeout_seconds, model)
 
     return LoopResult(
         content=final_content,

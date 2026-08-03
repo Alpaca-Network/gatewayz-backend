@@ -314,9 +314,7 @@ async def get_checkout_session(
         except Exception as e:
             # Never fail the status read because reconciliation failed; the
             # webhook is still the primary path.
-            logger.warning(
-                "Checkout reconciliation failed for session %s: %s", session_id, e
-            )
+            logger.warning("Checkout reconciliation failed for session %s: %s", session_id, e)
 
     return {
         "session_id": session["id"],

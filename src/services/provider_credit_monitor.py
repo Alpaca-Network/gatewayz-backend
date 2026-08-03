@@ -18,6 +18,5 @@ Prefer the canonical path in new code.
 import sys
 
 from src.services.monitoring.provider_credit_monitor import *  # noqa: F401,F403
-from src.services.monitoring.provider_credit_monitor import __dict__ as _canonical_dict  # noqa: F401
 
 sys.modules[__name__] = sys.modules["src.services.monitoring.provider_credit_monitor"]

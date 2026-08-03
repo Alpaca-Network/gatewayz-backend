@@ -114,9 +114,7 @@ def supports_caching(model: dict[str, Any]) -> bool:
     explicit = _flag(model, "supports_caching", "prompt_caching")
     if explicit is not None:
         return explicit
-    provider = str(
-        model.get("provider_slug") or model.get("source_gateway") or ""
-    ).strip().lower()
+    provider = str(model.get("provider_slug") or model.get("source_gateway") or "").strip().lower()
     if provider in CACHE_CAPABLE_PROVIDERS:
         return True
     model_id = (model.get("id") or "").lower()
@@ -160,7 +158,5 @@ def enrich_model_with_capabilities(model: dict[str, Any]) -> dict[str, Any]:
         }
     except Exception as e:
         # Capability metadata is a nice-to-have; never let it break the catalog.
-        logger.warning(
-            "Could not derive capabilities for model %s: %s", model.get("id"), e
-        )
+        logger.warning("Could not derive capabilities for model %s: %s", model.get("id"), e)
     return model

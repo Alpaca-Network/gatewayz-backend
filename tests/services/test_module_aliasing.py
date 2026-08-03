@@ -94,9 +94,7 @@ def test_every_relocated_module_has_a_shim_on_disk():
     from pathlib import Path
 
     missing = [
-        name
-        for name in sorted(_MODULE_TO_SUBPKG)
-        if not Path(f"src/services/{name}.py").exists()
+        name for name in sorted(_MODULE_TO_SUBPKG) if not Path(f"src/services/{name}.py").exists()
     ]
     assert not missing, f"relocated modules without a back-compat shim: {missing}"
 

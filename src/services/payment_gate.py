@@ -121,9 +121,7 @@ def check_live_key_allowed(user: dict, environment_tag: str) -> tuple[bool, str]
 
     allowed, reason = has_payment_signal(user)
     if not allowed:
-        logger.info(
-            "Blocked live key issuance for user %s (%s)", user.get("id"), reason
-        )
+        logger.info("Blocked live key issuance for user %s (%s)", user.get("id"), reason)
     return allowed, reason
 
 

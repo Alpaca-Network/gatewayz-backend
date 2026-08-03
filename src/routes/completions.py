@@ -136,8 +136,7 @@ async def create_completion(
     dropped = unsupported_params(req)
     if dropped:
         warnings.append(
-            "Parameters with no chat-completions equivalent were ignored: "
-            + ", ".join(dropped)
+            "Parameters with no chat-completions equivalent were ignored: " + ", ".join(dropped)
         )
 
     if req.stream:
@@ -165,11 +164,7 @@ async def create_completion(
         seed=req.seed,
         user=req.user,
         stream=False,
-        **(
-            {"presence_penalty": req.presence_penalty}
-            if req.presence_penalty is not None
-            else {}
-        ),
+        **({"presence_penalty": req.presence_penalty} if req.presence_penalty is not None else {}),
         **(
             {"frequency_penalty": req.frequency_penalty}
             if req.frequency_penalty is not None
@@ -192,9 +187,7 @@ async def create_completion(
     if not isinstance(result, dict):
         raise HTTPException(status_code=500, detail="unexpected upstream response shape")
 
-    completion = chat_response_to_completion(
-        result, req.model, f"cmpl-{uuid.uuid4().hex[:24]}"
-    )
+    completion = chat_response_to_completion(result, req.model, f"cmpl-{uuid.uuid4().hex[:24]}")
 
     if warnings:
         # Non-standard field, but silently doing something different from what

@@ -891,9 +891,7 @@ class StripeService:
 
         payment_id = metadata.get("payment_id")
         if payment_id is None:
-            logger.debug(
-                "Session %s has no payment_id metadata; nothing to reconcile", session_id
-            )
+            logger.debug("Session %s has no payment_id metadata; nothing to reconcile", session_id)
             return False
 
         try:

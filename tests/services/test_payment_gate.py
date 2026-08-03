@@ -131,9 +131,7 @@ class TestResolveKeyEnvironment:
 
     def test_new_unpaid_account_is_downgraded_to_test(self):
         with patch("src.db.payments.get_user_payments", return_value=[]):
-            env, downgraded = payment_gate.resolve_key_environment(
-                {"id": 1, "credits": 0}, "live"
-            )
+            env, downgraded = payment_gate.resolve_key_environment({"id": 1, "credits": 0}, "live")
         assert env == "test"
         assert downgraded is True
 
@@ -148,9 +146,7 @@ class TestResolveKeyEnvironment:
 
     def test_test_environment_is_never_downgraded(self):
         with patch("src.db.payments.get_user_payments", return_value=[]):
-            env, downgraded = payment_gate.resolve_key_environment(
-                {"id": 1, "credits": 0}, "test"
-            )
+            env, downgraded = payment_gate.resolve_key_environment({"id": 1, "credits": 0}, "test")
         assert env == "test"
         assert downgraded is False
 

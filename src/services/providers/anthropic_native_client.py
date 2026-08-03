@@ -228,7 +228,9 @@ def build_anthropic_payload(
             block = {
                 "type": "tool_result",
                 "tool_use_id": msg.get("tool_call_id", ""),
-                "content": content if isinstance(content, str) else _content_to_anthropic_blocks(content),
+                "content": (
+                    content if isinstance(content, str) else _content_to_anthropic_blocks(content)
+                ),
             }
             if anthropic_messages and anthropic_messages[-1]["role"] == "user":
                 prev = anthropic_messages[-1]
@@ -527,9 +529,7 @@ def make_anthropic_native_request_stream(messages, model, **kwargs) -> Iterator[
                                 "tool_calls": [
                                     {
                                         "index": tool_index,
-                                        "function": {
-                                            "arguments": delta.get("partial_json", "")
-                                        },
+                                        "function": {"arguments": delta.get("partial_json", "")},
                                     }
                                 ]
                             }

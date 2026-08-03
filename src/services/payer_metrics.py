@@ -72,8 +72,7 @@ def apply_epoch(payments: list[dict]) -> tuple[list[dict], str | None]:
 
     dropped = len(payments) - len(kept)
     note = (
-        f"Excluded {dropped} payment(s) before the metrics epoch "
-        f"({epoch.date().isoformat()})."
+        f"Excluded {dropped} payment(s) before the metrics epoch " f"({epoch.date().isoformat()})."
         if dropped
         else None
     )
@@ -185,7 +184,9 @@ def compute_paying_accounts(payments: list[dict]) -> set:
     return {p["user_id"] for p in payments if _is_settled(p) and p.get("user_id") is not None}
 
 
-def compute_new_paying_accounts(payments: list[dict], window_start: datetime, window_end: datetime) -> int:
+def compute_new_paying_accounts(
+    payments: list[dict], window_start: datetime, window_end: datetime
+) -> int:
     """Accounts whose **first** settled payment falls inside the window.
 
     First-payment date, not any-payment date -- otherwise a returning customer

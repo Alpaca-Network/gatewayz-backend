@@ -81,9 +81,7 @@ class InternalChatRequest(BaseModel):
     top_logprobs: int | None = Field(
         None, ge=0, le=20, description="Number of most likely tokens per position"
     )
-    logit_bias: dict[str, int] | None = Field(
-        None, description="Per-token likelihood adjustments"
-    )
+    logit_bias: dict[str, int] | None = Field(None, description="Per-token likelihood adjustments")
     stream_options: dict[str, Any] | None = Field(
         None, description="Streaming options (e.g. include_usage)"
     )

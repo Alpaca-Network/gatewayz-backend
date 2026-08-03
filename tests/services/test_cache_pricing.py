@@ -54,7 +54,9 @@ class TestSplitPromptTokens:
 
     def test_exclusive_total_does_not_produce_negative_uncached(self):
         """Some providers report prompt_tokens excluding cached tokens."""
-        uncached, write, read = split_prompt_tokens(200, cache_read_tokens=800, cache_write_tokens=0)
+        uncached, write, read = split_prompt_tokens(
+            200, cache_read_tokens=800, cache_write_tokens=0
+        )
         assert uncached == 0
         assert read == 800
 
@@ -100,18 +102,14 @@ class TestExtractCacheTokens:
 
 class TestCalculateCostWithCache:
     def test_no_cache_tokens_delegates_to_plain_calculation(self):
-        with patch(
-            "src.services.pricing.pricing.calculate_cost", return_value=0.05
-        ) as mock_calc:
+        with patch("src.services.pricing.pricing.calculate_cost", return_value=0.05) as mock_calc:
             result = calculate_cost_with_cache("anthropic/claude-sonnet-4", 1000, 100)
         assert result["total_cost"] == 0.05
         mock_calc.assert_called_once()
 
     def test_cache_read_is_cheaper_than_uncached_input(self):
         """The core commercial property."""
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             cached = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=10_000,
@@ -129,9 +127,7 @@ class TestCalculateCostWithCache:
         assert cached["total_cost"] < uncached["total_cost"]
 
     def test_cache_savings_is_reported_and_positive(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             result = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=10_000,
@@ -142,9 +138,7 @@ class TestCalculateCostWithCache:
         assert result["cache_savings"] > 0
 
     def test_anthropic_cache_read_priced_at_one_tenth(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             result = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=1_000,
@@ -157,9 +151,7 @@ class TestCalculateCostWithCache:
         assert result["cache_read_cost"] == pytest.approx(expected_before_markup, rel=0.5)
 
     def test_cache_write_costs_more_than_plain_input_for_anthropic(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             write = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=1_000,
@@ -171,9 +163,7 @@ class TestCalculateCostWithCache:
         assert write["cache_write_cost"] > plain
 
     def test_breakdown_components_sum_to_total(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             result = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=5_000,
@@ -188,9 +178,7 @@ class TestCalculateCostWithCache:
 
     def test_unknown_provider_charges_full_rate_for_cache_reads(self):
         """Never under-bill a provider whose cache economics we do not know."""
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             result = calculate_cost_with_cache(
                 "mystery/model",
                 prompt_tokens=1_000,
@@ -201,18 +189,20 @@ class TestCalculateCostWithCache:
         assert result["cache_savings"] == pytest.approx(0.0, abs=1e-9)
 
     def test_pricing_lookup_failure_falls_back_without_raising(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", side_effect=RuntimeError("db down")
-        ), patch("src.services.pricing.pricing.calculate_cost", return_value=0.02):
+        with (
+            patch(
+                "src.services.pricing.pricing.get_model_pricing",
+                side_effect=RuntimeError("db down"),
+            ),
+            patch("src.services.pricing.pricing.calculate_cost", return_value=0.02),
+        ):
             result = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4", 1_000, 100, cache_read_tokens=500
             )
         assert result["total_cost"] == 0.02
 
     def test_token_counts_are_echoed_for_observability(self):
-        with patch(
-            "src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING
-        ):
+        with patch("src.services.pricing.pricing.get_model_pricing", return_value=FAKE_PRICING):
             result = calculate_cost_with_cache(
                 "anthropic/claude-sonnet-4",
                 prompt_tokens=5_000,

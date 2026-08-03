@@ -187,8 +187,7 @@ class TestStreamTranslation:
         json_deltas = [
             p
             for p in parsed
-            if p["type"] == "content_block_delta"
-            and p["delta"]["type"] == "input_json_delta"
+            if p["type"] == "content_block_delta" and p["delta"]["type"] == "input_json_delta"
         ]
         assert json_deltas[0]["delta"]["partial_json"] == '{"p":1}'
 
