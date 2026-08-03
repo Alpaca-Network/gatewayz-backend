@@ -44,22 +44,37 @@ CACHE_CAPABLE_PROVIDERS: frozenset[str] = frozenset(
 # no explicit flag. Matched as substrings against the lowercased model ID.
 KNOWN_TOOL_FAMILIES: tuple[str, ...] = (
     "claude",
+    "gpt-3.5-turbo",
     "gpt-4",
     "gpt-5",
     "gpt-4o",
     "o1",
     "o3",
+    "o4",
     "gemini",
     "mistral-large",
     "command-r",
     "llama-3.1",
     "llama-3.3",
     "llama-4",
+    "qwen",
     "qwen2.5",
     "qwen3",
+    "deepseek",
     "deepseek-v3",
     "deepseek-r1",
     "grok",
+    # Families added when the provider roster moved to direct supply. Without
+    # these, a live production catalog reported tools:false for models that
+    # plainly support tool calling (Kimi K2 among them) — under-reporting fails
+    # safe, but it hides a chunk of the catalog from agent tools that filter on
+    # capability before sending a request.
+    "kimi",
+    "moonshot",
+    "minimax",
+    "glm",
+    "mimo",
+    "step",
 )
 
 KNOWN_VISION_FAMILIES: tuple[str, ...] = (

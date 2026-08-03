@@ -5,6 +5,8 @@ agent that trusts an incorrect "tools: true" fails at runtime, whereas one that
 routes around an under-reported model merely misses an option.
 """
 
+import pytest
+
 from src.services.model_capability_surface import (
     build_supported_parameters,
     enrich_model_with_capabilities,
@@ -111,3 +113,30 @@ class TestEnrichment:
     def test_missing_id_does_not_raise(self):
         model = enrich_model_with_capabilities({})
         assert "supported_parameters" in model
+
+
+class TestCurrentProviderRoster:
+    """Families added when supply moved direct.
+
+    A live production catalog reported tools=false for six models that plainly
+    support tool calling. Under-reporting fails safe, but agent tools that
+    filter on capability before sending a request never see those models.
+    """
+
+    @pytest.mark.parametrize(
+        "model_id",
+        [
+            "moonshot/kimi-k2.6",
+            "moonshot/kimi-k2.7-code",
+            "moonshot/kimi-k3",
+            "openai/gpt-3.5-turbo",
+            "openai/gpt-3.5-turbo-0125",
+            "openai/gpt-3.5-turbo-16k",
+        ],
+    )
+    def test_models_that_were_mis_reported_now_advertise_tools(self, model_id):
+        assert supports_tools({"id": model_id}) is True
+
+    def test_genuinely_unknown_model_still_fails_safe(self):
+        """The conservative default must survive the widened family list."""
+        assert supports_tools({"id": "obscure/mystery-model-v1"}) is False
