@@ -127,6 +127,45 @@ def check_live_key_allowed(user: dict, environment_tag: str) -> tuple[bool, str]
     return allowed, reason
 
 
+def resolve_key_environment(user: dict, requested: str | None) -> tuple[str, bool]:
+    """Pick the environment a key may actually be issued in.
+
+    Used by the signup path, which auto-creates a key rather than going through
+    ``POST /user/api-keys``. Guarding only the explicit endpoint left the whole
+    gate bypassable: register, receive a live key, farm credits — the exact hole
+    the gate exists to close.
+
+    Signup cannot simply 402 the way the explicit endpoint does, because
+    refusing to complete registration over a key environment would break the
+    sign-up flow entirely. So an ungated key is issued instead and the caller is
+    told it was downgraded. The user can still evaluate the API; they top up to
+    unlock live.
+
+    Returns ``(environment_tag, was_downgraded)``.
+    """
+    requested_tag = (requested or "live").strip().lower()
+
+    allowed, _ = check_live_key_allowed(user, requested_tag)
+    if allowed:
+        return requested_tag, False
+
+    logger.info(
+        "Downgrading auto-created key for user %s from '%s' to 'test' (no payment signal)",
+        user.get("id"),
+        requested_tag,
+    )
+    return "test", True
+
+
+def downgrade_notice(requested: str) -> str:
+    """Human-readable explanation for a downgraded key."""
+    return (
+        f"A '{requested}' API key requires credits on the account, so a free "
+        f"rate-limited 'test' key was issued instead. Top up at least "
+        f"${MIN_TOPUP_USD:.2f} to unlock live keys."
+    )
+
+
 def gate_error_detail(environment_tag: str) -> dict:
     """The 402 body. Tells the user precisely how to unblock themselves."""
     return {

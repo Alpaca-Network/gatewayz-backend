@@ -120,6 +120,64 @@ class TestEnvironmentGating:
         assert reason == "gate_disabled"
 
 
+class TestResolveKeyEnvironment:
+    """The signup path auto-creates keys and cannot 402, so it downgrades.
+
+    Regression cover for a hole found by running the flow end to end: the gate
+    originally guarded only POST /user/api-keys, so registering through /auth
+    handed out a live key to a brand-new zero-credit account — the exact
+    farming vector the gate exists to close.
+    """
+
+    def test_new_unpaid_account_is_downgraded_to_test(self):
+        with patch("src.db.payments.get_user_payments", return_value=[]):
+            env, downgraded = payment_gate.resolve_key_environment(
+                {"id": 1, "credits": 0}, "live"
+            )
+        assert env == "test"
+        assert downgraded is True
+
+    def test_paid_account_keeps_live(self):
+        with patch(
+            "src.db.payments.get_user_payments",
+            return_value=[{"amount_usd": 10.0, "status": "succeeded"}],
+        ):
+            env, downgraded = payment_gate.resolve_key_environment({"id": 1}, "live")
+        assert env == "live"
+        assert downgraded is False
+
+    def test_test_environment_is_never_downgraded(self):
+        with patch("src.db.payments.get_user_payments", return_value=[]):
+            env, downgraded = payment_gate.resolve_key_environment(
+                {"id": 1, "credits": 0}, "test"
+            )
+        assert env == "test"
+        assert downgraded is False
+
+    def test_missing_request_defaults_to_live_then_downgrades(self):
+        with patch("src.db.payments.get_user_payments", return_value=[]):
+            env, downgraded = payment_gate.resolve_key_environment({"id": 1, "credits": 0}, None)
+        assert env == "test"
+        assert downgraded is True
+
+    def test_kill_switch_restores_live(self, monkeypatch):
+        monkeypatch.setenv("REQUIRE_PAYMENT_FOR_LIVE_KEYS", "false")
+        env, downgraded = payment_gate.resolve_key_environment({"id": 1, "credits": 0}, "live")
+        assert env == "live"
+        assert downgraded is False
+
+    def test_account_with_granted_credits_keeps_live(self):
+        """Admin grants and coupons are human-gated, so they still qualify."""
+        with patch("src.db.payments.get_user_payments", return_value=[]):
+            env, _ = payment_gate.resolve_key_environment({"id": 1, "credits": 25.0}, "live")
+        assert env == "live"
+
+    def test_downgrade_notice_tells_the_user_how_to_unlock(self):
+        notice = payment_gate.downgrade_notice("live")
+        assert "test" in notice
+        assert "Top up" in notice
+
+
 class TestErrorDetail:
     def test_tells_the_user_how_to_unblock_themselves(self):
         detail = gate_error_detail("live")

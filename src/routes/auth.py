@@ -349,12 +349,18 @@ def _handle_existing_user(
             )
             try:
                 from src.db.api_keys import create_api_key
+                from src.services.payment_gate import resolve_key_environment
+
+                # The payment gate applies here too. Guarding only
+                # POST /user/api-keys left this path as a free source of live
+                # keys, which is exactly the hole the gate exists to close.
+                env_tag, _downgraded = resolve_key_environment(existing_user, "live")
 
                 # Create a new primary key for this user
                 primary_key, _ = create_api_key(
                     user_id=existing_user["id"],
                     key_name="Primary Key (Auto-created)",
-                    environment_tag="live",
+                    environment_tag=env_tag,
                     is_primary=True,
                 )
                 api_key_to_return = primary_key
@@ -1157,6 +1163,15 @@ async def privy_auth(
                         )
                         env_tag = "live"
 
+                    # A brand-new account has no payment signal, so a requested
+                    # live key is downgraded to a free rate-limited test key
+                    # rather than handed out. Signup still succeeds — refusing
+                    # registration over a key environment would be worse than
+                    # the farming it prevents.
+                    from src.services.payment_gate import resolve_key_environment
+
+                    env_tag, _downgraded = resolve_key_environment(created_user, env_tag)
+
                     api_key_value = created_user.get("api_key")
                     try:
                         existing_key_result = (
@@ -1522,6 +1537,12 @@ async def register_user(
                         f"Invalid environment_tag '{env_tag}' for registration, defaulting to 'live'"
                     )
                     env_tag = "live"
+
+                # Payment gate: a fresh registration has no payment signal, so a
+                # live key is downgraded to a free test key.
+                from src.services.payment_gate import resolve_key_environment
+
+                env_tag, _downgraded = resolve_key_environment(created_user, env_tag)
 
                 try:
                     client.table("api_keys_new").insert(

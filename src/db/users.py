@@ -235,11 +235,25 @@ def create_enhanced_user(
             logger.error(f"User creation failed: {e}")
             raise ValueError(f"Failed to create user account: {e}")
 
-        # Generate primary API key with the appropriate subscription status
+        # Generate primary API key with the appropriate subscription status.
+        #
+        # Payment gate: a newly created account has no payment signal by
+        # definition, so its primary key is issued in the free rate-limited
+        # 'test' environment rather than 'live'. This is THE farming vector —
+        # every other key-creation path either goes through the gated
+        # POST /user/api-keys endpoint or is admin-driven, but signup is open to
+        # anyone. Gating only the explicit endpoint left this wide open.
+        #
+        # resolve_key_environment respects REQUIRE_PAYMENT_FOR_LIVE_KEYS, so the
+        # kill switch restores the old behaviour.
+        from src.services.payment_gate import resolve_key_environment
+
+        key_environment, _downgraded = resolve_key_environment(user, "live")
+
         primary_key, _ = create_api_key(
             user_id=user_id,
             key_name="Primary Key",
-            environment_tag="live",
+            environment_tag=key_environment,
             is_primary=True,
             subscription_status=subscription_status,
         )

@@ -144,22 +144,29 @@ def check_checkout_creation(client: httpx.Client, amount_cents: int, report: Rep
     return session_id
 
 
-def check_session_reconciles(client: httpx.Client, session_id: str, report: Report) -> None:
-    """The success page must grant credits itself if the webhook is late."""
+def check_session_reconciles(
+    client: httpx.Client, session_id: str, report: Report
+) -> bool | None:
+    """The success page must grant credits itself if the webhook is late.
+
+    Returns whether *this call* performed the grant. False means the credits
+    had already landed — from the webhook, or from an earlier run of this
+    script against the same session.
+    """
     start = time.perf_counter()
     resp = client.get(f"/api/stripe/checkout-session/{session_id}")
     elapsed = time.perf_counter() - start
 
     if resp.status_code >= 400:
         report.add("session status readable", False, f"HTTP {resp.status_code}", elapsed)
-        return
+        return None
 
     data = resp.json()
     paid = data.get("payment_status") == "paid"
     report.add("session is paid", paid, f"payment_status={data.get('payment_status')}", elapsed)
 
     if not paid:
-        return
+        return None
 
     # credits_reconciled is True only when this call is what granted the
     # credits, i.e. the webhook had not landed. Either value is a pass; the
@@ -171,12 +178,15 @@ def check_session_reconciles(client: httpx.Client, session_id: str, report: Repo
             "response has no credits_reconciled field — a dropped webhook would "
             "strand a paying user on the success page",
         )
-    else:
-        report.add(
-            "late-webhook reconciliation present",
-            True,
-            f"credits_reconciled={data['credits_reconciled']}",
-        )
+        return None
+
+    reconciled = bool(data["credits_reconciled"])
+    report.add(
+        "late-webhook reconciliation present",
+        True,
+        f"credits_reconciled={reconciled}",
+    )
+    return reconciled
 
 
 def check_credits_landed(
@@ -256,8 +266,19 @@ def main() -> int:
         print(f"Starting balance: {before}\n")
 
         if args.session_id:
-            check_session_reconciles(client, args.session_id, report)
-            check_credits_landed(client, before, args.amount, report)
+            granted_now = check_session_reconciles(client, args.session_id, report)
+            if granted_now is False:
+                # The credits had already landed — from the webhook, or from an
+                # earlier run of this script against the same session. Asserting
+                # a balance *increase* here would flag correct idempotency as a
+                # failure, which is the opposite of what we want to verify.
+                report.add(
+                    "credits already granted (idempotent re-run)",
+                    (before or 0) > 0,
+                    f"balance {before} — no second grant, which is correct",
+                )
+            elif granted_now:
+                check_credits_landed(client, before, args.amount, report)
             check_live_key_unlocked(client, report)
         else:
             check_minimum_matches_what_we_advertise(client, report)
