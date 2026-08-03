@@ -7,10 +7,12 @@ undefined rather than infinite.
 """
 
 from datetime import UTC, datetime, timedelta, timezone
+from unittest.mock import patch
 
 import pytest
 
 from src.services.payer_metrics import (
+    PayerMetricsUnavailable,
     _amount_usd,
     _wow_pct,
     apply_epoch,
@@ -19,6 +21,7 @@ from src.services.payer_metrics import (
     compute_paying_accounts,
     compute_revenue,
     compute_second_topup_rate,
+    fetch_settled_payments,
 )
 
 NOW = datetime(2026, 8, 1, tzinfo=UTC)
@@ -40,7 +43,9 @@ class TestAmountNormalisation:
         assert _amount_usd({"amount_usd": 25.0, "amount": 999}) == 25.0
 
     def test_cents_fallback_divided_by_100(self):
-        assert _amount_usd({"amount": 2500}) == 25.0
+        # The column is amount_cents. This test previously asserted "amount",
+        # which is why it passed while production reported zero payers.
+        assert _amount_usd({"amount_cents": 2500}) == 25.0
 
     def test_missing_amount_is_zero(self):
         assert _amount_usd({}) == 0.0
@@ -206,3 +211,32 @@ class TestEpochConsistency:
         filtered, note = apply_epoch(payments)
         assert filtered == payments
         assert note is None
+
+
+class TestSchemaAndFailureVisibility:
+    """A broken query must never render as "no customers".
+
+    The payments table column is `amount_cents`, not `amount`. Selecting the
+    wrong name made PostgREST reject the query; the except-branch returned an
+    empty list; and the scorecard reported 0 paying accounts for a business
+    that had 8 payers and $123 of revenue. The number looked like a fact.
+    """
+
+    def test_amount_reads_the_real_cents_column(self):
+        assert _amount_usd({"amount_cents": 900}) == 9.0
+
+    def test_nonexistent_amount_column_is_not_used(self):
+        """Guards the exact regression: `amount` must not be read as cents."""
+        assert _amount_usd({"amount": 900}) == 0.0
+
+    def test_amount_usd_still_preferred(self):
+        assert _amount_usd({"amount_usd": 9.0, "amount_cents": 100}) == 9.0
+
+    def test_fetch_failure_raises_rather_than_returning_empty(self):
+        """An unreadable table must not look like an empty one."""
+        with patch(
+            "src.config.supabase_config.get_supabase_client",
+            side_effect=RuntimeError("column does not exist"),
+        ):
+            with pytest.raises(PayerMetricsUnavailable, match="NOT the same as having no payers"):
+                fetch_settled_payments()

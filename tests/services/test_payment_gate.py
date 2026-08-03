@@ -69,7 +69,7 @@ class TestPaymentSignal:
     def test_cents_only_payment_row_normalised(self):
         with patch(
             "src.db.payments.get_user_payments",
-            return_value=[{"amount": 500, "status": "paid"}],
+            return_value=[{"amount_cents": 500, "status": "paid"}],
         ):
             allowed, _ = has_payment_signal({"id": 1, "credits": 0})
         assert allowed is True

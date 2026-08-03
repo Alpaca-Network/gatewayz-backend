@@ -33,6 +33,14 @@ logger = logging.getLogger(__name__)
 SETTLED_STATUSES = frozenset({"succeeded", "completed", "paid"})
 
 
+class PayerMetricsUnavailable(RuntimeError):
+    """The payments data could not be read.
+
+    Distinct from "there are no payers". Conflating the two is what let a
+    mis-named column report an $8-payer business as having zero customers.
+    """
+
+
 def metrics_epoch() -> datetime | None:
     """Clean Day 0 for reported metrics.
 
@@ -112,14 +120,20 @@ class WeeklyScorecard:
 
 
 def _amount_usd(payment: dict) -> float:
-    """Dollars for a payment row (``amount_usd`` dollars, ``amount`` cents)."""
+    """Dollars for a payment row.
+
+    The column is ``amount_cents``, not ``amount``. Getting this wrong is what
+    made every payer metric report zero: the SELECT named a column that does not
+    exist, PostgREST rejected the query, and the except-branch below returned an
+    empty list — a query error rendered as "no customers".
+    """
     usd = payment.get("amount_usd")
     if usd is not None:
         try:
             return float(usd)
         except (TypeError, ValueError):
             return 0.0
-    cents = payment.get("amount")
+    cents = payment.get("amount_cents")
     try:
         return float(cents) / 100.0 if cents is not None else 0.0
     except (TypeError, ValueError):
@@ -164,14 +178,23 @@ def fetch_settled_payments(since: datetime | None = None) -> list[dict]:
         from src.config.supabase_config import get_supabase_client
 
         client = get_supabase_client()
-        query = client.table("payments").select("user_id, amount_usd, amount, status, created_at")
+        query = client.table("payments").select(
+            "user_id, amount_usd, amount_cents, status, created_at"
+        )
         if since:
             query = query.gte("created_at", since.isoformat())
         result = query.execute()
         return [p for p in (result.data or []) if _is_settled(p)]
     except Exception as e:
-        logger.error("Failed to fetch payments for payer metrics: %s", e)
-        return []
+        # Re-raise rather than returning []. Swallowing this turned a broken
+        # query into "0 paying accounts" on the scorecard — a number that looks
+        # like a business fact and is indistinguishable from one. The caller
+        # decides how to surface the failure; it must never be silent.
+        logger.error("Failed to fetch payments for payer metrics: %s", e, exc_info=True)
+        raise PayerMetricsUnavailable(
+            f"Could not read the payments table: {e}. Metrics are unavailable — "
+            "this is NOT the same as having no payers."
+        ) from e
 
 
 def compute_paying_accounts(payments: list[dict]) -> set:

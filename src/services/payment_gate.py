@@ -51,10 +51,13 @@ def is_gate_enabled() -> bool:
 def _payment_amount_usd(payment: dict) -> float:
     """Normalise a payment row to dollars.
 
-    The payments table carries ``amount_usd`` (dollars) on newer rows and
-    Stripe's ``amount`` (cents) on older ones. Reading whichever is present and
-    guessing the unit would silently under- or over-count by 100x, so the
-    dollar column is preferred and cents are only used as a fallback.
+    The payments table carries ``amount_usd`` (dollars) and ``amount_cents``.
+    Reading whichever is present and guessing the unit would silently under- or
+    over-count by 100x, so the dollar column is preferred and cents are only
+    used as a fallback.
+
+    Note the column is ``amount_cents``, not ``amount`` — the latter does not
+    exist, and naming it is what broke the payer metrics.
     """
     usd = payment.get("amount_usd")
     if usd is not None:
@@ -62,7 +65,7 @@ def _payment_amount_usd(payment: dict) -> float:
             return float(usd)
         except (TypeError, ValueError):
             return 0.0
-    cents = payment.get("amount")
+    cents = payment.get("amount_cents")
     try:
         return float(cents) / 100.0 if cents is not None else 0.0
     except (TypeError, ValueError):
