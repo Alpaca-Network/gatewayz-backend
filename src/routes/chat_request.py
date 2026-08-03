@@ -36,6 +36,11 @@ async def prepare_upstream_request(
     tracker,
 ) -> tuple[str, str, list, dict]:
     with tracker.stage("request_preparation"):
+        # Forward the full advertised OpenAI surface. ProxyRequest declares all
+        # of these, so dropping them here made the schema a lie -- tool_choice
+        # degraded to "auto" and response_format (JSON mode) did nothing.
+        # Provider-specific pruning happens later, in _call_provider, where the
+        # actual provider for the attempt is known (failover can change it).
         optional = {}
         for name in (
             "max_tokens",
@@ -43,7 +48,18 @@ async def prepare_upstream_request(
             "top_p",
             "frequency_penalty",
             "presence_penalty",
+            "stop",
+            "n",
+            "seed",
+            "user",
             "tools",
+            "tool_choice",
+            "parallel_tool_calls",
+            "response_format",
+            "logprobs",
+            "top_logprobs",
+            "logit_bias",
+            "stream_options",
             # Carried through as a canonical value; each provider adapter
             # translates it into its own dialect (or drops it for models that
             # do not reason) — see services/providers/reasoning_effort.py.
@@ -52,6 +68,19 @@ async def prepare_upstream_request(
             val = getattr(req, name, None)
             if val is not None:
                 optional[name] = val
+
+        # Semantic guards. These params are only legal in combination with
+        # others; sending them standalone is a 400 on OpenAI and most clones.
+        # parallel_tool_calls defaults to True in ProxyRequest, so without this
+        # guard every toolless request would start carrying it.
+        if not optional.get("tools"):
+            optional.pop("tool_choice", None)
+            optional.pop("parallel_tool_calls", None)
+        if not getattr(req, "stream", False):
+            optional.pop("stream_options", None)
+        # top_logprobs requires logprobs=True
+        if not optional.get("logprobs"):
+            optional.pop("top_logprobs", None)
 
         # Validate and adjust max_tokens for models with minimum requirements
         validate_and_adjust_max_tokens(optional, original_model)

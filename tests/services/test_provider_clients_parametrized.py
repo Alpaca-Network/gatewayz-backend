@@ -80,10 +80,15 @@ def _get_func(module, provider, suffix):
             "process_response": "process_openai_response",
         }
     elif provider == "anthropic":
+        # Anthropic's public entry points route to the native Messages API by
+        # default (prompt caching is unavailable on the OpenAI-compatibility
+        # endpoint). This suite verifies the thin-OpenAI-SDK-wrapper contract,
+        # so it targets the compatibility functions directly; the native
+        # transport has its own tests in test_anthropic_native_client.py.
         name_map = {
             "get_client": "get_anthropic_client",
-            "make_request": "make_anthropic_request",
-            "make_stream": "make_anthropic_request_stream",
+            "make_request": "_make_anthropic_request_compat",
+            "make_stream": "_make_anthropic_request_stream_compat",
             "process_response": "process_anthropic_response",
         }
     else:

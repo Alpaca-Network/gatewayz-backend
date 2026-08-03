@@ -61,11 +61,47 @@ def _rfield(obj: Any, name: str, default: Any = None) -> Any:
 _MAX_STREAM_DURATION = int(os.getenv("MAX_STREAM_DURATION_SECONDS", "300"))
 
 
+def _cache_aware_split(
+    model_id: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
+    provider: str | None,
+) -> tuple[float, float, float]:
+    """``calculate_cost_split`` that prices cached input at its own rate.
+
+    Delegates to the plain split when the request carried no cache tokens, so
+    non-caching traffic keeps its exact previous cost.
+    """
+    if not cache_read_tokens and not cache_write_tokens:
+        return calculate_cost_split(model_id, prompt_tokens, completion_tokens)
+
+    from src.services.pricing.cache_pricing import calculate_cost_with_cache
+
+    breakdown = calculate_cost_with_cache(
+        model_id,
+        prompt_tokens,
+        completion_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        provider=provider,
+    )
+    return (
+        breakdown["total_cost"],
+        breakdown["input_cost"],
+        breakdown["output_cost"],
+    )
+
+
 def _loss_proof_cost_split(
     requested_model: str,
     provider_model_id: str | None,
     prompt_tokens: int,
     completion_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    provider: str | None = None,
 ) -> tuple[float, float, float]:
     """Cost split that never bills below the provider that actually served the request.
 
@@ -89,7 +125,14 @@ def _loss_proof_cost_split(
     ``calculate_cost_split(requested_model, ...)`` and instead enforce
     catalog_price >= max(provider cost) in the pricing data.
     """
-    base = calculate_cost_split(requested_model, prompt_tokens, completion_tokens)
+    base = _cache_aware_split(
+        requested_model,
+        prompt_tokens,
+        completion_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        provider,
+    )
     if not provider_model_id or provider_model_id == requested_model:
         return base
     try:
@@ -99,7 +142,14 @@ def _loss_proof_cost_split(
             or float(served_pricing.get("completion", 0) or 0) > 0
         )
         if has_real_price:
-            served = calculate_cost_split(provider_model_id, prompt_tokens, completion_tokens)
+            served = _cache_aware_split(
+                provider_model_id,
+                prompt_tokens,
+                completion_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                provider,
+            )
             if served[0] > base[0]:
                 logger.info(
                     "[Pricing] Failover re-price: served provider model %r cost $%.6f "
@@ -162,6 +212,11 @@ class ChatInferenceHandler:
         # customer's own provider key (BYOK); consumed at billing time to charge a
         # routing fee instead of the full credit cost.
         self.is_byok = False
+        # Populated by _call_provider(_stream) with any generation params the
+        # served provider does not accept. Surfaced to the client as the
+        # X-Gatewayz-Dropped-Params response header so that a silently ignored
+        # tool_choice or response_format is visible rather than mysterious.
+        self.dropped_params: list[str] = []
 
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
@@ -369,9 +424,17 @@ class ChatInferenceHandler:
         """
         from fastapi import HTTPException
 
+        from src.services.provider_param_support import filter_params_for_provider
         from src.utils.errors import DetailedErrorFactory
 
         logger.info(f"[ChatHandler] Calling provider={provider_name}, model={model_id}")
+
+        # Prune params this provider does not accept. Done here rather than at
+        # the route because failover can hand the same request to a provider
+        # with a different supported set.
+        kwargs, dropped_params = filter_params_for_provider(provider_name, kwargs)
+        if dropped_params:
+            self.dropped_params = dropped_params
 
         # Bind the customer's own key (if any) for the duration of this call so
         # the provider client uses it instead of the platform key.
@@ -555,6 +618,13 @@ class ChatInferenceHandler:
             Exception: Provider-specific errors
         """
         logger.info(f"[ChatHandler] Calling provider={provider_name} (streaming), model={model_id}")
+
+        # Prune params this provider does not accept (see _call_provider).
+        from src.services.provider_param_support import filter_params_for_provider
+
+        kwargs, dropped_params = filter_params_for_provider(provider_name, kwargs)
+        if dropped_params:
+            self.dropped_params = dropped_params
 
         # Sentinel value to signal iterator exhaustion (PEP 479 compliance)
         _STREAM_EXHAUSTED = object()
@@ -884,7 +954,14 @@ class ChatInferenceHandler:
                 "stop": request.stop,
                 "tools": request.tools,
                 "tool_choice": request.tool_choice,
+                "parallel_tool_calls": request.parallel_tool_calls,
                 "response_format": request.response_format,
+                "n": request.n,
+                "seed": request.seed,
+                "logprobs": request.logprobs,
+                "top_logprobs": request.top_logprobs,
+                "logit_bias": request.logit_bias,
+                "stream_options": request.stream_options,
                 "user": request.user,
             }
             # Remove None values
@@ -959,6 +1036,13 @@ class ChatInferenceHandler:
                 prompt_tokens = 0
                 completion_tokens = 0
 
+            # Prompt-cache accounting. Cache reads cost a fraction of full input
+            # tokens; billing them at the input rate is the difference between
+            # beating and losing to the provider's direct pricing.
+            from src.services.pricing.cache_pricing import extract_cache_tokens
+
+            cache_read_tokens, cache_write_tokens = extract_cache_tokens(usage)
+
             # Extract response content
             choices = _rfield(provider_response, "choices")
             if choices:
@@ -995,6 +1079,9 @@ class ChatInferenceHandler:
                 provider_model_id,
                 prompt_tokens,
                 completion_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                provider_used,
             )
 
             logger.debug(
@@ -1034,6 +1121,18 @@ class ChatInferenceHandler:
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=total_tokens,
+                    # InternalUsage allows extras; these are surfaced to the
+                    # client so a caller can verify their cache breakpoints
+                    # actually hit rather than trusting the bill.
+                    **(
+                        {
+                            "cache_read_input_tokens": cache_read_tokens,
+                            "cache_creation_input_tokens": cache_write_tokens,
+                            "prompt_tokens_details": {"cached_tokens": cache_read_tokens},
+                        }
+                        if (cache_read_tokens or cache_write_tokens)
+                        else {}
+                    ),
                 ),
                 cost_usd=cost,
                 input_cost_usd=input_cost,
@@ -1094,6 +1193,8 @@ class ChatInferenceHandler:
         """
         prompt_tokens = 0
         completion_tokens = 0
+        cache_read_tokens = 0
+        cache_write_tokens = 0
         provider_used = None
 
         try:
@@ -1133,7 +1234,14 @@ class ChatInferenceHandler:
                 "stop": request.stop,
                 "tools": request.tools,
                 "tool_choice": request.tool_choice,
+                "parallel_tool_calls": request.parallel_tool_calls,
                 "response_format": request.response_format,
+                "n": request.n,
+                "seed": request.seed,
+                "logprobs": request.logprobs,
+                "top_logprobs": request.top_logprobs,
+                "logit_bias": request.logit_bias,
+                "stream_options": request.stream_options,
                 "user": request.user,
             }
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
@@ -1239,6 +1347,13 @@ class ChatInferenceHandler:
                                 completion_tokens = (
                                     _rfield(chunk_usage, "completion_tokens", 0) or 0
                                 )
+                                from src.services.pricing.cache_pricing import (
+                                    extract_cache_tokens,
+                                )
+
+                                cache_read_tokens, cache_write_tokens = extract_cache_tokens(
+                                    chunk_usage
+                                )
 
                             # Yield internal chunk
                             internal_chunk = InternalStreamChunk(
@@ -1299,6 +1414,9 @@ class ChatInferenceHandler:
                 provider_model_id,
                 prompt_tokens,
                 completion_tokens,
+                cache_read_tokens,
+                cache_write_tokens,
+                provider_used,
             )
 
             logger.debug(f"[ChatHandler] Streaming cost: ${cost:.6f}")

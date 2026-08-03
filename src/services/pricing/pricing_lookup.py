@@ -822,6 +822,17 @@ def enrich_model_with_pricing(
     if not model_id:
         return model_data
 
+    # Advertise capabilities alongside pricing. Agent tools need to know which
+    # models take tools / cache_control before they send a request; without it
+    # the only way to find out is to trigger an error.
+    try:
+        from src.services.model_capability_surface import enrich_model_with_capabilities
+
+        enrich_model_with_capabilities(model_data)
+    except Exception:
+        # Never let capability metadata break catalog assembly.
+        pass
+
     gateway_lower = gateway.lower()
     is_gateway_provider = gateway_lower in GATEWAY_PROVIDERS
 

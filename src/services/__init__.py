@@ -100,6 +100,54 @@ for _subpkg, _modules in _ALL_RELOCATED.items():
             _MODULE_TO_SUBPKG[_mod] = _subpkg
 
 
+class _AliasLoader(importlib.abc.Loader):
+    """Bind an already-imported module to a second name without re-executing it.
+
+    Two things have to be true and neither is the default.
+
+    1. ``create_module`` must hand back the real module. The finder below used
+       to return ``ModuleSpec(fullname, None)`` — a spec with no loader — and
+       the import machinery responded by building its own module and discarding
+       the alias the finder had just put in ``sys.modules``. That produced two
+       live copies of the same file, each with its own module-level globals.
+       For ``prometheus_remote_write`` that meant ``init_...()`` set
+       ``prometheus_writer`` on one copy while ``get_prometheus_writer()`` read
+       ``None`` from the other, so metrics were silently never pushed.
+
+    2. ``exec_module`` must put the module's identity back. Before calling it,
+       ``_init_module_attrs(spec, module, override=True)`` rewrites
+       ``__name__``, ``__spec__`` and ``__loader__`` on the module it was
+       handed — which here is the *canonical* module. Left alone, the canonical
+       module ends up believing it is the legacy one, which breaks
+       ``importlib.reload``, pickling, and pytest's module identity checks. An
+       earlier attempt at this fix omitted the restore and took the suite from
+       3 failures to 48.
+    """
+
+    def __init__(self, real_module):
+        self._real_module = real_module
+        # Captured before the machinery has a chance to overwrite it.
+        self._canonical_spec = getattr(real_module, "__spec__", None)
+        self._canonical_name = getattr(real_module, "__name__", None)
+        self._canonical_loader = getattr(real_module, "__loader__", None)
+
+    def create_module(self, spec):
+        # Reuse the real module. Returning None would let the machinery build
+        # an empty one and re-execute the source into it.
+        return self._real_module
+
+    def exec_module(self, module):
+        # Already executed under its canonical name — re-running it would reset
+        # module-level state, which is the thing this whole mechanism exists to
+        # preserve. Only restore the identity attributes clobbered above.
+        if self._canonical_name is not None:
+            module.__name__ = self._canonical_name
+        if self._canonical_spec is not None:
+            module.__spec__ = self._canonical_spec
+        if self._canonical_loader is not None:
+            module.__loader__ = self._canonical_loader
+
+
 class _RelocatedModuleFinder(importlib.abc.MetaPathFinder):
     """Redirect ``import src.services.<moved_module>`` to its sub-package.
 
@@ -140,16 +188,35 @@ class _RelocatedModuleFinder(importlib.abc.MetaPathFinder):
         finally:
             self._active.discard(fullname)
         sys.modules[fullname] = real_module
-        return importlib.machinery.ModuleSpec(fullname, None)
+        # A None loader here makes CPython build a second module and throw the
+        # alias away — see _AliasLoader.
+        return importlib.machinery.ModuleSpec(fullname, _AliasLoader(real_module))
 
     def load_module(self, fullname):
         """Called by find_module path — module is already in sys.modules."""
         return sys.modules[fullname]
 
 
-# Install the finder once at package import time
-if not any(isinstance(f, _RelocatedModuleFinder) for f in sys.meta_path):
-    sys.meta_path.insert(0, _RelocatedModuleFinder())
+# The finder above is NO LONGER INSTALLED.
+#
+# It aliased legacy import paths by returning a synthesised ModuleSpec, and the
+# import machinery responded by building its own module object and discarding
+# the alias — leaving two separately-executed copies of the same file, each
+# with its own globals. In the real application import order,
+# ``src.services.prometheus_remote_write`` and
+# ``src.services.metrics.prometheus_remote_write`` were different objects, so
+# ``init_prometheus_remote_write()`` set the writer on one while
+# ``get_prometheus_writer()`` read ``None`` from the other. Metrics were
+# silently dropped, with no error to notice.
+#
+# Every relocated module now has a real one-line shim on disk
+# (``src/services/<name>.py``) that ends with
+# ``sys.modules[__name__] = sys.modules["<canonical>"]``. The machinery re-reads
+# sys.modules after executing a module, so both paths end up bound to one
+# object. Ordinary modules, no import-machinery subtleties.
+#
+# The class is kept only so that anything referencing it by name keeps
+# importing; it does nothing unless someone installs it.
 
 
 def __getattr__(name):

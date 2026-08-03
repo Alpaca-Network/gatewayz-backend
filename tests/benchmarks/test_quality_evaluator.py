@@ -52,7 +52,9 @@ class TestQualityEvaluator:
         """Test default initialization."""
         evaluator = QualityEvaluator()
 
-        assert evaluator.judge_model == "gpt-4-turbo-preview"
+        # Tracks the default in scripts/benchmarks/quality_evaluator.py, which
+        # moved to gpt-4o. The assertion was left behind on the old value.
+        assert evaluator.judge_model == "gpt-4o"
         assert evaluator.min_passing_score == 60.0
         assert evaluator.timeout == 30.0
 

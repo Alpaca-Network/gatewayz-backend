@@ -98,6 +98,33 @@ def _extract_system_text(system: str | list[dict[str, Any]] | None) -> str | Non
     return str(system)
 
 
+def _system_has_cache_control(system: str | list[dict[str, Any]] | None) -> bool:
+    """Whether any system block carries a prompt-cache breakpoint."""
+    if not isinstance(system, list):
+        return False
+    return any(isinstance(b, dict) and b.get("cache_control") for b in system)
+
+
+def _system_blocks_preserving_cache(
+    system: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Keep the system prompt as content blocks so cache markers survive.
+
+    A coding agent's system prompt is typically its single largest cacheable
+    prefix, so flattening it to a string -- which is what _extract_system_text
+    does -- throws away the most valuable cache breakpoint in the request.
+    """
+    blocks: list[dict[str, Any]] = []
+    for block in system:
+        if not isinstance(block, dict) or block.get("type") != "text":
+            continue
+        out: dict[str, Any] = {"type": "text", "text": block.get("text", "")}
+        if block.get("cache_control"):
+            out["cache_control"] = block["cache_control"]
+        blocks.append(out)
+    return blocks
+
+
 def _transform_content_block(block: dict[str, Any]) -> dict[str, Any] | list[dict[str, Any]] | None:
     """
     Transform a single Anthropic content block to OpenAI format.
@@ -121,7 +148,15 @@ def _transform_content_block(block: dict[str, Any]) -> dict[str, Any] | list[dic
     block_type = block.get("type")
 
     if block_type == "text":
-        return {"type": "text", "text": block.get("text", "")}
+        out: dict[str, Any] = {"type": "text", "text": block.get("text", "")}
+        # Preserve prompt-cache breakpoints. Clients like Claude Code mark
+        # their static prefix with cache_control; dropping the marker here
+        # would silently disable caching for every request arriving on
+        # /v1/messages and bill the caller full input rate for a prefix they
+        # asked us to cache.
+        if block.get("cache_control"):
+            out["cache_control"] = block["cache_control"]
+        return out
 
     elif block_type == "image":
         source = block.get("source", {})
@@ -313,10 +348,18 @@ def transform_anthropic_to_openai(
     """
     openai_messages = []
 
-    # Add system message if provided (Anthropic separates this, can be string or array)
-    system_text = _extract_system_text(system)
-    if system_text:
-        openai_messages.append({"role": "system", "content": system_text})
+    # Add system message if provided (Anthropic separates this, can be string or array).
+    # When the caller marked cache breakpoints on the system prompt, keep it as
+    # content blocks so those markers reach the provider; otherwise flatten to a
+    # string, which is what every OpenAI-compatible provider expects.
+    if _system_has_cache_control(system):
+        openai_messages.append(
+            {"role": "system", "content": _system_blocks_preserving_cache(system)}
+        )
+    else:
+        system_text = _extract_system_text(system)
+        if system_text:
+            openai_messages.append({"role": "system", "content": system_text})
 
     # Transform messages
     for msg in messages:

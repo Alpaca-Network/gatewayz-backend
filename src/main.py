@@ -464,6 +464,14 @@ def create_app() -> FastAPI:
     # Single canonical inference endpoint: POST /v1/chat/completions
     v1_routes_to_load = [
         ("chat", "Chat Completions"),
+        # Anthropic Messages API compatibility — lets Claude Code point at the
+        # gateway via ANTHROPIC_BASE_URL with no translation proxy.
+        ("messages", "Anthropic Messages API"),
+        # Legacy text-completions shim for tools that have not migrated.
+        ("completions", "Legacy Completions"),
+        # Embeddings proxy — Continue and other agents need one for codebase
+        # indexing; without it the "one key" promise breaks for those features.
+        ("embeddings", "Embeddings"),
         ("audio", "Audio Transcription"),  # Whisper audio transcription endpoints
         ("tools", "Server-Side Tools"),  # TTS, calculator, code executor, etc.
         ("catalog", "Model Catalog"),
@@ -477,6 +485,10 @@ def create_app() -> FastAPI:
         ("health", "Health Check"),
         ("availability", "Model Availability"),
         ("monitoring", "Monitoring API"),  # Real-time metrics, health, analytics API
+        # Payer-cohort metrics for the weekly scorecard and investor sheet.
+        # Kept separate from monitoring: that answers "is the gateway healthy",
+        # this answers "is the business growing".
+        ("payer_analytics", "Payer Analytics"),
         ("providers_management", "Providers Management"),  # Provider CRUD operations
         ("models_catalog_management", "Models Catalog Management"),  # Model CRUD operations
         ("model_sync", "Model Sync Service"),  # Dynamic model catalog synchronization

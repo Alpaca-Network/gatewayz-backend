@@ -65,10 +65,25 @@ class InternalChatRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = Field(
         None, description="Tool choice strategy ('auto', 'none', or specific tool)"
     )
+    parallel_tool_calls: bool | None = Field(
+        None, description="Whether the model may emit multiple tool calls per turn"
+    )
 
     # Response format
     response_format: dict[str, Any] | None = Field(
         None, description="Desired response format (e.g., JSON)"
+    )
+
+    # Sampling / determinism
+    n: int | None = Field(None, ge=1, description="Number of completions to generate")
+    seed: int | None = Field(None, description="Seed for best-effort deterministic sampling")
+    logprobs: bool | None = Field(None, description="Return log probabilities of output tokens")
+    top_logprobs: int | None = Field(
+        None, ge=0, le=20, description="Number of most likely tokens per position"
+    )
+    logit_bias: dict[str, int] | None = Field(None, description="Per-token likelihood adjustments")
+    stream_options: dict[str, Any] | None = Field(
+        None, description="Streaming options (e.g. include_usage)"
     )
 
     # Reasoning effort (normalized; adapters translate per provider dialect)

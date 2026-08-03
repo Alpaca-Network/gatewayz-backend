@@ -141,8 +141,13 @@ class TestXSSPrevention:
             headers={"Authorization": "Bearer gw_test_key"},
         )
 
-        # Should process safely
-        assert response.status_code in [200, 401, 403, 422]
+        # The security property is that the payload is handled safely, not that
+        # the request succeeds. Any 4xx is a safe outcome — including the 400
+        # this returns when the model has no pricing in the test database, which
+        # the previous status allowlist omitted. What must not happen is a 5xx
+        # (the payload broke something) or the payload coming back unescaped.
+        assert response.status_code < 500, f"payload caused a server error: {response.text[:200]}"
+        assert "onerror=alert" not in response.text, "XSS payload reflected unescaped"
 
     def test_xss_in_json_response(self, client):
         """Verify JSON responses don't contain unescaped HTML"""
