@@ -56,14 +56,14 @@ METADATA_CACHE_TTL = 86400  # 24 hours
 # Cache key namespace — prepended to every Redis key to avoid collisions with
 # other services or provider slugs that could otherwise match a bare prefix.
 # Key schema:
-#   gw:catalog:v2:{gateway}:{hash}        - cached catalog API response
+#   gw:catalog:v3:{gateway}:{hash}        - cached catalog API response
 #   gw:catalog:metadata:{gateway}         - cache metadata (stats, timestamps)
 #   gw:catalog:rebuild_lock:{cache_key}   - stampede-protection lock
 CACHE_NAMESPACE = "gw:"
 
 # Cache configuration
 CATALOG_CACHE_TTL = CATALOG_RESPONSE_CACHE_TTL  # backward-compatible alias
-CATALOG_CACHE_PREFIX = f"{CACHE_NAMESPACE}catalog:v2:"  # Version prefix for easy invalidation
+CATALOG_CACHE_PREFIX = f"{CACHE_NAMESPACE}catalog:v3:"  # Version prefix for easy invalidation
 CATALOG_METADATA_KEY = f"{CACHE_NAMESPACE}catalog:metadata"
 
 # Maximum number of entries in the catalog response cache (CM-8.1.4)
@@ -74,7 +74,7 @@ MAX_CATALOG_CACHE_ENTRIES = MAX_CACHE_ENTRIES  # alias
 LRU_ENABLED = True
 LRU_EVICTION_BATCH_SIZE = 100  # Number of entries to evict at once
 CATALOG_CACHE_KEYS_INDEX = (
-    f"{CACHE_NAMESPACE}catalog_cache:keys_index"  # Sorted set for LRU tracking
+    f"{CACHE_NAMESPACE}catalog_cache:v3:keys_index"  # Sorted set for LRU tracking
 )
 
 
@@ -154,8 +154,6 @@ async def get_cached_catalog_response(gateway: str | None, params: dict) -> dict
         if cached_data:
             logger.info(f"✅ Cache HIT: {cache_key}")
             _track_cache_hit(gateway)
-            # Refresh TTL so frequently accessed keys stay warm
-            redis.expire(cache_key, CATALOG_CACHE_TTL)
 
             # Update LRU timestamp on cache hit (CM-8.1.6)
             try:
@@ -284,15 +282,16 @@ def invalidate_catalog_cache(gateway: str | None = None) -> int:
     This should be called after model sync operations to ensure fresh data.
 
     Args:
-        gateway: If specified, only invalidate caches for this gateway.
+        gateway: If specified, invalidate caches for this gateway and the
+                 aggregated ``all`` catalog that contains it.
                  If None, invalidate ALL catalog caches (use with caution).
 
     Returns:
         Number of cache keys deleted
 
     Examples:
-        >>> invalidate_catalog_cache("openrouter")  # Invalidate OpenRouter only
-        15
+        >>> invalidate_catalog_cache("openrouter")  # Invalidate OpenRouter + all
+        30
         >>> invalidate_catalog_cache()  # Invalidate all gateways
         250
 
@@ -308,34 +307,41 @@ def invalidate_catalog_cache(gateway: str | None = None) -> int:
             return 0
 
         if gateway:
-            # Invalidate specific gateway
-            pattern = f"{CATALOG_CACHE_PREFIX}{gateway}:*"
+            # A provider change also changes the aggregated gateway=all response.
+            # Keep the patterns distinct so provider-specific variants and every
+            # pagination/filter variant of the aggregate are removed together.
+            patterns = [f"{CATALOG_CACHE_PREFIX}{gateway}:*"]
+            if gateway != "all":
+                patterns.append(f"{CATALOG_CACHE_PREFIX}all:*")
         else:
-            # Invalidate all catalog caches
-            pattern = f"{CATALOG_CACHE_PREFIX}*"
+            patterns = [f"{CATALOG_CACHE_PREFIX}*"]
 
         # Use SCAN instead of KEYS to avoid blocking Redis
         # SCAN is cursor-based and won't block other operations
         deleted_count = 0
-        cursor = 0
+        for pattern in patterns:
+            cursor = 0
+            while True:
+                cursor, keys = redis.scan(cursor, match=pattern, count=100)
 
-        while True:
-            cursor, keys = redis.scan(cursor, match=pattern, count=100)
+                if keys:
+                    # Batch delete for efficiency
+                    redis.delete(*keys)
+                    # Keep sorted set in sync — remove evicted keys from LRU index
+                    redis.zrem(CATALOG_CACHE_KEYS_INDEX, *keys)
+                    deleted_count += len(keys)
 
-            if keys:
-                # Batch delete for efficiency
-                redis.delete(*keys)
-                # Keep sorted set in sync — remove evicted keys from LRU index
-                redis.zrem(CATALOG_CACHE_KEYS_INDEX, *keys)
-                deleted_count += len(keys)
-
-            if cursor == 0:
-                break
+                if cursor == 0:
+                    break
 
         if deleted_count > 0:
-            logger.info(f"🗑️  Invalidated {deleted_count} cache entries " f"(pattern: {pattern})")
+            logger.info(
+                "🗑️  Invalidated %s cache entries (patterns: %s)",
+                deleted_count,
+                ", ".join(patterns),
+            )
         else:
-            logger.debug(f"No cache entries to invalidate (pattern: {pattern})")
+            logger.debug("No cache entries to invalidate (patterns: %s)", ", ".join(patterns))
 
         return deleted_count
 

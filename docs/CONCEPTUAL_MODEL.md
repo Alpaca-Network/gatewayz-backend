@@ -183,7 +183,7 @@ When a provider fails, the request automatically retries with the next provider 
 Primary (Fireworks) ──FAIL──► OpenRouter ──FAIL──► Together ──SUCCESS──► Response
 ```
 
-- **14-provider failover chain** ordered by reliability
+- **9-provider failover chain** ordered by reliability (HuggingFace removed in the MVP refactor)
 - **Triggers on**: 401, 402 (provider out of credits), 403, 404, 502, 503, 504
 - **Does not trigger on**: 400 (user error), 429 (rate limit — retry with backoff instead)
 - **Circuit breakers** per provider: after 5 consecutive failures, the provider is temporarily removed from the chain. Auto-recovers after 1 minute (60 seconds) of cool-down.

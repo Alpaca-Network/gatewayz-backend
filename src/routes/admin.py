@@ -12,7 +12,6 @@ from src.db.credit_transactions import (
     get_transaction_summary,
 )
 from src.db.rate_limits import get_user_rate_limits, set_user_rate_limits
-from src.db.trials import get_trial_analytics
 from src.db.users import (
     add_credits_to_user,
     create_enhanced_user,
@@ -34,13 +33,9 @@ from src.security.deps import require_admin
 from src.services.model_catalog_cache import (
     get_gateway_cache_metadata,
     get_provider_cache_metadata,
-    invalidate_gateway_catalog,
     invalidate_provider_catalog,
 )
-from src.services.models import (
-    fetch_huggingface_model,
-    get_cached_models,
-)
+from src.services.models import get_cached_models
 from src.services.providers import get_cached_providers
 
 # Initialize logging
@@ -316,107 +311,6 @@ async def admin_cache_status(admin_user: dict = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="Failed to get cache status") from e
 
 
-@router.get("/admin/huggingface-cache-status", tags=["admin"])
-async def admin_huggingface_cache_status(admin_user: dict = Depends(require_admin)):
-    """Get Hugging Face cache status and statistics"""
-    try:
-        hf_cache = get_gateway_cache_metadata("huggingface")
-        cache_age = None
-        if hf_cache.get("timestamp"):
-            cache_age = (datetime.now(UTC) - hf_cache["timestamp"]).total_seconds()
-
-        hf_data = hf_cache.get("data") or []
-        cached_ids = [
-            model.get("id") for model in hf_data if isinstance(model, dict) and model.get("id")
-        ]
-
-        return {
-            "huggingface_cache": {
-                "age_seconds": cache_age,
-                "is_valid": cache_age is not None and cache_age < hf_cache.get("ttl", 1800),
-                "total_cached_models": len(hf_data),
-                "cached_model_ids": cached_ids,
-            },
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get Hugging Face cache status: {e}")
-        raise HTTPException(
-            status_code=500, detail="Failed to get Hugging Face cache status"
-        ) from e
-
-
-@router.post("/admin/refresh-huggingface-cache", tags=["admin"])
-async def admin_refresh_huggingface_cache(admin_user: dict = Depends(require_admin)):
-    """Clear Hugging Face cache to force refresh on the next request"""
-    try:
-        invalidate_gateway_catalog("huggingface")
-
-        return {
-            "message": "Hugging Face cache cleared successfully",
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to clear Hugging Face cache: {e}")
-        raise HTTPException(status_code=500, detail="Failed to clear Hugging Face cache") from e
-
-
-@router.get("/admin/test-huggingface/{hugging_face_id}", tags=["admin"])
-async def admin_test_huggingface(
-    hugging_face_id: str = "openai/gpt-oss-120b", admin_user: dict = Depends(require_admin)
-):
-    """Test Hugging Face API response for debugging"""
-    try:
-        hf_data = fetch_huggingface_model(hugging_face_id)
-        if not hf_data:
-            raise HTTPException(
-                status_code=404, detail=f"Hugging Face model {hugging_face_id} not found"
-            )
-
-        return {
-            "hugging_face_id": hugging_face_id,
-            "raw_response": hf_data,
-            "author_data_extracted": {
-                "has_author_data": bool(hf_data.get("author_data")),
-                "author_data": hf_data.get("author_data"),
-                "author": hf_data.get("author"),
-                "extracted_author_data": {
-                    "name": (
-                        hf_data.get("author_data", {}).get("name")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "fullname": (
-                        hf_data.get("author_data", {}).get("fullname")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "avatar_url": (
-                        hf_data.get("author_data", {}).get("avatarUrl")
-                        if hf_data.get("author_data")
-                        else None
-                    ),
-                    "follower_count": (
-                        hf_data.get("author_data", {}).get("followerCount", 0)
-                        if hf_data.get("author_data")
-                        else 0
-                    ),
-                },
-            },
-            "timestamp": datetime.now(UTC).isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to test Hugging Face API for {hugging_face_id}: {e}")
-        raise HTTPException(
-            status_code=500, detail=f"Failed to test Hugging Face API: {str(e)}"
-        ) from e
-
-
 @router.get("/admin/debug-models", tags=["admin"])
 async def admin_debug_models(admin_user: dict = Depends(require_admin)):
     """Debug models and providers data for troubleshooting"""
@@ -517,17 +411,6 @@ async def admin_clear_rate_limit_cache(admin_user: dict = Depends(require_admin)
         raise HTTPException(
             status_code=500, detail=f"Failed to clear rate limit cache: {str(e)}"
         ) from e
-
-
-@router.get("/admin/trial/analytics", tags=["admin"])
-async def get_trial_analytics_admin(admin_user: dict = Depends(require_admin)):
-    """Get trial analytics and conversion metrics for admin"""
-    try:
-        analytics = get_trial_analytics()
-        return {"success": True, "analytics": analytics}
-    except Exception as e:
-        logger.error(f"Error getting trial analytics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get trial analytics") from e
 
 
 @router.get("/admin/users/growth", tags=["admin"])
@@ -2385,7 +2268,9 @@ async def get_chat_requests_summary_admin(
         if redis_client:
             try:
                 redis_client.setex(
-                    cache_key, 60, json.dumps(response, default=str)  # 60 second TTL
+                    cache_key,
+                    60,
+                    json.dumps(response, default=str),  # 60 second TTL
                 )
                 logger.info(f"Cached chat summary for filter_hash={filter_hash} (TTL: 60s)")
             except Exception as cache_error:
@@ -2502,6 +2387,7 @@ async def get_model_usage_analytics(
     page: int = Query(1, ge=1, description="Page number (starts at 1)"),
     limit: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
     model_name: str = Query(None, description="Search by model name (partial match)"),
+    is_free: bool | None = Query(None, description="Filter by free-tier flag (true/false)"),
     sort_by: str = Query(
         "total_cost_usd", description="Sort by field (total_cost_usd, successful_requests, etc.)"
     ),
@@ -2522,6 +2408,7 @@ async def get_model_usage_analytics(
     Supports:
     - Pagination: ?page=1&limit=50
     - Search: ?model_name=gpt (partial match, case-insensitive)
+    - Filtering: ?is_free=true (free-tier only) or ?is_free=false (paid only)
     - Sorting: ?sort_by=total_cost_usd&sort_order=desc
     """
     try:
@@ -2539,6 +2426,9 @@ async def get_model_usage_analytics(
         if model_name:
             # Use ilike for case-insensitive partial match
             query = query.ilike("model_name", f"%{model_name}%")
+
+        if is_free is not None:
+            query = query.eq("is_free", is_free)
 
         # Validate sort_by field (prevent SQL injection)
         valid_sort_fields = [
@@ -2645,6 +2535,35 @@ async def run_pricing_audit(
         threshold_percent=threshold,
     )
 
+    return report
+
+
+# ============================================================================
+# ADMIN PRICING DRIFT MONITOR - Catch below-cost billing before it leaks margin
+# ============================================================================
+
+
+@router.get("/admin/pricing-drift", tags=["admin"])
+async def run_pricing_drift_audit(
+    admin_user: dict = Depends(require_admin),
+):
+    """
+    Audit active-provider catalog pricing against current OpenRouter reference
+    pricing to catch margin leaks.
+
+    We bill inference at ``catalog_price * Config.PRICING_MARKUP``. If a
+    provider raises its price and our catalog goes stale, we could bill below
+    the provider's real cost even with markup applied. This endpoint flags:
+
+    - ``drift``: models where ``catalog_price * markup`` is still below the
+      current OpenRouter reference price (worst deficit first).
+    - ``unpriced``: active models with no usable catalog price (None/0).
+
+    Read-only: never mutates prices or models. Requires admin authentication.
+    """
+    from src.services.billing.pricing_drift_monitor import audit_pricing_drift
+
+    report = await asyncio.to_thread(audit_pricing_drift)
     return report
 
 

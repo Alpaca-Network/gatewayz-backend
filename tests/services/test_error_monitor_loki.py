@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.services.error_monitor import ErrorMonitor
+from src.services.monitoring.error_monitor import ErrorMonitor
 
 
 class TestLokiErrorLogging:
     """Test Loki error logging behavior."""
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_empty_error_not_logged(self, mock_httpx_client):
         """Test that empty Loki errors are suppressed and not logged at ERROR level."""
         monitor = ErrorMonitor()
@@ -29,7 +29,7 @@ class TestLokiErrorLogging:
         # Simulate an empty error
         mock_session.get.side_effect = Exception("")
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             # Should return empty list
@@ -42,7 +42,7 @@ class TestLokiErrorLogging:
             mock_logger.debug.assert_called_once_with("Loki fetch returned empty/no response")
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_none_error_not_logged(self, mock_httpx_client):
         """Test that 'None' string errors from Loki are suppressed."""
         monitor = ErrorMonitor()
@@ -55,7 +55,7 @@ class TestLokiErrorLogging:
         # Simulate a "None" error
         mock_session.get.side_effect = Exception("None")
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             assert errors == []
@@ -63,7 +63,7 @@ class TestLokiErrorLogging:
             mock_logger.debug.assert_called()
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_real_error_still_logged(self, mock_httpx_client):
         """Test that real Loki errors are still logged at ERROR level."""
         monitor = ErrorMonitor()
@@ -77,7 +77,7 @@ class TestLokiErrorLogging:
         real_error = Exception("Connection timeout to Loki server")
         mock_session.get.side_effect = real_error
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             assert errors == []
@@ -88,7 +88,7 @@ class TestLokiErrorLogging:
             assert "Connection timeout to Loki server" in error_call_args
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_successful_fetch(self, mock_httpx_client):
         """Test that successful Loki fetches work correctly."""
         monitor = ErrorMonitor()
@@ -114,7 +114,7 @@ class TestLokiErrorLogging:
         }
         mock_session.get.return_value = mock_response
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             # Should return errors
@@ -127,7 +127,7 @@ class TestLokiErrorLogging:
             mock_logger.debug.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_disabled_no_error(self, mock_httpx_client):
         """Test that disabled Loki doesn't trigger errors."""
         monitor = ErrorMonitor()
@@ -135,7 +135,7 @@ class TestLokiErrorLogging:
         # Loki disabled
         monitor.loki_enabled = False
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             # Should return empty list
@@ -148,7 +148,7 @@ class TestLokiErrorLogging:
             mock_logger.error.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("src.services.error_monitor.httpx.AsyncClient")
+    @patch("src.services.monitoring.error_monitor.httpx.AsyncClient")
     async def test_loki_whitespace_error_suppressed(self, mock_httpx_client):
         """Test that whitespace-only errors are suppressed."""
         monitor = ErrorMonitor()
@@ -161,7 +161,7 @@ class TestLokiErrorLogging:
         # Simulate a whitespace error
         mock_session.get.side_effect = Exception("   \n\t  ")
 
-        with patch("src.services.error_monitor.logger") as mock_logger:
+        with patch("src.services.monitoring.error_monitor.logger") as mock_logger:
             errors = await monitor.fetch_recent_errors(hours=1, limit=100)
 
             assert errors == []

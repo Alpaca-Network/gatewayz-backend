@@ -82,11 +82,6 @@ class TestHealthEndpoints:
         data = response.json()
         assert "message" in data or "status" in data
 
-    def test_ping_endpoint(self, client):
-        """Test GET /ping returns pong"""
-        response = client.get("/ping")
-        assert response.status_code == 200
-
 
 class TestAuthEndpoints:
     """Test authentication endpoints"""

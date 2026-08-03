@@ -247,57 +247,8 @@ async def get_trial_status(api_key: str = Depends(get_api_key)):
 
 @router.get("/subscription/plans", tags=["subscription"])
 async def get_subscription_plans():
-    """Get available subscription plans with 4-tier structure"""
-    try:
-        # Get all plans from a database
-        plans = get_all_plans()
-
-        # Enhance plans with additional information
-        enhanced_plans = []
-        for plan in plans:
-            plan_type = plan.get("plan_type", "free")
-            is_pay_as_you_go = plan.get("is_pay_as_you_go", False)
-
-            enhanced_plan = {
-                "id": plan.get("id"),
-                "name": plan.get("name"),
-                "description": plan.get("description"),
-                "plan_type": plan_type,
-                "monthly_price": float(plan.get("price_per_month", 0)),
-                "yearly_price": (
-                    float(plan.get("yearly_price", 0)) if plan.get("yearly_price") else None
-                ),
-                "price_per_token": (
-                    float(plan.get("price_per_token", 0)) if plan.get("price_per_token") else None
-                ),
-                "is_pay_as_you_go": is_pay_as_you_go,
-                "daily_request_limit": plan.get("daily_request_limit", 0),
-                "monthly_request_limit": plan.get("monthly_request_limit", 0),
-                "daily_token_limit": plan.get("daily_token_limit", 0),
-                "monthly_token_limit": plan.get("monthly_token_limit", 0),
-                "max_concurrent_requests": plan.get("max_concurrent_requests", 5),
-                "features": plan.get("features", []),
-                "is_active": plan.get("is_active", True),
-                "trial_eligible": plan_type == "free",  # Only the Free plan is trial eligible
-            }
-            enhanced_plans.append(enhanced_plan)
-
-        # Sort plans by price (Free, Dev, Team, Customize)
-        plan_order = {"free": 0, "dev": 1, "team": 2, "customize": 3}
-        enhanced_plans.sort(key=lambda x: plan_order.get(x["plan_type"], 999))
-
-        return {
-            "success": True,
-            "plans": enhanced_plans,
-            "message": "Subscription plans retrieved successfully",
-            "trial_info": {
-                "trial_days": 3,
-                "trial_credits": 5.0,
-                "trial_tokens": 1000000,  # 1M tokens for trial
-                "trial_requests": 10000,  # 10K requests for trial
-                "trial_plan": "free",
-            },
-        }
-    except Exception as e:
-        logger.error(f"Error getting subscription plans: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error") from e
+    """Subscriptions have been discontinued; this endpoint is disabled."""
+    raise HTTPException(
+        status_code=410,
+        detail="Subscriptions have been discontinued. Please use credit top-ups instead.",
+    )

@@ -6,6 +6,13 @@ venv
 .idea
 .claude
 
+# Node
+node_modules/
+.ruff_cache/
+
+# Scratchpad
+scratchpad_*
+
 # graphify-generated knowledge graph (large; regenerate with /graphify)
 graphify-out/
 
@@ -54,6 +61,7 @@ gatewayz/
 !SYNC_QUICKSTART.md
 !PRODUCTION_VERIFICATION_CHECKLIST.md
 !scripts/README_VERIFICATION.md
+!supabase/staged-migrations/README.md
 
 # Temp and output files
 tmp/

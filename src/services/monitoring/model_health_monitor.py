@@ -497,9 +497,6 @@ class ModelHealthMonitor:
             "together": Config.TOGETHER_API_KEY,
             "xai": Config.XAI_API_KEY,
             "novita": Config.NOVITA_API_KEY,
-            "chutes": Config.CHUTES_API_KEY,
-            "aimo": Config.AIMO_API_KEY,
-            "nebius": Config.NEBIUS_API_KEY,
             "cerebras": Config.CEREBRAS_API_KEY,
         }
         return api_key_mapping.get(gateway)

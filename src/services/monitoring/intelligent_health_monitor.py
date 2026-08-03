@@ -30,6 +30,21 @@ import httpx
 logger = logging.getLogger(__name__)
 
 
+# A 400 carrying one of these means the model executed and hit the probe's own
+# token ceiling — liveness proven, not a failure. Reasoning models trip it
+# routinely because reasoning tokens count against the budget.
+_OUTPUT_BUDGET_EXHAUSTED_PATTERNS = (
+    "max_tokens or model output limit was reached",
+    "please try again with higher max_tokens",
+)
+
+
+def _is_output_budget_exhausted(body: str | None) -> bool:
+    """True when a 400 body says the model ran out of *our* token budget."""
+    text = (body or "").lower()
+    return any(p in text for p in _OUTPUT_BUDGET_EXHAUSTED_PATTERNS)
+
+
 class MonitoringTier(str, Enum):  # noqa: UP042
     """Model monitoring tiers"""
 
@@ -94,6 +109,64 @@ class ModelHealthConfig:
     next_check_at: datetime
     is_enabled: bool
     priority_score: float
+
+
+# Servable-model cache. Refreshed on a short interval so a newly listed model
+# starts being probed without a restart, while the hot path stays in-process.
+_servable_ids: set[str] = set()
+_servable_loaded_at: float = 0.0
+_SERVABLE_TTL_SECONDS = 300.0
+
+
+def _get_servable_model_ids() -> set[str]:
+    """Model ids currently listed in the catalog for an enabled provider.
+
+    Returns an empty set on failure, which the caller treats as "no opinion" and
+    skips the filter — better to probe too much than to stop monitoring entirely
+    because a query failed.
+    """
+    global _servable_ids, _servable_loaded_at
+
+    now = time.time()
+    if _servable_ids and (now - _servable_loaded_at) < _SERVABLE_TTL_SECONDS:
+        return _servable_ids
+
+    try:
+        from src.config.supabase_config import get_client_for_query
+        from src.utils.provider_filter import is_provider_enabled
+
+        supabase = get_client_for_query(read_only=True)
+        providers = supabase.table("providers").select("id, slug").eq("is_active", True).execute()
+        enabled_ids = {
+            row["id"]
+            for row in (providers.data or [])
+            if row.get("slug") and is_provider_enabled(row["slug"])
+        }
+        if not enabled_ids:
+            return set()
+
+        ids: set[str] = set()
+        for provider_id in enabled_ids:
+            response = (
+                supabase.table("models")
+                .select("provider_model_id")
+                .eq("provider_id", provider_id)
+                .eq("is_active", True)
+                .execute()
+            )
+            ids.update(
+                row["provider_model_id"]
+                for row in (response.data or [])
+                if row.get("provider_model_id")
+            )
+    except Exception as e:
+        logger.warning("Could not load servable model ids; probing unfiltered: %s", e)
+        return set()
+
+    _servable_ids = ids
+    _servable_loaded_at = now
+    logger.info("Health monitor scope: %d servable models", len(ids))
+    return ids
 
 
 class IntelligentHealthMonitor:
@@ -264,6 +337,36 @@ class IntelligentHealthMonitor:
 
             models = response.data or []
 
+            # model_health_tracking outlives the roster: rows persist after a
+            # provider is switched off, and nothing prunes them. Probing those
+            # burns requests on providers we cannot route to and republishes
+            # their failures on the public status page.
+            from src.utils.provider_filter import is_provider_enabled
+
+            before = len(models)
+            models = [m for m in models if is_provider_enabled(m.get("provider") or "")]
+            if before != len(models):
+                logger.info(
+                    "Health monitor skipped %d model(s) on providers outside ENABLED_PROVIDERS",
+                    before - len(models),
+                )
+
+            # Probe only what we actually sell. The provider filter above is not
+            # enough: 79 of 110 tracked rows were models delisted from the
+            # catalog — old Claude 3 and GPT-4 entries — and each one fails every
+            # probe by design. That dragged the PUBLIC status page down to 6%
+            # success while every served model was healthy, which is a worse lie
+            # than the "0%" it replaced.
+            servable = await asyncio.to_thread(_get_servable_model_ids)
+            if servable:
+                before = len(models)
+                models = [m for m in models if (m.get("model") or "") in servable]
+                if before != len(models):
+                    logger.info(
+                        "Health monitor skipped %d model(s) no longer in the served catalog",
+                        before - len(models),
+                    )
+
             if self.redis_coordination:
                 # Filter out models being checked by other workers
                 models = await self._filter_with_redis_locks(models)
@@ -336,13 +439,44 @@ class IntelligentHealthMonitor:
         response_time_ms = None
 
         try:
-            # Build test payload
+            # model_health_tracking stores the gateway-prefixed catalog id
+            # ("openai/gpt-5.5-pro"), but provider APIs want the native id
+            # ("gpt-5.5-pro") — OpenAI answers "invalid model ID", Anthropic and
+            # Moonshot answer 404. Resolve it the same way the inference path
+            # does, so a probe tests exactly what the router would dispatch.
+            probe_model_id = model_id
+            try:
+                from src.services.model_transformations import transform_model_id
+
+                probe_model_id = transform_model_id(model_id, gateway) or model_id
+            except Exception as e:
+                logger.debug("Model id transform failed for %s: %s", model_id, e)
+
+            # Some gateways have no mapping table, so the prefix survives the
+            # transform. Strip only an exact "<gateway>/" head: a native id that
+            # genuinely contains a slash (openrouter's "openai/gpt-4") is left
+            # alone because its gateway is openrouter, not openai.
+            if probe_model_id.startswith(f"{gateway}/"):
+                probe_model_id = probe_model_id[len(gateway) + 1 :]
+
+            # Smallest body every provider accepts. Deliberately no temperature:
+            # it tells a liveness probe nothing, and providers disagree about it
+            # per model — Moonshot rejects 0.1 on kimi-k2.6 with
+            # "only 1 is allowed for this model", which would have marked a
+            # perfectly healthy model failed on every single check.
             test_payload = {
-                "model": model_id,
+                "model": probe_model_id,
                 "messages": [{"role": "user", "content": "test"}],
-                "max_tokens": max_tokens,
-                "temperature": 0.1,
             }
+            # OpenAI's reasoning generations reject max_tokens outright
+            # ("Unsupported parameter: 'max_tokens' is not supported") — gpt-5*,
+            # o1, o3 all 400 on it. max_completion_tokens is accepted by every
+            # OpenAI model tested, old and new (gpt-3.5-turbo and gpt-4o-mini
+            # included), so it is the safe choice for the whole gateway.
+            if gateway == "openai":
+                test_payload["max_completion_tokens"] = max_tokens
+            else:
+                test_payload["max_tokens"] = max_tokens
 
             # Get endpoint URL for gateway
             endpoint_url = self._get_gateway_endpoint(gateway)
@@ -372,6 +506,13 @@ class IntelligentHealthMonitor:
                 elif response.status_code == 404:
                     status = HealthCheckStatus.NOT_FOUND
                     error_message = "Model not found"
+                elif response.status_code == 400 and _is_output_budget_exhausted(response.text):
+                    # The model ran and spent our (deliberately tiny) token budget
+                    # before finishing. Reasoning models do this routinely because
+                    # reasoning tokens count against the limit. It proves liveness
+                    # just as well as a 200 — the opposite reading would mark every
+                    # reasoning model permanently down.
+                    status = HealthCheckStatus.SUCCESS
                 else:
                     status = HealthCheckStatus.ERROR
                     error_message = f"HTTP {response.status_code}: {response.text[:200]}"
@@ -448,6 +589,26 @@ class IntelligentHealthMonitor:
         except Exception:
             pass
 
+        # Derive from the registry's base_url before reaching for hardcoded values.
+        # Only xai carries an explicit chat_completions_endpoint today, so without
+        # this every other provider on the roster — openai, anthropic, moonshot —
+        # resolves to None, the probe is skipped, and the status page reports
+        # nothing for three quarters of production.
+        try:
+            from src.services.gateway_registry import get_gateway_registry
+
+            base_url = (get_gateway_registry().get(gateway) or {}).get("base_url")
+            if base_url:
+                base = base_url.rstrip("/")
+                if gateway == "anthropic":
+                    # Anthropic speaks /v1/messages, not the OpenAI chat shape.
+                    return base + ("/messages" if base.endswith("/v1") else "/v1/messages")
+                return f"{base}/chat/completions"
+        except Exception as e:
+            # Registry unavailable (DB down, cache cold). Fall through to the
+            # hardcoded map rather than skipping the probe entirely.
+            logger.debug("Could not derive endpoint for %s from registry: %s", gateway, e)
+
         # Fallback to hardcoded endpoints
         _fallback_endpoints = {
             "openrouter": "https://openrouter.ai/api/v1/chat/completions",
@@ -474,7 +635,14 @@ class IntelligentHealthMonitor:
 
             api_key = get_provider_api_key(gateway)
             if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+                if gateway == "anthropic":
+                    # Anthropic authenticates with x-api-key and requires a version
+                    # header; a Bearer token is rejected with 401, which would look
+                    # like a broken key rather than a broken probe.
+                    headers["x-api-key"] = api_key
+                    headers["anthropic-version"] = "2023-06-01"
+                else:
+                    headers["Authorization"] = f"Bearer {api_key}"
                 return headers
         except Exception:
             pass

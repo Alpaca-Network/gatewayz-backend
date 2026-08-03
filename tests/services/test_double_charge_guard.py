@@ -26,7 +26,6 @@ def _patch_billing_deps(monkeypatch):
     what the ``from X import Y`` inside the function resolves against.
     """
     import src.db.rate_limits as rate_limits_mod
-    import src.db.trials as trials_mod
     import src.db.users as users_mod
     import src.services.pricing as pricing_mod
 
@@ -38,7 +37,6 @@ def _patch_billing_deps(monkeypatch):
     monkeypatch.setattr(users_mod, "record_usage", record)
     monkeypatch.setattr(users_mod, "log_api_usage_transaction", MagicMock())
     monkeypatch.setattr(rate_limits_mod, "update_rate_limit_usage", rate_limit)
-    monkeypatch.setattr(trials_mod, "track_trial_usage_for_key", MagicMock())
     monkeypatch.setattr(pricing_mod, "calculate_cost_async", AsyncMock(return_value=0.02))
     return {"deduct": deduct, "record": record, "rate_limit": rate_limit}
 

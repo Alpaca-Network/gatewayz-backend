@@ -38,23 +38,6 @@ from src.schemas.auth import (
 # Common enums
 from src.schemas.common import AuthMethod, PaymentMethod, PlanType, SubscriptionStatus
 
-# Coupon models
-from src.schemas.coupons import (
-    AvailableCouponResponse,
-    CouponAnalyticsResponse,
-    CouponResponse,
-    CouponScope,
-    CouponStatsResponse,
-    CouponType,
-    CreateCouponRequest,
-    CreatorType,
-    ListCouponsResponse,
-    RedeemCouponRequest,
-    RedemptionHistoryResponse,
-    RedemptionResponse,
-    UpdateCouponRequest,
-)
-
 # Payment models (includes both generic payment and Stripe-specific models)
 from src.schemas.payments import (
     AddCreditsRequest,
@@ -132,23 +115,6 @@ from src.schemas.proxy import (  # Anthropic Messages API
     UsageResponse,
 )
 
-# Trial models
-from src.schemas.trials import (
-    ConvertTrialRequest,
-    ConvertTrialResponse,
-    StartTrialRequest,
-    StartTrialResponse,
-    TrackUsageRequest,
-    TrackUsageResponse,
-    TrialAnalytics,
-    TrialConversion,
-    TrialLimits,
-    TrialStatus,
-    TrialStatusResponse,
-    TrialUsage,
-    TrialValidationResult,
-)
-
 # User models
 from src.schemas.users import (
     CreateUserRequest,
@@ -202,19 +168,6 @@ __all__ = [
     "PlanResponse",
     "SubscriptionPlan",
     "UserPlanResponse",
-    # Trials
-    "TrialStatus",
-    "TrialUsage",
-    "StartTrialRequest",
-    "StartTrialResponse",
-    "ConvertTrialRequest",
-    "ConvertTrialResponse",
-    "TrialStatusResponse",
-    "TrackUsageRequest",
-    "TrackUsageResponse",
-    "TrialAnalytics",
-    "TrialLimits",
-    "TrialValidationResult",
     # Admin
     "UsageMetrics",
     "AdminMonitorResponse",

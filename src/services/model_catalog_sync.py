@@ -9,46 +9,34 @@ from decimal import Decimal
 from typing import Any
 
 from src.config.supabase_config import get_client_for_query
-from src.db.models_catalog_db import bulk_upsert_models
+from src.db.models_catalog_db import bulk_upsert_models, deactivate_models_by_provider
 from src.db.providers_db import (
     create_provider,
     get_provider_by_slug,
 )
-from src.services.huggingface_models import fetch_models_from_huggingface_api
-from src.services.pricing_normalization import (
+from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
+from src.services.providers.anthropic_client import fetch_models_from_anthropic
+from src.services.providers.cerebras_client import fetch_models_from_cerebras
+from src.services.providers.deepinfra_catalog import fetch_models_from_deepinfra
+from src.services.providers.deepseek_catalog import fetch_models_from_deepseek
+from src.services.providers.featherless_client import fetch_models_from_featherless
+from src.services.providers.fireworks_catalog import fetch_models_from_fireworks
+from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
+from src.services.providers.groq_catalog import fetch_models_from_groq
+from src.services.providers.minimax_catalog import fetch_models_from_minimax
+from src.services.providers.moonshot_catalog import fetch_models_from_moonshot
+from src.services.providers.novita_client import fetch_models_from_novita
+from src.services.providers.openai_client import fetch_models_from_openai
+from src.services.providers.openrouter_client import fetch_models_from_openrouter
+from src.services.providers.together_catalog import fetch_models_from_together
+from src.services.providers.xai_client import fetch_models_from_xai
+from src.services.providers.xiaomi_catalog import fetch_models_from_xiaomi
+from src.services.providers.zai_catalog import fetch_models_from_zai
+from src.utils.pricing_normalization import (
     PricingFormat,
     get_provider_format,
     normalize_to_per_token,
 )
-from src.services.providers.aimo_client import fetch_models_from_aimo
-from src.services.providers.alibaba_cloud_client import fetch_models_from_alibaba
-from src.services.providers.anthropic_client import fetch_models_from_anthropic
-from src.services.providers.canopywave_client import fetch_models_from_canopywave
-from src.services.providers.cerebras_client import fetch_models_from_cerebras
-from src.services.providers.chutes_client import fetch_models_from_chutes
-from src.services.providers.clarifai_client import fetch_models_from_clarifai
-from src.services.providers.cloudflare_workers_ai_client import (
-    fetch_models_from_cloudflare_workers_ai,
-)
-from src.services.providers.cohere_client import fetch_models_from_cohere
-from src.services.providers.deepinfra_client import fetch_models_from_deepinfra
-from src.services.providers.fal_image_client import fetch_models_from_fal
-from src.services.providers.featherless_client import fetch_models_from_featherless
-from src.services.providers.fireworks_client import fetch_models_from_fireworks
-from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
-from src.services.providers.groq_client import fetch_models_from_groq
-from src.services.providers.modelz_client import fetch_models_from_modelz
-from src.services.providers.morpheus_client import fetch_models_from_morpheus
-from src.services.providers.near_client import fetch_models_from_near
-from src.services.providers.nebius_client import fetch_models_from_nebius
-from src.services.providers.novita_client import fetch_models_from_novita
-from src.services.providers.openai_client import fetch_models_from_openai
-from src.services.providers.openrouter_client import fetch_models_from_openrouter
-from src.services.providers.simplismart_client import fetch_models_from_simplismart
-from src.services.providers.sybil_client import fetch_models_from_sybil
-from src.services.providers.together_client import fetch_models_from_together
-from src.services.providers.xai_client import fetch_models_from_xai
-from src.services.providers.zai_client import fetch_models_from_zai
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +48,6 @@ _PROVIDER_TIERS: dict[str, int] = {
     "cerebras": 1,
     "fireworks": 2,
     "together": 2,
-    "cloudflare-workers-ai": 2,
 }
 
 
@@ -70,33 +57,24 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "openrouter": fetch_models_from_openrouter,
     "deepinfra": fetch_models_from_deepinfra,
     "featherless": fetch_models_from_featherless,
-    "chutes": fetch_models_from_chutes,
     "groq": fetch_models_from_groq,
     "fireworks": fetch_models_from_fireworks,
     "together": fetch_models_from_together,
-    "aimo": fetch_models_from_aimo,
-    "near": fetch_models_from_near,
-    "fal": fetch_models_from_fal,
     "alibaba": fetch_models_from_alibaba,
-    "huggingface": fetch_models_from_huggingface_api,
     "cerebras": fetch_models_from_cerebras,
     "google-vertex": fetch_models_from_google_vertex,
     "xai": fetch_models_from_xai,
-    "nebius": fetch_models_from_nebius,
     "novita": fetch_models_from_novita,
     # Additional providers that were missing
     "openai": fetch_models_from_openai,
     "anthropic": fetch_models_from_anthropic,
-    "clarifai": fetch_models_from_clarifai,
-    "simplismart": fetch_models_from_simplismart,
-    "cloudflare-workers-ai": fetch_models_from_cloudflare_workers_ai,
-    "modelz": fetch_models_from_modelz,
-    "cohere": fetch_models_from_cohere,
     # Recently added providers
     "zai": fetch_models_from_zai,
-    "morpheus": fetch_models_from_morpheus,
-    "sybil": fetch_models_from_sybil,
-    "canopywave": fetch_models_from_canopywave,
+    # Tier-2 providers (Task 18)
+    "deepseek": fetch_models_from_deepseek,
+    "moonshot": fetch_models_from_moonshot,
+    "minimax": fetch_models_from_minimax,
+    "xiaomi": fetch_models_from_xiaomi,
 }
 
 
@@ -180,7 +158,7 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
     Capability resolution strategy (metadata-first, name-based fallback):
     1. Check explicit capability fields on the model dict (set by provider clients
-       that have authoritative knowledge, e.g. cohere_client.py).
+       that have authoritative knowledge).
     2. Check architecture metadata (input_modalities for vision; supported_parameters
        for function calling) — derived from provider API responses.
     3. Fall back to model-name heuristics only when metadata is absent.
@@ -297,7 +275,11 @@ def extract_capabilities(model: dict[str, Any]) -> dict[str, bool]:
 
 
 def transform_normalized_model_to_db_schema(
-    normalized_model: dict[str, Any], provider_id: int, provider_slug: str
+    normalized_model: dict[str, Any],
+    provider_id: int,
+    provider_slug: str,
+    *,
+    provider_active: bool = True,
 ) -> dict[str, Any] | None:
     """
     Transform a normalized model (from fetch functions) to database schema
@@ -306,6 +288,9 @@ def transform_normalized_model_to_db_schema(
         normalized_model: Model data from provider fetch function (already normalized)
         provider_id: Database provider ID
         provider_slug: Provider slug for context
+        provider_active: Whether the serving provider is currently active/routable.
+            Defaults to True for backward compatibility with existing call sites
+            that pre-validate provider status before calling this function.
 
     Returns:
         Dictionary matching database schema or None if invalid
@@ -384,16 +369,68 @@ def transform_normalized_model_to_db_schema(
         # Normalize pricing to per-token if the provider uses a different format
         # (e.g., per-1M for NEAR, DeepInfra, etc.)
         # This prevents storing inflated values in metadata.pricing_raw
+        #
+        # CRITICAL (North Star §4.2 unit-error landmine): pricing produced by
+        # enrichment — tier "manual" (get_model_pricing), "database", or
+        # "cross_reference" (OpenRouter) — is ALREADY per-token. Only inline
+        # provider pricing (e.g. xai's hardcoded per-1M "5"/"15", which sets no
+        # pricing_source) still needs normalization here. Re-normalizing enriched
+        # pricing divides by the provider factor a SECOND time (per-1M => 1e-12),
+        # silently making every closed-provider model ~1e6x too cheap.
         source_gateway = normalized_model.get("source_gateway", provider_slug)
+        # Normalise separators before comparing: this guard once read
+        # "cross_reference" while the enricher wrote "cross-reference", so it
+        # never matched and every cross-referenced price was divided by the
+        # provider factor twice — claude-opus-5 listed at 5E-12 instead of
+        # 5E-6. Matching on a canonical form makes the check typo-proof.
+        _pricing_source = str(normalized_model.get("pricing_source") or "").replace("-", "_")
+        already_per_token = _pricing_source in ("manual", "database", "cross_reference")
         provider_format = get_provider_format(source_gateway)
-        if provider_format != PricingFormat.PER_TOKEN:
+        if not already_per_token and provider_format != PricingFormat.PER_TOKEN:
             for field in ("prompt", "completion", "image", "request"):
                 if pricing[field] is not None and pricing[field] != Decimal("0"):
                     normalized_val = normalize_to_per_token(pricing[field], provider_format)
                     pricing[field] = normalized_val if normalized_val is not None else Decimal("0")
 
+        # Sanity-gate the result (North Star §4.2: "sanity-gate every ingested
+        # price against cross-provider medians"). A unit error is silent — nothing
+        # throws, the gateway simply bills a millionth of cost — so the only
+        # defence is refusing to store an implausible number.
+        #
+        # The floor is three orders of magnitude below the cheapest real model:
+        # $0.01 per 1M tokens is 1e-8 per token, so anything non-zero under 1e-11
+        # is a conversion artefact, not a price. Storing None instead lets the
+        # model be re-priced from a trustworthy tier next sync rather than
+        # persisting a corrupt value that tier 1 then reads back forever.
+        for _field in ("prompt", "completion", "image", "request"):
+            _val = pricing.get(_field)
+            if _val is not None and _val != Decimal("0") and _val < Decimal("1e-11"):
+                logger.error(
+                    "Implausible %s price for %s: %s — refusing to store "
+                    "(likely a unit-conversion error)",
+                    _field,
+                    normalized_model.get("id"),
+                    _val,
+                )
+                pricing[_field] = None
+
         # Extract capabilities
         capabilities = extract_capabilities(normalized_model)
+
+        # --- Sync-time delisting (North Star §5: "no catalog breadth for its own
+        # sake" — every listed model must be priced, health-checked, and routable,
+        # or it isn't listed). A model is kept active only when it has a priced
+        # offer (free-tier models are exempt — zero pricing is legitimate there,
+        # per §4.3's free-tier routing) AND its serving provider is routable.
+        # This runs at sync time instead of only gating at inference, so the
+        # catalog itself reflects routable+priced reality (no silent inference-time
+        # 400s for models that were never going to work).
+        is_priced = bool(capabilities["is_free"]) or bool(pricing.get("prompt"))
+        is_routable = provider_active
+        model_is_active = is_priced and is_routable
+        delist_reason = None
+        if not model_is_active:
+            delist_reason = "no_routable_provider" if not is_routable else "unpriced"
 
         # Build metadata
         metadata = {
@@ -419,6 +456,12 @@ def transform_normalized_model_to_db_schema(
         # Store architecture string in metadata (no top-level DB column for it)
         if architecture_str:
             metadata["architecture_str"] = architecture_str
+
+        # Record why a model was delisted at sync time (observability — no silent
+        # drops; see sync_provider_models' "Delisted" log line and models_delisted
+        # count in its result dict).
+        if delist_reason:
+            metadata["delist_reason"] = delist_reason
 
         # Persist the normalized per-token pricing into metadata.pricing_raw.
         # Both the billing read path (pricing_lookup Source 2) and
@@ -462,8 +505,8 @@ def transform_normalized_model_to_db_schema(
             "is_reasoning": capabilities["is_reasoning"],
             "is_free": capabilities["is_free"],
             "latency_tier": capabilities["latency_tier"],
-            # Status
-            "is_active": True,
+            # Status — delisted at sync time when unpriced (non-free) or unroutable.
+            "is_active": model_is_active,
             "metadata": metadata,
         }
         # Only set max_output_tokens when the provider returned a value;
@@ -603,52 +646,12 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
                 "supports_function_calling": True,
                 "supports_vision": True,
             },
-            "clarifai": {
-                "name": "Clarifai",
-                "description": "Clarifai AI platform",
-                "base_url": "https://api.clarifai.com",
-                "api_key_env_var": "CLARIFAI_API_KEY",
-                "site_url": "https://clarifai.com",
-                "supports_streaming": True,
-            },
-            "simplismart": {
-                "name": "SimpliSmart",
-                "description": "SimpliSmart AI inference",
-                "base_url": "https://api.simplismart.ai/v1",
-                "api_key_env_var": "SIMPLISMART_API_KEY",
-                "site_url": "https://simplismart.ai",
-                "supports_streaming": True,
-            },
-            "cloudflare-workers-ai": {
-                "name": "Cloudflare Workers AI",
-                "description": "Cloudflare Workers AI inference",
-                "base_url": None,
-                "api_key_env_var": "CLOUDFLARE_API_TOKEN",
-                "site_url": "https://developers.cloudflare.com/workers-ai",
-                "supports_streaming": True,
-            },
-            "nebius": {
-                "name": "Nebius",
-                "description": "Nebius AI Studio",
-                "base_url": "https://api.studio.nebius.ai/v1",
-                "api_key_env_var": "NEBIUS_API_KEY",
-                "site_url": "https://studio.nebius.ai",
-                "supports_streaming": True,
-            },
             "novita": {
                 "name": "Novita",
                 "description": "Novita AI inference",
                 "base_url": "https://api.novita.ai/v3/openai",
                 "api_key_env_var": "NOVITA_API_KEY",
                 "site_url": "https://novita.ai",
-                "supports_streaming": True,
-            },
-            "modelz": {
-                "name": "Modelz",
-                "description": "Modelz AI model deployment platform",
-                "base_url": "https://backend.alpacanetwork.ai",
-                "api_key_env_var": "MODELZ_API_KEY",
-                "site_url": "https://modelz.ai",
                 "supports_streaming": True,
             },
         }
@@ -688,6 +691,73 @@ def ensure_provider_exists(provider_slug: str) -> dict[str, Any] | None:
     except Exception as e:
         logger.error(f"Error ensuring provider exists for {provider_slug}: {e}")
         return None
+
+
+def _load_unservable_model_ids(provider_id: int) -> set[str]:
+    """provider_model_ids an operator has marked unservable on our contract.
+
+    Read fresh each sync so re-listing a model is a database edit (clear the
+    flag) rather than a deploy. Fails open: on error the sync proceeds with its
+    normal price/routability gate rather than aborting.
+    """
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        # Deliberately not filtered on is_active: the metadata flag is the
+        # operator's intent and has to stand on its own. Requiring the row to be
+        # inactive already would mean a flag set on a live row never takes
+        # effect — and a row the previous sync re-activated could never be
+        # pinned back down.
+        response = (
+            get_client_for_query(read_only=True)
+            .table("models")
+            .select("provider_model_id, metadata")
+            .eq("provider_id", provider_id)
+            .execute()
+        )
+        return {
+            row["provider_model_id"]
+            for row in (response.data or [])
+            if row.get("provider_model_id")
+            and (row.get("metadata") or {}).get("delist_reason") == "unservable"
+        }
+    except Exception as e:
+        logger.warning(
+            "Could not load operator-delisted models for provider %s: %s", provider_id, e
+        )
+        return set()
+
+
+def pin_unservable_models(db_models: list[dict[str, Any]], unservable: set[str]) -> tuple[int, int]:
+    """Hold operator-delisted models down across a sync.
+
+    Re-stamps the marker on EVERY flagged model, not only the ones this pass
+    would have left active. Requiring is_active before stamping silently lost the
+    flag: a model that is unservable AND unpriced is already inactive by the time
+    this runs, so it was skipped, the transform's own delist_reason="unpriced"
+    stood, and _load_unservable_model_ids stopped matching it. The next sync able
+    to price the model then brought it back — which is how all ten
+    operator-delisted models returned to the catalog once their prices were
+    repaired.
+
+    Returns (models pinned, models newly flipped inactive).
+    """
+    if not unservable:
+        return 0, 0
+
+    pinned = 0
+    newly_delisted = 0
+    for db_model in db_models:
+        if db_model.get("provider_model_id") not in unservable:
+            continue
+        if db_model.get("is_active"):
+            db_model["is_active"] = False
+            newly_delisted += 1
+        metadata = db_model.get("metadata") or {}
+        metadata["delist_reason"] = "unservable"
+        db_model["metadata"] = metadata
+        pinned += 1
+    return pinned, newly_delisted
 
 
 def sync_provider_models(
@@ -730,12 +800,76 @@ def sync_provider_models(
                 "models_synced": 0,
             }
 
-        if not provider.get("is_active"):
+        # A price-reference provider keeps syncing while inactive. Its models are
+        # written is_active=False so nothing is ever routed to or listed from it
+        # (North Star §5 bars an aggregator as supply), but the catalog stays
+        # fresh so newly released models can still acquire a price.
+        #
+        # Without this the reference freezes on the day the provider is delisted:
+        # OpenRouter's catalog stopped at 2026-07-20, so Claude Opus 5 — released
+        # on the 24th — had no price anywhere and was filtered out of everything
+        # we sell. Being unsellable supply and being a useful price book are
+        # different things.
+        from src.config.config import Config as _SyncConfig
+
+        is_price_reference = provider_slug in _SyncConfig.PRICE_REFERENCE_PROVIDERS
+
+        if not provider.get("is_active") and not is_price_reference:
+            # Sync-time delisting: an inactive (unroutable) provider is not
+            # skipped as a pure no-op — its previously-synced models are
+            # bulk-deactivated so the live catalog reflects routable reality
+            # (North Star §5). This is the provider-level counterpart to the
+            # per-model "no_routable_provider" delist in
+            # transform_normalized_model_to_db_schema, which an inactive
+            # provider never reaches (this early return happens first).
+            if dry_run:
+                logger.info(
+                    f"[{provider_slug.upper()}] DRY RUN: provider is inactive — "
+                    f"would delist its previously-active models"
+                )
+                return {
+                    "success": True,
+                    "provider": provider_slug,
+                    "provider_id": provider["id"],
+                    "models_fetched": 0,
+                    "models_synced": 0,
+                    "models_delisted": 0,
+                    "reason": "provider_inactive",
+                    "dry_run": True,
+                }
+
+            delisted_count = deactivate_models_by_provider(provider["id"])
+            logger.info(
+                f"[{provider_slug.upper()}] Provider inactive | "
+                f"Delisted {delisted_count} previously-active model(s)"
+            )
+            try:
+                from src.services.model_catalog_cache import (
+                    invalidate_catalog_stats,
+                    invalidate_provider_catalog,
+                    invalidate_unique_models,
+                )
+
+                invalidate_provider_catalog(provider_slug, cascade=not batch_mode)
+                if not batch_mode:
+                    from src.services.cache.catalog_response_cache import invalidate_catalog_cache
+
+                    invalidate_unique_models()
+                    invalidate_catalog_stats()
+                    invalidate_catalog_cache(provider_slug)
+            except Exception as cache_e:
+                logger.warning(
+                    f"[{provider_slug.upper()}] Inactive-provider cache invalidation failed: "
+                    f"{cache_e}"
+                )
             return {
-                "success": False,
-                "error": f"Provider '{provider_slug}' is inactive",
+                "success": True,
+                "provider": provider_slug,
+                "provider_id": provider["id"],
                 "models_fetched": 0,
                 "models_synced": 0,
+                "models_delisted": delisted_count,
+                "reason": "provider_inactive",
             }
 
         # Get fetch function for this provider (DB-first, fallback to hardcoded)
@@ -760,8 +894,7 @@ def sync_provider_models(
         if not normalized_models:
             total_duration = time.time() - start_time
             logger.warning(
-                f"[{provider_slug.upper()}] No models returned | "
-                f"Duration: {total_duration:.2f}s"
+                f"[{provider_slug.upper()}] No models returned | Duration: {total_duration:.2f}s"
             )
             return {
                 "success": True,
@@ -789,6 +922,8 @@ def sync_provider_models(
         db_models = []
         skipped = 0
         filtered = 0
+        delisted = 0
+        provider_active = provider.get("is_active", True)
         for model in normalized_models:
             try:
                 # Quality gate: drop obvious junk (quant/merge/RP spam) before upsert.
@@ -799,10 +934,15 @@ def sync_provider_models(
                         continue
 
                 db_model = transform_normalized_model_to_db_schema(
-                    model, provider["id"], provider_slug
+                    model, provider["id"], provider_slug, provider_active=provider_active
                 )
                 if db_model:
                     db_models.append(db_model)
+                    # Sync-time delisting: unpriced (non-free) or unroutable models
+                    # are synced but marked inactive so the live catalog reflects
+                    # routable+priced reality (North Star §5).
+                    if not db_model.get("is_active", True):
+                        delisted += 1
                 else:
                     skipped += 1
             except Exception as e:
@@ -815,6 +955,33 @@ def sync_provider_models(
                 continue
 
         metrics["transform_duration"] = time.time() - transform_start
+
+        # Honour operator delistings. The gate above can only judge price and
+        # provider routability; it cannot tell that a model the provider happily
+        # lists is unusable on our contract — OpenAI's /models returns gpt-audio,
+        # o1-pro and gpt-3.5-turbo-instruct alongside ordinary chat models, but
+        # they need the audio, responses and completions endpoints respectively,
+        # so a user who picks one gets an error.
+        #
+        # Marking such a row unservable makes the delisting survive the next sync
+        # instead of being recomputed away every hour. Kept in the database rather
+        # than a hardcoded list in code (North Star §4.2).
+        # Re-stamp EVERY flagged model, not only the ones this pass would have
+        # left active. Requiring is_active here silently lost the marker: a model
+        # that is unservable AND (say) unpriced is already inactive by the time
+        # this runs, so the guard skipped it, the transform's own
+        # delist_reason="unpriced" stood, and _load_unservable_model_ids stopped
+        # matching it. The next sync that could price the model then brought it
+        # back — which is how all ten operator-delisted models returned to the
+        # catalog after their prices were repaired.
+        unservable = _load_unservable_model_ids(provider["id"])
+        pinned, newly_delisted = pin_unservable_models(db_models, unservable)
+        delisted += newly_delisted
+        if pinned:
+            logger.info(
+                f"[{provider_slug.upper()}] Kept {pinned} operator-delisted "
+                f"model(s) inactive (delist_reason=unservable)"
+            )
 
         if not db_models:
             total_duration = time.time() - start_time
@@ -834,6 +1001,7 @@ def sync_provider_models(
             f"Transformed: {len(db_models)} | "
             f"Skipped: {skipped} | "
             f"Filtered (quality gate): {filtered} | "
+            f"Delisted (unpriced/unroutable): {delisted} | "
             f"Duration: {metrics['transform_duration']:.2f}s | "
             f"Rate: {len(db_models) / metrics['transform_duration']:.0f} models/sec"
         )
@@ -941,13 +1109,42 @@ def sync_provider_models(
                     logger.debug(f"[{provider_slug.upper()}] Cache INVALIDATE (batch, no cascade)")
                 else:
                     # Single-provider sync: full cascade
+                    from src.services.cache.catalog_response_cache import invalidate_catalog_cache
+
                     invalidate_provider_catalog(provider_slug, cascade=True)
                     invalidate_unique_models()
                     invalidate_catalog_stats()
+                    invalidate_catalog_cache(provider_slug)
                     logger.info(f"[{provider_slug.upper()}] Cache INVALIDATE (full cascade)")
 
             except Exception as cache_e:
                 logger.warning(f"[{provider_slug.upper()}] Cache invalidation failed: {cache_e}")
+
+            # A refreshed price book is useless while the index built from it is
+            # still cached — that index has no TTL, so without this the new prices
+            # only take effect after a restart. Syncing the book then syncing a
+            # provider in the same process would price it from the stale copy,
+            # which is how claude-opus-5 came back at 0.0 right after the units
+            # were corrected.
+            #
+            # Kept out of the catalog-cache try above deliberately: a Redis hiccup
+            # there must not leave the price index stale, because the consequence
+            # is wrong prices rather than a slow request.
+            if provider_slug in _SyncConfig.PRICE_REFERENCE_PROVIDERS:
+                try:
+                    from src.services.pricing.pricing_lookup import (
+                        invalidate_openrouter_pricing_index,
+                    )
+
+                    invalidate_openrouter_pricing_index()
+                    logger.info(
+                        f"[{provider_slug.upper()}] Price index invalidated "
+                        f"(price-reference sync)"
+                    )
+                except Exception as price_e:
+                    logger.warning(
+                        f"[{provider_slug.upper()}] Price index invalidation failed: {price_e}"
+                    )
 
             metrics["cache_invalidation_duration"] = time.time() - cache_invalidation_start
         else:
@@ -973,6 +1170,7 @@ def sync_provider_models(
             "models_transformed": len(db_models),
             "models_skipped": skipped,
             "models_filtered": filtered,
+            "models_delisted": delisted,
             "models_synced": models_synced,
             "dry_run": dry_run,
             "metrics": metrics,
@@ -1007,6 +1205,22 @@ def sync_all_providers(
     Returns:
         Dictionary with overall sync results and performance metrics
     """
+    from src.services.cache.catalog_sync_guard import catalog_sync_guard
+
+    # Hold the guard for the whole batch, not per provider: the aggregate catalog
+    # spans every provider, so it is only coherent once the last one is written.
+    # A dry run mutates nothing and needs no guard.
+    if dry_run:
+        return _sync_all_providers_inner(provider_slugs, dry_run)
+
+    with catalog_sync_guard():
+        return _sync_all_providers_inner(provider_slugs, dry_run)
+
+
+def _sync_all_providers_inner(
+    provider_slugs: list[str] | None = None, dry_run: bool = False
+) -> dict[str, Any]:
+    """Body of :func:`sync_all_providers`, run inside the catalog sync guard."""
     import time
 
     try:
@@ -1015,55 +1229,72 @@ def sync_all_providers(
         sync_start_time = time.time()
 
         # Get providers to sync
-        from src.utils.provider_filter import is_provider_enabled
+        from src.utils.provider_filter import get_enabled_providers, is_provider_enabled
+
+        # Price-reference providers sync alongside the enabled roster. They are
+        # never routed to or listed — their rows are written is_active=False —
+        # but their catalogs are the only machine-readable source of prices for
+        # models whose own provider publishes none.
+        price_refs = Config.PRICE_REFERENCE_PROVIDERS
+
+        def _syncable(slug: str) -> bool:
+            return is_provider_enabled(slug) or slug in price_refs
 
         if provider_slugs:
             # Even explicit slugs must pass the enabled filter
-            providers_to_sync = [p for p in provider_slugs if is_provider_enabled(p)]
+            providers_to_sync = [p for p in provider_slugs if _syncable(p)]
         else:
-            # Use all active providers with fetch functions, minus skipped ones
+            # ENABLED_PROVIDERS is the routing/catalog source of truth. Starting
+            # from it also bootstraps a newly enabled provider whose DB registry
+            # row does not exist yet; sync_provider_models creates that row.
             skip_set = Config.MODEL_SYNC_SKIP_PROVIDERS
-            try:
-                from src.db.providers_db import get_active_provider_slugs
-                from src.services.gateway_registry import get_gateway_registry
+            enabled_providers = get_enabled_providers()
+            if enabled_providers is not None:
+                all_providers = sorted(enabled_providers)
+            else:
+                try:
+                    from src.db.providers_db import get_active_provider_slugs
+                    from src.services.gateway_registry import get_gateway_registry
 
-                all_providers = get_active_provider_slugs()
-                registry = get_gateway_registry()
-                all_providers = [
-                    s for s in all_providers if registry.get(s, {}).get("has_fetch_function", False)
-                ]
-                if not all_providers:
-                    logger.info("DB returned zero fetchable providers; nothing to sync")
-            except Exception:
-                logger.warning("Failed to load providers from DB; using hardcoded fallback")
-                all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
-            providers_to_sync = [
-                p for p in all_providers if p not in skip_set and is_provider_enabled(p)
-            ]
+                    all_providers = get_active_provider_slugs()
+                    registry = get_gateway_registry()
+                    all_providers = [
+                        s
+                        for s in all_providers
+                        if registry.get(s, {}).get("has_fetch_function", False)
+                    ]
+                    if not all_providers:
+                        logger.info("DB returned zero fetchable providers; nothing to sync")
+                except Exception:
+                    logger.warning("Failed to load providers from DB; using hardcoded fallback")
+                    all_providers = list(PROVIDER_FETCH_FUNCTIONS.keys())
+            all_providers = list(dict.fromkeys(list(all_providers) + sorted(price_refs)))
+            providers_to_sync = [p for p in all_providers if p not in skip_set and _syncable(p)]
             if skip_set:
                 logger.info(
                     f"Skipping {len(skip_set)} providers from sync: {', '.join(sorted(skip_set))}"
                 )
 
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'STARTING PROVIDER SYNC':^80}")
-        logger.info(f"{'='*80}")
+        logger.info(f"{'=' * 80}")
         logger.info(f"Providers to sync: {len(providers_to_sync)}")
         logger.info(f"Dry run mode: {dry_run}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         results = []
         total_fetched = 0
         total_transformed = 0
         total_skipped = 0
         total_synced = 0
+        total_delisted = 0
         errors = []
 
         import gc
 
         for i, provider_slug in enumerate(providers_to_sync, 1):
             logger.info(
-                f"\n{'='*80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'='*80}"
+                f"\n{'=' * 80}\n[{i}/{len(providers_to_sync)}] Syncing: {provider_slug.upper()}\n{'=' * 80}"
             )
             result = sync_provider_models(provider_slug, dry_run=dry_run, batch_mode=True)
             results.append(result)
@@ -1073,6 +1304,7 @@ def sync_all_providers(
                 total_transformed += result.get("models_transformed", 0)
                 total_skipped += result.get("models_skipped", 0)
                 total_synced += result.get("models_synced", 0)
+                total_delisted += result.get("models_delisted", 0)
             else:
                 errors.append({"provider": provider_slug, "error": result.get("error")})
 
@@ -1084,8 +1316,9 @@ def sync_all_providers(
 
         # Invalidate global caches ONCE after all providers are done
         # (instead of 35+ times per provider in the loop)
-        if total_synced > 0 and not dry_run:
+        if (total_synced > 0 or total_delisted > 0) and not dry_run:
             try:
+                from src.services.cache.catalog_response_cache import invalidate_catalog_cache
                 from src.services.model_catalog_cache import (
                     invalidate_catalog_stats,
                     invalidate_full_catalog,
@@ -1095,6 +1328,7 @@ def sync_all_providers(
                 invalidate_full_catalog()
                 invalidate_unique_models()
                 invalidate_catalog_stats()
+                invalidate_catalog_cache()
                 logger.info(
                     f"Global caches invalidated once after syncing {len(providers_to_sync)} providers"
                 )
@@ -1119,9 +1353,9 @@ def sync_all_providers(
         success_rate = (success_count / len(results) * 100) if results else 0
 
         # Print comprehensive dashboard
-        logger.info(f"\n{'='*80}")
+        logger.info(f"\n{'=' * 80}")
         logger.info(f"{'SYNC SUMMARY DASHBOARD':^80}")
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         # Overall Statistics
         logger.info(f"{'OVERALL STATISTICS':-<80}")
@@ -1135,13 +1369,13 @@ def sync_all_providers(
         logger.info(f"{'MODEL STATISTICS':-<80}")
         logger.info(f"{'Total Fetched':<40} {total_fetched:>20}")
         logger.info(
-            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Transformed':<40} {total_transformed:>20} ({total_transformed / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped/max(total_fetched,1)*100:>6.1f}%)"
+            f"{'Total Skipped':<40} {total_skipped:>20} ({total_skipped / max(total_fetched, 1) * 100:>6.1f}%)"
         )
         logger.info(
-            f"{'Total Synced':<40} {total_synced:>20} ({total_synced/max(total_transformed,1)*100:>6.1f}%)\n"
+            f"{'Total Synced':<40} {total_synced:>20} ({total_synced / max(total_transformed, 1) * 100:>6.1f}%)\n"
         )
 
         # Performance Metrics
@@ -1180,7 +1414,7 @@ def sync_all_providers(
                 logger.error(f"{i}. {error['provider']:<25} {error['error']}")
             logger.info("")
 
-        logger.info(f"{'='*80}\n")
+        logger.info(f"{'=' * 80}\n")
 
         return {
             "success": success,
@@ -1192,6 +1426,7 @@ def sync_all_providers(
             "total_models_transformed": total_transformed,
             "total_models_skipped": total_skipped,
             "total_models_synced": total_synced,
+            "total_models_delisted": total_delisted,
             "total_duration": round(total_duration, 2),
             "avg_duration_per_provider": round(avg_duration_per_provider, 2),
             "overall_models_per_sec": round(overall_models_per_sec, 2),

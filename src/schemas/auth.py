@@ -110,7 +110,6 @@ class PrivyAuthRequest(BaseModel):
     refresh_token: str | None = None
     session_update_action: str | None = None
     is_new_user: bool | None = None
-    referral_code: str | None = None  # Referral code if user signed up with one
     environment_tag: str | None = "live"  # Environment tag for API keys (live, test, development)
     auto_create_api_key: bool | None = (
         True  # Whether to automatically create API keys for new users

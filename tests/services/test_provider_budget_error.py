@@ -10,7 +10,7 @@ spend limit, and the raw error embeds the key id in a dashboard URL. We must:
 from fastapi import HTTPException
 
 from src.services.provider_failover import map_provider_error
-from src.utils.error_messages import (
+from src.utils.errors import (
     is_provider_budget_error,
     sanitize_provider_error_for_user,
 )

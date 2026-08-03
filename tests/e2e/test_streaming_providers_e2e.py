@@ -163,23 +163,6 @@ class TestProviderParameterE2E:
 
         assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
 
-    def test_provider_deepinfra_images(self, client: TestClient, auth_headers: dict):
-        """Test explicit DeepInfra provider on images endpoint."""
-        payload = {
-            "prompt": "A beautiful sunset",
-            "n": 1,
-            "size": "1024x1024",
-            "provider": "deepinfra",
-        }
-
-        response = client.post(
-            "/v1/images/generations",
-            json=payload,
-            headers=auth_headers,
-        )
-
-        assert response.status_code in [200, 400, 401, 402, 403, 422, 429, 500, 502, 503]
-
     def test_provider_default_fallback(self, client: TestClient, auth_headers: dict):
         """Test default provider fallback when not specified."""
         payload = {

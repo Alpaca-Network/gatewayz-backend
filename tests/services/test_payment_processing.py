@@ -1473,8 +1473,6 @@ class TestFirstTopupBonus:
         )
         return mock_client
 
-    @patch("src.services.referral.apply_referral_bonus")
-    @patch("src.services.referral.mark_first_purchase")
     @patch("src.config.supabase_config.get_supabase_client")
     @patch("src.services.billing.payments.get_payment")
     @patch("src.services.billing.payments.update_payment_status")
@@ -1485,13 +1483,11 @@ class TestFirstTopupBonus:
         mock_update_payment,
         mock_get_payment,
         mock_get_supabase,
-        mock_mark_first,
-        mock_apply_referral,
         stripe_service,
     ):
         """A user's first top-up of $5+ is credited the paid amount PLUS a flat $5 bonus."""
         mock_get_payment.return_value = None
-        self._mock_user_client(mock_get_supabase, has_made_first_purchase=False)
+        mock_client = self._mock_user_client(mock_get_supabase, has_made_first_purchase=False)
 
         stripe_service._handle_checkout_completed(self._make_session(500))  # $5.00
 
@@ -1511,10 +1507,8 @@ class TestFirstTopupBonus:
         total_credited = sum(c.kwargs["credits"] for c in calls)
         assert total_credited == 10.0
 
-        mock_mark_first.assert_called_once_with(1)
+        mock_client.table.return_value.update.assert_any_call({"has_made_first_purchase": True})
 
-    @patch("src.services.referral.apply_referral_bonus")
-    @patch("src.services.referral.mark_first_purchase")
     @patch("src.config.supabase_config.get_supabase_client")
     @patch("src.services.billing.payments.get_payment")
     @patch("src.services.billing.payments.update_payment_status")
@@ -1525,13 +1519,11 @@ class TestFirstTopupBonus:
         mock_update_payment,
         mock_get_payment,
         mock_get_supabase,
-        mock_mark_first,
-        mock_apply_referral,
         stripe_service,
     ):
         """A user who has already made a first purchase gets no bonus on subsequent top-ups."""
         mock_get_payment.return_value = None
-        self._mock_user_client(mock_get_supabase, has_made_first_purchase=True)
+        mock_client = self._mock_user_client(mock_get_supabase, has_made_first_purchase=True)
 
         stripe_service._handle_checkout_completed(self._make_session(2000))  # $20.00
 
@@ -1541,10 +1533,13 @@ class TestFirstTopupBonus:
             if c.kwargs.get("transaction_type") == "first_topup_bonus"
         ]
         assert bonus_calls == []
-        mock_mark_first.assert_not_called()
+        first_purchase_update_calls = [
+            c
+            for c in mock_client.table.return_value.update.call_args_list
+            if c.args and c.args[0] == {"has_made_first_purchase": True}
+        ]
+        assert first_purchase_update_calls == []
 
-    @patch("src.services.referral.apply_referral_bonus")
-    @patch("src.services.referral.mark_first_purchase")
     @patch("src.config.supabase_config.get_supabase_client")
     @patch("src.services.billing.payments.get_payment")
     @patch("src.services.billing.payments.update_payment_status")
@@ -1555,13 +1550,11 @@ class TestFirstTopupBonus:
         mock_update_payment,
         mock_get_payment,
         mock_get_supabase,
-        mock_mark_first,
-        mock_apply_referral,
         stripe_service,
     ):
         """A first top-up under $5 still marks the first purchase but grants no bonus."""
         mock_get_payment.return_value = None
-        self._mock_user_client(mock_get_supabase, has_made_first_purchase=False)
+        mock_client = self._mock_user_client(mock_get_supabase, has_made_first_purchase=False)
 
         stripe_service._handle_checkout_completed(self._make_session(400))  # $4.00
 
@@ -1571,4 +1564,4 @@ class TestFirstTopupBonus:
             if c.kwargs.get("transaction_type") == "first_topup_bonus"
         ]
         assert bonus_calls == []
-        mock_mark_first.assert_called_once_with(1)
+        mock_client.table.return_value.update.assert_any_call({"has_made_first_purchase": True})

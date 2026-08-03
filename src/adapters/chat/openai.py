@@ -81,6 +81,7 @@ class OpenAIChatAdapter(BaseChatAdapter):
             logit_bias=external_request.get("logit_bias"),
             stream_options=external_request.get("stream_options"),
             user=external_request.get("user"),
+            reasoning_effort=external_request.get("reasoning_effort"),
         )
 
         logger.debug(

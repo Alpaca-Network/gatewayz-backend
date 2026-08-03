@@ -101,32 +101,25 @@ PROVIDER_UNSUPPORTED_PARAMS: dict[str, frozenset[str]] = {
             "n",
         }
     ),
-    "cohere": frozenset(
-        {
-            "logit_bias",
-            "logprobs",
-            "top_logprobs",
-            "parallel_tool_calls",
-            "response_format",
-            "stream_options",
-            "n",
-        }
-    ),
     # Fast inference providers that implement a deliberately reduced schema.
     "cerebras": frozenset({"logit_bias", "logprobs", "top_logprobs", "parallel_tool_calls"}),
     "groq": frozenset({"logit_bias", "logprobs", "top_logprobs"}),
+    # Chinese-lab endpoints reached through the shared OpenAI-compatible
+    # adapter. They implement the core chat surface but not the sampling
+    # diagnostics.
+    "moonshot": frozenset({"logit_bias", "logprobs", "top_logprobs", "n"}),
+    "minimax": frozenset({"logit_bias", "logprobs", "top_logprobs", "n"}),
+    "xiaomi": frozenset({"logit_bias", "logprobs", "top_logprobs", "n"}),
+    "zai": frozenset({"logit_bias", "logprobs", "top_logprobs", "n"}),
+    "alibaba-cloud": frozenset({"logit_bias", "logprobs", "top_logprobs"}),
+    "deepseek": frozenset({"logit_bias", "top_logprobs", "n"}),
 }
 
 # Providers whose clients accept only the universal subset. Anything not in
-# UNIVERSAL_PARAMS is dropped for these.
-MINIMAL_PARAM_PROVIDERS: frozenset[str] = frozenset(
-    {
-        "nosana",
-        "modelz",
-        "morpheus",
-        "near",
-    }
-)
+# UNIVERSAL_PARAMS is dropped for these. Empty today — every provider on the
+# current roster speaks a usable share of the OpenAI surface — but kept so a
+# future minimal provider has an obvious home.
+MINIMAL_PARAM_PROVIDERS: frozenset[str] = frozenset()
 
 
 def supported_params_for(provider: str | None) -> frozenset[str]:

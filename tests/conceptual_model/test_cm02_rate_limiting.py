@@ -168,7 +168,6 @@ class TestLayer1IPRateLimiting:
         try:
             # Patch async helpers to avoid real I/O in dispatch
             with (
-                patch.object(mw, "_is_datacenter_ip", return_value=False),
                 patch.object(mw, "_get_user_tier_from_request", return_value="basic"),
                 patch("src.db.ip_whitelist.is_ip_whitelisted", return_value=False),
             ):

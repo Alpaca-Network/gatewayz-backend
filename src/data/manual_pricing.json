@@ -554,60 +554,52 @@
   },
   "openai": {
     "openai/gpt-4o": {
-      "prompt": "2.50",
-      "completion": "10.00",
+      "prompt": "2.5",
+      "completion": "10",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4o-2024-11-20": {
-      "prompt": "2.50",
-      "completion": "10.00",
+      "prompt": "2.5",
+      "completion": "10",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4o-2024-08-06": {
-      "prompt": "2.50",
-      "completion": "10.00",
+      "prompt": "2.5",
+      "completion": "10",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4o-mini": {
       "prompt": "0.15",
-      "completion": "0.60",
+      "completion": "0.6",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4o-mini-2024-07-18": {
       "prompt": "0.15",
-      "completion": "0.60",
+      "completion": "0.6",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4-turbo": {
-      "prompt": "10.00",
-      "completion": "30.00",
+      "prompt": "10",
+      "completion": "30",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4-turbo-2024-04-09": {
-      "prompt": "10.00",
-      "completion": "30.00",
+      "prompt": "10",
+      "completion": "30",
       "request": "0",
-      "image": "0",
-      "context_length": 128000
+      "image": "0"
     },
     "openai/gpt-4": {
-      "prompt": "30.00",
-      "completion": "60.00",
+      "prompt": "30",
+      "completion": "60",
       "request": "0",
-      "image": "0",
-      "context_length": 8192
+      "image": "0"
     },
     "openai/gpt-4-32k": {
       "prompt": "60.00",
@@ -617,18 +609,16 @@
       "context_length": 32768
     },
     "openai/gpt-3.5-turbo": {
-      "prompt": "0.50",
-      "completion": "1.50",
+      "prompt": "0.5",
+      "completion": "1.5",
       "request": "0",
-      "image": "0",
-      "context_length": 16385
+      "image": "0"
     },
     "openai/gpt-3.5-turbo-0125": {
-      "prompt": "0.50",
-      "completion": "1.50",
+      "prompt": "0.5",
+      "completion": "1.5",
       "request": "0",
-      "image": "0",
-      "context_length": 16385
+      "image": "0"
     },
     "openai/o1": {
       "prompt": "15.00",
@@ -638,11 +628,10 @@
       "context_length": 200000
     },
     "openai/o1-2024-12-17": {
-      "prompt": "15.00",
-      "completion": "60.00",
+      "prompt": "15",
+      "completion": "60",
       "request": "0",
-      "image": "0",
-      "context_length": 200000
+      "image": "0"
     },
     "openai/o1-preview": {
       "prompt": "15.00",
@@ -659,11 +648,10 @@
       "context_length": 128000
     },
     "openai/o3-mini": {
-      "prompt": "1.10",
-      "completion": "4.40",
+      "prompt": "1.1",
+      "completion": "4.4",
       "request": "0",
-      "image": "0",
-      "context_length": 200000
+      "image": "0"
     },
     "openai/chatgpt-4o-latest": {
       "prompt": "5.00",
@@ -671,6 +659,120 @@
       "request": "0",
       "image": "0",
       "context_length": 128000
+    },
+    "openai/gpt-5.4-nano": {
+      "prompt": "0.2",
+      "completion": "1.25",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-3.5-turbo-16k": {
+      "prompt": "3",
+      "completion": "4",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.6-sol": {
+      "prompt": "5",
+      "completion": "30",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4.1-nano": {
+      "prompt": "0.1",
+      "completion": "0.4",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.4-mini": {
+      "prompt": "0.75",
+      "completion": "4.5",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.2": {
+      "prompt": "1.75",
+      "completion": "14",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.6-terra": {
+      "prompt": "2.5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.5": {
+      "prompt": "5",
+      "completion": "30",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.6-luna": {
+      "prompt": "1",
+      "completion": "6",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4.1": {
+      "prompt": "2",
+      "completion": "8",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4o-search-preview": {
+      "prompt": "2.5",
+      "completion": "10",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.1": {
+      "prompt": "1.25",
+      "completion": "10",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4o-mini-search-preview": {
+      "prompt": "0.15",
+      "completion": "0.6",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5.4": {
+      "prompt": "2.5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5": {
+      "prompt": "1.25",
+      "completion": "10",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5-nano": {
+      "prompt": "0.05",
+      "completion": "0.4",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4o-2024-05-13": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-4.1-mini": {
+      "prompt": "0.4",
+      "completion": "1.6",
+      "request": "0",
+      "image": "0"
+    },
+    "openai/gpt-5-mini": {
+      "prompt": "0.25",
+      "completion": "2",
+      "request": "0",
+      "image": "0"
     }
   },
   "anthropic": {
@@ -785,6 +887,42 @@
       "request": "0",
       "image": "0",
       "context_length": 200000
+    },
+    "anthropic/claude-opus-4-7": {
+      "prompt": "5",
+      "completion": "25",
+      "request": "0",
+      "image": "0"
+    },
+    "anthropic/claude-sonnet-5": {
+      "prompt": "2",
+      "completion": "10",
+      "request": "0",
+      "image": "0"
+    },
+    "anthropic/claude-opus-4-8": {
+      "prompt": "5",
+      "completion": "25",
+      "request": "0",
+      "image": "0"
+    },
+    "anthropic/claude-sonnet-4-6": {
+      "prompt": "3",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "anthropic/claude-fable-5": {
+      "prompt": "10",
+      "completion": "50",
+      "request": "0",
+      "image": "0"
+    },
+    "anthropic/claude-opus-5": {
+      "prompt": "5",
+      "completion": "25",
+      "request": "0",
+      "image": "0"
     }
   },
   "simplismart": {
@@ -1008,55 +1146,55 @@
   },
   "sybil": {
     "deepseek-ai/DeepSeek-V3-0324": {
-      "prompt": "0.0000019",
-      "completion": "0.000002",
+      "prompt": "1.9",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 163840
     },
     "mistralai/Mistral-7B-Instruct-v0.3": {
-      "prompt": "0.000001",
-      "completion": "0.000002",
+      "prompt": "1",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 32768
     },
     "moonshotai/Kimi-K2-Thinking": {
-      "prompt": "0.000001",
-      "completion": "0.000002",
+      "prompt": "1",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 262144
     },
     "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8": {
-      "prompt": "0.00000125",
-      "completion": "0.000002",
+      "prompt": "1.25",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 262144
     },
     "zai-org/GLM-4.5": {
-      "prompt": "0.00000140",
-      "completion": "0.000002",
+      "prompt": "1.4",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 131072
     },
     "zai-org/GLM-4.6": {
-      "prompt": "0.00000150",
-      "completion": "0.000002",
+      "prompt": "1.5",
+      "completion": "2",
       "request": "0",
       "image": "0",
       "context_length": 202752
     },
     "distilbert/distilbert-base-uncased": {
-      "prompt": "0.000001",
-      "completion": "0.000002",
+      "prompt": "1",
+      "completion": "2",
       "request": "0",
       "image": "0"
     },
     "Qwen/Qwen3-Embedding-8B": {
-      "prompt": "0.0000001",
+      "prompt": "0.1",
       "completion": "0",
       "request": "0",
       "image": "0"
@@ -1192,8 +1330,8 @@
     }
   },
   "_metadata": {
-    "last_updated": "2026-01-26",
-    "note": "Manual pricing data for providers that don't expose pricing via API. Near AI and Alibaba Cloud pricing are now fetched dynamically from API but kept here as fallback.",
+    "last_updated": "2026-07-26",
+    "note": "Manual pricing for providers that expose no pricing via API. This is the tier-2 fallback: the OpenRouter price book (tier 3) now prices new models automatically, so entries here matter only when that reference is unavailable. Values are per-1M tokens. Regenerated from the verified served catalog on 2026-07-26.",
     "sources": [
       "https://simplismart.ai/pricing (Simplismart - MLOps platform with LLM inference, image generation, and speech-to-text)",
       "https://openai.com/api/pricing (OpenAI - official API pricing)",
@@ -1215,5 +1353,63 @@
     ],
     "currency": "USD",
     "units": "per 1M tokens (unless specified otherwise)"
+  },
+  "moonshot": {
+    "moonshot/kimi-k2.6": {
+      "prompt": "0.646",
+      "completion": "2.72",
+      "request": "0",
+      "image": "0"
+    },
+    "moonshot/kimi-k2.7-code": {
+      "prompt": "0.75",
+      "completion": "3.5",
+      "request": "0",
+      "image": "0"
+    },
+    "moonshot/kimi-k3": {
+      "prompt": "3",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    }
+  },
+  "xai": {
+    "grok-4": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "grok-3-mini": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "grok-3": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "grok-3-mini-beta": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "grok-4-fast": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    },
+    "grok-code-fast-1": {
+      "prompt": "5",
+      "completion": "15",
+      "request": "0",
+      "image": "0"
+    }
   }
 }

@@ -96,13 +96,13 @@ class ProxyRequest(BaseModel):
         description="The maximum number of tokens that can be generated in the chat completion",
     )
     temperature: float | None = Field(
-        default=1.0,
+        default=None,
         ge=0.0,
         le=2.0,
         description="Sampling temperature between 0 and 2. Higher values make output more random",
     )
     top_p: float | None = Field(
-        default=1.0,
+        default=None,
         ge=0.0,
         le=1.0,
         description="Nucleus sampling: consider tokens with top_p probability mass",
@@ -119,13 +119,13 @@ class ProxyRequest(BaseModel):
 
     # Penalty parameters
     frequency_penalty: float | None = Field(
-        default=0.0,
+        default=None,
         ge=-2.0,
         le=2.0,
         description="Penalize new tokens based on their existing frequency in the text",
     )
     presence_penalty: float | None = Field(
-        default=0.0,
+        default=None,
         ge=-2.0,
         le=2.0,
         description="Penalize new tokens based on whether they appear in the text so far",
@@ -180,6 +180,16 @@ class ProxyRequest(BaseModel):
     )
     service_tier: Literal["auto", "default"] | None = Field(
         default=None, description="Latency tier for processing the request"
+    )
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description=(
+            "How much reasoning the model should spend before answering. "
+            "Normalized across providers: forwarded as reasoning_effort to OpenAI, "
+            "xAI and Moonshot, and translated to extended thinking for Anthropic. "
+            "Silently ignored by models that do not reason. Reasoning tokens are "
+            "billed as output tokens, so higher effort costs more."
+        ),
     )
 
     # Gateway-specific parameters (not part of OpenAI API)

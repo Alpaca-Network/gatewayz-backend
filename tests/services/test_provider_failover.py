@@ -153,16 +153,10 @@ class TestBuildProviderFailoverChain:
     """Test provider failover chain construction"""
 
     def test_chain_with_huggingface_first(self):
-        """Test chain starting with huggingface"""
+        """huggingface has no client and is not in the fallback chain; treated as unknown"""
         chain = build_provider_failover_chain("huggingface")
 
-        assert chain[0] == "huggingface"
-        assert "featherless" in chain
-        assert "fireworks" in chain
-        assert "together" in chain
-        assert "openrouter" in chain
-        # Verify all providers in priority list are included
-        assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
+        assert chain == ["huggingface"]
 
     def test_chain_with_openrouter_first(self):
         """Test chain starting with openrouter"""
@@ -180,7 +174,7 @@ class TestBuildProviderFailoverChain:
         chain = build_provider_failover_chain("featherless")
 
         assert chain[0] == "featherless"
-        assert "huggingface" in chain
+        assert "huggingface" not in chain
         assert "fireworks" in chain
         assert len(chain) == len(FALLBACK_PROVIDER_PRIORITY)
 
@@ -228,7 +222,9 @@ class TestBuildProviderFailoverChain:
 
     def test_fallback_provider_priority_constants(self):
         """Test fallback provider constants are defined correctly"""
-        assert "huggingface" in FALLBACK_PROVIDER_PRIORITY
+        # huggingface client was deleted; it must not appear in the fallback chain
+        # (its PROVIDER_FETCH_FUNCTIONS/catalog entry remains — open roster decision)
+        assert "huggingface" not in FALLBACK_PROVIDER_PRIORITY
         assert "featherless" in FALLBACK_PROVIDER_PRIORITY
         assert "fireworks" in FALLBACK_PROVIDER_PRIORITY
         assert "together" in FALLBACK_PROVIDER_PRIORITY
@@ -751,6 +747,20 @@ class TestMapProviderErrorOpenAI:
         # Should map to 401 (authentication issue)
         assert mapped.status_code == 401
         assert "authentication" in mapped.detail.lower()
+
+    @patch("src.services.provider_failover.alert_provider_auth_failure")
+    def test_auth_error_triggers_alert(self, mock_alert):
+        """Test AuthenticationError fires the ops alert hook"""
+        response = Mock()
+        response.status_code = 401
+        error = AuthenticationError("Invalid API key", response=response, body=None)
+        error.status_code = 401
+        map_provider_error("openrouter", "gpt-4", error)
+
+        mock_alert.assert_called_once()
+        call_args = mock_alert.call_args.args
+        assert call_args[0] == "openrouter"
+        assert call_args[1] == "gpt-4"
 
     def test_map_not_found_error(self):
         """Test NotFoundError indicates model not available"""

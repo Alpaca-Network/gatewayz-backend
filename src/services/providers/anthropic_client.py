@@ -57,6 +57,21 @@ def _use_native_transport() -> bool:
     )
 
 
+def _prepare_anthropic_kwargs(model: str, kwargs: dict) -> dict:
+    """Prepare kwargs for the OpenAI-compatible Anthropic endpoint.
+
+    That surface takes `reasoning_effort` and REJECTS the native thinking shape
+    ("Adaptive thinking is not available via..."), so it is a passthrough like
+    OpenAI — the thinking/output_config translation belongs to the native
+    Messages transport, which handles reasoning_effort itself.
+    """
+    from src.services.providers.reasoning_effort import apply_reasoning_effort
+
+    prepared = dict(kwargs)
+    effort = prepared.pop("reasoning_effort", None)
+    return apply_reasoning_effort(prepared, "anthropic", model, effort)
+
+
 def make_anthropic_request(messages, model, **kwargs):
     """Make request to Anthropic.
 
@@ -107,6 +122,7 @@ def _make_anthropic_request_compat(messages, model, **kwargs):
         logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
         client = get_anthropic_client()
+        kwargs = _prepare_anthropic_kwargs(model, kwargs)
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
 
         logger.info(f"Anthropic request successful for model: {model}")
@@ -165,6 +181,7 @@ def _make_anthropic_request_stream_compat(messages, model, **kwargs):
         logger.debug(f"Request params: message_count={len(messages)}, kwargs={list(kwargs.keys())}")
 
         client = get_anthropic_client()
+        kwargs = _prepare_anthropic_kwargs(model, kwargs)
         stream = client.chat.completions.create(
             model=model, messages=messages, stream=True, **kwargs
         )

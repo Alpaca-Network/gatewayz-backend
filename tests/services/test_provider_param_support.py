@@ -31,8 +31,17 @@ class TestSupportedParamsFor:
         assert "tools" in supported
         assert "tool_choice" in supported
 
-    def test_minimal_provider_gets_universal_subset_only(self):
-        assert supported_params_for("nosana") == UNIVERSAL_PARAMS
+    def test_minimal_provider_gets_universal_subset_only(self, monkeypatch):
+        """No provider on the current roster is minimal, so this uses a stand-in.
+
+        The branch still needs cover: a future reduced-schema provider will use
+        it, and an untested branch is where that provider's bugs will live.
+        """
+        monkeypatch.setattr(
+            "src.services.provider_param_support.MINIMAL_PARAM_PROVIDERS",
+            frozenset({"toy-provider"}),
+        )
+        assert supported_params_for("toy-provider") == UNIVERSAL_PARAMS
 
 
 class TestFilterParamsForProvider:
@@ -74,9 +83,13 @@ class TestFilterParamsForProvider:
         _, dropped = filter_params_for_provider("anthropic", params)
         assert dropped == sorted(dropped)
 
-    def test_minimal_provider_drops_tools(self):
+    def test_minimal_provider_drops_tools(self, monkeypatch):
+        monkeypatch.setattr(
+            "src.services.provider_param_support.MINIMAL_PARAM_PROVIDERS",
+            frozenset({"toy-provider"}),
+        )
         params = {"temperature": 0.5, "tools": [{"type": "function"}]}
-        filtered, dropped = filter_params_for_provider("nosana", params)
+        filtered, dropped = filter_params_for_provider("toy-provider", params)
         assert "tools" not in filtered
         assert "tools" in dropped
 

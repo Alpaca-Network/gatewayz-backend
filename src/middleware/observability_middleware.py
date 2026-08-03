@@ -31,7 +31,6 @@ from src.services.metrics.prometheus_metrics import (
     http_request_duration,
     record_http_response,
 )
-from src.utils.profiling import tag_wrapper as _pyroscope_tag_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -144,15 +143,7 @@ class ObservabilityMiddleware:
             await send(message)
 
         try:
-            # Tag every Pyroscope sample taken during this request with the
-            # normalised endpoint and HTTP method.  This lets you filter the
-            # Grafana flamegraph to a specific route and ask:
-            #   "Which Python functions consume the most CPU on POST /v1/chat/completions?"
-            # For streaming responses the context stays open for the full SSE
-            # window, so slow streaming code shows up correctly in the profile.
-            # Falls back to nullcontext() when Pyroscope is disabled or not installed.
-            with _pyroscope_tag_wrapper({"endpoint": endpoint, "method": method}):
-                await self.app(scope, receive, send_with_metrics)
+            await self.app(scope, receive, send_with_metrics)
 
             # Record response size metric
             fastapi_response_size_bytes.labels(

@@ -150,6 +150,8 @@ def build_offer_rows(
 
     best: dict[tuple, dict] = {}
     dropped_implausible = 0
+    dropped_unpriced = 0
+    dropped_no_provider = 0
     for m in models:
         if not m.get("is_active", True):
             continue
@@ -170,10 +172,13 @@ def build_offer_rows(
         )
         slug = (provider or {}).get("slug")
         if not slug:
+            # No resolvable gateway for this provider_id — unroutable offer.
+            dropped_no_provider += 1
             continue
 
         cost = cost_per_1k_from_model(m)
         if cost is None:
+            dropped_unpriced += 1
             continue
         if not is_plausible_cost_per_1k(cost):
             # Garbage/stale price (unit error, cache staleness). Excluding it keeps
@@ -203,6 +208,16 @@ def build_offer_rows(
             dropped_implausible,
             _MIN_PLAUSIBLE_COST_PER_1K,
             _MAX_PLAUSIBLE_COST_PER_1K,
+        )
+    if dropped_unpriced or dropped_no_provider:
+        # Logged (not silently dropped) so catalog shrinkage to routable+priced
+        # reality is observable — North Star §5.
+        logger.info(
+            "Offer projection excluded %d model(s) as unroutable: %d unpriced, "
+            "%d with no resolvable gateway",
+            dropped_unpriced + dropped_no_provider,
+            dropped_unpriced,
+            dropped_no_provider,
         )
     return list(best.values())
 

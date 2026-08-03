@@ -37,27 +37,6 @@ Welcome! This is your complete guide to deploying Gatewayz to Railway with integ
   - 📊 Monitoring your errors
   - 🛠️ Troubleshooting
 
-### APIdog General Runner Integration (5 minutes)
-- **[APIDOG_RUNNER_QUICKSTART.md](docs/APIDOG_RUNNER_QUICKSTART.md)** - Quick setup
-  - ⚡ Automated deployment (2 steps)
-  - 🔑 Environment configuration
-  - ✅ Verification steps
-
-- **[APIDOG_RUNNER_SETUP.md](docs/APIDOG_RUNNER_SETUP.md)** - Complete guide
-  - 🏗️ Multi-service architecture
-  - 📋 3 deployment options
-  - 🔌 Integration with your API
-  - 🛠️ Troubleshooting & monitoring
-  - 📊 Performance & scaling
-
-- **[APIDOG_RUNNER_IMPLEMENTATION_SUMMARY.md](docs/APIDOG_RUNNER_IMPLEMENTATION_SUMMARY.md)** - Implementation details
-  - 📝 What was implemented
-  - ✅ Deployment checklist
-  - 📈 Architecture & resources
-  - 🔒 Security considerations
-
----
-
 ## 🎯 Choose Your Path
 
 ### Path 1: "Just Deploy It Now!" (5-10 minutes)
@@ -113,8 +92,6 @@ railway logs --follow --service apidog-runner
 ```
 
 **Result**: ✅ Multi-service deployment with testing capabilities!
-
-See: [APIDOG_RUNNER_QUICKSTART.md](docs/APIDOG_RUNNER_QUICKSTART.md)
 
 ---
 

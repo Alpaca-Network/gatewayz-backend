@@ -7,7 +7,8 @@ import re
 import httpx
 from fastapi import HTTPException
 
-from src.utils.error_messages import (
+from src.services.provider_alerting import alert_provider_auth_failure
+from src.utils.errors import (
     is_provider_budget_error,
     sanitize_provider_error_for_user,
 )
@@ -53,7 +54,6 @@ FALLBACK_PROVIDER_PRIORITY: tuple[str, ...] = (
     "google-vertex",
     "openrouter",  # Primary router / fallback for OpenAI/Anthropic models
     "cerebras",
-    "huggingface",
     "featherless",
     "alibaba",
     "fireworks",
@@ -564,6 +564,7 @@ def _map_provider_error_impl(
             detail = f"{provider} authentication error"
             # Always map auth errors to 401 for consistency
             status = 401
+            alert_provider_auth_failure(provider, model, str(exc)[:500])
         elif NotFoundError and isinstance(exc, NotFoundError):
             detail = f"Model {model} not found or unavailable on {provider}"
             status = 404
@@ -804,7 +805,7 @@ def map_provider_error_detailed(
         except Exception as e:
             raise map_provider_error_detailed(provider, model, e, request_id)
     """
-    from src.utils.error_factory import DetailedErrorFactory
+    from src.utils.errors import DetailedErrorFactory
 
     # Get the basic HTTP exception from the existing mapper
     http_exc = map_provider_error(provider, model, exc)

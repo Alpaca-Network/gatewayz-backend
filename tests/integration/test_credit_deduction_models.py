@@ -277,7 +277,6 @@ class TestTrialUserCreditHandling:
             patch("src.services.credit_handler.calculate_cost_async") as mock_cost,
             patch("src.db.users.deduct_credits", mock_deduct_credits),
             patch("src.db.users.log_api_usage_transaction", mock_log_transaction),
-            patch("src.db.trials.track_trial_usage", return_value=None),
             patch("src.services.credit_handler.asyncio.to_thread") as mock_to_thread,
         ):
             # Make to_thread call the function directly

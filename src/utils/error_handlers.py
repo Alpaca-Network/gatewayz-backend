@@ -18,7 +18,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.schemas.errors import ErrorResponse
-from src.utils.error_factory import DetailedErrorFactory
+from src.utils.errors import DetailedErrorFactory
 
 logger = logging.getLogger(__name__)
 

@@ -22,11 +22,39 @@ def test_contract_module_exposes_types():
 
 
 def test_every_provider_declares_a_full_trio():
-    """PROVIDER_FUNCTIONS: each provider declares one request, one process,
-    and one (sync) stream function name. Env-independent (static source of truth)."""
+    """PROVIDER_FUNCTIONS: each bespoke provider declares one request, one
+    process, and one (sync) stream function name; the OpenAI-compatible
+    providers consolidated onto the adapter are declared in ADAPTERS instead.
+    Env-independent (static source of truth)."""
     from src.handlers.provider_registry import PROVIDER_FUNCTIONS
+    from src.services.providers.adapter_configs import ADAPTERS
 
-    assert len(PROVIDER_FUNCTIONS) >= 25, "expected ~30 providers declared"
+    # MVP roster (post provider-purge + adapter consolidation):
+    #   bespoke clients: featherless, xai, cerebras, google_vertex,
+    #     alibaba_cloud, openai, anthropic (+ openrouter as fallback,
+    #     injected separately)
+    #   adapter-served (Tier-1): deepinfra, together, fireworks, groq, zai
+    #   adapter-served (Tier-2, Task 18): deepseek, moonshot, minimax, xiaomi
+    assert len(PROVIDER_FUNCTIONS) >= 7, "expected ~8 bespoke MVP-roster providers declared"
+    # Exact-set drift guard: ADAPTERS must be precisely the five Tier-1
+    # consolidated providers plus the four Tier-2 providers from Task 18 —
+    # not merely a superset. Adding/removing an adapter slug must update
+    # this assertion deliberately.
+    assert set(ADAPTERS) == {
+        "deepinfra",
+        "together",
+        "fireworks",
+        "groq",
+        "zai",
+        "deepseek",
+        "moonshot",
+        "minimax",
+        "xiaomi",
+    }
+    assert (
+        len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 12
+    ), "expected ~13 MVP-roster providers declared across bespoke + adapter"
+    assert not (set(PROVIDER_FUNCTIONS) & set(ADAPTERS)), "provider declared in both registries"
     for slug, fns in PROVIDER_FUNCTIONS.items():
         has_process = any(f.startswith("process_") for f in fns)
         has_stream = any(f.endswith("_stream") for f in fns)
@@ -56,7 +84,9 @@ def test_provider_routing_entries_are_shape_consistent(monkeypatch):
     try:
         reg = importlib.reload(reg)
         routing = reg.PROVIDER_ROUTING
-        assert len(routing) >= 25, f"expected ~30 providers enabled, got {len(routing)}"
+        # MVP roster (post provider-purge): ~13 providers routed directly,
+        # OpenRouter remains as a fallback outside PROVIDER_ROUTING.
+        assert len(routing) >= 10, f"expected ~13 MVP-roster providers enabled, got {len(routing)}"
         for slug, entry in routing.items():
             assert set(entry.keys()) == {"request", "process", "stream"}, f"{slug}: wrong keys"
             for key in ("request", "process", "stream"):

@@ -254,8 +254,8 @@ def reduce_quality_scores(scores: dict[str, float]) -> tuple[float | None, float
     """
     Reduce a {task_type: score} map to (overall, code) priors.
 
-    overall = the 'unknown' catch-all score if present (matches how model_selector
-    treats 'unknown'), else the mean of all task scores. code = 'code_generation'.
+    overall = the 'unknown' catch-all score if present, else the mean of all
+    task scores. code = 'code_generation'.
     Returns (None, None) when no scores are known.
     """
     if not scores:

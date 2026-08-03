@@ -232,16 +232,6 @@ This wiki provides comprehensive documentation for developers working on the Gat
 | [Supabase Migrations CI](SUPABASE_MIGRATIONS_CI.md) | ⭐ Automated migrations setup |
 | [Supabase Migrations Setup](../.github/SUPABASE_MIGRATIONS_SETUP.md) | Setup checklist |
 
-### API Testing
-
-| Document | Description |
-|----------|-------------|
-| [Apidog Runner Quick Start](APIDOG_RUNNER_QUICKSTART.md) | ⭐ API testing quick start |
-| [Apidog Runner Setup](APIDOG_RUNNER_SETUP.md) | Detailed setup guide |
-| [Apidog Runner Summary](APIDOG_RUNNER_IMPLEMENTATION_SUMMARY.md) | Implementation summary |
-
----
-
 ## 📖 API Documentation
 
 **API endpoints and usage**

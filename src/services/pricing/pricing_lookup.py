@@ -16,12 +16,18 @@ If you add a new pricing source, use normalize_pricing_dict() with the correct
 PricingFormat constant before returning values from this module.
 """
 
+import json
 import logging
+import re
 import threading
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# Manual pricing seed: src/data/manual_pricing.json (this file is src/services/pricing/).
+_MANUAL_PRICING_PATH = Path(__file__).resolve().parents[2] / "data" / "manual_pricing.json"
 
 
 def validate_pricing_value(value: Any, field: str, model_id: str = "") -> str:
@@ -74,6 +80,24 @@ GATEWAY_PROVIDERS = {
     "fireworks",
     "groq",
     "together",
+    # Direct open-weight providers whose /models API returns no pricing — must be
+    # priced (via OpenRouter cross-reference) or hidden, never shown as free.
+    "moonshot",
+    "minimax",
+    "deepseek",
+    "xiaomi",
+}
+
+# Map our provider slug -> the org prefix OpenRouter uses, for precise
+# cross-reference matching (e.g. our "moonshot/kimi-k3" == OpenRouter's
+# "moonshotai/kimi-k3"). Adding a provider here is all it takes to auto-price
+# its models from OpenRouter on every sync — the scalable path. Providers whose
+# slug already matches OpenRouter's org need no entry (base-id match still works).
+OPENROUTER_PROVIDER_ALIASES: dict[str, str] = {
+    "moonshot": "moonshotai",
+    "alibaba": "qwen",
+    "alibaba-cloud": "qwen",
+    "google-vertex": "google",
 }
 
 # Pricing lookup tier order (checked in sequence, first match wins)
@@ -94,13 +118,47 @@ _openrouter_pricing_index: dict[str, dict] | None = None
 
 
 def load_manual_pricing() -> dict[str, Any]:
-    """Manual pricing file fallback is removed.
+    """Load the manual pricing seed from ``src/data/manual_pricing.json``.
 
-    All pricing now comes from the database (models_catalog via model sync).
-    This stub is kept so existing callers continue to work — they all handle
-    the empty-dict return gracefully (return None / skip to next tier).
+    This is the tier-3 fallback in :func:`get_model_pricing` for providers whose
+    upstream ``/models`` API returns no pricing (e.g. OpenAI, Anthropic). Without
+    it, those models sync with ``None`` pricing and get filtered out of the served
+    catalog (and blocked at the inference gate). Model keys are lowercased at load
+    time so lookups are O(1) and case-insensitive. Result is cached in-memory for
+    ``PRICING_CACHE_TTL``; thread-safe. On any read/parse error, caches and returns
+    an empty dict so callers degrade gracefully to the next tier.
     """
-    return {}
+    global _pricing_cache, _pricing_cache_timestamp
+
+    now = time.monotonic()
+    with _pricing_cache_lock:
+        if (
+            _pricing_cache is not None
+            and _pricing_cache_timestamp is not None
+            and (now - _pricing_cache_timestamp) < PRICING_CACHE_TTL
+        ):
+            return _pricing_cache
+
+        try:
+            with open(_MANUAL_PRICING_PATH, encoding="utf-8") as f:
+                raw = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f"Failed to load manual pricing from {_MANUAL_PRICING_PATH}: {e}")
+            _pricing_cache = {}
+            _pricing_cache_timestamp = now
+            return _pricing_cache
+
+        normalized: dict[str, Any] = {}
+        for gateway, models in raw.items():
+            gw = str(gateway).lower()
+            if isinstance(models, dict):
+                normalized[gw] = {str(k).lower(): v for k, v in models.items()}
+            else:
+                normalized[gw] = models
+
+        _pricing_cache = normalized
+        _pricing_cache_timestamp = now
+        return _pricing_cache
 
 
 def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
@@ -115,7 +173,7 @@ def get_model_pricing(gateway: str, model_id: str) -> dict[str, str] | None:
         Pricing dictionary (normalized to per-token format) or None if not found
     """
     try:
-        from src.services.pricing_normalization import get_provider_format, normalize_pricing_dict
+        from src.utils.pricing_normalization import get_provider_format, normalize_pricing_dict
 
         pricing_data = load_manual_pricing()
 
@@ -228,6 +286,115 @@ def _is_building_catalog() -> bool:
         return False
 
 
+_unpriced_models: set[str] = set()
+_unpriced_lock = threading.Lock()
+
+# Shared across workers. A per-process set only ever showed whichever worker
+# happened to answer /health/catalog/unpriced, and the sync that discovered the
+# drop is rarely the worker serving the request — so the endpoint could read 0
+# while models were being dropped. The local set is kept as a fallback for when
+# Redis is unavailable.
+UNPRICED_MODELS_KEY = "gw:models:unpriced"
+_UNPRICED_TTL_SECONDS = 7 * 24 * 3600
+
+
+def _unpriced_redis():
+    try:
+        from src.config.redis_config import get_redis_client, is_redis_available
+
+        client = get_redis_client()
+        return client if (client and is_redis_available()) else None
+    except Exception:
+        return None
+
+
+def record_unpriced_model(model_id: str) -> None:
+    """Remember a model that was dropped for having no price."""
+    if not model_id:
+        return
+    with _unpriced_lock:
+        _unpriced_models.add(str(model_id))
+
+    client = _unpriced_redis()
+    if client:
+        try:
+            client.sadd(UNPRICED_MODELS_KEY, str(model_id))
+            # Expire the whole set so a model that later gets priced does not
+            # linger in the report forever.
+            client.expire(UNPRICED_MODELS_KEY, _UNPRICED_TTL_SECONDS)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not record unpriced model in Redis: %s", e)
+
+
+def get_unpriced_models() -> list[str]:
+    """Models dropped from the catalog for want of a price.
+
+    Exposed so a launch that lands without pricing is visible the same day
+    instead of being discovered weeks later, which is how Claude Opus 5 went
+    missing.
+    """
+    client = _unpriced_redis()
+    if client:
+        try:
+            members = client.smembers(UNPRICED_MODELS_KEY) or set()
+            return sorted(m.decode() if isinstance(m, bytes) else str(m) for m in members)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not read unpriced models from Redis: %s", e)
+
+    with _unpriced_lock:
+        return sorted(_unpriced_models)
+
+
+def clear_unpriced_models() -> None:
+    """Reset the set — called at the start of a full catalog sync."""
+    with _unpriced_lock:
+        _unpriced_models.clear()
+
+    client = _unpriced_redis()
+    if client:
+        try:
+            client.delete(UNPRICED_MODELS_KEY)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug("Could not clear unpriced models in Redis: %s", e)
+
+
+def _load_price_reference_catalog() -> list[dict]:
+    """Load the aggregator catalog used purely as a price reference.
+
+    Deliberately reads models regardless of ``is_active``. Being *listed* and
+    being a *price reference* are different jobs: OpenRouter is delisted as
+    supply (North Star §5 bars an aggregator as primary supply, and
+    ENABLED_PROVIDERS blocks routing to it), but its catalog is the only place
+    that carries prices for models whose own provider publishes none — OpenAI,
+    Anthropic and xAI all return catalogs with no pricing at all.
+
+    Coupling the two is what silently broke intake: delisting OpenRouter as
+    supply emptied this index, so newly released models — Claude Opus 5 among
+    them — could no longer acquire a price and were filtered out of the catalog
+    entirely. Nothing routes here; only prices are read.
+    """
+    try:
+        from src.db.models_catalog_db import get_models_by_gateway_for_catalog
+
+        rows = get_models_by_gateway_for_catalog(gateway_slug="openrouter", include_inactive=True)
+    except Exception as e:
+        logger.warning("Price reference catalog unavailable: %s", e)
+        return []
+
+    catalog: list[dict] = []
+    for row in rows or []:
+        metadata = row.get("metadata") or {}
+        pricing = metadata.get("pricing_raw") if isinstance(metadata, dict) else None
+        if not isinstance(pricing, dict) or not pricing:
+            continue
+        model_id = row.get("provider_model_id") or row.get("model_name")
+        if model_id:
+            catalog.append({"id": model_id, "pricing": pricing})
+
+    logger.info("Price reference catalog: %d priced models loaded", len(catalog))
+    return catalog
+
+
 def _build_openrouter_pricing_index() -> dict[str, dict]:
     """Build an O(1) lookup index from OpenRouter models.
 
@@ -250,9 +417,7 @@ def _build_openrouter_pricing_index() -> dict[str, dict]:
 
     index: dict[str, dict] = {}
     try:
-        from src.services.models import get_cached_models
-
-        openrouter_models = get_cached_models("openrouter") or []
+        openrouter_models = _load_price_reference_catalog()
         for model in openrouter_models:
             if not isinstance(model, dict):
                 continue
@@ -280,24 +445,65 @@ def invalidate_openrouter_pricing_index() -> None:
     _openrouter_pricing_index = None
 
 
+# Anthropic and OpenRouter spell the same model differently: Anthropic ships
+# "claude-opus-4-6" and dated snapshots like "claude-haiku-4-5-20251001", while
+# OpenRouter lists "claude-opus-4.6" and "claude-haiku-4.5". normalize_model_name
+# cannot bridge them — it maps "." to "p" but leaves "-" alone, so "4.6" becomes
+# "4p6" and "4-6" stays "4-6" and the two never meet. It also drives provider
+# dispatch, so widening it there risks mis-routing an inference call.
+#
+# These candidates are therefore built only for the price lookup. Four Anthropic
+# models sat unpriced — and so unlistable — purely because of this, with the
+# price sitting in the index under a dotted name.
+_DATE_SUFFIX = re.compile(r"-\d{8}$")
+_VERSION_SEGMENT = re.compile(r"(?<=\d)-(?=\d)")
+
+
+def _cross_reference_candidates(model_id: str, base_model_id: str) -> list[str]:
+    """Lookup keys to try, most literal first."""
+    candidates: list[str] = []
+
+    def add(value: str) -> None:
+        for form in (value, value.lower()):
+            if form and form not in candidates:
+                candidates.append(form)
+
+    for value in (model_id, base_model_id):
+        if not value:
+            continue
+        add(value)
+        # "claude-haiku-4-5-20251001" -> "claude-haiku-4-5"
+        undated = _DATE_SUFFIX.sub("", value)
+        add(undated)
+        # "claude-opus-4-6" -> "claude-opus-4.6" (a hyphen BETWEEN DIGITS only,
+        # so "gpt-4" and "claude-3-opus" are untouched)
+        add(_VERSION_SEGMENT.sub(".", undated))
+
+    return candidates
+
+
 def _get_cross_reference_pricing(
     model_id: str,
     openrouter_index: dict[str, dict] | None = None,
+    provider: str | None = None,
 ) -> dict[str, str] | None:
     """
-    Get pricing for a gateway provider model by cross-referencing OpenRouter's catalog.
+    Get pricing for a provider model by cross-referencing OpenRouter's catalog.
 
-    Gateway providers route to underlying providers
-    like OpenAI, Anthropic, Google etc. This function extracts the underlying model ID
-    and looks up its pricing from the OpenRouter pricing index.
+    Extracts the underlying model ID and looks up its pricing from the OpenRouter
+    pricing index. When ``provider`` is supplied and has an OpenRouter org alias
+    (OPENROUTER_PROVIDER_ALIASES), the fully-qualified aliased id is tried first
+    for a precise match (e.g. our "moonshot/kimi-k3" -> OpenRouter
+    "moonshotai/kimi-k3") before falling back to base-id matching.
 
     Uses an O(1) index lookup when `openrouter_index` is provided (batch path).
     Falls back to building the index on demand for single-model lookups.
 
     Args:
-        model_id: Model ID from gateway provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
+        model_id: Model ID from the provider (e.g., "openai/gpt-4o", "gpt-4o-mini")
         openrouter_index: Pre-built pricing index from _build_openrouter_pricing_index().
                           Pass None to have the function build/fetch the index itself.
+        provider: Optional provider slug, used for org-alias precise matching.
 
     Returns:
         Pricing dictionary (normalized to per-token format) or None if not found
@@ -307,7 +513,7 @@ def _get_cross_reference_pricing(
         return None
 
     try:
-        from src.services.pricing_normalization import PricingFormat, normalize_pricing_dict
+        from src.utils.pricing_normalization import PricingFormat, normalize_pricing_dict
 
         # Use the provided index or build it on demand (single-model fallback path)
         index = (
@@ -320,12 +526,21 @@ def _get_cross_reference_pricing(
         # e.g., "openai/gpt-4o" -> "gpt-4o", "anthropic/claude-3-opus" -> "claude-3-opus"
         base_model_id = model_id.split("/")[-1] if "/" in model_id else model_id
 
+        # --- Precise: provider org-alias fully-qualified match (lowest collision risk) ---
+        if provider:
+            alias = OPENROUTER_PROVIDER_ALIASES.get(provider.lower())
+            if alias:
+                aliased = f"{alias}/{base_model_id}"
+                for candidate in (aliased, aliased.lower()):
+                    if candidate in index:
+                        return normalize_pricing_dict(index[candidate], PricingFormat.PER_TOKEN)
+
         # --- O(1) exact-match attempts ---
         # OpenRouter's API returns prices already in per-token format (e.g. 0.000000055),
         # so we must normalize using PER_TOKEN — not PER_1M_TOKENS.
         # This is the canonical format used everywhere in the billing pipeline.
         # See PROVIDER_PRICING_FORMATS["openrouter"] in pricing_normalization.py.
-        for candidate in (model_id, model_id.lower(), base_model_id, base_model_id.lower()):
+        for candidate in _cross_reference_candidates(model_id, base_model_id):
             if candidate and candidate in index:
                 return normalize_pricing_dict(index[candidate], PricingFormat.PER_TOKEN)
 
@@ -376,8 +591,7 @@ def _resolve_pricing_from_db(
 
         client = get_supabase_client()
         select_cols = (
-            "id, model_name, metadata, "
-            "model_pricing(price_per_input_token, price_per_output_token)"
+            "id, model_name, metadata, model_pricing(price_per_input_token, price_per_output_token)"
         )
 
         for candidate in candidate_ids:
@@ -679,9 +893,16 @@ def enrich_model_with_pricing(
             logger.debug(f"Enriched {model_id} with manual pricing from {gateway}")
             return model_data
 
-        # For gateway providers, try cross-reference with OpenRouter
-        if is_gateway_provider:
-            cross_ref_pricing = _get_cross_reference_pricing(model_id, openrouter_index)
+        # Tier 4 — cross-reference with OpenRouter (universal fallback). Any provider
+        # whose models OpenRouter also lists gets exact pricing here even without a
+        # manual/DB entry. Only runs after the DB and manual tiers miss. Skip
+        # openrouter itself (its own catalog is the source). This is the scalable
+        # path: a new direct provider needs no per-model pricing work — if OpenRouter
+        # lists the model, it is priced automatically on every sync.
+        if gateway_lower != "openrouter":
+            cross_ref_pricing = _get_cross_reference_pricing(
+                model_id, openrouter_index, provider=gateway_lower
+            )
             if cross_ref_pricing:
                 # Verify cross-reference pricing has non-zero values
                 # Models with zero pricing from OpenRouter should still be filtered out
@@ -692,23 +913,34 @@ def enrich_model_with_pricing(
                 )
                 if has_valid_pricing:
                     model_data["pricing"] = cross_ref_pricing
-                    model_data["pricing_source"] = "cross-reference"
+                    # Underscore form: model_catalog_sync guards on this exact
+                    # string to skip re-normalisation. A hyphen here silently
+                    # divides every cross-referenced price by the provider factor
+                    # a second time.
+                    model_data["pricing_source"] = "cross_reference"
                     logger.debug(
                         f"Enriched {model_id} with cross-reference pricing from OpenRouter"
                     )
                     return model_data
                 else:
-                    logger.debug(f"Cross-reference pricing for {model_id} is zero, filtering out")
+                    logger.debug(f"Cross-reference pricing for {model_id} is zero")
 
-            # During catalog build, return the model with zero pricing instead of filtering
-            # This prevents models from disappearing during initial build. They'll get
-            # proper pricing during background refresh when cross-reference is available.
+        # Gateway providers must be priced or hidden — never shown as free.
+        if is_gateway_provider:
+            # During catalog build, keep with zero pricing instead of filtering; the
+            # background refresh prices it once cross-reference is available.
             if _is_building_catalog():
                 logger.debug(f"Catalog building: keeping {model_id} with zero pricing")
                 return model_data
-
-            # No pricing found for gateway provider - filter out this model
-            logger.debug(f"No pricing found for gateway provider model {model_id}, filtering out")
+            # WARNING, not debug: this silently removes a model from everything
+            # we sell. Claude Opus 5 was invisible for two days after launch and
+            # the only trace was a debug line nobody reads. record_unpriced_model
+            # keeps the running set so it can be surfaced and alerted on.
+            record_unpriced_model(model_id)
+            logger.warning(
+                "No pricing for %s — model will NOT be listed. Add pricing or it stays invisible.",
+                model_id,
+            )
             return None
 
         return model_data

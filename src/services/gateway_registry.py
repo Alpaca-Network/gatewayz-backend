@@ -112,18 +112,6 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
-    "chutes": {
-        "name": "Chutes",
-        "color": "bg-yellow-500",
-        "priority": "slow",
-        "site_url": "https://chutes.ai",
-        "timeout": 60,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
     "deepinfra": {
         "name": "DeepInfra",
         "color": "bg-cyan-500",
@@ -160,18 +148,6 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
-    "nebius": {
-        "name": "Nebius",
-        "color": "bg-slate-600",
-        "priority": "slow",
-        "site_url": "https://nebius.ai",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
     "xai": {
         "name": "xAI",
         "color": "bg-black",
@@ -196,83 +172,11 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
-    "huggingface": {
-        "name": "Hugging Face",
-        "color": "bg-yellow-600",
-        "priority": "slow",
-        "site_url": "https://huggingface.co",
-        "timeout": 60,
-        "has_fetch_function": True,
-        "aliases": ["hug"],
-        "icon": None,
-        "fetch_slug_override": "hug",
-        "logo_url": None,
-    },
-    "aimo": {
-        "name": "AiMo",
-        "color": "bg-pink-600",
-        "priority": "slow",
-        "site_url": "https://aimo.network",
-        "timeout": 60,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "near": {
-        "name": "NEAR",
-        "color": "bg-teal-600",
-        "priority": "slow",
-        "site_url": "https://near.ai",
-        "timeout": 60,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "fal": {
-        "name": "Fal",
-        "color": "bg-emerald-600",
-        "priority": "slow",
-        "site_url": "https://fal.ai",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "alpaca": {
-        "name": "Alpaca Network",
-        "color": "bg-green-700",
-        "priority": "slow",
-        "site_url": "https://alpaca.network",
-        "timeout": 30,
-        "has_fetch_function": False,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
     "alibaba": {
         "name": "Alibaba",
         "color": "bg-orange-700",
         "priority": "slow",
         "site_url": "https://dashscope.aliyun.com",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "clarifai": {
-        "name": "Clarifai",
-        "color": "bg-purple-600",
-        "priority": "slow",
-        "site_url": "https://clarifai.com",
         "timeout": 30,
         "has_fetch_function": True,
         "aliases": [],
@@ -286,66 +190,6 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "priority": "slow",
         "site_url": "https://z.ai",
         "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "simplismart": {
-        "name": "SimpliSmart",
-        "color": "bg-sky-500",
-        "priority": "slow",
-        "site_url": "https://simplismart.ai",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "sybil": {
-        "name": "Sybil",
-        "color": "bg-purple-500",
-        "priority": "slow",
-        "site_url": "https://sybil.com",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "cloudflare-workers-ai": {
-        "name": "Cloudflare Workers AI",
-        "color": "bg-orange-500",
-        "priority": "slow",
-        "site_url": "https://developers.cloudflare.com/workers-ai",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "morpheus": {
-        "name": "Morpheus",
-        "color": "bg-cyan-600",
-        "priority": "slow",
-        "site_url": "https://mor.org",
-        "timeout": 30,
-        "has_fetch_function": True,
-        "aliases": [],
-        "icon": None,
-        "fetch_slug_override": None,
-        "logo_url": None,
-    },
-    "canopywave": {
-        "name": "Canopy Wave",
-        "color": "bg-teal-500",
-        "priority": "slow",
-        "site_url": "https://canopywave.io",
-        "timeout": 60,
         "has_fetch_function": True,
         "aliases": [],
         "icon": None,
@@ -453,6 +297,51 @@ def get_gateway_registry() -> dict[str, dict]:
     from src.utils.provider_filter import filter_provider_dict
 
     return filter_provider_dict(_get_registry())
+
+
+_pricing_format_cache: dict[str, str] | None = None
+
+
+def get_declared_pricing_formats() -> dict[str, str]:
+    """Map provider slug -> declared pricing format, for EVERY provider.
+
+    The registry is built from active providers only and then filtered again by
+    ENABLED_PROVIDERS, which is right for routing and wrong for this: the units
+    a provider's API quotes prices in are true whether or not we route to it.
+    A disabled provider fell through to the PER_1M default, so OpenRouter — which
+    declares per_token and publishes 0.000005 for a $5/Mtok model — had every
+    price divided by a million. Read straight from the table instead.
+    """
+    global _pricing_format_cache
+    if _pricing_format_cache is not None:
+        return _pricing_format_cache
+
+    formats: dict[str, str] = {}
+    try:
+        from src.config.supabase_config import get_client_for_query
+
+        response = (
+            get_client_for_query(read_only=True)
+            .table("providers")
+            .select("slug, metadata")
+            .execute()
+        )
+        for row in response.data or []:
+            slug = (row.get("slug") or "").lower()
+            fmt = (row.get("metadata") or {}).get("pricing_format")
+            if slug and fmt:
+                formats[slug] = fmt
+    except Exception as e:
+        logger.warning("Could not load declared pricing formats: %s", e)
+        return {}
+
+    _pricing_format_cache = formats
+    return formats
+
+
+def invalidate_pricing_format_cache() -> None:
+    global _pricing_format_cache
+    _pricing_format_cache = None
 
 
 def get_valid_gateway_values() -> set[str]:
@@ -587,6 +476,10 @@ def refresh_registry_cache() -> None:
     global _cache_timestamp
     _cache_timestamp = 0.0
     _load_registry_from_db()
+    # Declared pricing formats come from the same providers table, so they go
+    # stale on exactly the same events. Refreshing one without the other is how
+    # a corrected unit would keep being ignored.
+    invalidate_pricing_format_cache()
     try:
         from src.services.dynamic_provider_loader import invalidate_loader_cache
 

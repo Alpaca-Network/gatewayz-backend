@@ -43,7 +43,6 @@ except ImportError:
 import redis
 
 from src.config.redis_config import get_redis_client, is_redis_available
-from src.utils.profiling import tag_wrapper
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +181,7 @@ _invalidation_debouncer = InvalidationDebouncer(delay=1.0)
 # overlap a bare prefix like "models:" or "providers:".
 #
 # Key schema:
-#   gw:models:catalog:full          - full aggregated catalog
+#   gw:models:catalog:v2:full       - full aggregated catalog
 #   gw:models:provider:{name}       - per-provider catalog list
 #   gw:models:model:{key}           - individual model metadata
 #   gw:models:pricing:{key}         - pricing data
@@ -217,7 +216,7 @@ class ModelCatalogCache:
 
     # Cache key prefixes — all include CACHE_NAMESPACE ("gw:") to avoid
     # collisions with provider slugs or keys from other services.
-    PREFIX_FULL_CATALOG = f"{CACHE_NAMESPACE}models:catalog:full"
+    PREFIX_FULL_CATALOG = f"{CACHE_NAMESPACE}models:catalog:v2:full"
     PREFIX_PROVIDER = f"{CACHE_NAMESPACE}models:provider"
     PREFIX_MODEL = f"{CACHE_NAMESPACE}models:model"
     PREFIX_PRICING = f"{CACHE_NAMESPACE}models:pricing"
@@ -306,13 +305,11 @@ class ModelCatalogCache:
         key = self.PREFIX_FULL_CATALOG
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "read"}):
-                cached_data = self.redis_client.get(key)
+            cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
                 self._record_cache_operation("hit")
                 logger.debug("Cache HIT: Full model catalog")
-                self.redis_client.expire(key, self.TTL_FULL_CATALOG)
                 return _deserialize(cached_data)
             else:
                 self._stats["misses"] += 1
@@ -332,6 +329,40 @@ class ModelCatalogCache:
             )
             return None
 
+    @staticmethod
+    def _should_skip_catalog_write(label: str, payload: list[Any]) -> bool:
+        """Reject catalog cache writes that would persist a known-bad snapshot.
+
+        Two cases, both learned the hard way:
+
+        1. A sync is rewriting ``models`` right now, so any rebuild reads a
+           half-written table. Caching that pins a wrong catalog for the whole
+           TTL — a 12s sync served 30 minutes of bad data.
+        2. The payload is empty. No caller benefits from a cached empty catalog,
+           and it is exactly how a failing query hides: ``get_all_unique_models_
+           for_catalog`` swallowed a schema error into ``[]`` and the warm step
+           cached it, so the emptiness looked deliberate.
+
+        Reads are never blocked — callers fall through to the database.
+        """
+        if not payload:
+            logger.warning(
+                "Cache SET skipped: %s payload is empty (refusing to cache nothing)", label
+            )
+            return True
+
+        from src.services.cache.catalog_sync_guard import is_sync_in_progress
+
+        if is_sync_in_progress():
+            logger.info(
+                "Cache SET skipped: %s — catalog sync in progress, "
+                "refusing to cache a half-written database",
+                label,
+            )
+            return True
+
+        return False
+
     def set_full_catalog(
         self,
         catalog: list[dict[str, Any]],
@@ -349,13 +380,15 @@ class ModelCatalogCache:
         if not self.redis_client or not is_redis_available():
             return False
 
+        if self._should_skip_catalog_write("full catalog", catalog):
+            return False
+
         key = self.PREFIX_FULL_CATALOG
         ttl = ttl or self.TTL_FULL_CATALOG
 
         try:
             serialized_data = _serialize(catalog)
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "write"}):
-                self.redis_client.setex(key, ttl, serialized_data)
+            self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
             logger.info(f"Cache SET: Full model catalog ({len(catalog)} models, TTL: {ttl}s)")
             return True
@@ -389,9 +422,11 @@ class ModelCatalogCache:
         key = self.PREFIX_FULL_CATALOG
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "delete"}):
-                self.redis_client.delete(key)
+            self.redis_client.delete(key)
             self._stats["invalidations"] += 1
+            # After the delete, and here rather than in the module wrapper so
+            # the cascade path (which calls this method directly) also bumps.
+            _bump_local_cache_epoch()
             logger.info("Cache INVALIDATE: Full model catalog")
             return True
 
@@ -417,8 +452,7 @@ class ModelCatalogCache:
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "read"}):
-                cached_data = self.redis_client.get(key)
+            cached_data = self.redis_client.get(key)
             if cached_data:
                 self._stats["hits"] += 1
                 self._record_cache_operation("hit")
@@ -454,13 +488,15 @@ class ModelCatalogCache:
         if not self.redis_client or not is_redis_available():
             return False
 
+        if self._should_skip_catalog_write(f"provider catalog ({provider_name})", catalog):
+            return False
+
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
         ttl = ttl or self.TTL_PROVIDER
 
         try:
             serialized_data = _serialize(catalog)
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "write"}):
-                self.redis_client.setex(key, ttl, serialized_data)
+            self.redis_client.setex(key, ttl, serialized_data)
             self._stats["sets"] += 1
             logger.debug(
                 f"Cache SET: Provider catalog for {provider_name} "
@@ -509,11 +545,15 @@ class ModelCatalogCache:
         key = self._generate_key(self.PREFIX_PROVIDER, provider_name)
 
         try:
-            with tag_wrapper({"cache_layer": "model_catalog", "cache_op": "delete"}):
-                self.redis_client.delete(key)
+            self.redis_client.delete(key)
             self._stats["invalidations"] += 1
             if cascade:
                 self.invalidate_full_catalog()
+            # After the delete, so no request can re-read the stale Redis value
+            # and re-stamp it locally under the new epoch. Placed here rather
+            # than in the module-level wrapper because a debounced invalidation
+            # re-enters this method directly when it finally runs.
+            _bump_local_cache_epoch()
             logger.info(
                 f"Cache INVALIDATE: Provider catalog for {provider_name} (cascade={cascade})"
             )
@@ -1055,6 +1095,9 @@ class ModelCatalogCache:
         if not self.redis_client or not is_redis_available():
             return False
 
+        if self._should_skip_catalog_write("unique models", unique_models):
+            return False
+
         key = self.PREFIX_UNIQUE
         ttl = ttl or self.TTL_UNIQUE
 
@@ -1334,7 +1377,23 @@ def rebuild_full_catalog_from_providers() -> list[dict[str, Any]]:
 def invalidate_full_catalog() -> bool:
     """Invalidate the full catalog cache"""
     cache = get_model_catalog_cache()
+    # The epoch bump lives inside the method so the cascade path bumps too.
     return cache.invalidate_full_catalog()
+
+
+def _bump_local_cache_epoch() -> None:
+    """Reach the per-process local caches that a Redis delete cannot.
+
+    Deleting a Redis key leaves every worker's in-process copy untouched, and
+    that copy is good for 15 minutes fresh plus an hour of stale grace. Bumping
+    the shared epoch makes them all treat their entry as a miss.
+    """
+    try:
+        from src.services.cache.local_memory_cache import bump_catalog_epoch
+
+        bump_catalog_epoch()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.warning("Local cache epoch bump failed: %s", e)
 
 
 def cache_provider_catalog(
@@ -1476,6 +1535,8 @@ def invalidate_provider_catalog(
         True if successful (or scheduled via debouncing), False otherwise
     """
     cache = get_model_catalog_cache()
+    # The epoch bump lives inside the method, after the Redis delete, so it also
+    # fires for a debounced invalidation when that finally runs.
     return cache.invalidate_provider_catalog(provider_name, cascade=cascade, debounce=debounce)
 
 
@@ -3156,7 +3217,7 @@ def invalidate_catalog_caches(gateway: str = None) -> dict[str, Any]:
         # L1 — shared response-level keys (always cleared regardless of scope)
         # ------------------------------------------------------------------
         l1_exact_keys = [
-            ModelCatalogCache.PREFIX_FULL_CATALOG,  # gw:models:catalog:full
+            ModelCatalogCache.PREFIX_FULL_CATALOG,  # gw:models:catalog:v2:full
             ModelCatalogCache.PREFIX_STATS,  # gw:models:stats
             ModelCatalogCache.PREFIX_UNIQUE,  # gw:models:unique
         ]

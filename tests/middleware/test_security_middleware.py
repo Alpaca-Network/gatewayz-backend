@@ -23,8 +23,6 @@ from fastapi.testclient import TestClient
 
 from src.middleware.security_middleware import (
     DEFAULT_IP_LIMIT,
-    FINGERPRINT_LIMIT,
-    STRICT_IP_LIMIT,
     VELOCITY_COOLDOWN_SECONDS,
     VELOCITY_ERROR_THRESHOLD,
     VELOCITY_LIMIT_MULTIPLIER,
@@ -275,94 +273,6 @@ class TestAuthenticatedUserExemption:
         assert not is_auth
 
 
-class TestIPTierDetection:
-    """Test datacenter IP detection"""
-
-    @pytest.mark.asyncio
-    async def test_datacenter_user_agent_detected(self, security_middleware):
-        """Test that datacenter IPs are detected by user agent"""
-        mock_request = Mock()
-        mock_request.headers = {"user-agent": "python-requests/2.28.0"}
-
-        is_dc = await security_middleware._is_datacenter_ip("1.2.3.4", mock_request)
-        assert is_dc
-
-    @pytest.mark.asyncio
-    async def test_proxy_headers_detected(self, security_middleware):
-        """Test that proxy headers indicate datacenter IP"""
-        mock_request = Mock()
-        mock_request.headers = {"X-Proxy-ID": "proxy123", "user-agent": "Mozilla/5.0"}
-
-        is_dc = await security_middleware._is_datacenter_ip("1.2.3.4", mock_request)
-        assert is_dc
-
-    @pytest.mark.asyncio
-    async def test_residential_ip_not_detected_as_datacenter(self, security_middleware):
-        """Test that residential IPs are not flagged as datacenter"""
-        mock_request = Mock()
-        mock_request.headers = {"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-
-        is_dc = await security_middleware._is_datacenter_ip("1.2.3.4", mock_request)
-        assert not is_dc
-
-
-class TestFingerprintGeneration:
-    """Test behavioral fingerprint generation"""
-
-    def test_fingerprint_generation(self, security_middleware):
-        """Test that fingerprint is generated from headers"""
-        mock_request = Mock()
-        mock_request.headers = {
-            "user-agent": "Mozilla/5.0",
-            "accept-language": "en-US",
-            "accept-encoding": "gzip, deflate",
-        }
-
-        fingerprint = security_middleware._generate_fingerprint(mock_request)
-        assert fingerprint is not None
-        assert len(fingerprint) == 16  # SHA256 hash truncated to 16 chars
-
-    def test_same_headers_produce_same_fingerprint(self, security_middleware):
-        """Test that identical headers produce identical fingerprints"""
-        mock_request1 = Mock()
-        mock_request1.headers = {
-            "user-agent": "Mozilla/5.0",
-            "accept-language": "en-US",
-            "accept-encoding": "gzip",
-        }
-
-        mock_request2 = Mock()
-        mock_request2.headers = {
-            "user-agent": "Mozilla/5.0",
-            "accept-language": "en-US",
-            "accept-encoding": "gzip",
-        }
-
-        fp1 = security_middleware._generate_fingerprint(mock_request1)
-        fp2 = security_middleware._generate_fingerprint(mock_request2)
-        assert fp1 == fp2
-
-    def test_different_headers_produce_different_fingerprints(self, security_middleware):
-        """Test that different headers produce different fingerprints"""
-        mock_request1 = Mock()
-        mock_request1.headers = {
-            "user-agent": "Mozilla/5.0",
-            "accept-language": "en-US",
-            "accept-encoding": "gzip",
-        }
-
-        mock_request2 = Mock()
-        mock_request2.headers = {
-            "user-agent": "Chrome/91.0",
-            "accept-language": "fr-FR",
-            "accept-encoding": "deflate",
-        }
-
-        fp1 = security_middleware._generate_fingerprint(mock_request1)
-        fp2 = security_middleware._generate_fingerprint(mock_request2)
-        assert fp1 != fp2
-
-
 class TestRequestOutcomeRecording:
     """Test request outcome recording and log cleanup"""
 
@@ -432,8 +342,6 @@ class TestVelocityModeConfiguration:
     def test_ip_limit_constants(self):
         """Test that IP limit constants are set correctly"""
         assert DEFAULT_IP_LIMIT == 300  # RPM
-        assert STRICT_IP_LIMIT == 60  # RPM
-        assert FINGERPRINT_LIMIT == 100  # RPM
 
 
 class TestEdgeCases:

@@ -149,6 +149,15 @@ class Config:
     LEDGER_RECONCILIATION_WINDOW_HOURS = int(
         os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
     )
+    # Nightly pricing-drift monitor: audits active-provider catalog pricing against
+    # current OpenRouter reference pricing so we never bill below provider cost even
+    # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when
+    # drift/unpriced models are found; never mutates prices or models.
+    ENABLE_PRICING_DRIFT_MONITOR = os.environ.get(
+        "ENABLE_PRICING_DRIFT_MONITOR", "true"
+    ).lower() in {"1", "true", "yes"}
+    # Default: once every 1440 minutes (24h) — nightly.
+    PRICING_DRIFT_INTERVAL_MINUTES = int(os.environ.get("PRICING_DRIFT_INTERVAL_MINUTES", "1440"))
     # Reject inference requests for models without a row in model_pricing.
     REQUIRE_MODEL_PRICING = os.environ.get("REQUIRE_MODEL_PRICING", "true").lower() in {
         "1",
@@ -173,37 +182,6 @@ class Config:
     # maximizes the captured spread (cheapest provider for the same model wins);
     # "balanced" / "latency" / "quality" trade margin for latency/quality.
     SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "cost").strip().lower()
-
-    # Gatewayz One Phase 4 — context assembly. When true, conversation messages are
-    # reassembled within a per-request token budget (system + memory + rolling
-    # summary + most-recent turns, oldest-first dropping) before the upstream call.
-    # Off by default; exact passthrough when disabled.
-    CONTEXT_ASSEMBLY_ENABLED = os.environ.get("CONTEXT_ASSEMBLY_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    # Fraction of a model's context window reserved for the assembled prompt
-    # (the rest is left for the completion). Only used when CONTEXT_ASSEMBLY_ENABLED.
-    CONTEXT_ASSEMBLY_BUDGET_RATIO = float(os.environ.get("CONTEXT_ASSEMBLY_BUDGET_RATIO", "0.7"))
-    # Phase 4 — heuristic user-memory capture. When on, durable self-stated facts
-    # ("my name is…", "I prefer…", "remember that…") are extracted from a user's
-    # messages and saved to user_memory (post-response background task) so the
-    # context assembler can recall them. High-precision + capped; off by default.
-    MEMORY_CAPTURE_ENABLED = os.environ.get("MEMORY_CAPTURE_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    MEMORY_MAX_PER_USER = int(os.environ.get("MEMORY_MAX_PER_USER", "100"))
-
-    # Assumed budget when a model's context length is unknown. Deliberately large
-    # so an unknown window does NOT cause aggressive truncation — when we can't tell
-    # a model's real window, we pass the turns through (no worse than today) rather
-    # than risk dropping context that would have fit.
-    CONTEXT_ASSEMBLY_DEFAULT_BUDGET = int(
-        os.environ.get("CONTEXT_ASSEMBLY_DEFAULT_BUDGET", "1000000")
-    )
 
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
@@ -267,7 +245,6 @@ class Config:
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
     NOVITA_API_KEY = os.environ.get("NOVITA_API_KEY")
-    NEBIUS_API_KEY = os.environ.get("NEBIUS_API_KEY")
     CEREBRAS_API_KEY = os.environ.get("CEREBRAS_API_KEY")
     HUG_API_KEY = os.environ.get("HUG_API_KEY")
 
@@ -285,9 +262,6 @@ class Config:
     # Valid models: claude-3-5-sonnet-20241022, claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
     ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
 
-    # Chutes.ai Configuration
-    CHUTES_API_KEY = os.environ.get("CHUTES_API_KEY")
-
     # Fireworks.ai Configuration
     FIREWORKS_API_KEY = os.environ.get("FIREWORKS_API_KEY")
 
@@ -296,23 +270,6 @@ class Config:
 
     # Groq Configuration
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-
-    # AIMO Configuration
-    AIMO_API_KEY = os.environ.get("AIMO_API_KEY")
-    AIMO_FETCH_TIMEOUT = float(os.environ.get("AIMO_FETCH_TIMEOUT", "5.0"))  # 5 second timeout
-    AIMO_CONNECT_TIMEOUT = float(
-        os.environ.get("AIMO_CONNECT_TIMEOUT", "3.0")
-    )  # 3 second connect timeout
-    AIMO_MAX_RETRIES = int(os.environ.get("AIMO_MAX_RETRIES", "2"))  # Retry up to 2 times
-    AIMO_ENABLE_HTTP_FALLBACK = (
-        os.environ.get("AIMO_ENABLE_HTTP_FALLBACK", "true").lower() == "true"
-    )
-    AIMO_BASE_URLS = [
-        "https://beta.aimo.network/api/v1",
-    ]  # Primary URL (beta.aimo.network is the active endpoint)
-
-    # Near AI Configuration
-    NEAR_API_KEY = os.environ.get("NEAR_API_KEY")
 
     # Fal.ai Configuration
     FAL_API_KEY = os.environ.get("FAL_API_KEY")
@@ -323,9 +280,6 @@ class Config:
     # Tavily Web Search Configuration
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 
-    # Alpaca Network Configuration
-    ALPACA_NETWORK_API_KEY = os.environ.get("ALPACA_NETWORK_API_KEY")
-
     # Alibaba Cloud Configuration
     ALIBABA_CLOUD_API_KEY = os.environ.get("ALIBABA_CLOUD_API_KEY")
     ALIBABA_CLOUD_API_KEY_INTERNATIONAL = os.environ.get("ALIBABA_CLOUD_API_KEY_INTERNATIONAL")
@@ -334,35 +288,24 @@ class Config:
         "ALIBABA_CLOUD_REGION", "international"
     )  # 'international' or 'china'
 
-    # Clarifai Configuration
-    CLARIFAI_API_KEY = os.environ.get("CLARIFAI_API_KEY")
-    CLARIFAI_USER_ID = os.environ.get("CLARIFAI_USER_ID")
-    CLARIFAI_APP_ID = os.environ.get("CLARIFAI_APP_ID")
-
-    # Akash ML Configuration
-    AKASH_API_KEY = os.environ.get("AKASH_API_KEY")
-
-    # Morpheus AI Gateway Configuration
-    MORPHEUS_API_KEY = os.environ.get("MORPHEUS_API_KEY")
-
-    # Simplismart AI Configuration
-    SIMPLISMART_API_KEY = os.environ.get("SIMPLISMART_API_KEY")
-
-    # Sybil AI Configuration
-    SYBIL_API_KEY = os.environ.get("SYBIL_API_KEY")
-
-    # Canopy Wave AI Configuration
-    CANOPYWAVE_API_KEY = os.environ.get("CANOPYWAVE_API_KEY")
-    CANOPYWAVE_BASE_URL = os.environ.get(
-        "CANOPYWAVE_BASE_URL", "https://inference.canopywave.io/v1"
-    )
-
     # Nosana GPU Computing Network Configuration
     NOSANA_API_KEY = os.environ.get("NOSANA_API_KEY")
     NOSANA_BASE_URL = os.environ.get("NOSANA_BASE_URL", "https://dashboard.k8s.prd.nos.ci/api")
 
     # Z.AI Configuration (Zhipu AI - GLM models)
     ZAI_API_KEY = os.environ.get("ZAI_API_KEY")
+
+    # DeepSeek Configuration (deepseek-chat / deepseek-reasoner)
+    DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY")
+
+    # Moonshot AI Configuration (Kimi models)
+    MOONSHOT_API_KEY = os.environ.get("MOONSHOT_API_KEY")
+
+    # MiniMax Configuration (MiniMax-M series models)
+    MINIMAX_API_KEY = os.environ.get("MINIMAX_API_KEY")
+
+    # Xiaomi MiMo Configuration (MiMo model family)
+    XIAOMI_API_KEY = os.environ.get("XIAOMI_API_KEY")
 
     # Soundsgood Configuration (GLM-4.5-Air distilled model)
     SOUNDSGOOD_API_KEY = os.environ.get("SOUNDSGOOD_API_KEY")
@@ -394,6 +337,11 @@ class Config:
     # Admin Configuration
     ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
     GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+
+    # Ops Alerting Configuration
+    # Destination for provider-auth-failure alerts (src/services/provider_alerting.py).
+    # Unset (default) means alerting is a no-op — see startup.py warning.
+    OPS_ALERT_EMAIL: str | None = os.environ.get("OPS_ALERT_EMAIL")
 
     # Admin Credit Grant Safety Controls
     # Maximum single credit grant amount in dollars (default $1000)
@@ -494,10 +442,6 @@ class Config:
     GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
     GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
 
-    # Grafana Cloud Loki (Logs)
-    GRAFANA_LOKI_USERNAME = os.environ.get("GRAFANA_LOKI_USERNAME")
-    GRAFANA_LOKI_API_KEY = os.environ.get("GRAFANA_LOKI_API_KEY")
-
     # Grafana Cloud Tempo (Traces)
     GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
     GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
@@ -528,7 +472,7 @@ class Config:
     CONCURRENCY_QUEUE_TIMEOUT = float(os.environ.get("CONCURRENCY_QUEUE_TIMEOUT", "10.0"))
 
     # Pricing Sync Scheduler Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
-    # Pricing is now synced via model sync (provider_model_sync_service.py)
+    # Pricing is now synced via model sync (model_catalog_sync.py)
 
     # ============================================================================
     # MODEL SYNC CONFIGURATION
@@ -542,6 +486,33 @@ class Config:
     ENABLE_SCHEDULED_MODEL_SYNC: bool = os.environ.get(
         "ENABLE_SCHEDULED_MODEL_SYNC", "false"
     ).lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+    # Providers synced purely as a price book. They stay delisted as supply —
+    # ENABLED_PROVIDERS still governs routing and listing — but their catalogs
+    # keep refreshing so models whose own provider publishes no pricing (OpenAI,
+    # Anthropic and xAI all return catalogs with no prices) can still acquire
+    # one. Aggregators are the only place those prices exist in machine-readable
+    # form; §5 bars them as supply, not as data.
+    PRICE_REFERENCE_PROVIDERS: frozenset[str] = frozenset(
+        s.strip()
+        for s in os.environ.get("PRICE_REFERENCE_PROVIDERS", "openrouter").split(",")
+        if s.strip()
+    )
+
+    # Live per-model health probing (src/services/monitoring/intelligent_health_monitor.py).
+    # Feeds model_health_history, which is what /v1/status/stats reports. With it
+    # off that table stays empty and the status page honestly reports
+    # "not measured" (success_rate: null, monitoring_active: false).
+    #
+    # DEFAULT OFF: probing sends a real billable request per model per tier
+    # interval. It never hides a model — the monitor writes only
+    # model_health_tracking / model_health_history, while catalog gating reads
+    # models.health_status, which only the sweep writes.
+    ENABLE_HEALTH_MONITOR: bool = os.environ.get("ENABLE_HEALTH_MONITOR", "false").lower() in {
         "1",
         "true",
         "yes",
@@ -594,11 +565,19 @@ class Config:
     # Enabled providers — only these providers will be loaded, routed to,
     # shown in the catalog, and synced.  Comma-separated slugs using the
     # hyphenated gateway names (e.g. "openrouter,openai,anthropic").
-    # Empty string or unset means ALL providers are enabled.
-    _raw_enabled = os.environ.get("ENABLED_PROVIDERS", "openrouter")
+    # Empty string means ALL providers are enabled.
+    #
+    # Unset is deliberately NOT the same as a value. The roster is a business
+    # decision (North Star §3) and startup rewrites the providers table to match
+    # it, so a missing env var must never stand in for one — defaulting to a
+    # single slug once inverted the whole production roster to the aggregator
+    # that North Star §5 bars as primary supply. ENABLED_PROVIDERS_EXPLICIT
+    # tells startup to leave the DB roster alone instead.
+    _raw_enabled = os.environ.get("ENABLED_PROVIDERS")
+    ENABLED_PROVIDERS_EXPLICIT: bool = _raw_enabled is not None
     ENABLED_PROVIDERS: frozenset[str] | None = (
         frozenset(s.strip() for s in _raw_enabled.split(",") if s.strip())
-        if _raw_enabled.strip()
+        if _raw_enabled and _raw_enabled.strip()
         else None  # None = all providers enabled
     )
 
@@ -642,7 +621,7 @@ class Config:
     )
 
     # Pricing Sync Configuration - DEPRECATED 2026-02 (Phase 3, Issue #1063)
-    # Pricing is now synced via model sync (provider_model_sync_service.py)
+    # Pricing is now synced via model sync (model_catalog_sync.py)
     # No separate pricing sync configuration needed
 
     # Metrics Aggregation Configuration

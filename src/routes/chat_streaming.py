@@ -15,7 +15,7 @@ import time  # noqa: F401  (used by the moved generator)
 from fastapi import Request  # noqa: F401
 
 from src.config import Config  # noqa: F401
-from src.db.chat_completion_requests_enhanced import (  # noqa: F401
+from src.db.chat_completion_requests import (  # noqa: F401
     save_chat_completion_request_with_cost,
 )
 from src.db.plans import enforce_plan_limits  # noqa: F401
@@ -438,7 +438,7 @@ async def stream_generator(
         error_message = "Streaming error occurred"
         error_type = "stream_error"
 
-        from src.utils.error_messages import (
+        from src.utils.errors import (
             PROVIDER_CAPACITY_MESSAGE,
             is_provider_budget_error,
             sanitize_provider_error_for_user,

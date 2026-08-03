@@ -73,9 +73,7 @@ async def warm_caches_after_sync(changed_providers: list[str]) -> None:
         warm_unique_models_cache_all_variants,
     )
 
-    logger.info(
-        f"Cache warming started after sync " f"(providers with changes: {changed_providers})"
-    )
+    logger.info(f"Cache warming started after sync (providers with changes: {changed_providers})")
 
     # Brief delay to let DB writes propagate
     await asyncio.sleep(2)
@@ -130,31 +128,26 @@ async def refresh_offers_projection_after(reason: str) -> None:
 
 async def run_scheduled_model_sync():
     """
-    Run the scheduled model sync job with incremental change detection.
+    Run the scheduled model sync job.
 
     This function is called by APScheduler at the configured interval.
-    It syncs all providers to the database using efficient incremental sync:
-    - Fetches models from ALL providers
-    - Compares with DB using content hashing
-    - Only writes changed/new models
-    - Only invalidates cache for providers with changes
-
-    This minimizes DB writes and cache invalidation overhead.
+    It syncs all providers to the database via the canonical catalog-sync
+    engine (``model_catalog_sync.sync_all_providers``): fetches the latest
+    model catalog from every provider API and upserts to the DB.
     """
-    from src.services.incremental_sync import sync_all_providers_incremental
+    from src.services.model_catalog_sync import sync_all_providers
 
     start_time = datetime.now(UTC)
     _last_sync_status["last_run_time"] = start_time
     _last_sync_status["total_runs"] += 1
 
     logger.info("=" * 80)
-    logger.info("Starting scheduled incremental model sync")
+    logger.info("Starting scheduled model sync")
     logger.info("=" * 80)
 
     try:
-        # Run incremental sync in background thread to avoid blocking event loop
-        # This uses content-based change detection to minimize DB writes
-        result = await asyncio.to_thread(sync_all_providers_incremental, dry_run=False)
+        # Run the full sync in a background thread to avoid blocking event loop.
+        result = await asyncio.to_thread(sync_all_providers, dry_run=False)
 
         # Calculate duration
         end_time = datetime.now(UTC)
@@ -169,27 +162,22 @@ async def run_scheduled_model_sync():
             _last_sync_status["last_models_synced"] = result.get("total_models_synced", 0)
 
             logger.info("=" * 80)
-            logger.info("✅ Scheduled incremental sync SUCCESSFUL")
+            logger.info("✅ Scheduled sync SUCCESSFUL")
             logger.info(f"   Duration: {duration:.2f}s")
             logger.info(f"   Models fetched: {result.get('total_models_fetched', 0):,}")
-            logger.info(f"   Models changed: {result.get('total_models_changed', 0):,}")
             logger.info(f"   Models synced: {result.get('total_models_synced', 0):,}")
-            logger.info(f"   Change rate: {result.get('change_rate_percent', 0):.1f}%")
-            logger.info(f"   Efficiency gain: {result.get('efficiency_gain_percent', 0):.1f}%")
-            logger.info(
-                f"   Providers synced: {result.get('providers_synced', 0)}/{result.get('total_providers', 0)}"
-            )
-            logger.info(f"   Providers with changes: {result.get('providers_with_changes', 0)}")
+            logger.info(f"   Models skipped: {result.get('total_models_skipped', 0):,}")
+            logger.info(f"   Providers processed: {result.get('providers_processed', 0)}")
             logger.info("=" * 80)
 
-            # Proactively warm caches so no user pays the rebuild cost
-            if result.get("providers_with_changes", 0) > 0:
-                changed = result.get("changed_providers", [])
+            # Proactively warm caches so no user pays the rebuild cost. A full
+            # sync always refreshes the catalog, so warm on any successful run.
+            if result.get("total_models_synced", 0) > 0:
                 asyncio.create_task(
-                    warm_caches_after_sync(changed),
+                    warm_caches_after_sync([]),
                     name="post_sync_cache_warm",
                 )
-                logger.info(f"Cache warming task queued for {len(changed)} changed providers")
+                logger.info("Cache warming task queued after model sync")
 
             # Refresh the smart router's offer projection from the updated catalog.
             asyncio.create_task(
@@ -425,8 +413,7 @@ async def run_scheduled_price_refresh():
             _last_price_refresh_status["last_error"] = None
             _last_price_refresh_status["last_prices_updated"] = result.get("prices_updated", 0)
             logger.info(
-                "Price refresh SUCCESSFUL in %.2fs | updated=%s unchanged=%s "
-                "checked=%s failed=%s",
+                "Price refresh SUCCESSFUL in %.2fs | updated=%s unchanged=%s checked=%s failed=%s",
                 duration,
                 result.get("prices_updated", 0),
                 result.get("prices_unchanged", 0),
@@ -655,3 +642,148 @@ def stop_ledger_reconciliation_scheduler():
         logger.error("❌ Error stopping ledger reconciliation scheduler: %s", e)
     finally:
         _recon_scheduler = None
+
+
+# ============================================================================
+# Nightly pricing-drift monitor — scheduled, read-only. We bill inference at
+# catalog_price * Config.PRICING_MARKUP; if a provider raises its price and our
+# catalog goes stale, we could bill below provider cost even with markup applied.
+# This job audits active-provider catalog pricing against current OpenRouter
+# reference pricing and alerts (log at ERROR + Sentry) on drift. It never mutates
+# prices or models — alert only, exactly like ledger reconciliation above.
+# ============================================================================
+
+_pricing_drift_scheduler: AsyncIOScheduler | None = None
+
+_last_pricing_drift_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_ok": None,
+    "last_checked": None,
+    "last_drift_count": None,
+    "last_unpriced_count": None,
+    "last_worst_deficit_pct": None,
+    "last_error": None,
+}
+
+
+async def run_scheduled_pricing_drift_audit():
+    """Run the nightly pricing-drift audit and alert on any margin-leak risk.
+
+    Read-only: never mutates prices/models. On drift or unpriced active models,
+    logs at ERROR (alertable via log-based alerting) and captures a Sentry
+    message so it pages independently of log scraping.
+    """
+    from src.services.billing.pricing_drift_monitor import audit_pricing_drift
+
+    now = datetime.now(UTC)
+    _last_pricing_drift_status["last_run_time"] = now
+
+    try:
+        result = await asyncio.to_thread(audit_pricing_drift)
+
+        _last_pricing_drift_status["last_ok"] = result.get("ok")
+        _last_pricing_drift_status["last_checked"] = result.get("checked")
+        _last_pricing_drift_status["last_drift_count"] = len(result.get("drift", []))
+        _last_pricing_drift_status["last_unpriced_count"] = len(result.get("unpriced", []))
+        _last_pricing_drift_status["last_worst_deficit_pct"] = result.get("worst_deficit_pct")
+        _last_pricing_drift_status["last_error"] = None
+
+        if result.get("ok"):
+            logger.info(
+                "✅ Pricing drift audit OK | checked=%s no drift, no unpriced models",
+                result.get("checked", 0),
+            )
+            return
+
+        drift = result.get("drift", [])
+        unpriced = result.get("unpriced", [])
+        logger.error(
+            "❌ Pricing drift audit found billing risk | checked=%s drift=%s "
+            "unpriced=%s worst_deficit_pct=%.2f%% | worst_examples=%s",
+            result.get("checked", 0),
+            len(drift),
+            len(unpriced),
+            result.get("worst_deficit_pct", 0.0),
+            drift[:5],
+        )
+
+        try:
+            import sentry_sdk
+
+            sentry_sdk.capture_message(
+                "Pricing drift detected: catalog price * markup below provider cost "
+                f"for {len(drift)} model(s), {len(unpriced)} unpriced active model(s) "
+                f"(worst deficit {result.get('worst_deficit_pct', 0.0):.2f}%)",
+                level="error",
+            )
+        except Exception as sentry_error:
+            logger.warning("Failed to capture pricing drift to Sentry: %s", sentry_error)
+
+    except Exception as e:
+        _last_pricing_drift_status["last_error"] = str(e)
+        logger.exception("Pricing drift audit EXCEPTION: %s", e)
+
+
+def start_pricing_drift_scheduler():
+    """Start the APScheduler for the nightly pricing-drift monitor (app lifespan)."""
+    global _pricing_drift_scheduler
+
+    if not Config.ENABLE_PRICING_DRIFT_MONITOR:
+        logger.info("Pricing drift monitor DISABLED: ENABLE_PRICING_DRIFT_MONITOR=false")
+        return
+
+    interval_minutes = Config.PRICING_DRIFT_INTERVAL_MINUTES
+    logger.info("Starting pricing drift monitor scheduler (interval: %s min)", interval_minutes)
+    try:
+        _pricing_drift_scheduler = AsyncIOScheduler()
+        _pricing_drift_scheduler.add_job(
+            run_scheduled_pricing_drift_audit,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="pricing_drift_monitor",
+            name="Pricing Drift Monitor Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _pricing_drift_scheduler.start()
+        logger.info(
+            "✅ Pricing drift monitor scheduler started (next run in %s min)", interval_minutes
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start pricing drift monitor scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_pricing_drift_scheduler():
+    """Stop the pricing-drift-monitor APScheduler gracefully (called during shutdown)."""
+    global _pricing_drift_scheduler
+
+    if _pricing_drift_scheduler is None:
+        return
+    logger.info("Stopping pricing drift monitor scheduler...")
+    try:
+        _pricing_drift_scheduler.shutdown(wait=True)
+        logger.info("✅ Pricing drift monitor scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping pricing drift monitor scheduler: %s", e)
+    finally:
+        _pricing_drift_scheduler = None
+
+
+def get_pricing_drift_status() -> dict[str, Any]:
+    """Get the current status of the pricing-drift monitor (for health monitoring)."""
+    return {
+        "enabled": Config.ENABLE_PRICING_DRIFT_MONITOR,
+        "interval_minutes": Config.PRICING_DRIFT_INTERVAL_MINUTES,
+        "last_run_time": (
+            _last_pricing_drift_status["last_run_time"].isoformat()
+            if _last_pricing_drift_status["last_run_time"]
+            else None
+        ),
+        "last_ok": _last_pricing_drift_status["last_ok"],
+        "last_checked": _last_pricing_drift_status["last_checked"],
+        "last_drift_count": _last_pricing_drift_status["last_drift_count"],
+        "last_unpriced_count": _last_pricing_drift_status["last_unpriced_count"],
+        "last_worst_deficit_pct": _last_pricing_drift_status["last_worst_deficit_pct"],
+        "last_error": _last_pricing_drift_status["last_error"],
+    }

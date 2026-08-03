@@ -20,7 +20,6 @@ from src.routes.catalog import (
     normalize_model_segment,
 )
 from src.services.models import (
-    enhance_model_with_huggingface_data,
     enhance_model_with_provider_info,
     fetch_specific_model,
     get_cached_models,
@@ -38,9 +37,6 @@ async def get_model_detail(
     modelId: str | None = Query(None, description="Full model ID (e.g., 'z-ai/glm-4-7')"),
     developer: str | None = Query(None, description="Developer/provider name (e.g., 'z-ai')"),
     modelName: str | None = Query(None, description="Model name (e.g., 'glm-4-7')"),
-    include_huggingface: bool = Query(
-        True, description="Include Hugging Face metrics if available"
-    ),
     gateway: str | None = Query(None, description="Gateway to use for fetching model data"),
 ):
     """
@@ -143,10 +139,6 @@ async def get_model_detail(
         if isinstance(model_data, dict):
             model_data = enhance_model_with_provider_info(model_data, enhanced_providers)
 
-            # Then enhance with Hugging Face data if requested
-            if include_huggingface and model_data.get("hugging_face_id"):
-                model_data = enhance_model_with_huggingface_data(model_data)
-
         # Extract provider list from model data for frontend compatibility
         providers = []
         if model_data.get("source_gateways"):
@@ -160,7 +152,6 @@ async def get_model_detail(
             "provider": provider_name,
             "model": model_name,
             "gateway": detected_gateway,
-            "include_huggingface": include_huggingface,
             "timestamp": datetime.now(UTC).isoformat(),
         }
 

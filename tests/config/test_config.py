@@ -163,7 +163,6 @@ class TestConfigProviderKeys:
             "CEREBRAS_API_KEY": "cerebras_key",
             "HUG_API_KEY": "hug_key",
             "FEATHERLESS_API_KEY": "featherless_key",
-            "CHUTES_API_KEY": "chutes_key",
             "FIREWORKS_API_KEY": "fireworks_key",
             "TOGETHER_API_KEY": "together_key",
             "GROQ_API_KEY": "groq_key",
@@ -178,7 +177,6 @@ class TestConfigProviderKeys:
             "ALIBABA_CLOUD_API_KEY": "alibaba_key",
             "ALIBABA_CLOUD_API_KEY_INTERNATIONAL": "intl_key",
             "ALIBABA_CLOUD_API_KEY_CHINA": "china_key",
-            "CLARIFAI_API_KEY": "clarifai_key",
         }
 
         for key, value in providers.items():
@@ -192,7 +190,6 @@ class TestConfigProviderKeys:
         assert config.Config.XAI_API_KEY == "xai_key"
         assert config.Config.CEREBRAS_API_KEY == "cerebras_key"
         assert config.Config.FEATHERLESS_API_KEY == "featherless_key"
-        assert config.Config.CHUTES_API_KEY == "chutes_key"
         assert config.Config.ALIBABA_CLOUD_API_KEY_INTERNATIONAL == "intl_key"
         assert config.Config.ALIBABA_CLOUD_API_KEY_CHINA == "china_key"
 
@@ -616,26 +613,6 @@ class TestConfigGetSupabaseConfig:
         assert key == "test_key_123"
 
 
-class TestConfigClarifai:
-    """Test Clarifai configuration"""
-
-    def test_clarifai_configuration(self, monkeypatch):
-        """Test Clarifai API configuration"""
-        from src.config import config
-
-        monkeypatch.setenv("CLARIFAI_API_KEY", "test_clarifai_key")
-        monkeypatch.setenv("CLARIFAI_USER_ID", "test_user_id")
-        monkeypatch.setenv("CLARIFAI_APP_ID", "test_app_id")
-
-        import importlib
-
-        importlib.reload(config)
-
-        assert config.Config.CLARIFAI_API_KEY == "test_clarifai_key"
-        assert config.Config.CLARIFAI_USER_ID == "test_user_id"
-        assert config.Config.CLARIFAI_APP_ID == "test_app_id"
-
-
 class TestConfigAdminAndAnalytics:
     """Test admin and analytics configuration"""
 
@@ -693,3 +670,47 @@ class TestCostRoutingDefaults:
         monkeypatch.setenv("SMART_ROUTER_ENABLED", "false")
         importlib.reload(config)
         assert config.Config.SMART_ROUTER_ENABLED is False
+
+
+class TestEnabledProvidersRoster:
+    """ENABLED_PROVIDERS must distinguish "unset" from "explicitly empty".
+
+    A dropped env var once fell back to a single-slug default and startup
+    rewrote the production providers table to match it, inverting the roster
+    to the aggregator North Star §5 bars as primary supply.
+    """
+
+    def test_unset_enables_all_and_is_not_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.delenv("ENABLED_PROVIDERS", raising=False)
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS is None
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is False
+
+    def test_explicit_empty_enables_all_but_is_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.setenv("ENABLED_PROVIDERS", "")
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS is None
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is True
+
+    def test_roster_is_parsed_and_marked_explicit(self, monkeypatch):
+        import importlib
+
+        from src.config import config
+
+        monkeypatch.setenv("ENABLED_PROVIDERS", "openai, anthropic ,xai,moonshot")
+        importlib.reload(config)
+
+        assert config.Config.ENABLED_PROVIDERS == frozenset(
+            {"openai", "anthropic", "xai", "moonshot"}
+        )
+        assert config.Config.ENABLED_PROVIDERS_EXPLICIT is True

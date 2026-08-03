@@ -431,7 +431,7 @@ def _raw_fetch_provider(gateway: str) -> list[dict]:
     import httpx
 
     from src.config.config import Config
-    from src.services.pricing_normalization import (
+    from src.utils.pricing_normalization import (
         get_provider_format,
         normalize_to_per_token,
     )
@@ -670,7 +670,7 @@ def _fetch_db_models_by_gateway() -> dict[str, list[dict]]:
             provider = raw_model.get("providers") or {}
             slug = provider.get("slug", "unknown")
 
-            from src.services.pricing_normalization import (
+            from src.utils.pricing_normalization import (
                 get_provider_format,
                 normalize_to_per_token,
             )

@@ -19,13 +19,24 @@ from src.cache import (  # Cache helper functions
 from src.config import Config
 from src.config.redis_config import get_redis_manager
 from src.services.google_models_config import register_google_models_in_canonical_registry
-from src.services.huggingface_models import get_huggingface_model_info
 from src.services.model_transformations import detect_provider_from_model_id
 from src.services.multi_provider_registry import (
     CanonicalModelProvider,
     get_registry,
 )
 from src.services.pricing_lookup import enrich_model_with_pricing
+
+# Canonical per-provider normalizers live in src/services/providers/*_catalog.py.
+# Re-exported here for backward compatibility (tests and the dynamic provider
+# loader resolve them via this module) — the duplicate copies were removed.
+from src.services.providers.fireworks_catalog import (  # noqa: F401
+    normalize_fireworks_model,
+)
+from src.services.providers.groq_catalog import normalize_groq_model  # noqa: F401
+from src.services.providers.together_catalog import (  # noqa: F401
+    normalize_together_model,
+)
+from src.services.providers.zai_catalog import normalize_zai_model  # noqa: F401
 from src.utils.model_name_validator import clean_model_name
 from src.utils.security_validators import sanitize_for_logging
 
@@ -1051,277 +1062,6 @@ def normalize_chutes_model(chutes_model: dict) -> dict:
     return enrich_model_with_pricing(normalized, "chutes")
 
 
-def normalize_groq_model(groq_model: dict) -> dict:
-    """Normalize Groq catalog entries to resemble OpenRouter model shape"""
-    provider_model_id = groq_model.get("id")
-    if not provider_model_id:
-        return {"source_gateway": "groq", "raw_groq": groq_model or {}}
-
-    slug = f"groq/{provider_model_id}"
-    provider_slug = "groq"
-
-    raw_display_name = (
-        groq_model.get("display_name")
-        or provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    owned_by = groq_model.get("owned_by")
-    base_description = groq_model.get("description") or f"Groq hosted model {provider_model_id}."
-    if owned_by and owned_by.lower() not in base_description.lower():
-        description = f"{base_description} Owned by {owned_by}."
-    else:
-        description = base_description
-
-    metadata = groq_model.get("metadata") or {}
-    hugging_face_id = metadata.get("huggingface_repo")
-
-    context_length = metadata.get("context_length") or groq_model.get("context_length") or 0
-
-    # Extract pricing information from API response
-    pricing_info = groq_model.get("pricing") or {}
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Groq may return pricing in various formats
-    # Check for token-based pricing (cents per token)
-    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
-        cents_input = pricing_info.get("cents_per_input_token", 0)
-        cents_output = pricing_info.get("cents_per_output_token", 0)
-
-        # Convert cents to dollars per token
-        if cents_input:
-            pricing["prompt"] = str(cents_input / 100)
-        if cents_output:
-            pricing["completion"] = str(cents_output / 100)
-
-    # Check for direct dollar-based pricing
-    elif "input" in pricing_info or "output" in pricing_info:
-        if pricing_info.get("input"):
-            pricing["prompt"] = str(pricing_info["input"])
-        if pricing_info.get("output"):
-            pricing["completion"] = str(pricing_info["output"])
-
-    architecture = {
-        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
-        "input_modalities": metadata.get("input_modalities") or ["text"],
-        "output_modalities": metadata.get("output_modalities") or ["text"],
-        "tokenizer": metadata.get("tokenizer"),
-        "instruct_type": metadata.get("instruct_type"),
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": hugging_face_id,
-        "name": display_name,
-        "created": groq_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": metadata.get("supported_parameters", []),
-        "default_parameters": metadata.get("default_parameters", {}),
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://groq.com",
-        "model_logo_url": metadata.get("model_logo_url"),
-        "source_gateway": "groq",
-        "raw_groq": groq_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "groq")
-
-
-def normalize_zai_model(zai_model: dict) -> dict | None:
-    """Normalize Z.AI catalog entries to resemble OpenRouter model shape.
-
-    Z.AI provides GLM models (GLM-4.7, GLM-4.5-Air, etc.) with OpenAI-compatible format.
-    """
-    provider_model_id = zai_model.get("id")
-    if not provider_model_id:
-        return {"source_gateway": "zai", "raw_zai": zai_model or {}}
-
-    slug = f"zai/{provider_model_id}"
-    provider_slug = "zai"
-
-    raw_display_name = (
-        zai_model.get("display_name")
-        or zai_model.get("name")
-        or provider_model_id.replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    owned_by = zai_model.get("owned_by", "zai")
-    base_description = zai_model.get("description") or f"Z.AI GLM model {provider_model_id}."
-    if owned_by and owned_by.lower() not in base_description.lower():
-        description = f"{base_description} Provided by Z.AI."
-    else:
-        description = base_description
-
-    metadata = zai_model.get("metadata") or {}
-
-    # Z.AI models typically have large context windows
-    context_length = (
-        metadata.get("context_length")
-        or zai_model.get("context_length")
-        or zai_model.get("context_window")
-        or 128000  # Default for GLM models
-    )
-
-    # Z.AI pricing - check for various formats
-    pricing_info = zai_model.get("pricing") or {}
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Check for direct dollar-based pricing
-    if "input" in pricing_info or "output" in pricing_info:
-        if pricing_info.get("input"):
-            pricing["prompt"] = str(pricing_info["input"])
-        if pricing_info.get("output"):
-            pricing["completion"] = str(pricing_info["output"])
-    elif "prompt" in pricing_info or "completion" in pricing_info:
-        if pricing_info.get("prompt"):
-            pricing["prompt"] = str(pricing_info["prompt"])
-        if pricing_info.get("completion"):
-            pricing["completion"] = str(pricing_info["completion"])
-
-    architecture = {
-        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
-        "input_modalities": metadata.get("input_modalities") or ["text"],
-        "output_modalities": metadata.get("output_modalities") or ["text"],
-        "tokenizer": metadata.get("tokenizer"),
-        "instruct_type": metadata.get("instruct_type"),
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": zai_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": metadata.get("supported_parameters", []),
-        "default_parameters": metadata.get("default_parameters", {}),
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://z.ai",
-        "model_logo_url": metadata.get("model_logo_url"),
-        "source_gateway": "zai",
-        "raw_zai": zai_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "zai")
-
-
-def normalize_fireworks_model(fireworks_model: dict) -> dict:
-    """Normalize Fireworks catalog entries to resemble OpenRouter model shape"""
-    provider_model_id = fireworks_model.get("id")
-    if not provider_model_id:
-        return {"source_gateway": "fireworks", "raw_fireworks": fireworks_model or {}}
-
-    # Fireworks uses format like "accounts/fireworks/models/deepseek-v3p1"
-    # We'll keep the full ID as-is
-    slug = provider_model_id
-    provider_slug = "fireworks"
-
-    raw_display_name = (
-        fireworks_model.get("display_name")
-        or provider_model_id.split("/")[-1].replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove company prefix, parentheses, etc.)
-    display_name = clean_model_name(raw_display_name)
-    owned_by = fireworks_model.get("owned_by")
-    base_description = (
-        fireworks_model.get("description") or f"Fireworks hosted model {provider_model_id}."
-    )
-    if owned_by and owned_by.lower() not in base_description.lower():
-        description = f"{base_description} Owned by {owned_by}."
-    else:
-        description = base_description
-
-    metadata = fireworks_model.get("metadata") or {}
-    context_length = metadata.get("context_length") or fireworks_model.get("context_length") or 0
-
-    # Extract pricing information from API response
-    pricing_info = fireworks_model.get("pricing") or {}
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Fireworks may return pricing in various formats
-    # Check for token-based pricing (cents per token)
-    if "cents_per_input_token" in pricing_info or "cents_per_output_token" in pricing_info:
-        cents_input = pricing_info.get("cents_per_input_token", 0)
-        cents_output = pricing_info.get("cents_per_output_token", 0)
-
-        # Convert cents to dollars per token
-        if cents_input:
-            pricing["prompt"] = str(cents_input / 100)
-        if cents_output:
-            pricing["completion"] = str(cents_output / 100)
-
-    # Check for direct dollar-based pricing
-    elif "input" in pricing_info or "output" in pricing_info:
-        if pricing_info.get("input"):
-            pricing["prompt"] = str(pricing_info["input"])
-        if pricing_info.get("output"):
-            pricing["completion"] = str(pricing_info["output"])
-
-    architecture = {
-        "modality": metadata.get("modality", MODALITY_TEXT_TO_TEXT),
-        "input_modalities": metadata.get("input_modalities") or ["text"],
-        "output_modalities": metadata.get("output_modalities") or ["text"],
-        "tokenizer": metadata.get("tokenizer"),
-        "instruct_type": metadata.get("instruct_type"),
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": fireworks_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": metadata.get("supported_parameters", []),
-        "default_parameters": metadata.get("default_parameters", {}),
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://fireworks.ai",
-        "model_logo_url": None,
-        "source_gateway": "fireworks",
-        "raw_fireworks": fireworks_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "fireworks")
-
-
 def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
     """Fetch specific model data from OpenRouter by searching cached models"""
     try:
@@ -1355,80 +1095,6 @@ def fetch_specific_model_from_openrouter(provider_name: str, model_name: str):
             sanitize_for_logging(str(e)),
         )
         return None
-
-
-def normalize_together_model(together_model: dict) -> dict:
-    """Normalize Together catalog entries to resemble OpenRouter model shape"""
-    provider_model_id = together_model.get("id")
-    if not provider_model_id:
-        return {"source_gateway": "together", "raw_together": together_model or {}}
-
-    slug = provider_model_id
-    provider_slug = "together"
-
-    # Get display name from API or generate from model ID
-    raw_display_name = (
-        together_model.get("display_name")
-        or provider_model_id.replace("/", " / ").replace("-", " ").replace("_", " ").title()
-    )
-    # Clean malformed model names (remove parentheses with size info, etc.)
-    display_name = clean_model_name(raw_display_name)
-    owned_by = together_model.get("owned_by") or together_model.get("organization")
-    base_description = (
-        together_model.get("description") or f"Together hosted model {provider_model_id}."
-    )
-    if owned_by and owned_by.lower() not in base_description.lower():
-        description = f"{base_description} Owned by {owned_by}."
-    else:
-        description = base_description
-
-    context_length = together_model.get("context_length", 0)
-
-    pricing = {
-        "prompt": None,
-        "completion": None,
-        "request": None,
-        "image": None,
-        "web_search": None,
-        "internal_reasoning": None,
-    }
-
-    # Extract pricing if available
-    pricing_info = together_model.get("pricing", {})
-    if pricing_info:
-        pricing["prompt"] = pricing_info.get("input")
-        pricing["completion"] = pricing_info.get("output")
-
-    architecture = {
-        "modality": MODALITY_TEXT_TO_TEXT,
-        "input_modalities": ["text"],
-        "output_modalities": ["text"],
-        "tokenizer": together_model.get("config", {}).get("tokenizer"),
-        "instruct_type": None,
-    }
-
-    normalized = {
-        "id": slug,
-        "slug": slug,
-        "canonical_slug": slug,
-        "hugging_face_id": None,
-        "name": display_name,
-        "created": together_model.get("created"),
-        "description": description,
-        "context_length": context_length,
-        "architecture": architecture,
-        "pricing": pricing,
-        "per_request_limits": None,
-        "supported_parameters": [],
-        "default_parameters": {},
-        "provider_slug": provider_slug,
-        "provider_site_url": "https://together.ai",
-        "model_logo_url": None,
-        "source_gateway": "together",
-        "raw_together": together_model,
-    }
-
-    return enrich_model_with_pricing(normalized, "together")
 
 
 def normalize_aimo_model(aimo_model: dict) -> dict:
@@ -2107,39 +1773,6 @@ def fetch_specific_model_from_fireworks(provider_name: str, model_name: str):
         return None
 
 
-def fetch_specific_model_from_huggingface(provider_name: str, model_name: str):
-    """Fetch specific model data from Hugging Face by using direct lookup or cached models"""
-    try:
-        provider_model_id = f"{provider_name}/{model_name}"
-        provider_model_id_lower = provider_model_id.lower()
-
-        # Try lightweight direct lookup first
-        model_data = get_huggingface_model_info(provider_model_id)
-        if model_data:
-            model_data.setdefault("source_gateway", "hug")
-            return model_data
-
-        # Fall back to cached catalog (may trigger a full fetch on first call)
-        huggingface_models = get_cached_models("huggingface") or get_cached_models("hug")
-        if huggingface_models:
-            for model in huggingface_models:
-                if model.get("id", "").lower() == provider_model_id_lower:
-                    return model
-
-        logger.warning(
-            "Model %s not found in Hugging Face catalog", sanitize_for_logging(provider_model_id)
-        )
-        return None
-    except Exception as e:
-        logger.error(
-            "Failed to fetch specific model %s/%s from Hugging Face: %s",
-            sanitize_for_logging(provider_name),
-            sanitize_for_logging(model_name),
-            sanitize_for_logging(str(e)),
-        )
-        return None
-
-
 def fetch_specific_model_from_fal(provider_name: str, model_name: str):
     """Fetch specific model data from Fal.ai by using cached catalog"""
     try:
@@ -2208,7 +1841,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
     """Detect which gateway a model belongs to by searching all caches
 
     Returns:
-        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'huggingface', 'fal', 'near', 'aimo', or 'openrouter' (default)
+        Gateway name: 'openrouter', 'featherless', 'deepinfra', 'chutes', 'groq', 'fireworks', 'together', 'google-vertex', 'cerebras', 'nebius', 'xai', 'novita', 'fal', 'near', 'aimo', or 'openrouter' (default)
     """
     try:
         provider_model_id = f"{provider_name}/{model_name}".lower()
@@ -2223,7 +1856,7 @@ def detect_model_gateway(provider_name: str, model_name: str) -> str:
             if models:
                 for model in models:
                     if model.get("id", "").lower() == provider_model_id:
-                        return "huggingface" if gateway in ("hug", "huggingface") else gateway
+                        return gateway
 
         # Default to openrouter if not found
         return "openrouter"
@@ -2258,10 +1891,7 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         def normalize_gateway(value: str) -> str:
             if not value:
                 return None
-            value = value.lower()
-            if value == "hug":
-                return "huggingface"
-            return value
+            return value.lower()
 
         candidate_gateways = []
 
@@ -2285,9 +1915,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
         if not explicit_gateway:
             if "openrouter" not in candidate_gateways:
                 candidate_gateways.append("openrouter")
-            # "huggingface" is the fetch-function key (not the normalized slug "hug")
-            if "huggingface" not in candidate_gateways:
-                candidate_gateways.append("huggingface")
 
         # fetch_specific_model_from_* functions live in this file (models.py),
         # not in individual client modules, so dynamic import doesn't apply here.
@@ -2300,7 +1927,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             "fireworks": fetch_specific_model_from_fireworks,
             "together": fetch_specific_model_from_together,
             "google-vertex": fetch_specific_model_from_google_vertex,
-            "huggingface": fetch_specific_model_from_huggingface,
             "fal": fetch_specific_model_from_fal,
         }
 
@@ -2311,8 +1937,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             fetcher = fetchers.get(candidate, fetch_specific_model_from_openrouter)
             model_data = fetcher(provider_name, model_name)
             if model_data:
-                if candidate == "huggingface":
-                    model_data.setdefault("source_gateway", "hug")
                 return model_data
 
         logger.warning(
@@ -2330,110 +1954,6 @@ def fetch_specific_model(provider_name: str, model_name: str, gateway: str = Non
             sanitize_for_logging(str(e)),
         )
         return None
-
-
-def get_cached_huggingface_model(hugging_face_id: str):
-    """Get cached Hugging Face model data or fetch if not cached"""
-    try:
-        # Check if we have cached data for this specific model in Redis
-        redis_manager = get_redis_manager()
-        cache_key = f"huggingface:model:{hugging_face_id}"
-        cached_data = redis_manager.get_json(cache_key)
-        if cached_data:
-            return cached_data
-
-        # Fetch from Hugging Face API
-        return fetch_huggingface_model(hugging_face_id)
-    except Exception as e:
-        logger.error(f"Error getting cached Hugging Face model {hugging_face_id}: {e}")
-        return None
-
-
-def fetch_huggingface_model(hugging_face_id: str):
-    """Fetch model data from Hugging Face API"""
-    try:
-        # Hugging Face API endpoint for model info
-        url = f"https://huggingface.co/api/models/{hugging_face_id}"
-
-        response = httpx.get(url, timeout=10.0)
-        response.raise_for_status()
-
-        model_data = response.json()
-
-        # Cache the result in Redis with 1-hour TTL
-        try:
-            redis_manager = get_redis_manager()
-            cache_key = f"huggingface:model:{hugging_face_id}"
-            redis_manager.set_json(cache_key, model_data, ttl=3600)
-        except Exception as cache_error:
-            logger.warning(f"Failed to cache HuggingFace model {hugging_face_id}: {cache_error}")
-
-        return model_data
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            logger.warning(f"Hugging Face model {hugging_face_id} not found")
-            return None
-        else:
-            logger.error(f"HTTP error fetching Hugging Face model {hugging_face_id}: {e}")
-            return None
-    except Exception as e:
-        logger.error(f"Failed to fetch Hugging Face model {hugging_face_id}: {e}")
-        return None
-
-
-def enhance_model_with_huggingface_data(openrouter_model: dict) -> dict:
-    """Enhance OpenRouter model data with Hugging Face information"""
-    try:
-        hugging_face_id = openrouter_model.get("hugging_face_id")
-        if not hugging_face_id:
-            return openrouter_model
-
-        # Get Hugging Face data
-        hf_data = get_cached_huggingface_model(hugging_face_id)
-        if not hf_data:
-            return openrouter_model
-
-        # Extract author data more robustly
-        author_data = None
-        if hf_data.get("author_data"):
-            author_data = {
-                "name": hf_data["author_data"].get("name"),
-                "fullname": hf_data["author_data"].get("fullname"),
-                "avatar_url": hf_data["author_data"].get("avatarUrl"),
-                "follower_count": hf_data["author_data"].get("followerCount", 0),
-            }
-        elif hf_data.get("author"):
-            # Fallback: create basic author data from author field
-            author_data = {
-                "name": hf_data.get("author"),
-                "fullname": hf_data.get("author"),
-                "avatar_url": None,
-                "follower_count": 0,
-            }
-
-        # Create enhanced model data
-        enhanced_model = {
-            **openrouter_model,
-            "huggingface_metrics": {
-                "downloads": hf_data.get("downloads", 0),
-                "likes": hf_data.get("likes", 0),
-                "pipeline_tag": hf_data.get("pipeline_tag"),
-                "num_parameters": hf_data.get("numParameters"),
-                "gated": hf_data.get("gated", False),
-                "private": hf_data.get("private", False),
-                "last_modified": hf_data.get("lastModified"),
-                "author": hf_data.get("author"),
-                "author_data": author_data,
-                "available_inference_providers": hf_data.get("availableInferenceProviders", []),
-                "widget_output_urls": hf_data.get("widgetOutputUrls", []),
-                "is_liked_by_user": hf_data.get("isLikedByUser", False),
-            },
-        }
-
-        return enhanced_model
-    except Exception as e:
-        logger.error(f"Error enhancing model with Hugging Face data: {e}")
-        return openrouter_model
 
 
 def _extract_model_provider_slug(model: dict) -> str | None:

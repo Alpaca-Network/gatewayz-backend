@@ -26,7 +26,7 @@ from src.services import _MODULE_TO_SUBPKG
 
 REPRESENTATIVES = [
     ("prometheus_remote_write", "metrics"),
-    ("nosana_client", "providers"),
+    ("anthropic_client", "providers"),
     ("payments", "billing"),
     ("error_monitor", "monitoring"),
     ("pricing_lookup", "pricing"),

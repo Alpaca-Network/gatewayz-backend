@@ -346,6 +346,40 @@ def deactivate_model(model_id: int) -> dict[str, Any] | None:
     return update_model(model_id, {"is_active": False})
 
 
+def deactivate_models_by_provider(provider_id: int) -> int:
+    """
+    Bulk-deactivate every currently-active model belonging to a provider.
+
+    Used when the provider itself has been marked inactive: its
+    previously-synced models must be retroactively delisted so the live
+    catalog reflects routable reality (North Star §5) instead of leaving
+    them active forever because an inactive provider never reaches the
+    per-model sync/transform loop.
+
+    Args:
+        provider_id: The provider's database ID.
+
+    Returns:
+        Number of models deactivated (0 if none were active or on error).
+    """
+    try:
+        supabase = get_client_for_query(read_only=False)
+        response = (
+            supabase.table("models")
+            .update({"is_active": False})
+            .eq("provider_id", provider_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        count = len(response.data) if response.data else 0
+        if count:
+            logger.info(f"Deactivated {count} models for inactive provider_id={provider_id}")
+        return count
+    except Exception as e:
+        logger.error(f"Error bulk-deactivating models for provider_id={provider_id}: {e}")
+        return 0
+
+
 def activate_model(model_id: int) -> dict[str, Any] | None:
     """
     Activate a model
@@ -2241,51 +2275,53 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
         start = time.monotonic()
         logger.debug(f"Fetching unique models (include_inactive={include_inactive})")
 
-        # OPTIMIZATION: Fetch all unique models with pagination
-        # to avoid Supabase's 1000-row default truncation
-        unique_models_data = []
         page_size = SUPABASE_PAGE_SIZE
-        um_offset = 0
-        deadline = start + DB_QUERY_TIMEOUT_SECONDS
 
-        while True:
-            if time.monotonic() > deadline:
-                logger.warning(
-                    f"get_all_unique_models_for_catalog (unique_models loop): wall-clock "
-                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
-                    f"{len(unique_models_data)} unique models; returning partial results"
-                )
-                break
+        # Order matters: the mappings are fetched FIRST and the unique_models rows
+        # are then looked up by the ids they reference. Fetching unique_models
+        # first meant paging the whole table (11k rows, 12 round-trips) to keep
+        # the handful the enabled providers actually offer — the table is sized by
+        # every model ever seen, the result by the current roster.
+        #
+        # Provider lookup for the in-Python join below (see the mappings query).
+        # ~40 rows, one round-trip.
+        #
+        # Restricted to active + ENABLED_PROVIDERS so this catalog agrees with
+        # rebuild_full_catalog_from_providers. Without the filter the unique
+        # view is the one surface that still exposes deactivated providers —
+        # including the aggregator North Star §5 bars as primary supply — while
+        # every other endpoint hides them. Mappings for excluded providers are
+        # dropped by the `if not provider` guard in the grouping loop.
+        providers_by_id: dict[Any, dict[str, Any]] = {}
+        try:
+            from src.utils.provider_filter import is_provider_enabled
 
-            um_query = (
-                supabase.table("unique_models")
-                .select("id, model_name, model_count, sample_model_id")
-                .range(um_offset, um_offset + page_size - 1)
+            providers_response = (
+                supabase.table("providers").select("id, slug, name").eq("is_active", True).execute()
             )
-            um_response = um_query.execute()
-            batch = um_response.data or []
+            providers_by_id = {
+                row["id"]: row
+                for row in (providers_response.data or [])
+                if row.get("slug") and is_provider_enabled(row["slug"])
+            }
+        except Exception as provider_e:
+            logger.error(
+                "get_all_unique_models_for_catalog: failed to load providers for join: %s",
+                provider_e,
+            )
+            return []
 
-            if not batch:
-                break
-
-            unique_models_data.extend(batch)
-
-            if len(batch) < page_size:
-                break
-
-            um_offset += page_size
-
-        if not unique_models_data:
-            logger.info("No unique models found in database")
+        if not providers_by_id:
+            logger.warning(
+                "get_all_unique_models_for_catalog: no active enabled providers; "
+                "returning empty unique catalog"
+            )
             return []
 
         # Note: These two queries are not atomic. Brief inconsistency is possible during model updates.
         # Supabase (PostgREST) does not support multi-statement transactions via the REST API,
         # so unique_models and unique_models_provider are fetched in separate round-trips.
         # In practice this window is milliseconds and only affects catalog reads, not writes.
-
-        # Record the set of unique_model_ids from the first query for staleness detection below.
-        unique_model_ids_from_first_query = {row["id"] for row in unique_models_data}
 
         # OPTIMIZATION: Fetch ALL provider mappings with pagination
         # This replaces N individual queries (one per unique model)
@@ -2303,12 +2339,24 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
                 )
                 break
 
+            # providers is joined in Python, not embedded. unique_models_provider
+            # has an index on provider_id but no foreign key to providers (see
+            # 20260129000001_create_unique_models_provider_table.sql), so
+            # PostgREST cannot resolve a `providers!inner(...)` embed and answers
+            # PGRST200 — which this function swallowed into an empty list,
+            # silently emptying the unique-models catalog. The provider table is
+            # tiny and already fetched above, so the join is free.
             ump_query = supabase.table("unique_models_provider").select(
-                "unique_model_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active), providers!inner(id, slug, name)"
+                "unique_model_id, provider_id, models!inner(id, model_name, provider_model_id, metadata, context_length, health_status, average_response_time_ms, modality, supports_streaming, supports_function_calling, supports_vision, description, is_active)"
             )
 
             if not include_inactive:
                 ump_query = ump_query.eq("models.is_active", True)
+
+            # Push the provider filter into the query instead of discarding rows
+            # after transfer: without it every mapping for every retired provider
+            # is paged over (13k rows, ~10s) just to be dropped in the join.
+            ump_query = ump_query.in_("provider_id", list(providers_by_id.keys()))
 
             ump_query = ump_query.range(ump_offset, ump_offset + page_size - 1)
             ump_response = ump_query.execute()
@@ -2324,19 +2372,72 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
 
             ump_offset += page_size
 
-        # Staleness check: warn if the second query references unique_model_ids that were not
-        # present in the first query. This can happen when a model is inserted between the two
-        # queries (non-atomic reads). The data is still usable but may be slightly inconsistent.
-        orphaned_ids = {
-            ump.get("unique_model_id")
-            for ump in all_provider_mappings
-            if ump.get("unique_model_id") not in unique_model_ids_from_first_query
-        }
+        if not all_provider_mappings:
+            logger.info("No provider mappings for enabled providers; unique catalog is empty")
+            return []
+
+        # Fetch only the unique_models rows the mappings actually reference.
+        # `in_` filters are URL parameters, so chunk the ids to keep the request
+        # line well inside the server's limit.
+        # Only ids whose provider survives the join — a mapping to a dropped
+        # provider contributes nothing, so looking its unique_models row up is
+        # wasted work. The provider filter is already pushed into the mappings
+        # query; this also covers a provider deleted between the two reads.
+        referenced_ids = sorted(
+            {
+                ump["unique_model_id"]
+                for ump in all_provider_mappings
+                if ump.get("unique_model_id") and ump.get("provider_id") in providers_by_id
+            }
+        )
+        if not referenced_ids:
+            logger.info("No provider mappings survived the provider join; unique catalog is empty")
+            return []
+        unique_models_data: list[dict[str, Any]] = []
+        queried_ids: set[Any] = set()
+        UNIQUE_MODEL_ID_CHUNK = 200
+        deadline = start + DB_QUERY_TIMEOUT_SECONDS
+
+        for chunk_start in range(0, len(referenced_ids), UNIQUE_MODEL_ID_CHUNK):
+            if time.monotonic() > deadline:
+                logger.warning(
+                    f"get_all_unique_models_for_catalog (unique_models lookup): wall-clock "
+                    f"deadline of {DB_QUERY_TIMEOUT_SECONDS}s exceeded after "
+                    f"{len(unique_models_data)} unique models "
+                    f"({len(referenced_ids) - len(queried_ids)} id(s) never queried); "
+                    f"returning partial results"
+                )
+                break
+
+            chunk = referenced_ids[chunk_start : chunk_start + UNIQUE_MODEL_ID_CHUNK]
+            um_response = (
+                supabase.table("unique_models")
+                .select("id, model_name, model_count, sample_model_id")
+                .in_("id", chunk)
+                .execute()
+            )
+            unique_models_data.extend(um_response.data or [])
+            queried_ids.update(chunk)
+
+        if not unique_models_data:
+            logger.info("No unique models found in database")
+            return []
+
+        # Consistency check: a mapping may reference a unique_models row that was
+        # deleted between the two non-atomic reads. Usable, but worth surfacing —
+        # those mappings are skipped when the result is assembled below.
+        #
+        # Scoped to ids we actually queried. A deadline break above leaves the
+        # rest unqueried, and reporting those as "removed" would blame a data
+        # inconsistency for what is really a timeout — the truncation is already
+        # logged on its own terms.
+        found_ids = {row["id"] for row in unique_models_data}
+        orphaned_ids = queried_ids - found_ids
         if orphaned_ids:
             logger.warning(
-                f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) returned "
-                f"by unique_models_provider were not present in the unique_models snapshot "
-                f"(ids: {sorted(orphaned_ids)}). This indicates a model was added between the "
+                f"Catalog consistency warning: {len(orphaned_ids)} unique_model_id(s) referenced "
+                f"by unique_models_provider have no unique_models row "
+                f"(ids: {sorted(orphaned_ids)}). This indicates a row was removed between the "
                 f"two non-atomic queries. The affected provider mappings will be skipped."
             )
 
@@ -2350,7 +2451,12 @@ def get_all_unique_models_for_catalog(include_inactive: bool = False) -> list[di
                 continue
 
             model = ump.get("models", {})
-            provider = ump.get("providers", {})
+            provider = providers_by_id.get(ump.get("provider_id"))
+            if not provider:
+                # Mapping points at a provider row that no longer exists. Skip it
+                # rather than emitting an offer with a null provider — the router
+                # cannot route to it and the catalog would show a blank source.
+                continue
 
             # NOTE: pricing_prompt/pricing_completion/pricing_image/pricing_request
             # and architecture columns were dropped from the models table

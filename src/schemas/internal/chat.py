@@ -88,6 +88,11 @@ class InternalChatRequest(BaseModel):
         None, description="Streaming options (e.g. include_usage)"
     )
 
+    # Reasoning effort (normalized; adapters translate per provider dialect)
+    reasoning_effort: str | None = Field(
+        None, description="How much reasoning to spend: low, medium or high"
+    )
+
     # Metadata
     user: str | None = Field(None, description="End-user identifier for abuse monitoring")
 
