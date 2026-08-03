@@ -6,7 +6,7 @@ empty denominator reports "no data" rather than zero, and growth from zero is
 undefined rather than infinite.
 """
 
-from datetime import datetime, timedelta, timezone, UTC
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 

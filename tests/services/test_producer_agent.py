@@ -6,9 +6,9 @@ to spend it — the ads exist, so they get run.
 """
 
 import json
+from unittest.mock import Mock
 
 import pytest
-from unittest.mock import Mock
 
 from agents.base import UsageLedger, UsageRecord
 from agents.producer import (

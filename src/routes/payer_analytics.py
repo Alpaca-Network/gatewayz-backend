@@ -11,7 +11,7 @@ Every number here is payer-derived. Nothing on this router reads signup counts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, UTC
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
