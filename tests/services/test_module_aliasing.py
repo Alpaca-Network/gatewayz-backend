@@ -51,7 +51,7 @@ def test_module_globals_are_shared(module_name, subpkg):
     canonical = importlib.import_module(f"src.services.{subpkg}.{module_name}")
 
     sentinel = object()
-    setattr(legacy, "_alias_probe", sentinel)
+    legacy._alias_probe = sentinel
     try:
         assert getattr(canonical, "_alias_probe", None) is sentinel
     finally:

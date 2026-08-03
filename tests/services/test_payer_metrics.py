@@ -6,7 +6,7 @@ empty denominator reports "no data" rather than zero, and growth from zero is
 undefined rather than infinite.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 
 import pytest
 
@@ -20,7 +20,7 @@ from src.services.payer_metrics import (
     compute_second_topup_rate,
 )
 
-NOW = datetime(2026, 8, 1, tzinfo=timezone.utc)
+NOW = datetime(2026, 8, 1, tzinfo=UTC)
 WEEK_AGO = NOW - timedelta(days=7)
 TWO_WEEKS_AGO = NOW - timedelta(days=14)
 

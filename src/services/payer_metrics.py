@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -135,11 +135,11 @@ def _parse_ts(value: Any) -> datetime | None:
     if not value:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         text = str(value).replace("Z", "+00:00")
         parsed = datetime.fromisoformat(text)
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except (TypeError, ValueError):
         return None
 
@@ -278,7 +278,7 @@ def build_weekly_scorecard(
         as_of: End of the reporting week (defaults to now, UTC).
         payments: Injected payment rows; fetched from the database when omitted.
     """
-    end = as_of or datetime.now(timezone.utc)
+    end = as_of or datetime.now(UTC)
     week_start = end - timedelta(days=7)
     prior_start = end - timedelta(days=14)
 

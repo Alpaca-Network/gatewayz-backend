@@ -11,7 +11,7 @@ Every number here is payer-derived. Nothing on this router reads signup counts.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, UTC
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -57,7 +57,7 @@ async def payer_trend(
     """
     try:
         payments = fetch_settled_payments()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         series = []
         for i in range(weeks, 0, -1):

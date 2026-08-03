@@ -9,7 +9,7 @@ from scripts.benchmarks import coding_benchmark as bench
 
 
 def _sample(**kw):
-    defaults = dict(task_id="t", model="m", route="gateway", ok=True)
+    defaults = {"task_id": "t", "model": "m", "route": "gateway", "ok": True}
     defaults.update(kw)
     return bench.Sample(**defaults)
 
