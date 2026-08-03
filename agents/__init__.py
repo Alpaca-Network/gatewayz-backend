@@ -10,7 +10,7 @@ keeps us honest about whether the gateway is actually pleasant to build on.
     A3 prospector  — scores buying signals, drafts founder replies
     A4 scorekeeper — weekly payer scorecard and commentary
     A5 concierge   — first-line support, escalates what it cannot cite
-    A6 producer    — ad creative; conditional on a channel earning budget
+    A6 producer    — ad creative; refuses until a channel's CAC clears target
 
 Every agent drafts; none publish. See ``agents.base`` for why.
 """
