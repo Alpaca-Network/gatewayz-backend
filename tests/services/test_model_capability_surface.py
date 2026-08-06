@@ -140,3 +140,38 @@ class TestCurrentProviderRoster:
     def test_genuinely_unknown_model_still_fails_safe(self):
         """The conservative default must survive the widened family list."""
         assert supports_tools({"id": "obscure/mystery-model-v1"}) is False
+
+
+class TestServeTimeEnrichment:
+    """Capabilities must be derivable from a bare DB row.
+
+    Regression: enrichment was hooked into enrich_model_with_pricing, which
+    only runs when the catalog is rebuilt from providers. Models served from
+    the models_catalog table came back with no `capabilities` or
+    `supported_parameters` keys at all — the fields appeared after a manual
+    resync and vanished on the next scheduled one. Agent tools that filter on
+    capability before sending a request saw nothing and assumed nothing.
+    """
+
+    DB_ROW = {
+        "id": "anthropic/claude-sonnet-4",
+        "provider_slug": "anthropic",
+        "context_length": 200000,
+        "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+    }
+
+    def test_bare_db_row_gains_capabilities(self):
+        model = enrich_model_with_capabilities(dict(self.DB_ROW))
+        assert model["capabilities"]["tools"] is True
+        assert "tools" in model["supported_parameters"]
+
+    def test_enrichment_is_idempotent(self):
+        """Serve-time enrichment runs on every request; twice must equal once."""
+        once = enrich_model_with_capabilities(dict(self.DB_ROW))
+        twice = enrich_model_with_capabilities(dict(once))
+        assert once["capabilities"] == twice["capabilities"]
+        assert once["supported_parameters"] == twice["supported_parameters"]
+
+    def test_row_with_no_pricing_or_provider_still_enriches(self):
+        model = enrich_model_with_capabilities({"id": "anthropic/claude-sonnet-4"})
+        assert model["capabilities"]["tools"] is True

@@ -954,10 +954,21 @@ async def get_models(
         # `id`, which most clients accept, but strict ones validate `object` on
         # the envelope and on each entry and hard-fail model discovery without
         # it. Additive, so every existing consumer is unaffected.
+        #
+        # Capability advertisement happens here too, at serve time, NOT in
+        # enrich_model_with_pricing. That hook only runs when the catalog is
+        # rebuilt from providers, so models served from the models_catalog table
+        # came back with no `capabilities` or `supported_parameters` at all —
+        # the fields appeared right after a resync and vanished on the next one.
+        # Agent tools that filter on capability before sending a request saw an
+        # empty capability set and had to assume nothing was supported.
+        from src.services.model_capability_surface import enrich_model_with_capabilities
+
         for _model in enhanced_models:
             if isinstance(_model, dict):
                 _model.setdefault("object", "model")
                 _model.setdefault("owned_by", _model.get("provider_slug") or "gatewayz")
+                enrich_model_with_capabilities(_model)
 
         result = {
             "object": "list",
