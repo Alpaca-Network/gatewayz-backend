@@ -78,6 +78,15 @@ async def prepare_upstream_request(
             optional.pop("parallel_tool_calls", None)
         if not getattr(req, "stream", False):
             optional.pop("stream_options", None)
+        elif optional.get("stream_options") is not None:
+            # ProxyRequest types this as a StreamOptions model, not a dict. Passed
+            # through as an object it reaches the provider client unserializable,
+            # the streaming generator dies, and the client gets HTTP 200 with an
+            # EMPTY body — no error, no chunks. Any caller asking for token counts
+            # on a stream (the OpenAI SDK sets include_usage) hit this.
+            _so = optional["stream_options"]
+            if hasattr(_so, "model_dump"):
+                optional["stream_options"] = _so.model_dump(exclude_none=True)
         # top_logprobs requires logprobs=True
         if not optional.get("logprobs"):
             optional.pop("top_logprobs", None)
