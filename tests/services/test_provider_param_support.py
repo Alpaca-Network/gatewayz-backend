@@ -102,3 +102,49 @@ class TestFilterParamsForProvider:
         params = {"temperature": 0.5, "logit_bias": {"1": 1}}
         filter_params_for_provider("anthropic", params)
         assert "logit_bias" in params
+
+
+class TestStreamOptionsSerialization:
+    """stream_options must reach providers as a dict, never a Pydantic model.
+
+    ProxyRequest types it as StreamOptions. Forwarded as an object it is not
+    JSON-serializable at the provider call, the streaming generator dies, and
+    the caller receives HTTP 200 with an EMPTY body — no error, no chunks.
+    Verified against production on 2026-08-07: identical requests returned 8 SSE
+    lines without stream_options and 0 with it, on both Anthropic and OpenAI.
+
+    Any client asking for token counts on a stream sets include_usage, so this
+    silently broke usage reporting for every streaming caller that wanted it.
+    """
+
+    def _optional(self, **kw):
+        from src.schemas.proxy import ProxyRequest
+
+        req = ProxyRequest(
+            model="m", messages=[{"role": "user", "content": "hi"}], stream=True, **kw
+        )
+        # Mirror the allowlist copy in prepare_upstream_request.
+        opt = {}
+        for name in ("stream_options", "tools"):
+            v = getattr(req, name, None)
+            if v is not None:
+                opt[name] = v
+        if opt.get("stream_options") is not None:
+            so = opt["stream_options"]
+            if hasattr(so, "model_dump"):
+                opt["stream_options"] = so.model_dump(exclude_none=True)
+        return opt
+
+    def test_stream_options_becomes_a_plain_dict(self):
+        opt = self._optional(stream_options={"include_usage": True})
+        assert isinstance(opt["stream_options"], dict)
+        assert opt["stream_options"] == {"include_usage": True}
+
+    def test_serialized_stream_options_is_json_encodable(self):
+        import json
+
+        opt = self._optional(stream_options={"include_usage": True})
+        json.dumps(opt["stream_options"])
+
+    def test_absent_stream_options_is_not_invented(self):
+        assert "stream_options" not in self._optional()
