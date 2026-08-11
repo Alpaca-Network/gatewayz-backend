@@ -1369,6 +1369,23 @@ class ChatInferenceHandler:
                                         prompt_tokens=prompt_tokens,
                                         completion_tokens=completion_tokens,
                                         total_tokens=prompt_tokens + completion_tokens,
+                                        # Cache counts are already extracted above
+                                        # for BILLING; carry them onto the chunk so
+                                        # the caller can see them too. Without this
+                                        # a streaming client is charged the cache
+                                        # rate but shown no cache tokens, and has no
+                                        # way to verify the saving it just got.
+                                        **(
+                                            {
+                                                "cache_read_input_tokens": cache_read_tokens,
+                                                "cache_creation_input_tokens": cache_write_tokens,
+                                                "prompt_tokens_details": {
+                                                    "cached_tokens": cache_read_tokens
+                                                },
+                                            }
+                                            if (cache_read_tokens or cache_write_tokens)
+                                            else {}
+                                        ),
                                     )
                                     if prompt_tokens > 0 or completion_tokens > 0
                                     else None
