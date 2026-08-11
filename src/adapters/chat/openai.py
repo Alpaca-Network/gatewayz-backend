@@ -209,6 +209,16 @@ class OpenAIChatAdapter(BaseChatAdapter):
                         "completion_tokens": chunk.usage.completion_tokens,
                         "total_tokens": chunk.usage.total_tokens,
                     }
+                    # Prompt-cache counts, when the provider reported any. The
+                    # non-streaming path has emitted these since #2207; this one
+                    # did not, so streaming callers saw no cache tokens even
+                    # though they were billed at the cache rate.
+                    _cr = getattr(chunk.usage, "cache_read_input_tokens", 0) or 0
+                    _cw = getattr(chunk.usage, "cache_creation_input_tokens", 0) or 0
+                    if _cr or _cw:
+                        chunk_response["usage"]["cache_read_input_tokens"] = _cr
+                        chunk_response["usage"]["cache_creation_input_tokens"] = _cw
+                        chunk_response["usage"]["prompt_tokens_details"] = {"cached_tokens": _cr}
 
                 # Format as SSE
                 sse_data = f"data: {json.dumps(chunk_response)}\n\n"
