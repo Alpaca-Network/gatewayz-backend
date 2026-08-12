@@ -9,6 +9,7 @@ unresolved aliases.
 """
 
 import ast
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -24,13 +25,31 @@ from src.services.task_classifier import TaskClassification
 CHAT_PY = Path(__file__).resolve().parents[2] / "src" / "routes" / "chat.py"
 
 
-def _req(model="auto", content="write a fibonacci function", tools=None, response_format=None):
+def _req(
+    model="auto",
+    content="write a fibonacci function",
+    tools=None,
+    response_format=None,
+    auto_routing=None,
+):
     return SimpleNamespace(
         model=model,
         messages=[Message(role="user", content=content)],
         tools=tools,
         response_format=response_format,
+        auto_routing=auto_routing,
     )
+
+
+@contextmanager
+def _enabled():
+    """Enable the global kill-switch and a not-disabled per-key policy — the
+    baseline every test exercising the actual engine needs (default is OFF)."""
+    with (
+        patch("src.routes.chat_routing.Config.AUTO_ROUTING_ENABLED", True),
+        patch("src.db.routing_policies.is_auto_routing_disabled_for_key", return_value=False),
+    ):
+        yield
 
 
 def _passthrough_to_thread():
@@ -81,13 +100,74 @@ def test_resolve_auto_routed_model_runs_before_pricing_gate():
 
 
 # --------------------------------------------------------------------------- #
+# Rollout-safety gates (gatewayz-backend#2216) — each must independently be
+# able to no-op the engine, regardless of the other three saying yes.
+# --------------------------------------------------------------------------- #
+@pytest.mark.asyncio
+async def test_noop_when_global_flag_is_off_by_default():
+    """AUTO_ROUTING_ENABLED defaults to False — the engine must stay fully
+    inert with no patching at all, exactly like before Phase 4 existed."""
+    req = _req(model="auto")
+
+    with patch("src.services.task_classifier.classify_task") as mock_classify:
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "auto"
+    mock_classify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_noop_when_request_explicitly_opts_out():
+    req = _req(model="auto", auto_routing=False)
+
+    with (
+        _enabled(),
+        patch("src.services.task_classifier.classify_task") as mock_classify,
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "auto"
+    mock_classify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_auto_routing_true_does_not_override_global_flag_off():
+    """auto_routing can only narrow access, never widen it past the global flag."""
+    req = _req(model="auto", auto_routing=True)
+
+    with patch("src.services.task_classifier.classify_task") as mock_classify:
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "auto"
+    mock_classify.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_noop_when_per_key_policy_disables_it():
+    req = _req(model="auto")
+
+    with (
+        patch("src.routes.chat_routing.Config.AUTO_ROUTING_ENABLED", True),
+        patch(
+            "src.db.routing_policies.is_auto_routing_disabled_for_key", return_value=True
+        ) as mock_policy,
+        patch("src.services.task_classifier.classify_task") as mock_classify,
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False, api_key="gw_live_abc123")
+
+    assert req.model == "auto"
+    mock_classify.assert_not_called()
+    mock_policy.assert_called_once_with("gw_live_abc123")
+
+
+# --------------------------------------------------------------------------- #
 # resolve_auto_routed_model behavior
 # --------------------------------------------------------------------------- #
 @pytest.mark.asyncio
 async def test_noop_for_anonymous_requests():
     req = _req(model="auto")
 
-    with patch("src.services.task_classifier.classify_task") as mock_classify:
+    with _enabled(), patch("src.services.task_classifier.classify_task") as mock_classify:
         await resolve_auto_routed_model(req, is_anonymous=True)
 
     assert req.model == "auto"
@@ -114,6 +194,7 @@ async def test_successful_resolution_mutates_req_model_in_place():
     selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer", score=80.0)
 
     with (
+        _enabled(),
         patch("asyncio.to_thread", new=_passthrough_to_thread()) as mock_to_thread,
         patch(
             "src.db.models_catalog_db.get_candidate_models",
@@ -125,9 +206,10 @@ async def test_successful_resolution_mutates_req_model_in_place():
         await resolve_auto_routed_model(req, is_anonymous=False)
 
     assert req.model == "openai/gpt-4o-mini"
-    # classify_task, get_candidate_models, select_model — all three blocking
-    # calls must go through asyncio.to_thread, never called directly.
-    assert mock_to_thread.call_count == 3
+    # is_auto_routing_disabled_for_key, classify_task, get_candidate_models,
+    # select_model — all four blocking calls must go through asyncio.to_thread,
+    # never called directly.
+    assert mock_to_thread.call_count == 4
 
 
 @pytest.mark.asyncio
@@ -136,6 +218,7 @@ async def test_classification_error_raises_400_and_leaves_model_unchanged():
     failed_classification = TaskClassification(error="timeout")
 
     with (
+        _enabled(),
         patch("asyncio.to_thread", new=_passthrough_to_thread()),
         patch("src.services.task_classifier.classify_task", return_value=failed_classification),
     ):
@@ -153,6 +236,7 @@ async def test_no_candidate_selected_raises_400():
     empty_selection = ModelSelection(model_id=None, reason="no_candidates")
 
     with (
+        _enabled(),
         patch("asyncio.to_thread", new=_passthrough_to_thread()),
         patch("src.db.models_catalog_db.get_candidate_models", return_value=[]),
         patch("src.services.task_classifier.classify_task", return_value=classification),
@@ -172,6 +256,7 @@ async def test_conversation_id_threaded_through_to_select_model():
     selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer")
 
     with (
+        _enabled(),
         patch("asyncio.to_thread", new=_passthrough_to_thread()),
         patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
         patch("src.services.task_classifier.classify_task", return_value=classification),
@@ -189,6 +274,7 @@ async def test_messages_are_converted_to_dicts_before_classification():
     selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer")
 
     with (
+        _enabled(),
         patch("asyncio.to_thread", new=_passthrough_to_thread()),
         patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
         patch(

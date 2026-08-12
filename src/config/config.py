@@ -197,6 +197,19 @@ class Config:
         os.environ.get("TASK_CLASSIFIER_TIMEOUT_SECONDS", "5.0")
     )
 
+    # Auto-routing Phase 5 — rollout kill-switch. `resolve_auto_routed_model`
+    # (chat_routing.py) fully no-ops when this is false: `auto`/`router:*`
+    # aliases keep 400ing exactly as before Phases 1-4 existed. Disabled by
+    # default -- this is the gate that keeps the whole feature inert until
+    # someone deliberately turns it on, per gatewayz-backend#2216. A per-key
+    # `routing_policies` row (see db/routing_policies.py) can opt a key out
+    # even when this is globally true, but cannot turn it on when it's false.
+    AUTO_ROUTING_ENABLED = os.environ.get("AUTO_ROUTING_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
     # MULTI_REGION_ENABLED is true the inventory is just this single region, so all
