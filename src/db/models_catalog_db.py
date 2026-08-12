@@ -1576,20 +1576,14 @@ def get_candidate_models(
         return []
 
 
-def _filter_and_sort_by_cost(
-    supabase: Any, candidates: list[dict[str, Any]], cost_ceiling: float
-) -> list[dict[str, Any]]:
-    """Drop candidates above `cost_ceiling` and sort the rest cheapest-first.
+def get_model_pricing_by_ids(supabase: Any, ids: list[Any]) -> dict[Any, dict[str, float | None]]:
+    """Normalized per-token pricing for a set of `models.id` values.
 
-    Blended price uses the same 0.25 input / 0.75 output weighting as
-    `model_categorizer`'s `cheapest` rule. A model with no priced row in
-    `model_pricing` is excluded — unknown price never passes a ceiling.
+    Returns {model_id: {"in": price_per_input_token, "out": price_per_output_token}},
+    both possibly None when unpriced. Missing ids are simply absent from the result.
     """
-    ids = [m["id"] for m in candidates if m.get("id")]
-    if not ids:
-        return []
-
     pricing_by_id: dict[Any, dict[str, float | None]] = {}
+    ids = [i for i in ids if i]
     for i in range(0, len(ids), 500):
         chunk = ids[i : i + 500]
         resp = (
@@ -1603,6 +1597,23 @@ def _filter_and_sort_by_cost(
                 "in": _to_float(row.get("price_per_input_token")),
                 "out": _to_float(row.get("price_per_output_token")),
             }
+    return pricing_by_id
+
+
+def _filter_and_sort_by_cost(
+    supabase: Any, candidates: list[dict[str, Any]], cost_ceiling: float
+) -> list[dict[str, Any]]:
+    """Drop candidates above `cost_ceiling` and sort the rest cheapest-first.
+
+    Blended price uses the same 0.25 input / 0.75 output weighting as
+    `model_categorizer`'s `cheapest` rule. A model with no priced row in
+    `model_pricing` is excluded — unknown price never passes a ceiling.
+    """
+    ids = [m["id"] for m in candidates if m.get("id")]
+    if not ids:
+        return []
+
+    pricing_by_id = get_model_pricing_by_ids(supabase, ids)
 
     priced: list[tuple[float, dict[str, Any]]] = []
     for model in candidates:
