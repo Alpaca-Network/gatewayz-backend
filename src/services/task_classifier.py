@@ -29,10 +29,10 @@ from __future__ import annotations
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass, field
 from typing import Any
+
+from openai import APITimeoutError
 
 from src.config import Config
 from src.services.capability_requirements import extract_required_capabilities
@@ -146,7 +146,11 @@ def classify_task(
             capability_names=deterministic.capability_names, error="no_user_text"
         )
 
-    def _call() -> str | None:
+    try:
+        # `timeout` is forwarded to the OpenAI SDK's own httpx client, which
+        # actually aborts the connection when it elapses — unlike wrapping
+        # this call in a ThreadPoolExecutor.result(timeout=...), which would
+        # stop waiting but leave the request and its worker thread running.
         response = make_openai_request(
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -156,13 +160,10 @@ def classify_task(
             temperature=0,
             max_tokens=100,
             response_format={"type": "json_object"},
+            timeout=timeout,
         )
-        return response.choices[0].message.content
-
-    try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            raw_content = executor.submit(_call).result(timeout=timeout)
-    except FutureTimeoutError:
+        raw_content = response.choices[0].message.content
+    except APITimeoutError:
         logger.warning(f"task_classifier: classification timed out after {timeout}s")
         return TaskClassification(capability_names=deterministic.capability_names, error="timeout")
     except Exception as e:

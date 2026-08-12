@@ -1,8 +1,9 @@
 """Tests for src.services.task_classifier (gatewayz-backend#2213)."""
 
 import json
-import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+from openai import APITimeoutError
 
 from src.services.task_classifier import TaskClassification, classify_task
 
@@ -91,15 +92,22 @@ def test_provider_exception_fails_open():
 
 
 def test_timeout_fails_open():
-    def _slow_call(*args, **kwargs):
-        time.sleep(0.3)
-        return _fake_response()
-
-    with patch("src.services.task_classifier.make_openai_request", side_effect=_slow_call):
+    """The OpenAI SDK raises APITimeoutError itself once `timeout=` elapses;
+    classify_task must translate that into a fail-open TaskClassification."""
+    with patch("src.services.task_classifier.make_openai_request") as mock_request:
+        mock_request.side_effect = APITimeoutError(request=Mock())
         result = classify_task(messages=[{"role": "user", "content": "hi"}], timeout_seconds=0.05)
 
     assert result.error == "timeout"
     assert result.task_type == "unknown"
+
+
+def test_timeout_seconds_is_forwarded_to_the_provider_call():
+    with patch("src.services.task_classifier.make_openai_request") as mock_request:
+        mock_request.return_value = _fake_response()
+        classify_task(messages=[{"role": "user", "content": "hi"}], timeout_seconds=2.5)
+
+    assert mock_request.call_args.kwargs["timeout"] == 2.5
 
 
 def test_uses_configured_classifier_model():
