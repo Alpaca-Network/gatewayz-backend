@@ -306,7 +306,7 @@ def _fallback_get_user(api_key: str):
 
 from src.routes.chat_context import inject_conversation_history, persist_conversation_turn
 from src.routes.chat_request import prepare_upstream_request
-from src.routes.chat_routing import resolve_model_routing
+from src.routes.chat_routing import resolve_auto_routed_model, resolve_model_routing
 from src.routes.chat_streaming import stream_generator  # noqa: F401
 
 # Log route registration for debugging
@@ -354,6 +354,17 @@ async def chat_completions(
     # Abuse-control gates (anonymous + unpriced models). Centralized helpers so
     # /v1/images and /v1/audio can adopt the same policy.
     enforce_anonymous_gate(is_anonymous, request_id=request_id, model_id=req.model)
+
+    # Resolve `auto`/`router:*` aliases to a real model BEFORE the pricing gate
+    # below, which treats req.model as a real catalog/pricing model and 400s
+    # otherwise. No-op for explicit models and for anonymous requests (see
+    # resolve_auto_routed_model's docstring for why anonymous is excluded).
+    await resolve_auto_routed_model(
+        req,
+        is_anonymous=is_anonymous,
+        conversation_id=str(session_id) if session_id else None,
+    )
+
     await enforce_model_pricing_gate(
         req.model,
         request_id=request_id,
