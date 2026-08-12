@@ -370,9 +370,9 @@ class TestAdapterRegistry:
     def test_contains_exactly_the_known_adapter_slugs(self):
         """ADAPTERS is an exact-set drift guard over the full known roster.
 
-        Five Tier-1 consolidated providers plus four Tier-2 providers added
-        in Task 18 (deepseek, moonshot, minimax, xiaomi — see
-        tests/services/providers/test_tier2_adapters.py). Any new adapter
+        Five Tier-1 consolidated providers plus five Tier-2 providers added
+        in Task 18 / Meta wiring (deepseek, moonshot, minimax, xiaomi, meta —
+        see tests/services/providers/test_tier2_adapters.py). Any new adapter
         slug, or the removal of one, must update this assertion deliberately
         rather than silently widen/narrow it.
         """
@@ -388,6 +388,7 @@ class TestAdapterRegistry:
             "moonshot",
             "minimax",
             "xiaomi",
+            "meta",
         }
 
     def test_all_entries_satisfy_protocol(self):

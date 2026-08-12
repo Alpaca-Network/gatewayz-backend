@@ -116,6 +116,20 @@ ADAPTER_CONFIGS: dict[str, ProviderConfig] = {
         api_key_env="XIAOMI_API_KEY",
         display_name="Xiaomi MiMo",
     ),
+    # Meta Model API — serves the Muse Spark model family, OpenAI-compatible.
+    # Verified live: GET /v1/models and POST /v1/chat/completions both
+    # succeed with a real key (https://dev.meta.ai/docs/api-reference).
+    # Note: this is a distinct product from Meta's older Llama API
+    # (llama.developer.meta.com / api.llama.com) — do not confuse the two.
+    "meta": ProviderConfig(
+        slug="meta",
+        base_url="https://api.meta.ai/v1",
+        api_key_env="META_API_KEY",
+        display_name="Meta",
+        # Catalog stores ids as "meta/muse-spark-1.1"; Meta's API expects the
+        # bare model name. Strip the slug prefix before the upstream call.
+        model_prefix="meta/",
+    ),
 }
 
 ADAPTERS: dict[str, OpenAICompatAdapter] = {
