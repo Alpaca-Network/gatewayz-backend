@@ -34,10 +34,11 @@ def test_every_provider_declares_a_full_trio():
     #     alibaba_cloud, openai, anthropic (+ openrouter as fallback,
     #     injected separately)
     #   adapter-served (Tier-1): deepinfra, together, fireworks, groq, zai
-    #   adapter-served (Tier-2, Task 18): deepseek, moonshot, minimax, xiaomi
+    #   adapter-served (Tier-2, Task 18 + Meta): deepseek, moonshot, minimax,
+    #     xiaomi, meta
     assert len(PROVIDER_FUNCTIONS) >= 7, "expected ~8 bespoke MVP-roster providers declared"
     # Exact-set drift guard: ADAPTERS must be precisely the five Tier-1
-    # consolidated providers plus the four Tier-2 providers from Task 18 —
+    # consolidated providers plus the five Tier-2 providers (Task 18 + Meta) —
     # not merely a superset. Adding/removing an adapter slug must update
     # this assertion deliberately.
     assert set(ADAPTERS) == {
@@ -50,10 +51,11 @@ def test_every_provider_declares_a_full_trio():
         "moonshot",
         "minimax",
         "xiaomi",
+        "meta",
     }
     assert (
-        len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 12
-    ), "expected ~13 MVP-roster providers declared across bespoke + adapter"
+        len(PROVIDER_FUNCTIONS) + len(ADAPTERS) >= 13
+    ), "expected ~14 MVP-roster providers declared across bespoke + adapter"
     assert not (set(PROVIDER_FUNCTIONS) & set(ADAPTERS)), "provider declared in both registries"
     for slug, fns in PROVIDER_FUNCTIONS.items():
         has_process = any(f.startswith("process_") for f in fns)

@@ -23,6 +23,7 @@ from src.services.providers.featherless_client import fetch_models_from_featherl
 from src.services.providers.fireworks_catalog import fetch_models_from_fireworks
 from src.services.providers.google_vertex_catalog import fetch_models_from_google_vertex
 from src.services.providers.groq_catalog import fetch_models_from_groq
+from src.services.providers.meta_catalog import fetch_models_from_meta
 from src.services.providers.minimax_catalog import fetch_models_from_minimax
 from src.services.providers.moonshot_catalog import fetch_models_from_moonshot
 from src.services.providers.novita_client import fetch_models_from_novita
@@ -75,6 +76,7 @@ PROVIDER_FETCH_FUNCTIONS = _FALLBACK_FETCH_FUNCTIONS = {
     "moonshot": fetch_models_from_moonshot,
     "minimax": fetch_models_from_minimax,
     "xiaomi": fetch_models_from_xiaomi,
+    "meta": fetch_models_from_meta,
 }
 
 

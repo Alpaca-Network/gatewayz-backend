@@ -19,7 +19,7 @@ from src.config import Config
 from src.services.providers.base import ProviderAdapter
 from src.services.providers.openai_compat import OpenAICompatAdapter
 
-TIER2_SLUGS = ["deepseek", "moonshot", "minimax", "xiaomi"]
+TIER2_SLUGS = ["deepseek", "moonshot", "minimax", "xiaomi", "meta"]
 
 # slug -> (base_url, api_key_env, error_match)
 EXPECTED_CONFIG = {
@@ -42,6 +42,11 @@ EXPECTED_CONFIG = {
         "https://api.xiaomimimo.com/v1",
         "XIAOMI_API_KEY",
         "Xiaomi MiMo API key not configured",
+    ),
+    "meta": (
+        "https://api.meta.ai/v1",
+        "META_API_KEY",
+        "Meta API key not configured",
     ),
 }
 
@@ -226,7 +231,13 @@ class TestTier2RequestTargeting:
 class TestTier2ConfigEnvVars:
     @pytest.mark.parametrize(
         "attr",
-        ["DEEPSEEK_API_KEY", "MOONSHOT_API_KEY", "MINIMAX_API_KEY", "XIAOMI_API_KEY"],
+        [
+            "DEEPSEEK_API_KEY",
+            "MOONSHOT_API_KEY",
+            "MINIMAX_API_KEY",
+            "XIAOMI_API_KEY",
+            "META_API_KEY",
+        ],
     )
     def test_config_has_attribute(self, attr):
         assert hasattr(Config, attr), f"Config.{attr} not defined"

@@ -225,6 +225,7 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     "moonshot": _safe_adapter_routing("moonshot"),
     "minimax": _safe_adapter_routing("minimax"),
     "xiaomi": _safe_adapter_routing("xiaomi"),
+    "meta": _safe_adapter_routing("meta"),
 }
 
 # Strip disabled providers from routing so they are completely unreachable
