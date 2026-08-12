@@ -572,6 +572,26 @@ class TestMessageContentValidation:
         with pytest.raises(ValidationError, match="must have non-empty content"):
             Message(role="user", content="   \n\t  ")
 
+
+class TestAutoRoutingField:
+    """gatewayz-backend#2216: per-request opt-out for auto-routing."""
+
+    def test_defaults_to_none(self):
+        request = ProxyRequest(model="auto", messages=[{"role": "user", "content": "hi"}])
+        assert request.auto_routing is None
+
+    def test_accepts_explicit_false(self):
+        request = ProxyRequest(
+            model="auto", messages=[{"role": "user", "content": "hi"}], auto_routing=False
+        )
+        assert request.auto_routing is False
+
+    def test_accepts_explicit_true(self):
+        request = ProxyRequest(
+            model="auto", messages=[{"role": "user", "content": "hi"}], auto_routing=True
+        )
+        assert request.auto_routing is True
+
     def test_system_message_rejects_empty_string(self):
         """Test that system messages reject empty string content"""
         with pytest.raises(ValidationError, match="must have non-empty content"):

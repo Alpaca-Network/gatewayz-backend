@@ -213,6 +213,17 @@ class ProxyRequest(BaseModel):
             "Only used when auto_web_search is 'auto'. Default is 0.5."
         ),
     )
+    auto_routing: bool | None = Field(
+        default=None,
+        description=(
+            "Per-request override for auto-routing of 'auto'/'router:*' model aliases. "
+            "None (default) defers to the per-key routing_policies row and the global "
+            "AUTO_ROUTING_ENABLED flag. Set to False to force today's explicit-400 "
+            "behavior for this request regardless of those settings. Setting True does "
+            "NOT enable auto-routing if it's disabled at the key or global level -- "
+            "this field can only narrow access, never widen it."
+        ),
+    )
 
     class Config:
         extra = "allow"

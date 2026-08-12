@@ -362,6 +362,7 @@ async def chat_completions(
     await resolve_auto_routed_model(
         req,
         is_anonymous=is_anonymous,
+        api_key=api_key,
         conversation_id=str(session_id) if session_id else None,
     )
 

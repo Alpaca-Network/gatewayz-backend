@@ -23,6 +23,8 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from src.config import Config
+
 logger = logging.getLogger(__name__)
 
 # Bare aliases that used to fold onto the `router` prefix. `openrouter/auto` is
@@ -73,17 +75,26 @@ def _raise_auto_routing_failed() -> None:
 async def resolve_auto_routed_model(
     req: Any,
     is_anonymous: bool,
+    api_key: str | None = None,
     conversation_id: str | None = None,
 ) -> None:
     """Resolve an `auto`/`router:*` alias to a real model, in place on `req`.
 
-    No-op for explicit model ids and for anonymous requests: auto-routing
-    costs a real LLM call (Phase 2's `classify_task`), and anonymous traffic
-    never had alias access to begin with -- it is still rejected downstream by
-    `enforce_model_pricing_gate` exactly as before this phase. Restricting the
-    engine to authenticated requests closes the one abuse vector this phase
-    would otherwise open (anonymous IPs triggering unlimited paid
-    classification calls via `model=auto`), at no cost to the feature.
+    No-op (falls through to today's exact 400-on-alias behavior downstream)
+    unless ALL of the following hold:
+      - the request is authenticated (auto-routing costs a real LLM call;
+        anonymous traffic never had alias access to begin with -- it's still
+        rejected by `enforce_model_pricing_gate` exactly as before this phase)
+      - `req.model` is actually a router alias
+      - `Config.AUTO_ROUTING_ENABLED` is true (gatewayz-backend#2216's global
+        kill-switch -- disabled by default, so this whole function is inert
+        until someone deliberately turns it on)
+      - the caller didn't pass `auto_routing=False` on the request
+      - the key's `routing_policies` row (if any) doesn't explicitly opt out
+
+    Each of these can only NARROW access relative to the one before it --
+    none of them can force auto-routing on when a higher-priority setting
+    says no.
 
     MUST be called before any gate that treats `req.model` as a real, priced
     model (`enforce_model_pricing_gate` in particular) -- that gate 400s on
@@ -94,6 +105,7 @@ async def resolve_auto_routed_model(
     `classify_task` and `select_model` are synchronous, blocking functions
     (an LLM HTTP call and Supabase reads respectively) -- both are run via
     `asyncio.to_thread` so they never stall this (async) request's event loop.
+    The per-key policy lookup is the same shape of call and is also offloaded.
 
     Known gap: `get_candidate_models` is never given a `min_context_length`
     here, even for long messages -- `TaskClassification` doesn't carry an
@@ -108,7 +120,22 @@ async def resolve_auto_routed_model(
     (classifier error, or no candidate could be selected) -- fail-SAFE, not
     fail-open, since this sits in front of billing-adjacent gates.
     """
-    if is_anonymous or not _is_router_model(req.model):
+    if (
+        is_anonymous
+        or not _is_router_model(req.model)
+        or not Config.AUTO_ROUTING_ENABLED
+        or getattr(req, "auto_routing", None) is False
+    ):
+        return
+
+    from src.db.routing_policies import is_auto_routing_disabled_for_key
+
+    if await asyncio.to_thread(is_auto_routing_disabled_for_key, api_key):
+        # Same as the other three narrowing checks above: fall through
+        # silently to enforce_model_pricing_gate's standard 400 downstream,
+        # rather than raising a distinct message here. All four opt-out
+        # paths must behave identically regardless of which setting fired.
+        logger.info("auto-routing: disabled by routing_policies for this key")
         return
 
     from src.db.models_catalog_db import get_candidate_models
@@ -150,6 +177,7 @@ async def resolve_auto_routed_model(
 
     logger.info(
         f"auto-routing: resolved alias {original_alias!r} -> {selection.model_id!r} "
-        f"(task_type={classification.task_type}, reason={selection.reason})"
+        f"(task_type={classification.task_type}, confidence={classification.confidence}, "
+        f"reason={selection.reason})"
     )
     req.model = selection.model_id
