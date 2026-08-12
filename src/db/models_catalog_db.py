@@ -1495,6 +1495,12 @@ def get_candidate_models(
         computed from `model_pricing` rows fetched for the shortlisted rows.
         Models with no known price never pass a cost ceiling.
 
+    An unrecognized `required_capabilities` name fails closed (returns no
+    candidates, with a logged warning) rather than silently matching every
+    model. Because rows are over-fetched then filtered in Python, a very
+    selective filter combination can return fewer than `limit` rows even when
+    more matches exist deeper in the catalog.
+
     Args:
         required_capabilities: capability names the model must support, a
             subset of {"tools", "vision", "caching"}. None/empty = no filter.
@@ -1538,20 +1544,28 @@ def get_candidate_models(
                 "vision": supports_vision,
                 "caching": supports_caching,
             }
-            filtered = []
-            for model in candidates:
-                try:
-                    if all(
-                        capability_checks[name](model)
-                        for name in required_capabilities
-                        if name in capability_checks
-                    ):
-                        filtered.append(model)
-                except Exception as cap_err:
-                    logger.warning(
-                        f"Capability check failed for model {model.get('id')}: {cap_err}"
-                    )
-            candidates = filtered
+            unknown = set(required_capabilities) - capability_checks.keys()
+            if unknown:
+                # An unrecognized capability name can never be verified as
+                # satisfied — fail closed rather than silently matching every
+                # model (an empty `all()` over zero known checks is True).
+                logger.warning(
+                    f"get_candidate_models: unknown required_capabilities {sorted(unknown)}; "
+                    "no candidates can satisfy them"
+                )
+                candidates = []
+            else:
+                checks = [capability_checks[name] for name in required_capabilities]
+                filtered = []
+                for model in candidates:
+                    try:
+                        if all(check(model) for check in checks):
+                            filtered.append(model)
+                    except Exception as cap_err:
+                        logger.warning(
+                            f"Capability check failed for model {model.get('id')}: {cap_err}"
+                        )
+                candidates = filtered
 
         if cost_ceiling is not None:
             candidates = _filter_and_sort_by_cost(supabase, candidates, cost_ceiling)

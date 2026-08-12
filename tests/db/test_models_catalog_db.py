@@ -82,6 +82,20 @@ def test_min_context_length_applies_gte_filter(sb):
     models_query.gte.assert_called_once_with("context_length", 128_000)
 
 
+def test_unknown_required_capability_fails_closed(sb):
+    """A typo'd/unknown capability name must exclude everything, not match
+    everything (an `all()` over zero known checks would otherwise be True)."""
+    fake_rows = [{"id": 1, "model_name": "a"}, {"id": 2, "model_name": "b"}]
+    client, _, _ = _mock_client_for(fake_rows)
+
+    with patch("src.db.models_catalog_db.get_client_for_query", return_value=client):
+        from src.db.models_catalog_db import get_candidate_models
+
+        result = get_candidate_models(required_capabilities={"not_a_real_capability"})
+
+    assert result == []
+
+
 def test_required_capabilities_filters_out_non_matching_models(sb):
     fake_rows = [
         {"id": 1, "model_name": "tool-model", "supports_tools": True},
