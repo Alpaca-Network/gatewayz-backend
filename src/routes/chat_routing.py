@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 # Bare aliases that used to fold onto the `router` prefix. `openrouter/auto` is
 # deliberately EXCLUDED — it is a real passthrough model served by OpenRouter.
-_ROUTER_BARE_ALIASES = {"auto", "gatewayz/auto"}
+# `gatewayz-router` is the branded name for this feature (gatewayz-backend#2216
+# follow-up) -- same resolution path as `auto`, just a friendlier model id.
+_ROUTER_BARE_ALIASES = {"auto", "gatewayz/auto", "gatewayz-router"}
 _ROUTER_PREFIXES = ("router", "auto:", "gatewayz-general", "gatewayz-code")
 
 

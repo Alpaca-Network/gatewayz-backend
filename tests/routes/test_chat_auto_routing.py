@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from src.routes.chat_routing import resolve_auto_routed_model
+from src.routes.chat_routing import _is_router_model, resolve_auto_routed_model
 from src.schemas.proxy import Message
 from src.services.model_selector import ModelSelection
 from src.services.task_classifier import TaskClassification
@@ -183,6 +183,33 @@ async def test_noop_for_explicit_model():
 
     assert req.model == "openai/gpt-4o-mini"
     mock_classify.assert_not_called()
+
+
+def test_gatewayz_router_is_a_recognized_alias():
+    """`gatewayz-router` is the branded name for this feature -- same
+    resolution path as `auto`, just a friendlier model id."""
+    assert _is_router_model("gatewayz-router") is True
+    assert _is_router_model("GATEWAYZ-ROUTER") is True  # case-insensitive, matches _is_router_model
+
+
+@pytest.mark.asyncio
+async def test_gatewayz_router_alias_resolves_like_auto():
+    req = _req(model="gatewayz-router")
+    classification = TaskClassification(
+        task_type="code_generation", capability_names=frozenset(), confidence=0.9
+    )
+    selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer")
+
+    with (
+        _enabled(),
+        patch("asyncio.to_thread", new=_passthrough_to_thread()),
+        patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
+        patch("src.services.task_classifier.classify_task", return_value=classification),
+        patch("src.services.model_selector.select_model", return_value=selection),
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "openai/gpt-4o-mini"
 
 
 @pytest.mark.asyncio
