@@ -95,6 +95,15 @@ async def resolve_auto_routed_model(
     (an LLM HTTP call and Supabase reads respectively) -- both are run via
     `asyncio.to_thread` so they never stall this (async) request's event loop.
 
+    Known gap: `get_candidate_models` is never given a `min_context_length`
+    here, even for long messages -- `TaskClassification` doesn't carry an
+    estimated-token-count signal (it's computed internally by
+    `extract_required_capabilities` but discarded before it reaches this
+    caller), so a long request can still be routed to a small-context model.
+    Not a new failure mode (the resulting provider error is the same one a
+    human picking the wrong model manually would hit) but worth closing in a
+    follow-up by exposing that estimate on `TaskClassification`.
+
     Raises the same 400 as `resolve_model_routing` on any failure to resolve
     (classifier error, or no candidate could be selected) -- fail-SAFE, not
     fail-open, since this sits in front of billing-adjacent gates.
