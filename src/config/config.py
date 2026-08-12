@@ -183,6 +183,20 @@ class Config:
     # "balanced" / "latency" / "quality" trade margin for latency/quality.
     SMART_ROUTER_POLICY = os.environ.get("SMART_ROUTER_POLICY", "cost").strip().lower()
 
+    # Auto-routing Phase 2 — task classifier (src/services/task_classifier.py).
+    # Cheap/fast model used ONLY for the internal task_type + reasoning-needed
+    # judgment call, never for serving the user's actual request. "gpt-4o-mini"
+    # is already used elsewhere in this codebase (model_capabilities_cache.py),
+    # not a guessed/unverified model id.
+    TASK_CLASSIFIER_MODEL = os.environ.get("TASK_CLASSIFIER_MODEL", "gpt-4o-mini").strip()
+    # Hard wall-clock ceiling for the classification call, independent of the
+    # shared HTTP connection pool's generic 60s read timeout (connection_pool.py)
+    # — this is a low-priority internal call that must fail fast, not risk
+    # blocking a chat request for a minute if the classifier model is slow.
+    TASK_CLASSIFIER_TIMEOUT_SECONDS = float(
+        os.environ.get("TASK_CLASSIFIER_TIMEOUT_SECONDS", "5.0")
+    )
+
     # Gatewayz One Phase 5 — multi-region (rollout phase 1: inventory + wire, no
     # traffic change). The region_router selection core is fed from these. Until
     # MULTI_REGION_ENABLED is true the inventory is just this single region, so all
