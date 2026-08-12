@@ -1469,6 +1469,140 @@ def get_models_by_category(
         return []
 
 
+@with_retry(**_CATALOG_DB_RETRY)
+def get_candidate_models(
+    required_capabilities: set[str] | frozenset[str] | None = None,
+    min_context_length: int | None = None,
+    quality_tier: str | None = None,
+    cost_ceiling: float | None = None,
+    limit: int = 200,
+) -> list[dict[str, Any]]:
+    """
+    Shortlist candidate models by capability, context length, quality tier and cost.
+
+    Composes existing catalog primitives rather than re-deriving them:
+      - `quality_tier` ("flagship"/"mid"/"budget") filters on the `categories`
+        tag already written by the nightly categorizer sync (see
+        `_sync_categories`). A model that hasn't been categorized yet is
+        excluded, not guessed at — same "missing data never fabricates a tag"
+        rule as `model_categorizer`.
+      - `required_capabilities` (any of {"tools", "vision", "caching"}) are
+        evaluated live per row via `model_capability_surface`, the same
+        convention used at query time in `routes/catalog.py` and
+        `pricing/pricing_lookup.py`.
+      - `cost_ceiling` is a completion-weighted blended $/1M-token price (the
+        same 0.25/0.75 input/output weights as the `cheapest` category rule),
+        computed from `model_pricing` rows fetched for the shortlisted rows.
+        Models with no known price never pass a cost ceiling.
+
+    Args:
+        required_capabilities: capability names the model must support, a
+            subset of {"tools", "vision", "caching"}. None/empty = no filter.
+        min_context_length: minimum context window in tokens. None = no filter.
+        quality_tier: one of "flagship" / "mid" / "budget". None = no filter.
+        cost_ceiling: max blended $ per 1M tokens. None = no filter.
+        limit: max rows to return after filtering.
+
+    Returns:
+        List of model dicts (with provider info), cheapest-first when
+        `cost_ceiling` is set. [] on error or no matches.
+    """
+    from src.services.model_capability_surface import (
+        supports_caching,
+        supports_tools,
+        supports_vision,
+    )
+
+    try:
+        supabase = get_client_for_query(read_only=True)
+        query = (
+            supabase.table("models")
+            .select("*, providers!inner(*)")
+            .eq("is_active", True)
+            .is_("deprecated_at", "null")
+        )
+        if quality_tier:
+            query = query.contains("categories", [quality_tier])
+        if min_context_length is not None:
+            query = query.gte("context_length", min_context_length)
+
+        # Over-fetch before capability/cost filtering trims the set, bounded
+        # well under SUPABASE_PAGE_SIZE so this stays a single-page query.
+        fetch_limit = min(max(limit * 5, limit), SUPABASE_PAGE_SIZE)
+        response = query.limit(fetch_limit).execute()
+        candidates = response.data or []
+
+        if required_capabilities:
+            capability_checks = {
+                "tools": supports_tools,
+                "vision": supports_vision,
+                "caching": supports_caching,
+            }
+            filtered = []
+            for model in candidates:
+                try:
+                    if all(
+                        capability_checks[name](model)
+                        for name in required_capabilities
+                        if name in capability_checks
+                    ):
+                        filtered.append(model)
+                except Exception as cap_err:
+                    logger.warning(
+                        f"Capability check failed for model {model.get('id')}: {cap_err}"
+                    )
+            candidates = filtered
+
+        if cost_ceiling is not None:
+            candidates = _filter_and_sort_by_cost(supabase, candidates, cost_ceiling)
+
+        return candidates[:limit]
+    except Exception as e:
+        logger.error(f"Error fetching candidate models: {e}")
+        return []
+
+
+def _filter_and_sort_by_cost(
+    supabase: Any, candidates: list[dict[str, Any]], cost_ceiling: float
+) -> list[dict[str, Any]]:
+    """Drop candidates above `cost_ceiling` and sort the rest cheapest-first.
+
+    Blended price uses the same 0.25 input / 0.75 output weighting as
+    `model_categorizer`'s `cheapest` rule. A model with no priced row in
+    `model_pricing` is excluded — unknown price never passes a ceiling.
+    """
+    ids = [m["id"] for m in candidates if m.get("id")]
+    if not ids:
+        return []
+
+    pricing_by_id: dict[Any, dict[str, float | None]] = {}
+    for i in range(0, len(ids), 500):
+        chunk = ids[i : i + 500]
+        resp = (
+            supabase.table("model_pricing")
+            .select("model_id, price_per_input_token, price_per_output_token")
+            .in_("model_id", chunk)
+            .execute()
+        )
+        for row in resp.data or []:
+            pricing_by_id[row["model_id"]] = {
+                "in": _to_float(row.get("price_per_input_token")),
+                "out": _to_float(row.get("price_per_output_token")),
+            }
+
+    priced: list[tuple[float, dict[str, Any]]] = []
+    for model in candidates:
+        price = pricing_by_id.get(model.get("id"))
+        if not price or (price.get("in") is None and price.get("out") is None):
+            continue
+        blended = ((price.get("in") or 0.0) * 0.25 + (price.get("out") or 0.0) * 0.75) * 1_000_000
+        if blended <= cost_ceiling:
+            priced.append((blended, model))
+
+    priced.sort(key=lambda pair: pair[0])
+    return [model for _, model in priced]
+
+
 def get_all_models_for_catalog(include_inactive: bool = False) -> list[dict[str, Any]]:
     """
     Get ALL models from database optimized for catalog building.
