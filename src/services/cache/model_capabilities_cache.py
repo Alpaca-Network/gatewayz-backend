@@ -336,12 +336,19 @@ def get_free_models() -> set[str]:
 
 
 def is_free_model(model_id: str) -> bool:
-    """Return True if model_id is a free model (case-insensitive)."""
+    """Return True if model_id is a known free model (case-insensitive).
+
+    Membership in the DB-backed set (or its hardcoded fallback) only — a bare
+    ``.endswith(":free")`` used to also match here, which meant any caller could
+    mark an arbitrary, non-cataloged model "free" just by naming it
+    ``<anything>:free``. That's a real gate: it's what exempts a request from the
+    credit check in chat.py and from the anonymous model allowlist in
+    anonymous_rate_limiter.py, so it must only trust models actually known to be free.
+    """
     _ensure_loaded()
     key = model_id.lower()
     free = _free_models if _free_models else _FREE_MODELS_FALLBACK
-    # Exact match or ends with :free
-    return key in free or key.endswith(":free")
+    return key in free
 
 
 def get_latency_tier(model_id: str, default: int = 3) -> int:
