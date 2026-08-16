@@ -111,6 +111,28 @@ def test_required_capabilities_filters_out_non_matching_models(sb):
     assert [m["id"] for m in result] == [1]
 
 
+def test_reasoning_is_a_recognized_capability(sb):
+    """Regression: `task_classifier.classify_task` adds "reasoning" to
+    `capability_names` for any prompt it judges needs multi-step reasoning.
+    Before "reasoning" was registered here, that made every such request an
+    "unknown capability" -> fail-closed to zero candidates -> the auto-router
+    outright rejected exactly the requests where routing quality matters most,
+    instead of routing to a reasoning-capable model.
+    """
+    fake_rows = [
+        {"id": 1, "model_name": "reasoning-model", "is_reasoning": True},
+        {"id": 2, "model_name": "regular-model", "is_reasoning": False},
+    ]
+    client, _, _ = _mock_client_for(fake_rows)
+
+    with patch("src.db.models_catalog_db.get_client_for_query", return_value=client):
+        from src.db.models_catalog_db import get_candidate_models
+
+        result = get_candidate_models(required_capabilities={"reasoning"})
+
+    assert [m["id"] for m in result] == [1]
+
+
 def test_required_capabilities_falls_back_to_family_heuristic(sb):
     """No explicit flag on the row -> model_capability_surface's family match decides."""
     fake_rows = [

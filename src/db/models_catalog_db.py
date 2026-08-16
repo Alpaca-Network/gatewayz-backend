@@ -1486,7 +1486,7 @@ def get_candidate_models(
         `_sync_categories`). A model that hasn't been categorized yet is
         excluded, not guessed at — same "missing data never fabricates a tag"
         rule as `model_categorizer`.
-      - `required_capabilities` (any of {"tools", "vision", "caching"}) are
+      - `required_capabilities` (any of {"tools", "vision", "caching", "reasoning"}) are
         evaluated live per row via `model_capability_surface`, the same
         convention used at query time in `routes/catalog.py` and
         `pricing/pricing_lookup.py`.
@@ -1503,7 +1503,7 @@ def get_candidate_models(
 
     Args:
         required_capabilities: capability names the model must support, a
-            subset of {"tools", "vision", "caching"}. None/empty = no filter.
+            subset of {"tools", "vision", "caching", "reasoning"}. None/empty = no filter.
         min_context_length: minimum context window in tokens. None = no filter.
         quality_tier: one of "flagship" / "mid" / "budget". None = no filter.
         cost_ceiling: max blended $ per 1M tokens. None = no filter.
@@ -1515,6 +1515,7 @@ def get_candidate_models(
     """
     from src.services.model_capability_surface import (
         supports_caching,
+        supports_reasoning,
         supports_tools,
         supports_vision,
     )
@@ -1543,6 +1544,7 @@ def get_candidate_models(
                 "tools": supports_tools,
                 "vision": supports_vision,
                 "caching": supports_caching,
+                "reasoning": supports_reasoning,
             }
             unknown = set(required_capabilities) - capability_checks.keys()
             if unknown:

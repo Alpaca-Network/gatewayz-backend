@@ -39,6 +39,16 @@ def test_cost_score_tiers():
     assert _cost_score(None) == 50.0  # unknown -> neutral default
 
 
+def test_quality_score_does_not_raise_on_integer_model_id():
+    """Regression: `get_candidate_models` candidates carry the `models` table's
+    integer PK as `id` (canonical_id is unpopulated in production today), and
+    `.lower()` on that int used to raise `AttributeError` for every real
+    auto-routing candidate -- the classifier worked, but selection crashed
+    on the very first candidate scored.
+    """
+    assert _quality_score(2298, None, "code_generation", {}) == 50.0
+
+
 def test_quality_score_uses_canonical_id_not_display_id():
     priors = {"openai/gpt-4o-mini": {"code_generation": 80.0}}
 
@@ -166,6 +176,42 @@ def test_mode_changes_which_model_wins():
 
     assert price_mode.model_id == "cheap-low-quality"
     assert quality_mode.model_id == "pricey-high-quality"
+
+
+# --------------------------------------------------------------------------- #
+# select_model against real `get_candidate_models` row shape
+# --------------------------------------------------------------------------- #
+def test_select_model_on_raw_catalog_rows_returns_provider_model_id_not_db_pk():
+    """`get_candidate_models` returns raw `models` table rows: `id` is that
+    table's integer PK (meaningful only for the `model_pricing` join), and
+    the actual model string lives in `provider_model_id`. Before this fix,
+    `select_model` returned the raw int PK as `ModelSelection.model_id`,
+    which becomes `req.model` in chat_routing.py -- passing an integer
+    through as the model name would break every downstream provider-dispatch
+    and pricing-gate call expecting a string like "openai/gpt-4o-mini".
+    """
+    candidates = [
+        {"id": 2298, "provider_model_id": "together/Qwen3-Coder-480B", "canonical_id": None},
+        {"id": 5001, "provider_model_id": "openai/gpt-4o-mini", "canonical_id": None},
+    ]
+    pricing = {
+        2298: {"in": 0.00000005, "out": 0.00000005},  # cheapest -> wins in "price" mode
+        5001: {"in": 0.06, "out": 0.06},
+    }
+
+    result = _patched_select(candidates, _classification(), mode="price", pricing=pricing)
+
+    assert result.model_id == "together/Qwen3-Coder-480B"
+    assert isinstance(result.model_id, str)
+
+
+def test_select_model_on_raw_catalog_rows_prefers_canonical_id_when_present():
+    candidates = [{"id": 42, "provider_model_id": "raw/slug", "canonical_id": "openai/gpt-4o-mini"}]
+    pricing = {42: {"in": 0.001, "out": 0.001}}
+
+    result = _patched_select(candidates, _classification(), pricing=pricing)
+
+    assert result.model_id == "openai/gpt-4o-mini"
 
 
 # --------------------------------------------------------------------------- #

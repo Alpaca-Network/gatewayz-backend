@@ -110,18 +110,44 @@ def _flag(model: dict[str, Any], *names: str) -> bool | None:
     return None
 
 
+def _model_identifier(model: dict[str, Any]) -> str:
+    """The string identifier to pattern-match against, from either row shape.
+
+    A public/API-formatted model dict (routes/catalog.py, pricing_lookup.py)
+    carries a string ``id``. A raw ``models`` table row (models_catalog_db.py's
+    ``get_candidate_models``, used by auto-routing) carries an integer PK in
+    ``id`` and the actual model slug in ``provider_model_id`` instead --
+    calling ``.lower()`` on the raw int used to raise unconditionally for
+    every auto-routing candidate. Prefer the slug when present; str() the
+    fallback defensively so a non-string ``id`` can never crash this again.
+    """
+    identifier = model.get("provider_model_id") or model.get("id") or ""
+    return str(identifier)
+
+
 def supports_tools(model: dict[str, Any]) -> bool:
-    explicit = _flag(model, "supports_tools", "tools", "function_calling")
+    explicit = _flag(model, "supports_tools", "tools", "function_calling", "supports_function_calling")
     if explicit is not None:
         return explicit
-    return _matches_family(model.get("id", ""), KNOWN_TOOL_FAMILIES)
+    return _matches_family(_model_identifier(model), KNOWN_TOOL_FAMILIES)
 
 
 def supports_vision(model: dict[str, Any]) -> bool:
     explicit = _flag(model, "supports_vision", "vision", "multimodal")
     if explicit is not None:
         return explicit
-    return _matches_family(model.get("id", ""), KNOWN_VISION_FAMILIES)
+    return _matches_family(_model_identifier(model), KNOWN_VISION_FAMILIES)
+
+
+def supports_reasoning(model: dict[str, Any]) -> bool:
+    """Whether the model is a dedicated reasoning model (catalog `is_reasoning` flag).
+
+    No family-matching fallback: unlike tools/vision, reasoning capability
+    isn't reliably inferable from a model id, so an unflagged model reports
+    unsupported rather than guessing (same honesty rule as the module docstring).
+    """
+    explicit = _flag(model, "is_reasoning", "supports_reasoning")
+    return bool(explicit)
 
 
 def supports_caching(model: dict[str, Any]) -> bool:
@@ -129,10 +155,17 @@ def supports_caching(model: dict[str, Any]) -> bool:
     explicit = _flag(model, "supports_caching", "prompt_caching")
     if explicit is not None:
         return explicit
-    provider = str(model.get("provider_slug") or model.get("source_gateway") or "").strip().lower()
+    metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
+    provider = str(
+        model.get("provider_slug")
+        or model.get("source_gateway")
+        or metadata.get("provider_slug")
+        or metadata.get("source_gateway")
+        or ""
+    ).strip().lower()
     if provider in CACHE_CAPABLE_PROVIDERS:
         return True
-    model_id = (model.get("id") or "").lower()
+    model_id = _model_identifier(model).lower()
     return any(p in model_id for p in CACHE_CAPABLE_PROVIDERS)
 
 

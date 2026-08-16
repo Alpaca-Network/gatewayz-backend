@@ -11,9 +11,12 @@ and cost from `get_model_pricing_by_ids()` instead of a `ModelCapabilities`
 schema object (that schema, `schemas/router.py`, was deleted separately and
 is not revived here — see gatewayz-backend#2214).
 
-Shadow-mode only: this module scores/selects but is not wired into any live
-request path yet. `log_shadow_selection()` gives a caller a structured way to
-record what this engine would have chosen, without changing behavior.
+Live since gatewayz-backend#2223 (`chat_routing.resolve_auto_routed_model`
+calls `select_model()` directly and assigns its result to `req.model`) --
+despite this module's original "shadow-mode only" design, it is on the
+request path whenever `Config.AUTO_ROUTING_ENABLED` is true.
+`log_shadow_selection()` remains for callers that want to log what this
+engine would have chosen without acting on it.
 
 Not to be confused with `Config.SMART_ROUTER_POLICY` (`src/config/config.py`),
 which governs PROVIDER choice for an already-chosen model, one layer below
@@ -100,7 +103,7 @@ def _cost_score(price_per_input_token: float | None) -> float:
 
 
 def _quality_score(
-    model_id: str | None,
+    model_id: Any,
     canonical_id: str | None,
     task_type: str,
     quality_priors: dict[str, dict[str, float]],
@@ -110,12 +113,30 @@ def _quality_score(
     `get_quality_priors()` is keyed by `canonical_id.lower()` (per
     `model_quality_scores.model_id`, which stores canonical ids), NOT by the
     row's display `id` — using the wrong key silently returns no signal.
+    `model_id` is str()'d defensively: candidates from `get_candidate_models`
+    carry the `models` table's integer PK as `id`, not a string, and this used
+    to raise unconditionally for every real candidate (`.lower()` on an int).
     """
-    key = (canonical_id or model_id or "").lower()
+    key = str(canonical_id or model_id or "").lower()
     priors = quality_priors.get(key)
     if not priors:
         return _QUALITY_SCORE_DEFAULT
     return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
+
+
+def _display_model_id(model: dict[str, Any]) -> Any:
+    """The request-facing model identifier for a candidate row.
+
+    `get_candidate_models` returns raw `models` table rows: `id` is that
+    table's integer primary key (only meaningful for the `model_pricing`
+    join), while `provider_model_id` is the actual model string (what
+    `req.model`, `get_model_pricing()`, and `model_quality_scores.model_id`
+    all mean by "model id" elsewhere in the codebase). Prefer `canonical_id`
+    when populated (the intended long-term key), else `provider_model_id`,
+    and only fall back to the raw `id` for candidate shapes (tests) that
+    already use a string there directly.
+    """
+    return model.get("canonical_id") or model.get("provider_model_id") or model.get("id")
 
 
 def _blended_score(quality: float, cost: float, mode: OptimizationMode) -> float:
@@ -160,8 +181,10 @@ def select_model(
     Pick/rank a model from `candidates` for the given task classification.
 
     Args:
-        candidates: model rows from `get_candidate_models` (must carry "id";
-            "canonical_id" is used for the quality lookup when present).
+        candidates: model rows from `get_candidate_models` (must carry "id",
+            the `models` table's integer PK, used for the pricing join;
+            the returned `ModelSelection.model_id` prefers "canonical_id"
+            then "provider_model_id" -- see `_display_model_id`).
         classification: Phase 2's `TaskClassification` — `task_type` drives
             the quality-prior lookup.
         mode: "price" / "quality" / "fast" / "balanced" — a model-choice-level
@@ -189,13 +212,14 @@ def select_model(
         model_id = model.get("id")
         if not model_id:
             continue
+        display_id = _display_model_id(model)
         quality = _quality_score(
-            model_id, model.get("canonical_id"), classification.task_type, quality_priors
+            display_id, model.get("canonical_id"), classification.task_type, quality_priors
         )
         price = pricing_by_id.get(model_id, {})
         cost = _cost_score(price.get("in"))
         score = _blended_score(quality, cost, mode)
-        if model_id in preferred:
+        if display_id in preferred:
             score += _PREFERRED_MODEL_BOOST
         scored.append((score, model))
 
@@ -214,14 +238,14 @@ def select_model(
             idx = hash_val % len(similar)
             selected_score, selected_model = similar[idx]
             return ModelSelection(
-                model_id=selected_model.get("id"),
+                model_id=_display_model_id(selected_model),
                 reason="stable_selection",
                 score=selected_score,
                 considered=len(scored),
             )
 
     return ModelSelection(
-        model_id=top_model.get("id"),
+        model_id=_display_model_id(top_model),
         reason="top_scorer",
         score=top_score,
         considered=len(scored),
