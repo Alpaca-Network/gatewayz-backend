@@ -126,9 +126,18 @@ def _model_identifier(model: dict[str, Any]) -> str:
 
 
 def supports_tools(model: dict[str, Any]) -> bool:
-    explicit = _flag(model, "supports_tools", "tools", "function_calling", "supports_function_calling")
+    explicit = _flag(model, "supports_tools", "tools", "function_calling")
     if explicit is not None:
         return explicit
+    # `supports_function_calling` is the raw catalog-sync column -- trust an
+    # explicit True from it, but NOT an explicit False: that column's own
+    # detection heuristic is narrower than KNOWN_TOOL_FAMILIES (that's why
+    # the family list exists -- it was added specifically to rescue models,
+    # e.g. Kimi/Moonshot/MiniMax/GLM/Mimo/Step, that this column under-reports
+    # for). Short-circuiting on its False would silently reintroduce that
+    # exact under-reporting bug for the auto-routing path.
+    if model.get("supports_function_calling") is True:
+        return True
     return _matches_family(_model_identifier(model), KNOWN_TOOL_FAMILIES)
 
 

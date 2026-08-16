@@ -205,6 +205,22 @@ def test_select_model_on_raw_catalog_rows_returns_provider_model_id_not_db_pk():
     assert isinstance(result.model_id, str)
 
 
+def test_select_model_final_fallback_is_stringified_even_without_provider_model_id():
+    """Regression (code review on gatewayz-backend#2227): `provider_model_id`
+    is NOT NULL today, so this path isn't reachable for a real catalog row,
+    but a malformed row or future schema change must not be able to leak the
+    raw integer PK back out as `ModelSelection.model_id` -- that's the exact
+    bug class this module was just fixed for.
+    """
+    candidates = [{"id": 777}]
+    pricing = {777: {"in": 0.001, "out": 0.001}}
+
+    result = _patched_select(candidates, _classification(), pricing=pricing)
+
+    assert result.model_id == "777"
+    assert isinstance(result.model_id, str)
+
+
 def test_select_model_on_raw_catalog_rows_prefers_canonical_id_when_present():
     candidates = [{"id": 42, "provider_model_id": "raw/slug", "canonical_id": "openai/gpt-4o-mini"}]
     pricing = {42: {"in": 0.001, "out": 0.001}}

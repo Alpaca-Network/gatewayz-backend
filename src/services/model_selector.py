@@ -134,9 +134,14 @@ def _display_model_id(model: dict[str, Any]) -> Any:
     all mean by "model id" elsewhere in the codebase). Prefer `canonical_id`
     when populated (the intended long-term key), else `provider_model_id`,
     and only fall back to the raw `id` for candidate shapes (tests) that
-    already use a string there directly.
+    already use a string there directly. `provider_model_id` is a NOT NULL
+    column today so the final fallback shouldn't be reachable for a real
+    catalog row, but str() it anyway -- this exact "int PK leaks out as the
+    model id" shape is the bug this module was just fixed for; a malformed
+    row or a future schema change must not be able to reintroduce it here.
     """
-    return model.get("canonical_id") or model.get("provider_model_id") or model.get("id")
+    display_id = model.get("canonical_id") or model.get("provider_model_id") or model.get("id")
+    return str(display_id) if display_id is not None else None
 
 
 def _blended_score(quality: float, cost: float, mode: OptimizationMode) -> float:

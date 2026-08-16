@@ -222,6 +222,24 @@ class TestRawCatalogRow:
     def test_no_provider_model_id_and_non_string_id_is_safe(self):
         assert supports_tools({"id": 12345}) is False
 
+    def test_explicit_false_supports_function_calling_does_not_override_family_rescue(self):
+        """Regression (code review on gatewayz-backend#2227): `supports_function_calling`
+        is the catalog-sync heuristic KNOWN_TOOL_FAMILIES was added to rescue
+        models from (Kimi/Moonshot/etc under-reported by that narrower
+        heuristic). Treating its explicit False as authoritative here would
+        silently reintroduce that exact under-reporting bug for auto-routing.
+        """
+        row = {
+            "id": 4242,
+            "provider_model_id": "moonshot/kimi-k2.6",
+            "supports_function_calling": False,
+        }
+        assert supports_tools(row) is True
+
+    def test_explicit_true_supports_function_calling_is_trusted(self):
+        row = {"id": 1, "provider_model_id": "obscure/model", "supports_function_calling": True}
+        assert supports_tools(row) is True
+
 
 class TestSupportsReasoning:
     def test_flag_true(self):
