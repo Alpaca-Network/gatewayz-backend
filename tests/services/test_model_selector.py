@@ -5,6 +5,7 @@ from unittest.mock import patch
 from src.services.model_selector import (
     ModelSelection,
     _cost_score,
+    _gap_fill_quality_priors,
     _hash_for_selection,
     _quality_score,
     log_shadow_selection,
@@ -65,54 +66,62 @@ def test_quality_score_falls_back_to_unknown_task_then_default():
     assert _quality_score("model-a", None, "code_generation", priors_without_task) == 50.0
 
 
-def test_quality_score_falls_back_to_inference_when_no_manual_prior_matches():
+def test_gap_fill_adds_inferred_prior_for_uncovered_candidates():
     """The actual fix: `model_quality_scores` only covers 15 legacy models, so
     every other candidate used to get a flat `_QUALITY_SCORE_DEFAULT` --
     making "quality" a constant across virtually the whole catalog and
-    collapsing routing to cost-tier-only despite a correct task_type. With a
-    `fallback_model` row, a large reasoning/coder model must score higher
-    than a small plain-chat model on code_generation, with zero manual data.
+    collapsing routing to cost-tier-only despite a correct task_type.
+    `_gap_fill_quality_priors` must add a real per-task-type entry for a
+    candidate with no manual prior, so `_quality_score` stops returning the
+    flat default for it. A large coder model must score higher than a small
+    plain-chat model on code_generation, with zero manual data.
     """
-    large_coder_reasoner = {
-        "id": 1,
-        "provider_model_id": "some-vendor/big-model-70b-coder",
-        "is_reasoning": True,
-    }
-    small_plain = {"id": 2, "provider_model_id": "some-vendor/tiny-model-3b", "is_reasoning": False}
+    large_coder = {"id": 1, "provider_model_id": "some-vendor/big-model-70b-coder"}
+    small_plain = {"id": 2, "provider_model_id": "some-vendor/tiny-model-3b"}
 
-    big_score = _quality_score(
-        "some-vendor/big-model-70b-coder",
-        None,
-        "code_generation",
-        {},
-        fallback_model=large_coder_reasoner,
-    )
-    small_score = _quality_score(
-        "some-vendor/tiny-model-3b", None, "code_generation", {}, fallback_model=small_plain
-    )
+    merged = _gap_fill_quality_priors([large_coder, small_plain], {})
 
+    big_score = _quality_score("some-vendor/big-model-70b-coder", None, "code_generation", merged)
+    small_score = _quality_score("some-vendor/tiny-model-3b", None, "code_generation", merged)
     assert big_score > small_score
+    assert big_score != 50.0 and small_score != 50.0  # neither is the flat default anymore
 
 
-def test_quality_score_without_fallback_model_keeps_flat_default():
-    """No behavior change for callers that don't pass a candidate row (existing
-    direct unit tests of `_quality_score`) -- inference is opt-in via
-    `fallback_model`, not a silent global default swap."""
-    assert _quality_score("unknown-model", None, "code_generation", {}) == 50.0
-
-
-def test_manual_prior_still_wins_over_inference():
-    """ "Real scores always win" -- a `model_quality_scores` hit must not be
-    shadowed by the inference fallback even when a `fallback_model` row is
-    also supplied."""
+def test_gap_fill_never_overwrites_a_manual_prior():
+    """ "Real scores always win" -- a `model_quality_scores` hit must survive
+    gap-fill even for a candidate that also has an id inference could derive
+    a (different) score for."""
     priors = {"openai/gpt-4o-mini": {"code_generation": 82.0}}
     model = {"id": 1, "provider_model_id": "openai/gpt-4o-mini"}
 
-    score = _quality_score(
-        "openai/gpt-4o-mini", None, "code_generation", priors, fallback_model=model
-    )
+    merged = _gap_fill_quality_priors([model], priors)
 
-    assert score == 82.0
+    assert merged["openai/gpt-4o-mini"]["code_generation"] == 82.0
+
+
+def test_gap_fill_never_raises_on_a_malformed_row():
+    """Regression (code review on gatewayz-backend#2230): `infer_quality_from_row`
+    parses `.lower()` on whatever name field it finds -- an unguarded call broke
+    this module's own "never raises" invariant (mirrors the try/except already
+    wrapping `_fetch_pricing`/`_fetch_quality_priors`). A malformed row must not
+    abort selection for every other candidate in the same request.
+    """
+    malformed = {"id": 1, "provider_model_id": 12345}  # non-string, would break .lower()
+    well_formed = {"id": 2, "provider_model_id": "vendor/normal-model-7b"}
+
+    merged = _gap_fill_quality_priors([malformed, well_formed], {})
+
+    assert "vendor/normal-model-7b" in merged  # the other candidate still got gap-filled
+    assert _quality_score(1, None, "code_generation", merged) == 50.0  # malformed -> flat default,
+    # not a crash for the whole request
+
+
+def test_quality_score_stays_a_pure_lookup_with_no_signal_for_uncovered_ids():
+    """`_quality_score` itself never infers -- that's `_gap_fill_quality_priors`'s
+    job, called once upfront. Without it, an uncovered id is still the flat
+    default; this is what select_model would fall back to if gap-fill failed
+    for a given candidate."""
+    assert _quality_score("unknown-model", None, "code_generation", {}) == 50.0
 
 
 def test_select_model_ranks_large_reasoning_model_above_small_plain_model_in_quality_mode():

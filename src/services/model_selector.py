@@ -110,9 +110,10 @@ def _quality_score(
     canonical_id: str | None,
     task_type: str,
     quality_priors: dict[str, dict[str, float]],
-    fallback_model: dict[str, Any] | None = None,
 ) -> float:
-    """Task-specific quality prior.
+    """Task-specific quality prior. Pure key lookup -- see `_gap_fill_quality_priors`
+    for how `quality_priors` gets an entry for every real candidate, not just the
+    15 legacy models `model_quality_scores` actually has rows for.
 
     `get_quality_priors()` is keyed by `canonical_id.lower()` (per
     `model_quality_scores.model_id`, which stores canonical ids), NOT by the
@@ -120,26 +121,43 @@ def _quality_score(
     `model_id` is str()'d defensively: candidates from `get_candidate_models`
     carry the `models` table's integer PK as `id`, not a string, and this used
     to raise unconditionally for every real candidate (`.lower()` on an int).
-
-    `model_quality_scores` only has 15 legacy models (seeded pre-MVP-refactor,
-    never updated for the current catalog) -- for every other model this used
-    to silently fall back to a flat `_QUALITY_SCORE_DEFAULT`, which made
-    "quality" a constant across virtually the whole catalog and collapsed
-    routing to cost-tier-only despite the classifier correctly identifying
-    the task. When `fallback_model` (the raw candidate row) is provided and
-    no manual/benchmark row matches, derive a real per-task-type prior from
-    `infer_quality_from_row` (parameter count, reasoning/coder flags) instead
-    -- same "real scores always win, inferred gap-fills the rest" precedent
-    already used for the catalog's smartest/coding/tier tags.
     """
     key = str(canonical_id or model_id or "").lower()
     priors = quality_priors.get(key)
-    if priors:
-        return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
-    if fallback_model is not None:
-        inferred = infer_quality_from_row(fallback_model)
-        return inferred.get(task_type, inferred.get("unknown", _QUALITY_SCORE_DEFAULT))
-    return _QUALITY_SCORE_DEFAULT
+    if not priors:
+        return _QUALITY_SCORE_DEFAULT
+    return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
+
+
+def _gap_fill_quality_priors(
+    candidates: list[dict[str, Any]], quality_priors: dict[str, dict[str, float]]
+) -> dict[str, dict[str, float]]:
+    """Add a deterministic inferred prior for every candidate `model_quality_scores`
+    doesn't cover, so `_quality_score` stays a pure key lookup.
+
+    `model_quality_scores` only has 15 legacy models (seeded pre-MVP-refactor,
+    never updated for the current catalog) -- without this, virtually every
+    real candidate fell back to a flat `_QUALITY_SCORE_DEFAULT`, making
+    "quality" a constant across the whole catalog and collapsing routing to
+    cost-tier-only despite the classifier correctly identifying the task.
+    Manual/benchmark rows always win (never overwritten here) -- same "real
+    scores win, inferred gap-fills the rest" precedent already used for the
+    catalog's smartest/coding/tier category tags. Computed once per request,
+    not per scoring call. Never raises: a row that fails to parse (malformed
+    shape, non-string id fields) just gets no inferred entry and `_quality_score`
+    falls through to its existing flat-default behavior for that one model --
+    mirrors the try/except already wrapping `_fetch_pricing`/`_fetch_quality_priors`.
+    """
+    merged = dict(quality_priors)
+    for model in candidates:
+        key = str(model.get("canonical_id") or _display_model_id(model) or "").lower()
+        if not key or key in merged:
+            continue
+        try:
+            merged[key] = infer_quality_from_row(model)
+        except Exception as e:
+            logger.warning(f"model_selector: quality inference failed for {key!r}: {e}")
+    return merged
 
 
 def _display_model_id(model: dict[str, Any]) -> Any:
@@ -227,7 +245,7 @@ def select_model(
 
     ids = [c["id"] for c in candidates if c.get("id")]
     pricing_by_id = _fetch_pricing(ids)
-    quality_priors = _fetch_quality_priors()
+    quality_priors = _gap_fill_quality_priors(candidates, _fetch_quality_priors())
     preferred = set(preferred_models or [])
 
     scored: list[tuple[float, dict[str, Any]]] = []
@@ -237,11 +255,7 @@ def select_model(
             continue
         display_id = _display_model_id(model)
         quality = _quality_score(
-            display_id,
-            model.get("canonical_id"),
-            classification.task_type,
-            quality_priors,
-            fallback_model=model,
+            display_id, model.get("canonical_id"), classification.task_type, quality_priors
         )
         price = pricing_by_id.get(model_id, {})
         cost = _cost_score(price.get("in"))
