@@ -6,8 +6,10 @@ Picks/ranks the actual model to route to, given a candidate shortlist
 `classify_task`). Revives the scoring formula and MD5-hash sticky/hysteresis
 design from the deleted `src/services/model_selector.py` (commit `e94e095c`),
 but sources quality from the real DB-backed
-`model_capabilities_cache.get_quality_priors()` instead of a hardcoded table,
-and cost from `get_model_pricing_by_ids()` instead of a `ModelCapabilities`
+`model_capabilities_cache.get_quality_priors()` (manual/benchmark rows),
+gap-filled by `quality_inference.infer_quality_from_row` for every model that
+table doesn't cover, instead of a hardcoded table -- and cost from
+`get_model_pricing_by_ids()` instead of a `ModelCapabilities`
 schema object (that schema, `schemas/router.py`, was deleted separately and
 is not revived here — see gatewayz-backend#2214).
 
@@ -47,6 +49,7 @@ from typing import Any, Literal
 from src.config.supabase_config import get_client_for_query
 from src.db.models_catalog_db import get_model_pricing_by_ids
 from src.services.cache.model_capabilities_cache import get_quality_priors
+from src.services.quality_inference import infer_quality_from_row
 from src.services.task_classifier import TaskClassification
 
 logger = logging.getLogger(__name__)
@@ -108,7 +111,9 @@ def _quality_score(
     task_type: str,
     quality_priors: dict[str, dict[str, float]],
 ) -> float:
-    """Task-specific quality prior.
+    """Task-specific quality prior. Pure key lookup -- see `_gap_fill_quality_priors`
+    for how `quality_priors` gets an entry for every real candidate, not just the
+    15 legacy models `model_quality_scores` actually has rows for.
 
     `get_quality_priors()` is keyed by `canonical_id.lower()` (per
     `model_quality_scores.model_id`, which stores canonical ids), NOT by the
@@ -122,6 +127,37 @@ def _quality_score(
     if not priors:
         return _QUALITY_SCORE_DEFAULT
     return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
+
+
+def _gap_fill_quality_priors(
+    candidates: list[dict[str, Any]], quality_priors: dict[str, dict[str, float]]
+) -> dict[str, dict[str, float]]:
+    """Add a deterministic inferred prior for every candidate `model_quality_scores`
+    doesn't cover, so `_quality_score` stays a pure key lookup.
+
+    `model_quality_scores` only has 15 legacy models (seeded pre-MVP-refactor,
+    never updated for the current catalog) -- without this, virtually every
+    real candidate fell back to a flat `_QUALITY_SCORE_DEFAULT`, making
+    "quality" a constant across the whole catalog and collapsing routing to
+    cost-tier-only despite the classifier correctly identifying the task.
+    Manual/benchmark rows always win (never overwritten here) -- same "real
+    scores win, inferred gap-fills the rest" precedent already used for the
+    catalog's smartest/coding/tier category tags. Computed once per request,
+    not per scoring call. Never raises: a row that fails to parse (malformed
+    shape, non-string id fields) just gets no inferred entry and `_quality_score`
+    falls through to its existing flat-default behavior for that one model --
+    mirrors the try/except already wrapping `_fetch_pricing`/`_fetch_quality_priors`.
+    """
+    merged = dict(quality_priors)
+    for model in candidates:
+        key = str(model.get("canonical_id") or _display_model_id(model) or "").lower()
+        if not key or key in merged:
+            continue
+        try:
+            merged[key] = infer_quality_from_row(model)
+        except Exception as e:
+            logger.warning(f"model_selector: quality inference failed for {key!r}: {e}")
+    return merged
 
 
 def _display_model_id(model: dict[str, Any]) -> Any:
@@ -209,7 +245,7 @@ def select_model(
 
     ids = [c["id"] for c in candidates if c.get("id")]
     pricing_by_id = _fetch_pricing(ids)
-    quality_priors = _fetch_quality_priors()
+    quality_priors = _gap_fill_quality_priors(candidates, _fetch_quality_priors())
     preferred = set(preferred_models or [])
 
     scored: list[tuple[float, dict[str, Any]]] = []

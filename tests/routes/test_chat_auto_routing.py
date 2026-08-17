@@ -274,6 +274,37 @@ async def test_successful_resolution_against_real_select_model_with_raw_catalog_
 
 
 @pytest.mark.asyncio
+async def test_resolution_prefers_stronger_model_via_inference_fallback_end_to_end():
+    """End-to-end proof of the "route to the best model for the task" fix:
+    with zero manual `model_quality_scores` data (the live default -- that
+    table only covers 15 legacy models) and identical pricing so cost cannot
+    explain the outcome, a reasoning-heavy request must resolve to the larger
+    reasoning-flagged candidate, not tie-break arbitrarily.
+    """
+    req = _req(model="auto")
+    classification = TaskClassification(
+        task_type="complex_reasoning", capability_names=frozenset(), confidence=0.9
+    )
+    candidates = [
+        {"id": 1, "provider_model_id": "vendor/flagship-400b-reasoner", "is_reasoning": True},
+        {"id": 2, "provider_model_id": "vendor/tiny-3b-chat", "is_reasoning": False},
+    ]
+    identical_pricing = {1: {"in": 0.001, "out": 0.001}, 2: {"in": 0.001, "out": 0.001}}
+
+    with (
+        _enabled(),
+        patch("asyncio.to_thread", new=_passthrough_to_thread()),
+        patch("src.db.models_catalog_db.get_candidate_models", return_value=candidates),
+        patch("src.services.task_classifier.classify_task", return_value=classification),
+        patch("src.services.model_selector._fetch_pricing", return_value=identical_pricing),
+        patch("src.services.model_selector._fetch_quality_priors", return_value={}),
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "vendor/flagship-400b-reasoner"
+
+
+@pytest.mark.asyncio
 async def test_classification_error_raises_400_and_leaves_model_unchanged():
     req = _req(model="auto")
     failed_classification = TaskClassification(error="timeout")
