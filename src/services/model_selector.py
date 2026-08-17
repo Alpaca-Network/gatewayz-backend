@@ -6,8 +6,10 @@ Picks/ranks the actual model to route to, given a candidate shortlist
 `classify_task`). Revives the scoring formula and MD5-hash sticky/hysteresis
 design from the deleted `src/services/model_selector.py` (commit `e94e095c`),
 but sources quality from the real DB-backed
-`model_capabilities_cache.get_quality_priors()` instead of a hardcoded table,
-and cost from `get_model_pricing_by_ids()` instead of a `ModelCapabilities`
+`model_capabilities_cache.get_quality_priors()` (manual/benchmark rows),
+gap-filled by `quality_inference.infer_quality_from_row` for every model that
+table doesn't cover, instead of a hardcoded table -- and cost from
+`get_model_pricing_by_ids()` instead of a `ModelCapabilities`
 schema object (that schema, `schemas/router.py`, was deleted separately and
 is not revived here — see gatewayz-backend#2214).
 
@@ -47,6 +49,7 @@ from typing import Any, Literal
 from src.config.supabase_config import get_client_for_query
 from src.db.models_catalog_db import get_model_pricing_by_ids
 from src.services.cache.model_capabilities_cache import get_quality_priors
+from src.services.quality_inference import infer_quality_from_row
 from src.services.task_classifier import TaskClassification
 
 logger = logging.getLogger(__name__)
@@ -107,6 +110,7 @@ def _quality_score(
     canonical_id: str | None,
     task_type: str,
     quality_priors: dict[str, dict[str, float]],
+    fallback_model: dict[str, Any] | None = None,
 ) -> float:
     """Task-specific quality prior.
 
@@ -116,12 +120,26 @@ def _quality_score(
     `model_id` is str()'d defensively: candidates from `get_candidate_models`
     carry the `models` table's integer PK as `id`, not a string, and this used
     to raise unconditionally for every real candidate (`.lower()` on an int).
+
+    `model_quality_scores` only has 15 legacy models (seeded pre-MVP-refactor,
+    never updated for the current catalog) -- for every other model this used
+    to silently fall back to a flat `_QUALITY_SCORE_DEFAULT`, which made
+    "quality" a constant across virtually the whole catalog and collapsed
+    routing to cost-tier-only despite the classifier correctly identifying
+    the task. When `fallback_model` (the raw candidate row) is provided and
+    no manual/benchmark row matches, derive a real per-task-type prior from
+    `infer_quality_from_row` (parameter count, reasoning/coder flags) instead
+    -- same "real scores always win, inferred gap-fills the rest" precedent
+    already used for the catalog's smartest/coding/tier tags.
     """
     key = str(canonical_id or model_id or "").lower()
     priors = quality_priors.get(key)
-    if not priors:
-        return _QUALITY_SCORE_DEFAULT
-    return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
+    if priors:
+        return priors.get(task_type, priors.get("unknown", _QUALITY_SCORE_DEFAULT))
+    if fallback_model is not None:
+        inferred = infer_quality_from_row(fallback_model)
+        return inferred.get(task_type, inferred.get("unknown", _QUALITY_SCORE_DEFAULT))
+    return _QUALITY_SCORE_DEFAULT
 
 
 def _display_model_id(model: dict[str, Any]) -> Any:
@@ -219,7 +237,11 @@ def select_model(
             continue
         display_id = _display_model_id(model)
         quality = _quality_score(
-            display_id, model.get("canonical_id"), classification.task_type, quality_priors
+            display_id,
+            model.get("canonical_id"),
+            classification.task_type,
+            quality_priors,
+            fallback_model=model,
         )
         price = pricing_by_id.get(model_id, {})
         cost = _cost_score(price.get("in"))

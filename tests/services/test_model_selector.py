@@ -65,6 +65,75 @@ def test_quality_score_falls_back_to_unknown_task_then_default():
     assert _quality_score("model-a", None, "code_generation", priors_without_task) == 50.0
 
 
+def test_quality_score_falls_back_to_inference_when_no_manual_prior_matches():
+    """The actual fix: `model_quality_scores` only covers 15 legacy models, so
+    every other candidate used to get a flat `_QUALITY_SCORE_DEFAULT` --
+    making "quality" a constant across virtually the whole catalog and
+    collapsing routing to cost-tier-only despite a correct task_type. With a
+    `fallback_model` row, a large reasoning/coder model must score higher
+    than a small plain-chat model on code_generation, with zero manual data.
+    """
+    large_coder_reasoner = {
+        "id": 1,
+        "provider_model_id": "some-vendor/big-model-70b-coder",
+        "is_reasoning": True,
+    }
+    small_plain = {"id": 2, "provider_model_id": "some-vendor/tiny-model-3b", "is_reasoning": False}
+
+    big_score = _quality_score(
+        "some-vendor/big-model-70b-coder",
+        None,
+        "code_generation",
+        {},
+        fallback_model=large_coder_reasoner,
+    )
+    small_score = _quality_score(
+        "some-vendor/tiny-model-3b", None, "code_generation", {}, fallback_model=small_plain
+    )
+
+    assert big_score > small_score
+
+
+def test_quality_score_without_fallback_model_keeps_flat_default():
+    """No behavior change for callers that don't pass a candidate row (existing
+    direct unit tests of `_quality_score`) -- inference is opt-in via
+    `fallback_model`, not a silent global default swap."""
+    assert _quality_score("unknown-model", None, "code_generation", {}) == 50.0
+
+
+def test_manual_prior_still_wins_over_inference():
+    """ "Real scores always win" -- a `model_quality_scores` hit must not be
+    shadowed by the inference fallback even when a `fallback_model` row is
+    also supplied."""
+    priors = {"openai/gpt-4o-mini": {"code_generation": 82.0}}
+    model = {"id": 1, "provider_model_id": "openai/gpt-4o-mini"}
+
+    score = _quality_score(
+        "openai/gpt-4o-mini", None, "code_generation", priors, fallback_model=model
+    )
+
+    assert score == 82.0
+
+
+def test_select_model_ranks_large_reasoning_model_above_small_plain_model_in_quality_mode():
+    """End-to-end: with zero manual quality data and no canonical_id (today's
+    live production shape), "quality" mode must still prefer the objectively
+    stronger model for a reasoning-heavy task -- not just tie everything at
+    the flat default and let cost alone decide.
+    """
+    candidates = [
+        {"id": 1, "provider_model_id": "vendor/flagship-400b-reasoner", "is_reasoning": True},
+        {"id": 2, "provider_model_id": "vendor/tiny-3b-chat", "is_reasoning": False},
+    ]
+    # Deliberately IDENTICAL pricing so cost cannot explain the outcome.
+    pricing = {1: {"in": 0.001, "out": 0.001}, 2: {"in": 0.001, "out": 0.001}}
+    classification = _classification(task_type="complex_reasoning")
+
+    result = _patched_select(candidates, classification, mode="quality", pricing=pricing)
+
+    assert result.model_id == "vendor/flagship-400b-reasoner"
+
+
 def test_hash_for_selection_is_deterministic():
     a = _hash_for_selection("conv-123", "code_generation")
     b = _hash_for_selection("conv-123", "code_generation")
