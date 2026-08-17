@@ -165,13 +165,17 @@ def supports_caching(model: dict[str, Any]) -> bool:
     if explicit is not None:
         return explicit
     metadata = model.get("metadata") if isinstance(model.get("metadata"), dict) else {}
-    provider = str(
-        model.get("provider_slug")
-        or model.get("source_gateway")
-        or metadata.get("provider_slug")
-        or metadata.get("source_gateway")
-        or ""
-    ).strip().lower()
+    provider = (
+        str(
+            model.get("provider_slug")
+            or model.get("source_gateway")
+            or metadata.get("provider_slug")
+            or metadata.get("source_gateway")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     if provider in CACHE_CAPABLE_PROVIDERS:
         return True
     model_id = _model_identifier(model).lower()
