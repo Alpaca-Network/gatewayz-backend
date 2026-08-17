@@ -240,6 +240,40 @@ async def test_successful_resolution_mutates_req_model_in_place():
 
 
 @pytest.mark.asyncio
+async def test_successful_resolution_against_real_select_model_with_raw_catalog_row():
+    """End-to-end regression: `get_candidate_models` returns raw `models` table
+    rows (integer `id` PK, string `provider_model_id`, no `canonical_id`) --
+    exactly gatewayz-backend's live production shape. `select_model` itself is
+    NOT mocked here (only its own DB fetches are), so this exercises the real
+    `_quality_score`/`_display_model_id` path end-to-end. Before the fix, this
+    raised `AttributeError` on the first candidate (`.lower()` on an int) and
+    every real auto-routing request crashed instead of routing.
+    """
+    req = _req(model="auto")
+    classification = TaskClassification(
+        task_type="code_generation", capability_names=frozenset(), confidence=0.9
+    )
+    raw_row = {
+        "id": 2298,
+        "provider_model_id": "openai/gpt-4o-mini",
+        "canonical_id": None,
+        "supports_function_calling": True,
+    }
+
+    with (
+        _enabled(),
+        patch("asyncio.to_thread", new=_passthrough_to_thread()),
+        patch("src.db.models_catalog_db.get_candidate_models", return_value=[raw_row]),
+        patch("src.services.task_classifier.classify_task", return_value=classification),
+        patch("src.services.model_selector._fetch_pricing", return_value={}),
+        patch("src.services.model_selector._fetch_quality_priors", return_value={}),
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    assert req.model == "openai/gpt-4o-mini"
+
+
+@pytest.mark.asyncio
 async def test_classification_error_raises_400_and_leaves_model_unchanged():
     req = _req(model="auto")
     failed_classification = TaskClassification(error="timeout")

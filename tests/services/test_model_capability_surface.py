@@ -11,6 +11,7 @@ from src.services.model_capability_surface import (
     build_supported_parameters,
     enrich_model_with_capabilities,
     supports_caching,
+    supports_reasoning,
     supports_tools,
     supports_vision,
 )
@@ -175,3 +176,78 @@ class TestServeTimeEnrichment:
     def test_row_with_no_pricing_or_provider_still_enriches(self):
         model = enrich_model_with_capabilities({"id": "anthropic/claude-sonnet-4"})
         assert model["capabilities"]["tools"] is True
+
+
+class TestRawCatalogRow:
+    """`get_candidate_models` (auto-routing) passes raw `models` table rows,
+    not the public API-formatted dict every other test in this file uses.
+
+    That row shape has an INTEGER primary key in `id` (only meaningful for
+    the `model_pricing` join) and the actual model slug in `provider_model_id`
+    instead, with `provider_slug`/`source_gateway` nested under `metadata`.
+    Regression: every check here used to call `.lower()` on the raw int `id`
+    and raise `AttributeError` for every real auto-routing candidate.
+    """
+
+    DB_ROW = {
+        "id": 2298,
+        "provider_model_id": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8",
+        "canonical_id": None,
+        "supports_function_calling": True,
+        "supports_vision": False,
+        "is_reasoning": False,
+        "metadata": {"provider_slug": "together", "source_gateway": "together"},
+    }
+
+    def test_supports_tools_does_not_raise_on_int_id(self):
+        assert supports_tools(dict(self.DB_ROW)) is True
+
+    def test_supports_vision_does_not_raise_on_int_id(self):
+        assert supports_vision(dict(self.DB_ROW)) is False
+
+    def test_supports_caching_does_not_raise_on_int_id(self):
+        # "together" isn't in CACHE_CAPABLE_PROVIDERS -- just must not crash.
+        assert supports_caching(dict(self.DB_ROW)) is False
+
+    def test_supports_caching_reads_provider_from_metadata(self):
+        row = dict(self.DB_ROW)
+        row["metadata"] = {"provider_slug": "anthropic", "source_gateway": "anthropic"}
+        assert supports_caching(row) is True  # cache-capable provider, nested under metadata
+
+    def test_family_fallback_uses_provider_model_id_not_int_id(self):
+        row = {"id": 999, "provider_model_id": "anthropic/claude-sonnet-4"}
+        assert supports_tools(row) is True
+        assert supports_caching(row) is True
+
+    def test_no_provider_model_id_and_non_string_id_is_safe(self):
+        assert supports_tools({"id": 12345}) is False
+
+    def test_explicit_false_supports_function_calling_does_not_override_family_rescue(self):
+        """Regression (code review on gatewayz-backend#2227): `supports_function_calling`
+        is the catalog-sync heuristic KNOWN_TOOL_FAMILIES was added to rescue
+        models from (Kimi/Moonshot/etc under-reported by that narrower
+        heuristic). Treating its explicit False as authoritative here would
+        silently reintroduce that exact under-reporting bug for auto-routing.
+        """
+        row = {
+            "id": 4242,
+            "provider_model_id": "moonshot/kimi-k2.6",
+            "supports_function_calling": False,
+        }
+        assert supports_tools(row) is True
+
+    def test_explicit_true_supports_function_calling_is_trusted(self):
+        row = {"id": 1, "provider_model_id": "obscure/model", "supports_function_calling": True}
+        assert supports_tools(row) is True
+
+
+class TestSupportsReasoning:
+    def test_flag_true(self):
+        assert supports_reasoning({"id": 1, "is_reasoning": True}) is True
+
+    def test_flag_false(self):
+        assert supports_reasoning({"id": 1, "is_reasoning": False}) is False
+
+    def test_missing_flag_fails_safe(self):
+        """No family-heuristic fallback -- unflagged models report unsupported."""
+        assert supports_reasoning({"id": "openai/o3"}) is False
