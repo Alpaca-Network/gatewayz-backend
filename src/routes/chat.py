@@ -19,8 +19,8 @@ from src.db.chat_completion_requests import save_chat_completion_request_with_co
 from src.schemas import ProxyRequest
 from src.security.deps import get_optional_api_key
 from src.services.anonymous_rate_limiter import (
-    ANONYMOUS_ALLOWED_MODELS,
     ANONYMOUS_DAILY_LIMIT,
+    get_anonymous_allowed_models_sample,
     get_anonymous_rate_limit_headers,
     validate_anonymous_request,
 )
@@ -426,7 +426,7 @@ async def chat_completions(
                                     "message": anon_validation["reason"],
                                     "type": "model_not_allowed",
                                     "code": "anonymous_model_restricted",
-                                    "allowed_models": ANONYMOUS_ALLOWED_MODELS[:5],
+                                    "allowed_models": get_anonymous_allowed_models_sample(5),
                                 }
                             },
                         )

@@ -12,7 +12,7 @@ Key Features:
 - Fallback to in-memory when Redis unavailable
 
 Security Design:
-- Anonymous users can ONLY use models ending with :free
+- Anonymous users can ONLY use models known to be free (DB is_free flag)
 - Maximum 3 requests per day per IP address
 - No credit deduction (free models have $0 cost)
 - IP fingerprinting to prevent simple bypasses
@@ -91,12 +91,38 @@ def _cleanup_memory_cache():
         logger.info(f"Cleaned up {len(expired_keys)} expired anonymous rate limit entries")
 
 
+def get_anonymous_allowed_models_sample(n: int = 5) -> list[str]:
+    """A sample of models currently usable by anonymous users, for error messages.
+
+    Prefers the real, DB-verified free catalog over ANONYMOUS_ALLOWED_MODELS,
+    which is a last-resort fallback that can drift out of sync with the DB
+    (see its own comment) and name models that don't exist in the catalog.
+    """
+    try:
+        from src.services.model_capabilities_cache import get_free_models
+
+        live_free = sorted(get_free_models())
+        if live_free:
+            return live_free[:n]
+    except Exception:
+        pass
+    return ANONYMOUS_ALLOWED_MODELS[:n]
+
+
 def is_model_allowed_for_anonymous(model_id: str) -> bool:
     """
     Check if a model is allowed for anonymous users.
 
-    Only models explicitly whitelisted AND ending with :free are allowed.
-    This prevents anonymous users from accessing expensive models.
+    Only models known to be free (DB is_free flag, or the hardcoded fallback
+    list when the DB cache is unavailable) are allowed. This prevents
+    anonymous users from accessing paid models.
+
+    A ``:free`` suffix used to be a hard prerequisite here, but the catalog's
+    actual free models aren't guaranteed to carry that suffix (production's
+    current free set — e.g. "unsloth/gemma-2-9b-it" — doesn't), which made
+    this reject every real free model and leave anonymous access fully
+    unusable. is_free_model() is the source of truth; it already only
+    matches models genuinely known to be free.
 
     Args:
         model_id: The model identifier
@@ -105,10 +131,6 @@ def is_model_allowed_for_anonymous(model_id: str) -> bool:
         True if model is allowed for anonymous access
     """
     if not model_id:
-        return False
-
-    # Must end with :free suffix
-    if not model_id.endswith(":free"):
         return False
 
     # Check DB-backed free model list first, then fall back to hardcoded whitelist
@@ -241,7 +263,7 @@ def validate_anonymous_request(ip_address: str, model_id: str) -> dict[str, Any]
     # Check model whitelist first (fast fail)
     model_allowed = is_model_allowed_for_anonymous(model_id)
     if not model_allowed:
-        allowed_models_str = ", ".join(ANONYMOUS_ALLOWED_MODELS[:3]) + "..."
+        allowed_models_str = ", ".join(get_anonymous_allowed_models_sample(3)) + "..."
         return {
             "allowed": False,
             "reason": f"Model '{model_id}' is not available for anonymous users. Anonymous access is limited to free models: {allowed_models_str}. Please sign up for an account to access this model.",
