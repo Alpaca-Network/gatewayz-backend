@@ -83,6 +83,35 @@ _WEIGHTS: dict[OptimizationMode, tuple[float, float]] = {
     "balanced": (0.5, 0.5),
 }
 
+# task_type -> concrete OptimizationMode, for resolve_adaptive_mode(). Used
+# only when the user has chosen "let Gatewayz decide" (routing_preferences
+# mode="auto") instead of pinning an explicit price/quality/fast mode.
+_ADAPTIVE_MODE_BY_TASK_TYPE: dict[str, OptimizationMode] = {
+    "code_generation": "quality",
+    "code_review": "quality",
+    "complex_reasoning": "quality",
+    "data_analysis": "quality",
+    "math_calculation": "quality",
+    "simple_qa": "fast",
+    "conversation": "fast",
+    "summarization": "fast",
+    "translation": "fast",
+    "creative_writing": "balanced",
+    "tool_use": "balanced",
+    "unknown": "balanced",
+}
+
+
+def resolve_adaptive_mode(task_type: str) -> OptimizationMode:
+    """Concrete `OptimizationMode` for a classified `task_type`, when the
+    user has chosen "let Gatewayz decide" rather than pinning a mode.
+
+    Pure lookup, no side effects. Any `task_type` not in
+    `_ADAPTIVE_MODE_BY_TASK_TYPE` (including "unknown" and anything future
+    classification adds) falls back to "balanced".
+    """
+    return _ADAPTIVE_MODE_BY_TASK_TYPE.get(task_type, "balanced")
+
 
 @dataclass(frozen=True)
 class ModelSelection:

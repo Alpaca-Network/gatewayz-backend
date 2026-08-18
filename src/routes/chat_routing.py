@@ -140,8 +140,12 @@ async def resolve_auto_routed_model(
         logger.info("auto-routing: disabled by routing_policies for this key")
         return
 
+    from src.services.routing_preferences import get_routing_preferences_for_key
+
+    mode, industry = await asyncio.to_thread(get_routing_preferences_for_key, api_key)
+
     from src.db.models_catalog_db import get_candidate_models
-    from src.services.model_selector import select_model
+    from src.services.model_selector import resolve_adaptive_mode, select_model
     from src.services.task_classifier import classify_task
 
     original_alias = req.model
@@ -152,6 +156,7 @@ async def resolve_auto_routed_model(
         messages,
         tools=req.tools,
         response_format=req.response_format,
+        industry=industry,
     )
     if classification.error is not None:
         logger.warning(
@@ -159,6 +164,10 @@ async def resolve_auto_routed_model(
             f"({classification.error}); rejecting"
         )
         _raise_auto_routing_failed()
+
+    # mode="auto" ("let Gatewayz decide") resolves to a concrete mode from
+    # the classified task_type; an explicit user-chosen mode passes through.
+    resolved_mode = mode if mode != "auto" else resolve_adaptive_mode(classification.task_type)
 
     candidates = await asyncio.to_thread(
         get_candidate_models,
@@ -168,6 +177,7 @@ async def resolve_auto_routed_model(
         select_model,
         candidates,
         classification,
+        mode=resolved_mode,
         conversation_id=conversation_id,
     )
     if not selection.model_id:
@@ -180,6 +190,6 @@ async def resolve_auto_routed_model(
     logger.info(
         f"auto-routing: resolved alias {original_alias!r} -> {selection.model_id!r} "
         f"(task_type={classification.task_type}, confidence={classification.confidence}, "
-        f"reason={selection.reason})"
+        f"reason={selection.reason}, resolved_mode={resolved_mode})"
     )
     req.model = selection.model_id

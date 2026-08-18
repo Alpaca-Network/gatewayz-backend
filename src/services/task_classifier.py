@@ -52,6 +52,24 @@ _SYSTEM_PROMPT = (
 )
 
 
+def _system_prompt_for(industry: str | None) -> str:
+    """`_SYSTEM_PROMPT`, optionally extended with one line of industry
+    context for this classification call only.
+
+    This hint is scoped to the internal classifier LLM call -- it is never
+    injected into the actual downstream chat request sent to the selected
+    model. `None` or `"general"` (the routing_preferences default, meaning
+    "no industry set/selected") leave the prompt unchanged.
+    """
+    if not industry or industry == "general":
+        return _SYSTEM_PROMPT
+    return (
+        _SYSTEM_PROMPT
+        + f" The user's line of work is {industry}; weigh that context when judging "
+        "task_type, but don't let it override clear signals in the message itself."
+    )
+
+
 @dataclass(frozen=True)
 class TaskClassification:
     """Task category + required capabilities + confidence for one request."""
@@ -111,6 +129,7 @@ def classify_task(
     tools: list[dict[str, Any]] | None = None,
     response_format: dict[str, Any] | None = None,
     timeout_seconds: float | None = None,
+    industry: str | None = None,
 ) -> TaskClassification:
     """
     Classify a chat request's task type and required capabilities.
@@ -126,6 +145,12 @@ def classify_task(
         response_format: the request's response_format field, if any.
         timeout_seconds: hard wall-clock ceiling for the classification call.
             Defaults to Config.TASK_CLASSIFIER_TIMEOUT_SECONDS.
+        industry: optional user-set industry hint (see
+            `src.services.routing_preferences.INDUSTRIES`) folded into the
+            classifier's own system prompt as one extra sentence of context.
+            `None` or `"general"` leave the prompt unchanged. Scoped to this
+            internal classification call only -- never forwarded to the
+            actual downstream chat request.
 
     Returns:
         A TaskClassification. On any failure (timeout, API error, malformed
@@ -153,7 +178,7 @@ def classify_task(
         # stop waiting but leave the request and its worker thread running.
         response = make_openai_request(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": _system_prompt_for(industry)},
                 {"role": "user", "content": user_text},
             ],
             model=Config.TASK_CLASSIFIER_MODEL,

@@ -9,6 +9,7 @@ from src.services.model_selector import (
     _hash_for_selection,
     _quality_score,
     log_shadow_selection,
+    resolve_adaptive_mode,
     select_model,
 )
 from src.services.task_classifier import TaskClassification
@@ -153,6 +154,35 @@ def test_hash_for_selection_varies_by_task_type():
     a = _hash_for_selection("conv-123", "code_generation")
     b = _hash_for_selection("conv-123", "creative_writing")
     assert a != b
+
+
+# --------------------------------------------------------------------------- #
+# resolve_adaptive_mode
+# --------------------------------------------------------------------------- #
+def test_resolve_adaptive_mode_quality_bucket():
+    for task_type in (
+        "code_generation",
+        "code_review",
+        "complex_reasoning",
+        "data_analysis",
+        "math_calculation",
+    ):
+        assert resolve_adaptive_mode(task_type) == "quality"
+
+
+def test_resolve_adaptive_mode_fast_bucket():
+    for task_type in ("simple_qa", "conversation", "summarization", "translation"):
+        assert resolve_adaptive_mode(task_type) == "fast"
+
+
+def test_resolve_adaptive_mode_balanced_bucket():
+    for task_type in ("creative_writing", "tool_use", "unknown"):
+        assert resolve_adaptive_mode(task_type) == "balanced"
+
+
+def test_resolve_adaptive_mode_unrecognized_task_type_falls_back_to_balanced():
+    assert resolve_adaptive_mode("not_a_real_task_type") == "balanced"
+    assert resolve_adaptive_mode("") == "balanced"
 
 
 # --------------------------------------------------------------------------- #

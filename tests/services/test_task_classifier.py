@@ -139,6 +139,37 @@ def test_uses_most_recent_user_message_in_multiturn_conversation():
     assert sent_messages[-1]["content"] == "second question"
 
 
+def test_industry_hint_appears_in_system_prompt_when_set():
+    with patch("src.services.task_classifier.make_openai_request") as mock_request:
+        mock_request.return_value = _fake_response()
+        classify_task(messages=[{"role": "user", "content": "hi"}], industry="legal")
+
+    sent_messages = mock_request.call_args.kwargs["messages"]
+    assert sent_messages[0]["role"] == "system"
+    system_prompt = sent_messages[0]["content"]
+    assert "legal" in system_prompt
+
+
+def test_industry_hint_absent_when_industry_is_none():
+    with patch("src.services.task_classifier.make_openai_request") as mock_request:
+        mock_request.return_value = _fake_response()
+        classify_task(messages=[{"role": "user", "content": "hi"}])
+
+    sent_messages = mock_request.call_args.kwargs["messages"]
+    system_prompt = sent_messages[0]["content"]
+    assert "line of work" not in system_prompt
+
+
+def test_industry_hint_absent_when_industry_is_general():
+    with patch("src.services.task_classifier.make_openai_request") as mock_request:
+        mock_request.return_value = _fake_response()
+        classify_task(messages=[{"role": "user", "content": "hi"}], industry="general")
+
+    sent_messages = mock_request.call_args.kwargs["messages"]
+    system_prompt = sent_messages[0]["content"]
+    assert "line of work" not in system_prompt
+
+
 def test_flattens_multipart_text_content():
     with patch("src.services.task_classifier.make_openai_request") as mock_request:
         mock_request.return_value = _fake_response()
