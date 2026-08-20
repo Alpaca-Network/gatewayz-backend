@@ -43,11 +43,16 @@ def _req(
 
 @contextmanager
 def _enabled():
-    """Enable the global kill-switch and a not-disabled per-key policy — the
+    """Enable the global kill-switch, a not-disabled per-key policy, and the
+    default (mode="auto", industry="general") routing preferences — the
     baseline every test exercising the actual engine needs (default is OFF)."""
     with (
         patch("src.routes.chat_routing.Config.AUTO_ROUTING_ENABLED", True),
         patch("src.db.routing_policies.is_auto_routing_disabled_for_key", return_value=False),
+        patch(
+            "src.services.routing_preferences.get_routing_preferences_for_key",
+            return_value=("auto", "general"),
+        ),
     ):
         yield
 
@@ -233,10 +238,10 @@ async def test_successful_resolution_mutates_req_model_in_place():
         await resolve_auto_routed_model(req, is_anonymous=False)
 
     assert req.model == "openai/gpt-4o-mini"
-    # is_auto_routing_disabled_for_key, classify_task, get_candidate_models,
-    # select_model — all four blocking calls must go through asyncio.to_thread,
-    # never called directly.
-    assert mock_to_thread.call_count == 4
+    # is_auto_routing_disabled_for_key, get_routing_preferences_for_key,
+    # classify_task, get_candidate_models, select_model — all five blocking
+    # calls must go through asyncio.to_thread, never called directly.
+    assert mock_to_thread.call_count == 5
 
 
 @pytest.mark.asyncio
@@ -357,6 +362,67 @@ async def test_conversation_id_threaded_through_to_select_model():
         await resolve_auto_routed_model(req, is_anonymous=False, conversation_id="42")
 
     assert mock_select.call_args.kwargs["conversation_id"] == "42"
+
+
+@pytest.mark.asyncio
+async def test_routing_preferences_industry_threaded_into_classify_task():
+    """The key's `routing_industry` preference must reach `classify_task`'s
+    `industry` kwarg (which folds it into the classifier's own prompt --
+    see task_classifier._system_prompt_for)."""
+    req = _req(model="auto")
+    classification = TaskClassification(task_type="code_generation", capability_names=frozenset())
+    selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer")
+
+    with (
+        patch("src.routes.chat_routing.Config.AUTO_ROUTING_ENABLED", True),
+        patch("src.db.routing_policies.is_auto_routing_disabled_for_key", return_value=False),
+        patch(
+            "src.services.routing_preferences.get_routing_preferences_for_key",
+            return_value=("price", "legal"),
+        ),
+        patch("asyncio.to_thread", new=_passthrough_to_thread()),
+        patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
+        patch(
+            "src.services.task_classifier.classify_task", return_value=classification
+        ) as mock_classify,
+        patch(
+            "src.services.model_selector.select_model", return_value=selection
+        ) as mock_select,
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False, api_key="gw_live_abc123")
+
+    assert mock_classify.call_args.kwargs["industry"] == "legal"
+    # explicit mode="price" passes straight through -- not adaptive-resolved.
+    assert mock_select.call_args.kwargs["mode"] == "price"
+
+
+@pytest.mark.asyncio
+async def test_routing_preferences_auto_mode_resolves_via_adaptive_mapping():
+    """mode="auto" ("let Gatewayz decide") must resolve to a concrete mode
+    from the classified task_type via `resolve_adaptive_mode`, not pass
+    "auto" straight through to `select_model`."""
+    req = _req(model="auto")
+    classification = TaskClassification(task_type="code_generation", capability_names=frozenset())
+    selection = ModelSelection(model_id="openai/gpt-4o-mini", reason="top_scorer")
+
+    with (
+        patch("src.routes.chat_routing.Config.AUTO_ROUTING_ENABLED", True),
+        patch("src.db.routing_policies.is_auto_routing_disabled_for_key", return_value=False),
+        patch(
+            "src.services.routing_preferences.get_routing_preferences_for_key",
+            return_value=("auto", "general"),
+        ),
+        patch("asyncio.to_thread", new=_passthrough_to_thread()),
+        patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
+        patch("src.services.task_classifier.classify_task", return_value=classification),
+        patch(
+            "src.services.model_selector.select_model", return_value=selection
+        ) as mock_select,
+    ):
+        await resolve_auto_routed_model(req, is_anonymous=False)
+
+    # code_generation -> "quality" per resolve_adaptive_mode.
+    assert mock_select.call_args.kwargs["mode"] == "quality"
 
 
 @pytest.mark.asyncio
