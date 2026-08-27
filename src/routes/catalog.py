@@ -819,7 +819,9 @@ async def get_models(
         ):
             if not breaker.should_skip("openrouter"):
                 try:
-                    openrouter_models = get_cached_models("openrouter") or []
+                    openrouter_models = (
+                        await asyncio.to_thread(get_cached_models, "openrouter") or []
+                    )
                     # Record success even for empty results - empty is not a failure
                     breaker.record_success("openrouter")
                     if not openrouter_models:
@@ -849,7 +851,7 @@ async def get_models(
                     continue
                 if gateway_value not in (_slug, "all"):
                     continue
-                _fetched = get_cached_models(_slug) or []
+                _fetched = await asyncio.to_thread(get_cached_models, _slug) or []
                 provider_models[_slug] = _fetched
                 if not _fetched and gateway_value == _slug:
                     logger.warning("%s models unavailable - continuing without them", _slug)
