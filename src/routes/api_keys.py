@@ -24,6 +24,7 @@ from src.services.auth_rate_limiting import (
     AuthRateLimitType,
     check_auth_rate_limit,
 )
+from src.db.activity import get_user_usage_since
 from src.services.user_lookup_cache import get_user
 from src.utils.security_validators import sanitize_for_logging
 
@@ -411,18 +412,66 @@ async def delete_user_api_key(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+def _parse_since(since: str) -> str:
+    """Normalize a `since` value to an ISO-8601 UTC timestamp.
+
+    Accepts ISO-8601 (with or without timezone; naive is treated as UTC),
+    epoch seconds, or epoch milliseconds. Raises ValueError on anything else.
+    """
+    value = since.strip()
+    if value.replace(".", "", 1).isdigit():
+        epoch = float(value)
+        if epoch > 1e12:  # milliseconds
+            epoch /= 1000.0
+        return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+
+
 @router.get("/user/api-keys/usage", tags=["authentication"])
-async def get_user_api_key_usage(api_key: str = Depends(get_api_key)):
-    """Get usage statistics for all API keys of the user"""
+async def get_user_api_key_usage(
+    api_key: str = Depends(get_api_key),
+    since: str | None = None,
+):
+    """Get usage statistics for all API keys of the user.
+
+    Optional `since` (ISO-8601, epoch seconds, or epoch ms): additionally
+    returns `usage_since` — the user's aggregate requests/tokens/cost from
+    that moment to now. Aggregation is user-level (activity records carry no
+    per-key linkage); per-key lifetime counters are unchanged.
+    """
     try:
         user = get_user(api_key)
         if not user:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
+        since_iso = None
+        if since is not None:
+            try:
+                since_iso = _parse_since(since)
+            except (ValueError, OverflowError, OSError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Invalid `since` value — use ISO-8601 "
+                        "(e.g. 2026-08-27T00:00:00Z), epoch seconds, or epoch ms"
+                    ),
+                )
+
         usage_stats = get_user_all_api_keys_usage(user["id"])
 
         if usage_stats is None:
             raise HTTPException(status_code=500, detail="Failed to retrieve usage statistics")
+
+        if since_iso is not None:
+            usage_since = get_user_usage_since(user["id"], since_iso)
+            if usage_since is None:
+                raise HTTPException(
+                    status_code=500, detail="Failed to aggregate usage since timestamp"
+                )
+            usage_stats = {**usage_stats, "usage_since": usage_since}
 
         # Add Phase 4 audit logging information
         enhanced_usage = usage_stats.copy()

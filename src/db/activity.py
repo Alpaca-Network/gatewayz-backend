@@ -235,6 +235,47 @@ def get_user_activity_stats(
         }
 
 
+def get_user_usage_since(user_id: int, since_iso: str) -> dict[str, Any] | None:
+    """
+    Aggregate a user's inference usage from `since_iso` (inclusive) to now.
+
+    Backs the `since` parameter on GET /user/api-keys/usage. Aggregation is
+    user-level because activity_log records carry no api_key linkage — under
+    the one-user-per-organization convention this is exactly org-level usage.
+
+    Args:
+        user_id: User ID
+        since_iso: ISO-8601 timestamp (UTC) lower bound, inclusive
+
+    Returns:
+        {"from", "to", "total_requests", "total_tokens", "total_cost_usd"},
+        or None on error (callers must treat None as a failure, not zero).
+    """
+    try:
+        client = get_supabase_client()
+        now_iso = datetime.now(UTC).isoformat()
+        result = (
+            client.table("activity_log")
+            .select("tokens,cost")
+            .eq("user_id", int(user_id))
+            .gte("timestamp", since_iso)
+            .execute()
+        )
+        rows = result.data or []
+        return {
+            "from": since_iso,
+            "to": now_iso,
+            "total_requests": len(rows),
+            "total_tokens": sum(int(r.get("tokens") or 0) for r in rows),
+            "total_cost_usd": round(sum(float(r.get("cost") or 0.0) for r in rows), 6),
+        }
+    except Exception as e:
+        logger.error(
+            "Error aggregating usage since %s for user %s: %s", since_iso, user_id, e
+        )
+        return None
+
+
 def get_user_activity_log(
     user_id: int,
     limit: int = 50,
