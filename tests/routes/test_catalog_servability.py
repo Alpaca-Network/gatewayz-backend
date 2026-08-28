@@ -71,3 +71,29 @@ class TestAnnotateServability:
 
     def test_returns_input_on_empty(self):
         assert _annotate_servability([]) == []
+
+
+class TestRowIsServableHardening:
+    def test_non_dict_pricing_fails_closed_without_raising(self):
+        assert _row_is_servable({"id": "m", "pricing": "n/a"}) is False
+
+    def test_free_suffix_on_non_openrouter_shaped_id_not_trusted(self):
+        # Mirrors model_has_pricing: bare ':free' on a slashless id naming a
+        # first-party provider is treated as spoofable, not honored.
+        assert _row_is_servable({"id": "anthropic-claude:free", "pricing": {}}) is False
+
+
+class TestAnnotateServabilityCopyRows:
+    def test_copy_rows_leaves_source_dicts_unmutated(self):
+        shared = {"id": "a", "pricing": {"prompt": "0.001", "completion": "0.002"}}
+        out = _annotate_servability([shared], copy_rows=True)
+        assert out[0]["servable"] is True
+        assert "servable" not in shared, "shared cache dicts must not be mutated"
+
+    def test_bad_row_does_not_lose_annotation_on_others(self):
+        rows = [
+            {"id": "bad", "providers": "not-a-list-nor-none"},
+            {"id": "good", "pricing": {"prompt": "0.001", "completion": "0.002"}},
+        ]
+        out = _annotate_servability(rows)
+        assert out[1]["servable"] is True

@@ -336,3 +336,115 @@ class TestStreamErrorPropagation:
         types = [p["type"] for p in parsed]
         assert "error" in types
         assert "message_stop" not in types
+
+
+class TestStreamErrorPropagationNonFatal:
+    """Advisory error chunks (emitted after content was fully delivered) must
+    NOT terminate the stream — the inverse fabrication of the #2236 bug."""
+
+    async def _collect(self, chunks, model="claude-sonnet-4"):
+        async def _fake_stream():
+            for c in chunks:
+                yield c
+
+        events = []
+        async for e in _stream_anthropic_events(_fake_stream(), model, "msg_1"):
+            events.append(e)
+        return events
+
+    def _parse(self, events):
+        parsed = []
+        for e in events:
+            for line in e.strip().split("\n"):
+                if line.startswith("data: "):
+                    parsed.append(json.loads(line[len("data: ") :]))
+        return parsed
+
+    @pytest.mark.asyncio
+    async def test_normalization_warning_does_not_terminate(self):
+        chunks = [
+            'data: {"choices":[{"delta":{"content":"full answer"},"finish_reason":null}]}',
+            'data: {"error":{"message":"Warning: 5 of 8 chunks could not be normalized",'
+            '"type":"stream_normalization_warning","status":500}}',
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
+            '"usage":{"prompt_tokens":10,"completion_tokens":5}}',
+        ]
+        parsed = self._parse(await self._collect(chunks))
+        types = [p["type"] for p in parsed]
+        assert "error" not in types, "advisory warning must not become a terminal error"
+        assert "message_stop" in types
+        usage = [p for p in parsed if p["type"] == "message_delta"][0]["usage"]
+        assert usage["output_tokens"] == 5
+
+    @pytest.mark.asyncio
+    async def test_fatal_error_closes_inner_stream(self):
+        closed = {"value": False}
+
+        class _FakeStream:
+            def __init__(self):
+                self._chunks = iter(
+                    ['data: {"error":{"message":"boom","type":"provider_error","status":502}}']
+                )
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(self._chunks)
+                except StopIteration:
+                    raise StopAsyncIteration
+
+            async def aclose(self):
+                closed["value"] = True
+
+        events = []
+        async for e in _stream_anthropic_events(_FakeStream(), "m", "msg_1"):
+            events.append(e)
+        assert any(e.startswith("event: error") for e in events)
+        assert closed["value"], "fatal error must aclose() the inner stream"
+
+
+class TestNonStreaming503Mapping:
+    @pytest.mark.asyncio
+    async def _error_type_for(self, status, detail):
+        from src.routes.messages import create_message
+
+        req = AnthropicMessagesRequest(
+            model="claude-sonnet-4",
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+        )
+        with patch(
+            "src.routes.chat.chat_completions",
+            new=AsyncMock(side_effect=HTTPException(status_code=status, detail=detail)),
+        ):
+            with pytest.raises(HTTPException) as exc:
+                await create_message(
+                    req=req,
+                    background_tasks=None,
+                    request=_FakeRequest({"x-api-key": "k"}),
+                    api_key="k",
+                )
+        return exc.value.detail["error"]["type"]
+
+    @pytest.mark.asyncio
+    async def test_transient_503_maps_to_overloaded(self):
+        error_type = await self._error_type_for(
+            503, {"error": {"message": "capacity limit on our side", "code": "capacity"}}
+        )
+        assert error_type == "overloaded_error"
+
+    @pytest.mark.asyncio
+    async def test_pricing_not_configured_503_is_not_retryable(self):
+        error_type = await self._error_type_for(
+            503,
+            {
+                "error": {
+                    "message": "Pricing for model 'x' is not configured.",
+                    "type": "service_unavailable",
+                    "code": "pricing_not_configured",
+                }
+            },
+        )
+        assert error_type == "api_error"

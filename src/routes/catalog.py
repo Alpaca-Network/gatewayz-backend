@@ -168,10 +168,22 @@ def _row_is_servable(m: dict) -> bool:
     cannot price is a row the gate will refuse.
     """
     model_id = str(m.get("id") or "")
-    if m.get("is_free") or model_id.endswith(":free"):
+    if m.get("is_free"):
         return True
+    if model_id.endswith(":free"):
+        # Mirror model_has_pricing: ':free' is honored only for
+        # OpenRouter-shaped IDs (the gate treats other ':free' as spoofable).
+        if "/" in model_id or not any(
+            provider in model_id.lower()
+            for provider in ("anthropic", "google", "cohere", "mistral", "deepseek")
+        ):
+            return True
 
-    def _priced(pricing: dict) -> bool:
+    def _priced(pricing) -> bool:
+        if not isinstance(pricing, dict):
+            # Rows can arrive from cached JSON/DB with unexpected shapes; a
+            # row we cannot price is a row the gate will refuse.
+            return False
         try:
             prompt = float(pricing.get("prompt") or 0)
             completion = float(pricing.get("completion") or 0)
@@ -186,21 +198,33 @@ def _row_is_servable(m: dict) -> bool:
     return _priced(m.get("pricing") or {})
 
 
-def _annotate_servability(models: list) -> list:
+def _annotate_servability(models: list, copy_rows: bool = False) -> list:
     """Stamp ``servable`` on each served model row.
 
     ``is_active`` says a model exists in the catalog; it says nothing about
     whether the pricing gate will admit it, and partners sync registries from
     this response (issue #2236: xai/moonshot listed active, refused as
-    unpriced). Fails open — annotation trouble never blocks the catalog.
+    unpriced). Fails open PER ROW — one odd row never blocks the catalog or
+    leaves the rest of the page unannotated.
+
+    ``copy_rows=True`` returns shallow-copied rows: required when the list's
+    dicts are shared with a process-wide cache (e.g. the local-memory catalog
+    tier), which must never be mutated as a serving side effect.
     """
-    try:
-        for m in models:
-            if isinstance(m, dict):
-                m["servable"] = _row_is_servable(m)
-    except Exception as e:
-        logger.warning(f"servability annotation failed, returning unannotated models: {e}")
-    return models
+    annotated: list = []
+    for m in models:
+        if isinstance(m, dict):
+            try:
+                servable = _row_is_servable(m)
+            except Exception as e:
+                logger.warning(f"servability annotation failed for row {m.get('id')!r}: {e}")
+                annotated.append(m)
+                continue
+            m = {**m, "servable": servable} if copy_rows else m
+            if not copy_rows:
+                m["servable"] = servable
+        annotated.append(m)
+    return annotated
 
 
 @router.get("/routers", tags=["routers"])
@@ -926,7 +950,7 @@ async def get_models(
         # and paginating, so totals/pagination stay correct. Inert until a sweep
         # marks a model down; 429/timeout/auth never hide a model.
         _pre_gate_count = len(models)
-        models = _annotate_servability(_apply_health_gating(models))
+        models = _apply_health_gating(models)
         if len(models) != _pre_gate_count:
             logger.info(
                 f"Health gating removed {_pre_gate_count - len(models)} 'down' models "
@@ -971,6 +995,11 @@ async def get_models(
         for model in models:
             enhanced_model = enhance_model_with_provider_info(model, enhanced_providers)
             enhanced_models.append(enhanced_model)
+
+        # Servability is annotated AFTER pagination (only the served page needs
+        # it) and on the enhanced copies, never on the shared catalog-cache
+        # dicts. The annotated page is what gets cached below.
+        enhanced_models = _annotate_servability(enhanced_models)
 
         note = {
             "openrouter": "OpenRouter catalog",
@@ -2374,8 +2403,9 @@ async def search_models(
             all_models = []
 
         # Match the primary catalog's health contract before applying search
-        # filters, counts, sorting, or pagination.
-        all_models = _annotate_servability(_apply_health_gating(all_models))
+        # filters, counts, sorting, or pagination. (Servability is annotated
+        # post-pagination, on copies — these dicts are shared cache objects.)
+        all_models = _apply_health_gating(all_models)
 
         # Apply filters
         filtered_models = all_models
@@ -2483,6 +2513,8 @@ async def search_models(
         # Apply pagination
         total_count = len(filtered_models)
         paginated_models = filtered_models[offset : offset + limit]
+        # copy_rows: these dicts belong to the process-wide catalog cache.
+        paginated_models = _annotate_servability(paginated_models, copy_rows=True)
 
         return {
             "success": True,
