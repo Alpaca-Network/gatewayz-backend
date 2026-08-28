@@ -67,3 +67,22 @@ def test_map_provider_error_generic_message_is_sanitized():
     detail = str(result.detail)
     assert "http" not in detail
     assert "deadbeefdeadbeefdeadbeefdeadbeef00" not in detail
+
+
+# Anthropic's unfunded-account error is an HTTP 400 whose text names the credit
+# balance — no 402 anywhere. Issue #2236: this surfaced as an opaque 502
+# provider_error instead of the 503 capacity path (friendly message + Sentry
+# top-up alert).
+REAL_ANTHROPIC_LOW_CREDIT = (
+    "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
+    "'message': 'Your credit balance is too low to access the Anthropic API. "
+    "Please go to Plans & Billing to upgrade or purchase credits.'}}"
+)
+
+
+def test_anthropic_low_credit_balance_is_budget_error():
+    assert is_provider_budget_error(REAL_ANTHROPIC_LOW_CREDIT) is True
+
+
+def test_generic_low_credit_phrasings_detected():
+    assert is_provider_budget_error("your credit balance is too low") is True

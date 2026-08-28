@@ -545,7 +545,11 @@ class ChatInferenceHandler:
                 sanitize_provider_error_for_user,
             )
 
-            if mapped.status_code == 402 or is_provider_budget_error(str(e)):
+            # BYOK requests run on the USER's provider key: their empty balance
+            # is not a gateway capacity outage, so skip the "our side" message
+            # and the ops top-up alert and fall through to the sanitized
+            # provider-error path instead.
+            if not byok_token and (mapped.status_code == 402 or is_provider_budget_error(str(e))):
                 try:
                     from src.utils.sentry_context import capture_provider_error
 

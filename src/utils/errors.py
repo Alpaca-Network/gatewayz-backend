@@ -416,6 +416,9 @@ _PROVIDER_BUDGET_PATTERNS = (
     "weekly limit",
     "insufficient_quota",
     "payment required",
+    # Anthropic's unfunded-account error is an HTTP 400 (not 402) whose text is
+    # the only budget signal (issue #2236).
+    "credit balance is too low",
 )
 
 _URL_RE = re.compile(r"https?://\S+")

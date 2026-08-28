@@ -385,9 +385,7 @@ async def test_routing_preferences_industry_threaded_into_classify_task():
         patch(
             "src.services.task_classifier.classify_task", return_value=classification
         ) as mock_classify,
-        patch(
-            "src.services.model_selector.select_model", return_value=selection
-        ) as mock_select,
+        patch("src.services.model_selector.select_model", return_value=selection) as mock_select,
     ):
         await resolve_auto_routed_model(req, is_anonymous=False, api_key="gw_live_abc123")
 
@@ -415,9 +413,7 @@ async def test_routing_preferences_auto_mode_resolves_via_adaptive_mapping():
         patch("asyncio.to_thread", new=_passthrough_to_thread()),
         patch("src.db.models_catalog_db.get_candidate_models", return_value=[{"id": "m"}]),
         patch("src.services.task_classifier.classify_task", return_value=classification),
-        patch(
-            "src.services.model_selector.select_model", return_value=selection
-        ) as mock_select,
+        patch("src.services.model_selector.select_model", return_value=selection) as mock_select,
     ):
         await resolve_auto_routed_model(req, is_anonymous=False)
 

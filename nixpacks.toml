@@ -11,7 +11,7 @@ cmds = [
 
 [phases.build]
 cmds = [
-  '. /opt/venv/bin/activate && pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.44.0',
+  '. /opt/venv/bin/activate && pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.109.1',
   '. /opt/venv/bin/activate && pip install --no-cache-dir -r requirements.txt'
 ]
 

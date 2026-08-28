@@ -98,6 +98,22 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+# Gateway/stream error types -> Anthropic SSE error types
+# (https://docs.anthropic.com/en/api/errors). Anything unmapped is an api_error.
+_STREAM_ERROR_TYPE_MAP = {
+    "rate_limit_error": "rate_limit_error",
+    "plan_limit_exceeded": "rate_limit_error",
+    "auth_error": "authentication_error",
+    "not_found_error": "not_found_error",
+    "capacity_error": "overloaded_error",
+}
+
+# Error-shaped chunks that are advisories emitted AFTER content was fully
+# delivered (chat_streaming continues to [DONE] after them). Terminating on
+# these would discard a delivered-and-billed response.
+_NON_FATAL_STREAM_ERROR_TYPES = frozenset({"stream_normalization_warning"})
+
+
 async def _stream_anthropic_events(
     openai_stream,
     model: str,
@@ -155,6 +171,36 @@ async def _stream_anthropic_events(
             chunk = json.loads(payload)
         except json.JSONDecodeError:
             continue
+
+        # A provider failure travels through the inner stream as an error chunk
+        # (see stream_normalizer.create_error_sse_chunk). Before this check it
+        # fell into the no-choices `continue` below and the stream ended with a
+        # clean zero-usage message_stop — a fabricated success (issue #2236).
+        # Surface it as Anthropic's own SSE error event and stop.
+        if chunk.get("error"):
+            err = chunk["error"] if isinstance(chunk["error"], dict) else {}
+            if err.get("type") in _NON_FATAL_STREAM_ERROR_TYPES:
+                continue
+            yield _sse(
+                "error",
+                {
+                    "type": "error",
+                    "error": {
+                        "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
+                        # Never fall back to repr-ing the raw error object —
+                        # it may carry internal fields (provider, request_id).
+                        "message": err.get("message") or "upstream provider error",
+                    },
+                },
+            )
+            # Close the inner generator so its finally blocks (provider
+            # connection release, cleanup) run now, not at GC time.
+            if hasattr(openai_stream, "aclose"):
+                try:
+                    await openai_stream.aclose()
+                except Exception:
+                    pass
+            return
 
         if chunk.get("usage"):
             usage = chunk["usage"]
@@ -321,7 +367,14 @@ async def create_message(
             403: "permission_error",
             404: "not_found_error",
             429: "rate_limit_error",
+            # Provider capacity/budget exhaustion (e.g. unfunded upstream
+            # account) surfaces as 503 — Anthropic SDKs retry overloaded_error.
+            503: "overloaded_error",
         }.get(exc.status_code, "api_error")
+        # A 503 for missing pricing config is deterministic, not transient —
+        # don't invite SDK retries on it.
+        if error_type == "overloaded_error" and "pricing_not_configured" in message:
+            error_type = "api_error"
         raise _anthropic_error(exc.status_code, error_type, message) from exc
 
     if req.stream:

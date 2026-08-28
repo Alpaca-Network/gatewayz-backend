@@ -11,7 +11,7 @@ fi
 # so subsequent container restarts (Railway keeps the container alive and just
 # re-runs start.sh on crash/deploy) skip the 30-60s pip install entirely.
 # The stamp records the required versions; if requirements change, update REQUIRED_VERSIONS.
-REQUIRED_VERSIONS="httpx==0.27.0,openai==1.44.0"
+REQUIRED_VERSIONS="httpx==0.27.0,openai==1.109.1"
 STAMP_FILE="/tmp/.dep_versions_ok"
 
 needs_reinstall=false
@@ -24,9 +24,9 @@ if [ ! -f "$STAMP_FILE" ] || [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$REQUIRED_
     echo "Current httpx version: $HTTPX_VERSION"
     echo "Current openai version: $OPENAI_VERSION"
 
-    if [ "$HTTPX_VERSION" != "0.27.0" ] || [ "$OPENAI_VERSION" != "1.44.0" ]; then
+    if [ "$HTTPX_VERSION" != "0.27.0" ] || [ "$OPENAI_VERSION" != "1.109.1" ]; then
         echo "⚠️  Wrong versions detected! Fixing..."
-        python -m pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.44.0
+        python -m pip install --no-cache-dir --force-reinstall httpx==0.27.0 openai==1.109.1
         echo "✅ Dependencies fixed!"
     else
         echo "✅ Correct versions already installed"
