@@ -37,7 +37,7 @@ def test_invalid_industry_falls_back_to_default():
 
 
 def test_balanced_is_not_a_valid_user_selectable_mode():
-    """"balanced" is intentionally internal-only (model_selector's fallback);
+    """ "balanced" is intentionally internal-only (model_selector's fallback);
     a stray "balanced" value in settings must fall back to the default,
     never pass through as if it were user-selected."""
     user = {"settings": {"routing_mode": "balanced"}}
