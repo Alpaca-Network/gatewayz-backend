@@ -12,7 +12,12 @@ from src.routes.catalog import _annotate_servability, _row_is_servable
 
 class TestRowIsServable:
     def test_priced_model_is_servable(self):
-        assert _row_is_servable({"id": "openai/gpt-4o", "pricing": {"prompt": "0.0000025", "completion": "0.00001"}}) is True
+        assert (
+            _row_is_servable(
+                {"id": "openai/gpt-4o", "pricing": {"prompt": "0.0000025", "completion": "0.00001"}}
+            )
+            is True
+        )
 
     def test_missing_pricing_is_not_servable(self):
         assert _row_is_servable({"id": "xai/grok-4"}) is False
@@ -21,7 +26,10 @@ class TestRowIsServable:
         assert _row_is_servable({"id": "moonshot/kimi-k2", "pricing": {}}) is False
 
     def test_zero_priced_paid_model_is_not_servable(self):
-        assert _row_is_servable({"id": "xai/grok-4", "pricing": {"prompt": "0", "completion": "0"}}) is False
+        assert (
+            _row_is_servable({"id": "xai/grok-4", "pricing": {"prompt": "0", "completion": "0"}})
+            is False
+        )
 
     def test_free_flag_is_servable(self):
         assert _row_is_servable({"id": "some/model", "is_free": True}) is True
@@ -30,7 +38,9 @@ class TestRowIsServable:
         assert _row_is_servable({"id": "meta-llama/llama-3:free", "pricing": {}}) is True
 
     def test_garbage_pricing_values_fail_closed(self):
-        assert _row_is_servable({"id": "m", "pricing": {"prompt": "n/a", "completion": None}}) is False
+        assert (
+            _row_is_servable({"id": "m", "pricing": {"prompt": "n/a", "completion": None}}) is False
+        )
 
     def test_unique_models_shape_any_priced_provider(self):
         row = {

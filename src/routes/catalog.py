@@ -720,7 +720,9 @@ async def get_models(
             logger.info(f"✅ Returning cached response for gateway={gateway_value}")
             # Defense-in-depth: re-apply health gating to cached data in case the
             # entry was cached before a model was marked 'down' (inert otherwise).
-            gated_data = _annotate_servability(_apply_health_gating(cached_response.get("data", [])))
+            gated_data = _annotate_servability(
+                _apply_health_gating(cached_response.get("data", []))
+            )
             if len(gated_data) != len(cached_response.get("data", [])):
                 cached_response = {**cached_response, "data": gated_data}
             cached_json = _dumps_fast(cached_response)

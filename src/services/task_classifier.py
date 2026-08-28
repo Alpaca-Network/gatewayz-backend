@@ -64,8 +64,7 @@ def _system_prompt_for(industry: str | None) -> str:
     if not industry or industry == "general":
         return _SYSTEM_PROMPT
     return (
-        _SYSTEM_PROMPT
-        + f" The user's line of work is {industry}; weigh that context when judging "
+        _SYSTEM_PROMPT + f" The user's line of work is {industry}; weigh that context when judging "
         "task_type, but don't let it override clear signals in the message itself."
     )
 

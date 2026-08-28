@@ -27,6 +27,5 @@ def test_sdk_accepts_max_completion_tokens():
 
 def test_sdk_accepts_reasoning_effort():
     assert "reasoning_effort" in _create_params(), (
-        "installed openai SDK predates reasoning_effort; "
-        "reasoning requests will TypeError"
+        "installed openai SDK predates reasoning_effort; " "reasoning requests will TypeError"
     )
