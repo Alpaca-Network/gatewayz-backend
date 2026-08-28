@@ -29,7 +29,7 @@ dependencies = [
 
     # External services
     "requests==2.31.0",
-    "openai==1.44.0",
+    "openai==1.109.1",
     "resend==0.8.0",
     "stripe==13.0.1",
 

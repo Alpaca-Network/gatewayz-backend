@@ -256,3 +256,83 @@ class TestErrorEnvelope:
                 req=req, background_tasks=None, request=_FakeRequest({}), api_key="k"
             )
         assert exc.value.status_code == 400
+
+
+class TestStreamErrorPropagation:
+    """A provider error inside the inner stream must surface as an Anthropic
+    ``error`` SSE event and terminate the stream — never be swallowed into a
+    well-formed empty ``message_stop`` (issue #2236: streaming fabricated
+    success for every failing provider)."""
+
+    async def _collect(self, chunks, model="claude-sonnet-4"):
+        async def _fake_stream():
+            for c in chunks:
+                yield c
+
+        events = []
+        async for e in _stream_anthropic_events(_fake_stream(), model, "msg_1"):
+            events.append(e)
+        return events
+
+    def _parse(self, events):
+        parsed = []
+        for e in events:
+            for line in e.strip().split("\n"):
+                if line.startswith("data: "):
+                    parsed.append(json.loads(line[len("data: ") :]))
+        return parsed
+
+    @pytest.mark.asyncio
+    async def test_error_chunk_becomes_error_event(self):
+        chunks = [
+            'data: {"error":{"message":"The model provider is temporarily unavailable.",'
+            '"type":"provider_error","status":502}}'
+        ]
+        events = await self._collect(chunks)
+        assert any(e.startswith("event: error") for e in events)
+        parsed = self._parse(events)
+        error_events = [p for p in parsed if p["type"] == "error"]
+        assert error_events, "expected an Anthropic error event"
+        assert error_events[0]["error"]["type"] == "api_error"
+        assert "temporarily unavailable" in error_events[0]["error"]["message"]
+
+    @pytest.mark.asyncio
+    async def test_error_terminates_stream_without_fabricated_success(self):
+        chunks = [
+            'data: {"error":{"message":"boom","type":"provider_error","status":502}}',
+            # Anything after the error must not be processed.
+            'data: {"choices":[{"delta":{"content":"ghost"},"finish_reason":"stop"}]}',
+        ]
+        parsed = self._parse(await self._collect(chunks))
+        types = [p["type"] for p in parsed]
+        assert "message_stop" not in types, "error stream must not end with message_stop"
+        assert "message_delta" not in types, "error stream must not report end_turn/usage"
+        assert not any(p["type"] == "content_block_delta" for p in parsed)
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_maps_to_anthropic_rate_limit_error(self):
+        chunks = [
+            'data: {"error":{"message":"Rate limit exceeded. Please wait.",'
+            '"type":"rate_limit_error","status":429}}'
+        ]
+        parsed = self._parse(await self._collect(chunks))
+        error_events = [p for p in parsed if p["type"] == "error"]
+        assert error_events[0]["error"]["type"] == "rate_limit_error"
+
+    @pytest.mark.asyncio
+    async def test_capacity_error_maps_to_overloaded(self):
+        chunks = ['data: {"error":{"message":"capacity","type":"capacity_error","status":503}}']
+        parsed = self._parse(await self._collect(chunks))
+        error_events = [p for p in parsed if p["type"] == "error"]
+        assert error_events[0]["error"]["type"] == "overloaded_error"
+
+    @pytest.mark.asyncio
+    async def test_error_after_content_still_surfaces(self):
+        chunks = [
+            'data: {"choices":[{"delta":{"content":"partial"},"finish_reason":null}]}',
+            'data: {"error":{"message":"died mid-stream","type":"stream_timeout","status":504}}',
+        ]
+        parsed = self._parse(await self._collect(chunks))
+        types = [p["type"] for p in parsed]
+        assert "error" in types
+        assert "message_stop" not in types

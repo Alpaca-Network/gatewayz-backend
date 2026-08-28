@@ -159,6 +159,50 @@ def _apply_health_gating(models: list) -> list:
         return models
 
 
+def _row_is_servable(m: dict) -> bool:
+    """Whether the inference pricing gate would admit this catalog row.
+
+    Mirrors ``enforce_model_pricing_gate``/``model_has_pricing`` from the row's
+    own data: explicitly free models are servable; paid models need a nonzero
+    prompt or completion price. Unparseable pricing fails closed — a row we
+    cannot price is a row the gate will refuse.
+    """
+    model_id = str(m.get("id") or "")
+    if m.get("is_free") or model_id.endswith(":free"):
+        return True
+
+    def _priced(pricing: dict) -> bool:
+        try:
+            prompt = float(pricing.get("prompt") or 0)
+            completion = float(pricing.get("completion") or 0)
+        except (TypeError, ValueError):
+            return False
+        return prompt > 0 or completion > 0
+
+    providers = m.get("providers")
+    if isinstance(providers, list) and providers:
+        # unique_models=True shape: one row, per-provider pricing.
+        return any(_priced(p.get("pricing") or {}) for p in providers if isinstance(p, dict))
+    return _priced(m.get("pricing") or {})
+
+
+def _annotate_servability(models: list) -> list:
+    """Stamp ``servable`` on each served model row.
+
+    ``is_active`` says a model exists in the catalog; it says nothing about
+    whether the pricing gate will admit it, and partners sync registries from
+    this response (issue #2236: xai/moonshot listed active, refused as
+    unpriced). Fails open — annotation trouble never blocks the catalog.
+    """
+    try:
+        for m in models:
+            if isinstance(m, dict):
+                m["servable"] = _row_is_servable(m)
+    except Exception as e:
+        logger.warning(f"servability annotation failed, returning unannotated models: {e}")
+    return models
+
+
 @router.get("/routers", tags=["routers"])
 async def get_intelligent_routers():
     """
@@ -676,7 +720,7 @@ async def get_models(
             logger.info(f"✅ Returning cached response for gateway={gateway_value}")
             # Defense-in-depth: re-apply health gating to cached data in case the
             # entry was cached before a model was marked 'down' (inert otherwise).
-            gated_data = _apply_health_gating(cached_response.get("data", []))
+            gated_data = _annotate_servability(_apply_health_gating(cached_response.get("data", [])))
             if len(gated_data) != len(cached_response.get("data", [])):
                 cached_response = {**cached_response, "data": gated_data}
             cached_json = _dumps_fast(cached_response)
@@ -880,7 +924,7 @@ async def get_models(
         # and paginating, so totals/pagination stay correct. Inert until a sweep
         # marks a model down; 429/timeout/auth never hide a model.
         _pre_gate_count = len(models)
-        models = _apply_health_gating(models)
+        models = _annotate_servability(_apply_health_gating(models))
         if len(models) != _pre_gate_count:
             logger.info(
                 f"Health gating removed {_pre_gate_count - len(models)} 'down' models "
@@ -1905,7 +1949,7 @@ async def get_models_by_category_api(
         )
 
     models = get_models_by_category(tag, limit=limit, include_inactive=include_inactive)
-    models = _apply_health_gating(models)
+    models = _annotate_servability(_apply_health_gating(models))
     return {
         "category": tag,
         "data": models,
@@ -2329,7 +2373,7 @@ async def search_models(
 
         # Match the primary catalog's health contract before applying search
         # filters, counts, sorting, or pagination.
-        all_models = _apply_health_gating(all_models)
+        all_models = _annotate_servability(_apply_health_gating(all_models))
 
         # Apply filters
         filtered_models = all_models

@@ -98,6 +98,17 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+# Gateway/stream error types -> Anthropic SSE error types
+# (https://docs.anthropic.com/en/api/errors). Anything unmapped is an api_error.
+_STREAM_ERROR_TYPE_MAP = {
+    "rate_limit_error": "rate_limit_error",
+    "plan_limit_exceeded": "rate_limit_error",
+    "auth_error": "authentication_error",
+    "not_found_error": "not_found_error",
+    "capacity_error": "overloaded_error",
+}
+
+
 async def _stream_anthropic_events(
     openai_stream,
     model: str,
@@ -155,6 +166,27 @@ async def _stream_anthropic_events(
             chunk = json.loads(payload)
         except json.JSONDecodeError:
             continue
+
+        # A provider failure travels through the inner stream as an error chunk
+        # (see stream_normalizer.create_error_sse_chunk). Before this check it
+        # fell into the no-choices `continue` below and the stream ended with a
+        # clean zero-usage message_stop — a fabricated success (issue #2236).
+        # Surface it as Anthropic's own SSE error event and stop.
+        if chunk.get("error"):
+            err = chunk["error"] if isinstance(chunk["error"], dict) else {}
+            yield _sse(
+                "error",
+                {
+                    "type": "error",
+                    "error": {
+                        "type": _STREAM_ERROR_TYPE_MAP.get(err.get("type"), "api_error"),
+                        "message": err.get("message")
+                        or str(chunk["error"])
+                        or "upstream provider error",
+                    },
+                },
+            )
+            return
 
         if chunk.get("usage"):
             usage = chunk["usage"]
@@ -321,6 +353,9 @@ async def create_message(
             403: "permission_error",
             404: "not_found_error",
             429: "rate_limit_error",
+            # Provider capacity/budget exhaustion (e.g. unfunded upstream
+            # account) surfaces as 503 — Anthropic SDKs retry overloaded_error.
+            503: "overloaded_error",
         }.get(exc.status_code, "api_error")
         raise _anthropic_error(exc.status_code, error_type, message) from exc
 
