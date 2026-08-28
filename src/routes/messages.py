@@ -299,6 +299,29 @@ async def _stream_anthropic_events(
     yield _sse("message_stop", {"type": "message_stop"})
 
 
+def _unwrap_chat_result(result):
+    """Normalize chat_completions' return value to the response dict.
+
+    chat_completions returns a plain dict in some paths and a JSONResponse
+    (rendered BYTES in .body, carrying rate-limit headers) in others — the
+    latter is what production returns today. Anything else is a genuine
+    unexpected shape.
+    """
+    if isinstance(result, dict):
+        return result
+    body = getattr(result, "body", None)
+    if isinstance(body, (bytes, bytearray)):
+        try:
+            decoded = json.loads(body.decode())
+        except (ValueError, UnicodeDecodeError):
+            raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
+        if isinstance(decoded, dict):
+            return decoded
+    elif isinstance(body, dict):
+        return body
+    raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
+
+
 @router.post("/messages", tags=["messages"])
 async def create_message(
     req: AnthropicMessagesRequest,
@@ -392,9 +415,7 @@ async def create_message(
             },
         )
 
-    openai_response = result if isinstance(result, dict) else getattr(result, "body", result)
-    if not isinstance(openai_response, dict):
-        raise _anthropic_error(500, "api_error", "unexpected upstream response shape")
+    openai_response = _unwrap_chat_result(result)
 
     anthropic_response = transform_openai_to_anthropic(
         openai_response,
