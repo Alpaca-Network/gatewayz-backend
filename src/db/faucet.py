@@ -83,9 +83,9 @@ def create_pending_claim(user_id: int, wallet_address: str, amount: int) -> dict
 def mark_claim_sent(claim_id: int, tx_hash: str) -> None:
     try:
         client = get_supabase_client()
-        client.table(_CLAIMS_TABLE).update(
-            {"status": "sent", "tx_hash": tx_hash}
-        ).eq("id", claim_id).execute()
+        client.table(_CLAIMS_TABLE).update({"status": "sent", "tx_hash": tx_hash}).eq(
+            "id", claim_id
+        ).execute()
     except Exception as e:
         logger.warning(f"faucet_claims mark-sent failed for claim {claim_id}: {e}")
 
@@ -93,8 +93,8 @@ def mark_claim_sent(claim_id: int, tx_hash: str) -> None:
 def mark_claim_failed(claim_id: int, error: str) -> None:
     try:
         client = get_supabase_client()
-        client.table(_CLAIMS_TABLE).update(
-            {"status": "failed", "error": error}
-        ).eq("id", claim_id).execute()
+        client.table(_CLAIMS_TABLE).update({"status": "failed", "error": error}).eq(
+            "id", claim_id
+        ).execute()
     except Exception as e:
         logger.warning(f"faucet_claims mark-failed failed for claim {claim_id}: {e}")

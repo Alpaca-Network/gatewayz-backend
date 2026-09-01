@@ -161,9 +161,7 @@ class Config:
         _get_env_var("WAYZ_STAKING_SYNC_INTERVAL_MINUTES", "15")
     )
     # Placeholder; the real value is a product decision, not set here.
-    WAYZ_DAILY_INFERENCE_CAPACITY = int(
-        _get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0")
-    )
+    WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
     # WAYZ testnet faucet (gatewayz-backend#2245). Unset contract address
     # or minter key (the default -- nothing is deployed to Fuji yet, no
     # minter key provisioned) means /faucet/claim returns 503.

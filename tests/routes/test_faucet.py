@@ -149,9 +149,7 @@ def test_claim_rejects_ineligible_account(
 @patch("src.routes.faucet.get_existing_claim")
 @patch("src.routes.faucet.has_completed_at_least_one_request")
 @patch("src.routes.faucet.get_redis_client")
-def test_claim_rejects_duplicate(
-    mock_get_redis, mock_eligible, mock_existing, mock_client_cls
-):
+def test_claim_rejects_duplicate(mock_get_redis, mock_eligible, mock_existing, mock_client_cls):
     mock_client_cls.from_config.return_value = MagicMock()
     account = Account.create()
     nonce = "test-nonce-123"
@@ -170,9 +168,7 @@ def test_claim_rejects_duplicate(
 @patch("src.routes.faucet.WayzTokenFaucetClient")
 @patch("src.routes.faucet.create_pending_claim")
 @patch("src.routes.faucet.get_redis_client")
-def test_claim_returns_503_when_faucet_unconfigured(
-    mock_get_redis, mock_create, mock_client_cls
-):
+def test_claim_returns_503_when_faucet_unconfigured(mock_get_redis, mock_create, mock_client_cls):
     from src.services.chain.wayz_token_faucet_client import WayzTokenFaucetClientError
 
     mock_client_cls.from_config.side_effect = WayzTokenFaucetClientError("not configured")

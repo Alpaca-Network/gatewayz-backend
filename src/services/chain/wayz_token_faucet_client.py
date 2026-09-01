@@ -48,7 +48,7 @@ class WayzTokenFaucetClient:
         )
 
     @classmethod
-    def from_config(cls) -> "WayzTokenFaucetClient":
+    def from_config(cls) -> WayzTokenFaucetClient:
         if not Config.WAYZ_TOKEN_CONTRACT_ADDRESS or not Config.WAYZ_FAUCET_MINTER_PRIVATE_KEY:
             raise WayzTokenFaucetClientError(
                 "WAYZ_TOKEN_CONTRACT_ADDRESS or WAYZ_FAUCET_MINTER_PRIVATE_KEY is not set"
