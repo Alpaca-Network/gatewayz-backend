@@ -1,0 +1,26 @@
+[
+  {
+    "type": "function",
+    "name": "stakedBalanceOf",
+    "stateMutability": "view",
+    "inputs": [{"name": "", "type": "address"}],
+    "outputs": [{"name": "", "type": "uint256"}]
+  },
+  {
+    "type": "function",
+    "name": "totalStaked",
+    "stateMutability": "view",
+    "inputs": [],
+    "outputs": [{"name": "", "type": "uint256"}]
+  },
+  {
+    "type": "event",
+    "name": "Staked",
+    "anonymous": false,
+    "inputs": [
+      {"name": "staker", "type": "address", "indexed": true},
+      {"name": "amount", "type": "uint256", "indexed": false},
+      {"name": "newTotalStaked", "type": "uint256", "indexed": false}
+    ]
+  }
+]

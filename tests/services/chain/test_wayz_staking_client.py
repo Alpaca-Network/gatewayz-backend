@@ -1,0 +1,83 @@
+"""Tests for src.services.chain.wayz_staking_client (gatewayz-backend#2244)."""
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from src.services.chain.wayz_staking_client import WayzStakingClient, WayzStakingClientError
+
+
+@pytest.fixture
+def sb():
+    """No-op fixture whose mere presence bypasses the autouse DB-skip in
+    tests/conftest.py -- this is a pure unit test with everything mocked."""
+    return None
+
+
+def _make_client_with_mocked_web3():
+    with patch("src.services.chain.wayz_staking_client.Web3") as mock_web3_cls:
+        mock_w3 = MagicMock()
+        mock_web3_cls.return_value = mock_w3
+        mock_web3_cls.to_checksum_address.side_effect = lambda a: a
+        mock_contract = MagicMock()
+        mock_w3.eth.contract.return_value = mock_contract
+        client = WayzStakingClient("http://fake-rpc", "0xcontract")
+        return client, mock_w3, mock_contract
+
+
+def test_current_block_reads_eth_block_number(sb):
+    client, mock_w3, _ = _make_client_with_mocked_web3()
+    mock_w3.eth.block_number = 12345
+    assert client.current_block() == 12345
+
+
+def test_staked_balance_of_calls_contract_function(sb):
+    client, _, mock_contract = _make_client_with_mocked_web3()
+    mock_contract.functions.stakedBalanceOf.return_value.call.return_value = 500
+    assert client.staked_balance_of("0xabc") == 500
+    mock_contract.functions.stakedBalanceOf.assert_called_once_with("0xabc")
+
+
+def test_total_staked_calls_contract_function(sb):
+    client, _, mock_contract = _make_client_with_mocked_web3()
+    mock_contract.functions.totalStaked.return_value.call.return_value = 1000
+    assert client.total_staked() == 1000
+
+
+def test_staked_event_addresses_deduplicates_lowercases_and_sorts(sb):
+    client, _, mock_contract = _make_client_with_mocked_web3()
+    mock_contract.events.Staked.return_value.get_logs.return_value = [
+        {"args": {"staker": "0xABC"}},
+        {"args": {"staker": "0xabc"}},
+        {"args": {"staker": "0xDEF"}},
+    ]
+    result = client.staked_event_addresses(1, 100)
+    assert result == ["0xabc", "0xdef"]
+    mock_contract.events.Staked.return_value.get_logs.assert_called_once_with(
+        fromBlock=1, toBlock=100
+    )
+
+
+def test_staked_event_addresses_returns_empty_for_invalid_range(sb):
+    client, _, mock_contract = _make_client_with_mocked_web3()
+    result = client.staked_event_addresses(100, 1)
+    assert result == []
+    mock_contract.events.Staked.return_value.get_logs.assert_not_called()
+
+
+def test_from_config_raises_when_contract_address_unset(sb):
+    with patch("src.services.chain.wayz_staking_client.Config") as mock_config:
+        mock_config.WAYZ_STAKING_CONTRACT_ADDRESS = None
+        with pytest.raises(WayzStakingClientError):
+            WayzStakingClient.from_config()
+
+
+def test_from_config_builds_client_when_contract_address_set(sb):
+    with patch("src.services.chain.wayz_staking_client.Config") as mock_config:
+        mock_config.WAYZ_STAKING_CONTRACT_ADDRESS = "0xcontract"
+        mock_config.AVALANCHE_FUJI_RPC_URL = "http://fake-rpc"
+        with patch("src.services.chain.wayz_staking_client.Web3") as mock_web3_cls:
+            mock_web3_cls.return_value = MagicMock()
+            mock_web3_cls.to_checksum_address.side_effect = lambda a: a
+            client = WayzStakingClient.from_config()
+            assert isinstance(client, WayzStakingClient)
