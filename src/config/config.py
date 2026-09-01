@@ -149,6 +149,21 @@ class Config:
     LEDGER_RECONCILIATION_WINDOW_HOURS = int(
         os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
     )
+    # WAYZ staking on-chain sync (gatewayz-backend#2244). Unset contract
+    # address (the default -- nothing is deployed to Fuji yet) means the
+    # scheduler no-ops at startup rather than erroring.
+    AVALANCHE_FUJI_RPC_URL = _get_env_var(
+        "AVALANCHE_FUJI_RPC_URL", "https://api.avax-test.network/ext/bc/C/rpc"
+    )
+    WAYZ_STAKING_CONTRACT_ADDRESS = _get_env_var("WAYZ_STAKING_CONTRACT_ADDRESS")
+    WAYZ_STAKING_DEPLOY_BLOCK = int(_get_env_var("WAYZ_STAKING_DEPLOY_BLOCK", "0"))
+    WAYZ_STAKING_SYNC_INTERVAL_MINUTES = int(
+        _get_env_var("WAYZ_STAKING_SYNC_INTERVAL_MINUTES", "15")
+    )
+    # Placeholder; the real value is a product decision, not set here.
+    WAYZ_DAILY_INFERENCE_CAPACITY = int(
+        _get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0")
+    )
     # Nightly pricing-drift monitor: audits active-provider catalog pricing against
     # current OpenRouter reference pricing so we never bill below provider cost even
     # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when

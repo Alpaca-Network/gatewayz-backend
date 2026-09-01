@@ -643,6 +643,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start ledger reconciliation scheduler: {e}")
         # Don't fail startup if reconciliation fails to start
 
+    # Start WAYZ staking on-chain sync (gatewayz-backend#2244)
+    try:
+        from src.services.scheduled_sync import start_wayz_staking_sync_scheduler
+
+        start_wayz_staking_sync_scheduler()
+        logger.info("WAYZ staking sync service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start WAYZ staking sync scheduler: {e}")
+        # Don't fail startup if WAYZ staking sync fails to start
+
     # Start nightly pricing-drift monitor (read-only; alerts if catalog price *
     # markup would ever bill below current provider/reference cost)
     try:
@@ -796,6 +806,15 @@ async def lifespan(app):
         logger.info("Ledger reconciliation service stopped")
     except Exception as e:
         logger.warning(f"Ledger reconciliation shutdown warning: {e}")
+
+    # Stop WAYZ staking on-chain sync
+    try:
+        from src.services.scheduled_sync import stop_wayz_staking_sync_scheduler
+
+        stop_wayz_staking_sync_scheduler()
+        logger.info("WAYZ staking sync service stopped")
+    except Exception as e:
+        logger.warning(f"WAYZ staking sync shutdown warning: {e}")
 
     # Stop nightly pricing-drift monitor
     try:
