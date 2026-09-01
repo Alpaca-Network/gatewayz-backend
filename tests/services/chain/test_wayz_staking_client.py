@@ -1,16 +1,10 @@
 """Tests for src.services.chain.wayz_staking_client (gatewayz-backend#2244)."""
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from web3 import Web3
 
-from src.services.chain.wayz_staking_client import (
-    _ABI_PATH,
-    WayzStakingClient,
-    WayzStakingClientError,
-)
+from src.services.chain.wayz_staking_client import WayzStakingClient, WayzStakingClientError
 
 
 @pytest.fixture
@@ -96,20 +90,25 @@ def test_get_logs_call_uses_real_web3_signature(sb):
     called get_logs(fromBlock=..., toBlock=...), but web3.py 7.x's
     ContractEvent.get_logs() only accepts from_block/to_block (snake_case).
     Every mocked test above passed anyway because MagicMock silently accepts
-    any keyword name -- so this test exercises the REAL (unmocked) web3.py
-    binding against an unreachable host. A wrong keyword name fails fast with
-    TypeError (argument binding, no network attempted); the correct keywords
-    fail with a connection error instead, proving the call was accepted.
+    any keyword name.
+
+    This test goes through the REAL, PRODUCTION call site --
+    WayzStakingClient.staked_event_addresses() itself, unmocked, against an
+    unreachable host -- rather than hand-rolling a separate get_logs() call
+    (an earlier version of this test did that, which decoupled it from
+    whatever kwargs the real code actually uses -- it would have kept
+    passing even if fromBlock/toBlock were reintroduced into
+    wayz_staking_client.py). A wrong keyword name fails fast with TypeError
+    (argument binding, no network attempted); the correct keywords fail with
+    a connection error instead, proving get_logs actually accepted the call.
     """
-    w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:1", request_kwargs={"timeout": 3}))
-    contract = w3.eth.contract(
-        address=Web3.to_checksum_address("0x0000000000000000000000000000000000000001"),
-        abi=json.loads(_ABI_PATH.read_text()),
-    )
+    client = WayzStakingClient("http://127.0.0.1:1", "0x0000000000000000000000000000000000000001")
+
     with pytest.raises(Exception) as exc_info:
-        contract.events.Staked().get_logs(from_block=1, to_block=100)
+        client.staked_event_addresses(1, 100)
+
     assert not isinstance(exc_info.value, TypeError), (
-        f"get_logs rejected the keyword arguments: {exc_info.value}"
+        f"staked_event_addresses's get_logs call rejected its keyword arguments: {exc_info.value}"
     )
 
 
