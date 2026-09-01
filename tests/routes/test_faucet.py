@@ -188,11 +188,44 @@ def test_claim_returns_503_when_faucet_unconfigured(mock_get_redis, mock_create,
 
 
 @patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.create_pending_claim")
+@patch("src.routes.faucet.get_redis_client")
+def test_claim_returns_503_on_malformed_faucet_config(mock_get_redis, mock_create, mock_client_cls):
+    """A malformed (not merely unset) config value -- e.g. a truncated
+    minter private key -- fails inside WayzTokenFaucetClient.__init__,
+    raising ValueError/binascii errors that are NOT
+    WayzTokenFaucetClientError. Must still be a clean 503, not a raw 500."""
+    mock_client_cls.from_config.side_effect = ValueError("Non-hexadecimal digit found")
+    mock_redis = MagicMock()
+    mock_get_redis.return_value = mock_redis
+
+    account = Account.create()
+    body = _signed_claim_body(42, "test-nonce-123", account)
+    response = client.post("/faucet/claim", json=body)
+
+    assert response.status_code == 503
+    mock_create.assert_not_called()
+    mock_redis.getdel.assert_not_called()
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
 def test_claim_rejects_invalid_wallet_address(mock_client_cls):
     mock_client_cls.from_config.return_value = MagicMock()
     account = Account.create()
     body = _signed_claim_body(42, "test-nonce-123", account)
     body["wallet_address"] = "not-an-address"
+
+    response = client.post("/faucet/claim", json=body)
+
+    assert response.status_code == 422
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+def test_claim_rejects_oversized_signature(mock_client_cls):
+    mock_client_cls.from_config.return_value = MagicMock()
+    account = Account.create()
+    body = _signed_claim_body(42, "test-nonce-123", account)
+    body["signature"] = "0x" + "ab" * 150  # well past a real 65-byte signature
 
     response = client.post("/faucet/claim", json=body)
 

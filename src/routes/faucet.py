@@ -61,7 +61,10 @@ class FaucetNonceRequest(BaseModel):
 
 class FaucetClaimRequest(BaseModel):
     wallet_address: str = Field(..., min_length=42, max_length=42)
-    signature: str = Field(..., min_length=1)
+    # A 65-byte ECDSA signature, hex-encoded with a 0x prefix, is 132 chars;
+    # 200 leaves slack without letting an arbitrarily large string reach
+    # eth_account's signature parser.
+    signature: str = Field(..., min_length=1, max_length=200)
 
     @field_validator("wallet_address")
     @classmethod
@@ -108,6 +111,14 @@ async def claim_faucet(
     try:
         mint_client = WayzTokenFaucetClient.from_config()
     except WayzTokenFaucetClientError as e:
+        raise HTTPException(status_code=503, detail="Faucet not configured") from e
+    except Exception as e:
+        # from_config()'s presence-check only rules out unset config; a malformed
+        # value (bad hex key, non-checksummable address) fails inside
+        # WayzTokenFaucetClient.__init__ instead, raising ValueError/binascii
+        # errors that aren't WayzTokenFaucetClientError -- still a config
+        # problem, still a 503, not a 500.
+        logger.error(f"Faucet client construction failed unexpectedly: {e}")
         raise HTTPException(status_code=503, detail="Faucet not configured") from e
 
     redis_client = get_redis_client()
@@ -157,5 +168,9 @@ async def claim_faucet(
     return {
         "success": True,
         "tx_hash": tx_hash,
+        # Whole WAYZ (human-readable), NOT the wei-scaled value stored in
+        # faucet_claims.amount -- that column matches wallet_stakes's
+        # wei-equivalent convention for on-chain reconciliation; this API
+        # response deliberately uses the more readable unit instead.
         "amount": str(Config.WAYZ_FAUCET_CLAIM_AMOUNT),
     }
