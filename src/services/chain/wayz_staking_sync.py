@@ -16,7 +16,6 @@ from src.config.config import Config
 from src.db.wallet_stakes import (
     get_all_wallet_addresses,
     get_sync_cursor,
-    insert_wallet_if_missing,
     set_sync_cursor,
     upsert_wallet_stake,
 )
@@ -52,18 +51,33 @@ def sync_once(client: WayzStakingClient) -> SyncResult:
 
     new_addresses = client.staked_event_addresses(scan_start, to_block)
     known_addresses = set(get_all_wallet_addresses())
-    discovered = [addr for addr in new_addresses if addr not in known_addresses]
-    all_discoveries_ok = True
-    for addr in discovered:
-        if not insert_wallet_if_missing(addr):
-            all_discoveries_ok = False
+    discovered = {addr for addr in new_addresses if addr not in known_addresses}
+    all_addresses = known_addresses | discovered
 
-    all_addresses = known_addresses | set(discovered)
-    total_staked = client.total_staked()
+    try:
+        total_staked = client.total_staked()
+    except Exception as e:
+        # Can't compute allowances without a denominator -- skip the resync
+        # loop entirely this run rather than crash. Newly-discovered
+        # addresses aren't persisted yet (that happens via upsert_wallet_stake
+        # below, which never ran), so the cursor must NOT advance -- the next
+        # run's event scan needs to rediscover them.
+        logger.warning(
+            "WAYZ staking sync: totalStaked() failed, skipping this run entirely: %s", e
+        )
+        return SyncResult(
+            wallets_discovered=len(discovered),
+            wallets_synced=0,
+            wallets_failed=0,
+            total_staked=0,
+            from_block=scan_start,
+            to_block=to_block,
+        )
 
     now = datetime.now(UTC).isoformat()
     synced = 0
     failed = 0
+    discovered_all_ok = True
     for addr in all_addresses:
         try:
             staked = client.staked_balance_of(addr)
@@ -72,18 +86,27 @@ def sync_once(client: WayzStakingClient) -> SyncResult:
                 if total_staked == 0
                 else (staked * Config.WAYZ_DAILY_INFERENCE_CAPACITY) // total_staked
             )
-            upsert_wallet_stake(addr, staked, allowance, to_block, now)
+            if not upsert_wallet_stake(addr, staked, allowance, to_block, now):
+                raise RuntimeError("upsert_wallet_stake reported failure")
             synced += 1
         except Exception as e:
             failed += 1
+            if addr in discovered:
+                discovered_all_ok = False
             logger.warning("WAYZ staking resync failed for wallet %s: %s", addr, e)
 
-    if all_discoveries_ok:
+    # Gate the cursor on newly-DISCOVERED wallets' writes succeeding, not on
+    # every known wallet's resync succeeding: a known wallet's failed resync
+    # is self-healing next run (its row already exists with last run's
+    # values), but a discovered wallet whose only write this run failed has
+    # no persisted row at all -- advancing the cursor past it would mean its
+    # Staked event is never scanned again.
+    if discovered_all_ok:
         set_sync_cursor(contract_address, to_block, now)
     else:
         logger.warning(
             "WAYZ staking sync: skipping cursor advance to %s -- at least one "
-            "newly-discovered wallet failed to insert; retrying discovery next run",
+            "newly-discovered wallet's write failed; retrying discovery next run",
             to_block,
         )
 

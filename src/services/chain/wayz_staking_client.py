@@ -79,7 +79,7 @@ class WayzStakingClient:
         while chunk_start <= to_block:
             chunk_end = min(chunk_start + self._LOG_SCAN_CHUNK_SIZE - 1, to_block)
             events = self._contract.events.Staked().get_logs(
-                fromBlock=chunk_start, toBlock=chunk_end
+                from_block=chunk_start, to_block=chunk_end
             )
             stakers.update(event["args"]["staker"].lower() for event in events)
             chunk_start = chunk_end + 1

@@ -1,10 +1,16 @@
 """Tests for src.services.chain.wayz_staking_client (gatewayz-backend#2244)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from web3 import Web3
 
-from src.services.chain.wayz_staking_client import WayzStakingClient, WayzStakingClientError
+from src.services.chain.wayz_staking_client import (
+    _ABI_PATH,
+    WayzStakingClient,
+    WayzStakingClientError,
+)
 
 
 @pytest.fixture
@@ -54,7 +60,7 @@ def test_staked_event_addresses_deduplicates_lowercases_and_sorts(sb):
     result = client.staked_event_addresses(1, 100)
     assert result == ["0xabc", "0xdef"]
     mock_contract.events.Staked.return_value.get_logs.assert_called_once_with(
-        fromBlock=1, toBlock=100
+        from_block=1, to_block=100
     )
 
 
@@ -73,9 +79,9 @@ def test_staked_event_addresses_chunks_large_ranges(sb):
     assert result == ["0xaaa", "0xbbb"]
     get_logs = mock_contract.events.Staked.return_value.get_logs
     assert get_logs.call_count == 3
-    get_logs.assert_any_call(fromBlock=start, toBlock=start + 1999)
-    get_logs.assert_any_call(fromBlock=start + 2000, toBlock=start + 3999)
-    get_logs.assert_any_call(fromBlock=start + 4000, toBlock=end)
+    get_logs.assert_any_call(from_block=start, to_block=start + 1999)
+    get_logs.assert_any_call(from_block=start + 2000, to_block=start + 3999)
+    get_logs.assert_any_call(from_block=start + 4000, to_block=end)
 
 
 def test_staked_event_addresses_returns_empty_for_invalid_range(sb):
@@ -83,6 +89,28 @@ def test_staked_event_addresses_returns_empty_for_invalid_range(sb):
     result = client.staked_event_addresses(100, 1)
     assert result == []
     mock_contract.events.Staked.return_value.get_logs.assert_not_called()
+
+
+def test_get_logs_call_uses_real_web3_signature(sb):
+    """Regression guard for a real bug: staked_event_addresses() previously
+    called get_logs(fromBlock=..., toBlock=...), but web3.py 7.x's
+    ContractEvent.get_logs() only accepts from_block/to_block (snake_case).
+    Every mocked test above passed anyway because MagicMock silently accepts
+    any keyword name -- so this test exercises the REAL (unmocked) web3.py
+    binding against an unreachable host. A wrong keyword name fails fast with
+    TypeError (argument binding, no network attempted); the correct keywords
+    fail with a connection error instead, proving the call was accepted.
+    """
+    w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:1", request_kwargs={"timeout": 3}))
+    contract = w3.eth.contract(
+        address=Web3.to_checksum_address("0x0000000000000000000000000000000000000001"),
+        abi=json.loads(_ABI_PATH.read_text()),
+    )
+    with pytest.raises(Exception) as exc_info:
+        contract.events.Staked().get_logs(from_block=1, to_block=100)
+    assert not isinstance(exc_info.value, TypeError), (
+        f"get_logs rejected the keyword arguments: {exc_info.value}"
+    )
 
 
 def test_from_config_raises_when_contract_address_unset(sb):

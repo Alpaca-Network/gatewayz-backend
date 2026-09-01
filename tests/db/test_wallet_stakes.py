@@ -7,7 +7,6 @@ import pytest
 from src.db.wallet_stakes import (
     get_all_wallet_addresses,
     get_sync_cursor,
-    insert_wallet_if_missing,
     set_sync_cursor,
     upsert_wallet_stake,
 )
@@ -57,30 +56,10 @@ def test_get_all_wallet_addresses_returns_empty_on_error(sb):
         assert get_all_wallet_addresses() == []
 
 
-def test_insert_wallet_if_missing_calls_upsert_with_ignore_duplicates(sb):
+def test_upsert_wallet_stake_writes_expected_row_and_returns_true(sb):
     client = _mock_table_client({})
     with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
-        result = insert_wallet_if_missing("0xabc")
-
-    table_query = client.table("wallet_stakes")
-    table_query.upsert.assert_called_once()
-    args, kwargs = table_query.upsert.call_args
-    assert args[0]["wallet_address"] == "0xabc"
-    assert kwargs["ignore_duplicates"] is True
-    assert result is True
-
-
-def test_insert_wallet_if_missing_returns_false_on_error(sb):
-    client = MagicMock()
-    client.table.side_effect = RuntimeError("boom")
-    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
-        assert insert_wallet_if_missing("0xabc") is False
-
-
-def test_upsert_wallet_stake_writes_expected_row(sb):
-    client = _mock_table_client({})
-    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
-        upsert_wallet_stake("0xabc", 500, 10, 12345, "2026-09-01T00:00:00+00:00")
+        result = upsert_wallet_stake("0xabc", 500, 10, 12345, "2026-09-01T00:00:00+00:00")
 
     table_query = client.table("wallet_stakes")
     args, kwargs = table_query.upsert.call_args
@@ -92,6 +71,14 @@ def test_upsert_wallet_stake_writes_expected_row(sb):
         "last_synced_at": "2026-09-01T00:00:00+00:00",
     }
     assert kwargs["on_conflict"] == "wallet_address"
+    assert result is True
+
+
+def test_upsert_wallet_stake_returns_false_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert upsert_wallet_stake("0xabc", 500, 10, 12345, "2026-09-01T00:00:00+00:00") is False
 
 
 def test_get_sync_cursor_returns_none_when_no_row(sb):
