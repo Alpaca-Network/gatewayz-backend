@@ -58,6 +58,26 @@ def test_staked_event_addresses_deduplicates_lowercases_and_sorts(sb):
     )
 
 
+def test_staked_event_addresses_chunks_large_ranges(sb):
+    client, _, mock_contract = _make_client_with_mocked_web3()
+    start = 1000
+    end = start + 5000 - 1  # 5000-block range, 2000-block chunks -> 3 calls
+    mock_contract.events.Staked.return_value.get_logs.side_effect = [
+        [{"args": {"staker": "0xAAA"}}],
+        [{"args": {"staker": "0xbbb"}}],
+        [{"args": {"staker": "0xAAA"}}],  # dup across chunks
+    ]
+
+    result = client.staked_event_addresses(start, end)
+
+    assert result == ["0xaaa", "0xbbb"]
+    get_logs = mock_contract.events.Staked.return_value.get_logs
+    assert get_logs.call_count == 3
+    get_logs.assert_any_call(fromBlock=start, toBlock=start + 1999)
+    get_logs.assert_any_call(fromBlock=start + 2000, toBlock=start + 3999)
+    get_logs.assert_any_call(fromBlock=start + 4000, toBlock=end)
+
+
 def test_staked_event_addresses_returns_empty_for_invalid_range(sb):
     client, _, mock_contract = _make_client_with_mocked_web3()
     result = client.staked_event_addresses(100, 1)

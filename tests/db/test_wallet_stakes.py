@@ -60,13 +60,21 @@ def test_get_all_wallet_addresses_returns_empty_on_error(sb):
 def test_insert_wallet_if_missing_calls_upsert_with_ignore_duplicates(sb):
     client = _mock_table_client({})
     with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
-        insert_wallet_if_missing("0xabc")
+        result = insert_wallet_if_missing("0xabc")
 
     table_query = client.table("wallet_stakes")
     table_query.upsert.assert_called_once()
     args, kwargs = table_query.upsert.call_args
     assert args[0]["wallet_address"] == "0xabc"
     assert kwargs["ignore_duplicates"] is True
+    assert result is True
+
+
+def test_insert_wallet_if_missing_returns_false_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert insert_wallet_if_missing("0xabc") is False
 
 
 def test_upsert_wallet_stake_writes_expected_row(sb):

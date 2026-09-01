@@ -672,9 +672,10 @@ async def run_scheduled_wayz_staking_sync():
         _last_wayz_staking_sync_status["last_ok"] = True
         _last_wayz_staking_sync_status["wallets_synced"] = result.wallets_synced
         logger.info(
-            "✅ WAYZ staking sync OK | discovered=%s synced=%s total_staked=%s blocks=%s..%s",
+            "✅ WAYZ staking sync OK | discovered=%s synced=%s failed=%s total_staked=%s blocks=%s..%s",
             result.wallets_discovered,
             result.wallets_synced,
+            result.wallets_failed,
             result.total_staked,
             result.from_block,
             result.to_block,

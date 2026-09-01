@@ -32,6 +32,8 @@ def _load_abi() -> list[dict]:
 class WayzStakingClient:
     """Thin read-only wrapper around the deployed WAYZStaking contract."""
 
+    _LOG_SCAN_CHUNK_SIZE = 2000
+
     def __init__(self, rpc_url: str, contract_address: str):
         self._to_checksum_address = Web3.to_checksum_address
         self._w3 = Web3(Web3.HTTPProvider(rpc_url))
@@ -63,10 +65,23 @@ class WayzStakingClient:
         Returns [] (not an error) when from_block > to_block -- the caller's
         range can go empty/invalid after a reorg, and an empty scan is a
         valid, non-exceptional outcome.
+
+        Scans in fixed-size chunks (_LOG_SCAN_CHUNK_SIZE) since public RPC
+        endpoints commonly cap the block span of a single eth_getLogs call
+        (e.g. ~2048 blocks on Fuji) -- an unchunked scan over a large or
+        unbounded range would fail outright.
         """
         if from_block > to_block:
             return []
-        events = self._contract.events.Staked().get_logs(
-            fromBlock=from_block, toBlock=to_block
-        )
-        return sorted({event["args"]["staker"].lower() for event in events})
+
+        stakers: set[str] = set()
+        chunk_start = from_block
+        while chunk_start <= to_block:
+            chunk_end = min(chunk_start + self._LOG_SCAN_CHUNK_SIZE - 1, to_block)
+            events = self._contract.events.Staked().get_logs(
+                fromBlock=chunk_start, toBlock=chunk_end
+            )
+            stakers.update(event["args"]["staker"].lower() for event in events)
+            chunk_start = chunk_end + 1
+
+        return sorted(stakers)

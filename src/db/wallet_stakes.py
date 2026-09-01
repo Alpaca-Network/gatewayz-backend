@@ -30,12 +30,16 @@ def get_all_wallet_addresses() -> list[str]:
         return []
 
 
-def insert_wallet_if_missing(wallet_address: str) -> None:
+def insert_wallet_if_missing(wallet_address: str) -> bool:
     """Insert a new wallet_stakes row with zeroed balances if one doesn't exist.
 
     ignore_duplicates=True so a wallet discovered twice (same run or across
     overlapping runs) never errors and never clobbers an existing row's
     already-synced balance.
+
+    Returns True on success, False on a caught exception -- the caller
+    (sync_once) uses this to decide whether it's safe to advance the sync
+    cursor past this discovery.
     """
     try:
         client = get_supabase_client()
@@ -48,8 +52,10 @@ def insert_wallet_if_missing(wallet_address: str) -> None:
             on_conflict="wallet_address",
             ignore_duplicates=True,
         ).execute()
+        return True
     except Exception as e:
         logger.warning(f"wallet_stakes insert failed for {wallet_address}: {e}")
+        return False
 
 
 def upsert_wallet_stake(
@@ -59,7 +65,14 @@ def upsert_wallet_stake(
     last_synced_block: int,
     last_synced_at: str,
 ) -> None:
-    """Write a wallet's freshly-synced staked amount and computed allowance."""
+    """Write a wallet's freshly-synced staked amount and computed allowance.
+
+    last_synced_block is the block the sync RUN reached (to_block), not
+    necessarily the exact block this wallet's balance was read at -- the
+    view calls that produce staked_amount/daily_allowance read `latest`
+    chain state, not a block pinned to last_synced_block. Fine for this
+    indexer's purposes today, but not a precise historical snapshot.
+    """
     try:
         client = get_supabase_client()
         client.table(_WALLET_STAKES_TABLE).upsert(
