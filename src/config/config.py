@@ -161,9 +161,14 @@ class Config:
         _get_env_var("WAYZ_STAKING_SYNC_INTERVAL_MINUTES", "15")
     )
     # Placeholder; the real value is a product decision, not set here.
-    WAYZ_DAILY_INFERENCE_CAPACITY = int(
-        _get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0")
-    )
+    WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
+    # WAYZ testnet faucet (gatewayz-backend#2245). Unset contract address
+    # or minter key (the default -- nothing is deployed to Fuji yet, no
+    # minter key provisioned) means /faucet/claim returns 503.
+    WAYZ_TOKEN_CONTRACT_ADDRESS = _get_env_var("WAYZ_TOKEN_CONTRACT_ADDRESS")
+    WAYZ_FAUCET_MINTER_PRIVATE_KEY = _get_env_var("WAYZ_FAUCET_MINTER_PRIVATE_KEY")
+    WAYZ_FAUCET_CLAIM_AMOUNT = int(_get_env_var("WAYZ_FAUCET_CLAIM_AMOUNT", "1000"))
+    WAYZ_FAUCET_MIN_REQUESTS = int(_get_env_var("WAYZ_FAUCET_MIN_REQUESTS", "1"))
     # Nightly pricing-drift monitor: audits active-provider catalog pricing against
     # current OpenRouter reference pricing so we never bill below provider cost even
     # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when
