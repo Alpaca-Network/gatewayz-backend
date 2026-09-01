@@ -62,9 +62,7 @@ def sync_once(client: WayzStakingClient) -> SyncResult:
         # addresses aren't persisted yet (that happens via upsert_wallet_stake
         # below, which never ran), so the cursor must NOT advance -- the next
         # run's event scan needs to rediscover them.
-        logger.warning(
-            "WAYZ staking sync: totalStaked() failed, skipping this run entirely: %s", e
-        )
+        logger.warning("WAYZ staking sync: totalStaked() failed, skipping this run entirely: %s", e)
         return SyncResult(
             wallets_discovered=len(discovered),
             wallets_synced=0,

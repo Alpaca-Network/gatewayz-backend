@@ -107,9 +107,9 @@ def test_get_logs_call_uses_real_web3_signature(sb):
     with pytest.raises(Exception) as exc_info:
         client.staked_event_addresses(1, 100)
 
-    assert not isinstance(exc_info.value, TypeError), (
-        f"staked_event_addresses's get_logs call rejected its keyword arguments: {exc_info.value}"
-    )
+    assert not isinstance(
+        exc_info.value, TypeError
+    ), f"staked_event_addresses's get_logs call rejected its keyword arguments: {exc_info.value}"
 
 
 def test_from_config_raises_when_contract_address_unset(sb):

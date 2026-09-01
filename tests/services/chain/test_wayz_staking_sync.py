@@ -27,8 +27,12 @@ def _mock_client(current_block, staked_balances: dict, total_staked, staked_even
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_first_run_scans_from_deploy_block_inclusive(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     mock_config.WAYZ_STAKING_CONTRACT_ADDRESS = "0xcontract"
     mock_config.WAYZ_STAKING_DEPLOY_BLOCK = 100
@@ -38,8 +42,10 @@ def test_first_run_scans_from_deploy_block_inclusive(
     mock_upsert.return_value = True
 
     client = _mock_client(
-        current_block=200, staked_balances={"0xabc": 500},
-        total_staked=500, staked_events=["0xabc"],
+        current_block=200,
+        staked_balances={"0xabc": 500},
+        total_staked=500,
+        staked_events=["0xabc"],
     )
 
     result = sync_once(client)
@@ -67,8 +73,12 @@ def test_first_run_scans_from_deploy_block_inclusive(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_subsequent_run_scans_from_cursor_plus_one(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     mock_config.WAYZ_STAKING_CONTRACT_ADDRESS = "0xcontract"
     mock_config.WAYZ_STAKING_DEPLOY_BLOCK = 100
@@ -78,8 +88,10 @@ def test_subsequent_run_scans_from_cursor_plus_one(
     mock_upsert.return_value = True
 
     client = _mock_client(
-        current_block=200, staked_balances={"0xabc": 500},
-        total_staked=500, staked_events=[],
+        current_block=200,
+        staked_balances={"0xabc": 500},
+        total_staked=500,
+        staked_events=[],
     )
 
     result = sync_once(client)
@@ -96,8 +108,12 @@ def test_subsequent_run_scans_from_cursor_plus_one(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_zero_total_staked_gives_zero_allowance(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     mock_config.WAYZ_STAKING_CONTRACT_ADDRESS = "0xcontract"
     mock_config.WAYZ_STAKING_DEPLOY_BLOCK = 100
@@ -107,8 +123,10 @@ def test_zero_total_staked_gives_zero_allowance(
     mock_upsert.return_value = True
 
     client = _mock_client(
-        current_block=200, staked_balances={"0xabc": 0},
-        total_staked=0, staked_events=[],
+        current_block=200,
+        staked_balances={"0xabc": 0},
+        total_staked=0,
+        staked_events=[],
     )
 
     sync_once(client)
@@ -125,8 +143,12 @@ def test_zero_total_staked_gives_zero_allowance(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_known_wallet_is_always_resynced_even_with_no_new_events(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     """The always-re-read-every-known-wallet property is what makes this job
     double as reconciliation -- a wallet's balance is refreshed even when the
@@ -157,8 +179,12 @@ def test_known_wallet_is_always_resynced_even_with_no_new_events(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_failed_discovery_write_skips_cursor_advance(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     """A newly-discovered wallet whose write fails must not let the cursor
     advance past the block range containing its Staked event -- otherwise
@@ -173,8 +199,10 @@ def test_failed_discovery_write_skips_cursor_advance(
     mock_upsert.return_value = False
 
     client = _mock_client(
-        current_block=200, staked_balances={"0xabc": 500},
-        total_staked=500, staked_events=["0xabc"],
+        current_block=200,
+        staked_balances={"0xabc": 500},
+        total_staked=500,
+        staked_events=["0xabc"],
     )
 
     result = sync_once(client)
@@ -191,8 +219,12 @@ def test_failed_discovery_write_skips_cursor_advance(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_one_known_wallet_resync_failure_does_not_abort_others_and_cursor_still_advances(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     """A single KNOWN wallet raising from staked_balance_of during resync must
     not starve the other known wallets, and since a known wallet's resync
@@ -235,8 +267,12 @@ def test_one_known_wallet_resync_failure_does_not_abort_others_and_cursor_still_
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_one_discovered_wallet_write_failure_among_several_skips_cursor(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     """If a DISCOVERED wallet's write fails, the cursor must not advance even
     if OTHER discovered/known wallets' writes succeeded in the same run --
@@ -273,8 +309,12 @@ def test_one_discovered_wallet_write_failure_among_several_skips_cursor(
 @patch("src.services.chain.wayz_staking_sync.get_all_wallet_addresses")
 @patch("src.services.chain.wayz_staking_sync.get_sync_cursor")
 def test_total_staked_failure_skips_entire_run_and_cursor(
-    mock_get_cursor, mock_get_all, mock_upsert, mock_set_cursor,
-    mock_config, sb,
+    mock_get_cursor,
+    mock_get_all,
+    mock_upsert,
+    mock_set_cursor,
+    mock_config,
+    sb,
 ):
     """An RPC exception mid-run (from totalStaked(), before the resync loop
     even starts) must skip the resync loop AND leave the cursor unadvanced
