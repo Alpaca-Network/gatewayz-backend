@@ -530,6 +530,10 @@ def create_app() -> FastAPI:
             "user_provider_keys",
             "BYOK Provider Keys",
         ),  # Bring-your-own-key management (pivot Phase 5)
+        (
+            "faucet",
+            "WAYZ Testnet Faucet",
+        ),  # Testnet WAYZ claim (gatewayz-backend#2245)
     ]
 
     loaded_count = 0
