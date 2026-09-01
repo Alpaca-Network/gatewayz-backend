@@ -645,6 +645,94 @@ def stop_ledger_reconciliation_scheduler():
 
 
 # ============================================================================
+# WAYZ staking on-chain sync (gatewayz-backend#2244) — polls the WAYZStaking
+# contract on Avalanche Fuji for stake events and re-reads current balances
+# into wallet_stakes. No-ops at startup if no contract address is configured.
+# ============================================================================
+_wayz_staking_scheduler: AsyncIOScheduler | None = None
+_last_wayz_staking_sync_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_ok": None,
+    "wallets_synced": None,
+}
+
+
+async def run_scheduled_wayz_staking_sync():
+    """Sync wallet_stakes from the on-chain WAYZStaking contract."""
+    from src.services.chain.wayz_staking_client import (
+        WayzStakingClient,
+        WayzStakingClientError,
+    )
+    from src.services.chain.wayz_staking_sync import sync_once
+
+    _last_wayz_staking_sync_status["last_run_time"] = datetime.now(UTC)
+    try:
+        client = WayzStakingClient.from_config()
+        result = await asyncio.to_thread(sync_once, client)
+        _last_wayz_staking_sync_status["last_ok"] = True
+        _last_wayz_staking_sync_status["wallets_synced"] = result.wallets_synced
+        logger.info(
+            "✅ WAYZ staking sync OK | discovered=%s synced=%s total_staked=%s blocks=%s..%s",
+            result.wallets_discovered,
+            result.wallets_synced,
+            result.total_staked,
+            result.from_block,
+            result.to_block,
+        )
+    except WayzStakingClientError as e:
+        logger.info("WAYZ staking sync skipped: %s", e)
+    except Exception as e:
+        _last_wayz_staking_sync_status["last_ok"] = False
+        logger.warning("WAYZ staking sync failed (non-fatal): %s", e)
+
+
+def start_wayz_staking_sync_scheduler():
+    """Start the APScheduler for WAYZ staking sync (app lifespan)."""
+    global _wayz_staking_scheduler
+
+    if not Config.WAYZ_STAKING_CONTRACT_ADDRESS:
+        logger.info("WAYZ staking sync DISABLED: WAYZ_STAKING_CONTRACT_ADDRESS not set")
+        return
+
+    interval_minutes = Config.WAYZ_STAKING_SYNC_INTERVAL_MINUTES
+    logger.info("Starting WAYZ staking sync scheduler (interval: %s min)", interval_minutes)
+    try:
+        _wayz_staking_scheduler = AsyncIOScheduler()
+        _wayz_staking_scheduler.add_job(
+            run_scheduled_wayz_staking_sync,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="wayz_staking_sync",
+            name="WAYZ Staking On-Chain Sync Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _wayz_staking_scheduler.start()
+        logger.info(
+            "✅ WAYZ staking sync scheduler started (next run in %s min)", interval_minutes
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start WAYZ staking sync scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_wayz_staking_sync_scheduler():
+    """Stop the WAYZ staking sync APScheduler gracefully (called during shutdown)."""
+    global _wayz_staking_scheduler
+
+    if _wayz_staking_scheduler is None:
+        return
+    logger.info("Stopping WAYZ staking sync scheduler...")
+    try:
+        _wayz_staking_scheduler.shutdown(wait=True)
+        logger.info("✅ WAYZ staking sync scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping WAYZ staking sync scheduler: %s", e)
+    finally:
+        _wayz_staking_scheduler = None
+
+
+# ============================================================================
 # Nightly pricing-drift monitor — scheduled, read-only. We bill inference at
 # catalog_price * Config.PRICING_MARKUP; if a provider raises its price and our
 # catalog goes stale, we could bill below provider cost even with markup applied.
