@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from hexbytes import HexBytes
 
 from src.services.chain.wayz_token_faucet_client import (
     WayzTokenFaucetClient,
@@ -71,7 +72,7 @@ async def test_mint_builds_signs_and_sends_transaction(sb):
         "data": "0xdeadbeef",
     }
     mock_w3.eth.send_raw_transaction.return_value = MagicMock(
-        hex=lambda: "0xabc123"
+        hex=lambda: "0xabc123", to_0x_hex=lambda: "0xabc123"
     )
 
     tx_hash = await client.mint("0xrecipient", 1000)
@@ -79,6 +80,37 @@ async def test_mint_builds_signs_and_sends_transaction(sb):
     assert tx_hash == "0xabc123"
     mock_contract.functions.mint.assert_called_once_with("0xrecipient", 1000 * 10**18)
     mock_w3.eth.send_raw_transaction.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_mint_returns_0x_prefixed_tx_hash(sb):
+    """Regression guard: hexbytes==2.0.0's HexBytes.hex() no longer adds a
+    '0x' prefix -- only to_0x_hex() does. A fully-mocked send_raw_transaction
+    return value would hide this, so this test uses a REAL HexBytes (what
+    web3's send_raw_transaction actually returns) to prove the prefix is
+    present end to end."""
+    test_account = Account.create()
+    client, mock_w3, mock_contract = _make_client_with_mocked_web3(test_account.key.hex())
+
+    mock_w3.eth.get_transaction_count.return_value = 5
+    mock_w3.eth.chain_id = 43113
+    mock_w3.eth.gas_price = 1_000_000_000
+    mock_contract.functions.mint.return_value.build_transaction.return_value = {
+        "from": test_account.address,
+        "nonce": 5,
+        "chainId": 43113,
+        "gas": 200_000,
+        "gasPrice": 1_000_000_000,
+        "to": "0x" + "1" * 40,
+        "value": 0,
+        "data": "0xdeadbeef",
+    }
+    mock_w3.eth.send_raw_transaction.return_value = HexBytes(b"\xab" * 32)
+
+    tx_hash = await client.mint("0xrecipient", 1000)
+
+    assert tx_hash.startswith("0x")
+    assert tx_hash == HexBytes(b"\xab" * 32).to_0x_hex()
 
 
 def test_real_eth_account_sign_transaction_uses_raw_transaction_attribute(sb):

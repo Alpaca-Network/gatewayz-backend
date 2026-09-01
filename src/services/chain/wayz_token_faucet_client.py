@@ -84,4 +84,4 @@ class WayzTokenFaucetClient:
         )
         signed = self._account.sign_transaction(tx)
         tx_hash = self._w3.eth.send_raw_transaction(signed.raw_transaction)
-        return tx_hash.hex()
+        return tx_hash.to_0x_hex()
