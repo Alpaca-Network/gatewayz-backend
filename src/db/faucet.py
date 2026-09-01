@@ -27,6 +27,7 @@ def has_completed_at_least_one_request(user_id: int, min_requests: int = 1) -> b
             client.table(_USAGE_TABLE)
             .select("id")
             .eq("user_id", user_id)
+            .limit(min_requests)
             .execute()
         )
         return len(result.data or []) >= min_requests

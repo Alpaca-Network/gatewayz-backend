@@ -26,6 +26,7 @@ def _mock_table_client(table_data: dict, raise_on_insert: bool = False):
             query = MagicMock()
             query.select.return_value = query
             query.eq.return_value = query
+            query.limit.return_value = query
             query.or_.return_value = query
             query.update.return_value = query
             if raise_on_insert and name == "faucet_claims":
