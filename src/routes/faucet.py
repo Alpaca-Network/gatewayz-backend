@@ -5,13 +5,14 @@ See docs/superpowers/specs/2026-09-01-wayz-testnet-faucet-design.md.
 """
 
 import logging
+import re
 import secrets
 from typing import Any
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from src.config.config import Config
 from src.config.redis_config import get_redis_client
@@ -40,13 +41,32 @@ faucet_nonce_rl = create_endpoint_rate_limit("faucet_nonce", max_requests=10, wi
 faucet_claim_rl = create_endpoint_rate_limit("faucet_claim", max_requests=5, window_seconds=60)
 
 
+_WALLET_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
+
+
+def _validate_wallet_address(v: str) -> str:
+    if not _WALLET_ADDRESS_RE.match(v):
+        raise ValueError("wallet_address must be a 0x-prefixed 40-character hex address")
+    return v.lower()
+
+
 class FaucetNonceRequest(BaseModel):
     wallet_address: str = Field(..., min_length=42, max_length=42)
+
+    @field_validator("wallet_address")
+    @classmethod
+    def validate_wallet_address(cls, v):
+        return _validate_wallet_address(v)
 
 
 class FaucetClaimRequest(BaseModel):
     wallet_address: str = Field(..., min_length=42, max_length=42)
     signature: str = Field(..., min_length=1)
+
+    @field_validator("wallet_address")
+    @classmethod
+    def validate_wallet_address(cls, v):
+        return _validate_wallet_address(v)
 
 
 def _nonce_key(user_id: int, wallet_address: str) -> str:
@@ -69,7 +89,11 @@ async def get_faucet_nonce(
     if redis_client is None:
         raise HTTPException(status_code=503, detail="Faucet temporarily unavailable")
 
-    redis_client.setex(_nonce_key(user_id, body.wallet_address), _NONCE_TTL_SECONDS, nonce)
+    try:
+        redis_client.setex(_nonce_key(user_id, body.wallet_address), _NONCE_TTL_SECONDS, nonce)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Faucet temporarily unavailable") from e
+
     message = _claim_message(user_id, nonce)
     return {"success": True, "data": {"message": message, "expires_in": _NONCE_TTL_SECONDS}}
 
@@ -81,12 +105,20 @@ async def claim_faucet(
     _rl: None = Depends(faucet_claim_rl),
 ) -> dict[str, Any]:
     """Verify wallet ownership, check eligibility, mint testnet WAYZ."""
+    try:
+        mint_client = WayzTokenFaucetClient.from_config()
+    except WayzTokenFaucetClientError as e:
+        raise HTTPException(status_code=503, detail="Faucet not configured") from e
+
     redis_client = get_redis_client()
     if redis_client is None:
         raise HTTPException(status_code=503, detail="Faucet temporarily unavailable")
 
     key = _nonce_key(user_id, body.wallet_address)
-    nonce = redis_client.get(key)
+    try:
+        nonce = redis_client.getdel(key)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail="Faucet temporarily unavailable") from e
     if not nonce:
         raise HTTPException(
             status_code=400, detail="No pending nonce for this wallet — request one first"
@@ -97,10 +129,7 @@ async def claim_faucet(
     try:
         recovered = Account.recover_message(encode_defunct(text=message), signature=body.signature)
     except Exception as e:
-        redis_client.delete(key)
         raise HTTPException(status_code=401, detail="Invalid signature") from e
-
-    redis_client.delete(key)
 
     if recovered.lower() != body.wallet_address.lower():
         raise HTTPException(status_code=401, detail="Signature does not match wallet_address")
@@ -111,15 +140,11 @@ async def claim_faucet(
     if get_existing_claim(user_id, body.wallet_address) is not None:
         raise HTTPException(status_code=409, detail="Already claimed")
 
-    claim = create_pending_claim(user_id, body.wallet_address, Config.WAYZ_FAUCET_CLAIM_AMOUNT)
+    claim = create_pending_claim(
+        user_id, body.wallet_address, Config.WAYZ_FAUCET_CLAIM_AMOUNT * 10**18
+    )
     if claim is None:
         raise HTTPException(status_code=409, detail="Already claimed")
-
-    try:
-        mint_client = WayzTokenFaucetClient.from_config()
-    except WayzTokenFaucetClientError as e:
-        mark_claim_failed(claim["id"], str(e))
-        raise HTTPException(status_code=503, detail="Faucet not configured") from e
 
     try:
         tx_hash = await mint_client.mint(body.wallet_address, Config.WAYZ_FAUCET_CLAIM_AMOUNT)
