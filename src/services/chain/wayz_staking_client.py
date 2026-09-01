@@ -43,7 +43,7 @@ class WayzStakingClient:
         )
 
     @classmethod
-    def from_config(cls) -> "WayzStakingClient":
+    def from_config(cls) -> WayzStakingClient:
         if not Config.WAYZ_STAKING_CONTRACT_ADDRESS:
             raise WayzStakingClientError("WAYZ_STAKING_CONTRACT_ADDRESS is not set")
         return cls(Config.AVALANCHE_FUJI_RPC_URL, Config.WAYZ_STAKING_CONTRACT_ADDRESS)
