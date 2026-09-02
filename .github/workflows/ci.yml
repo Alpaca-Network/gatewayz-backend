@@ -58,10 +58,15 @@ jobs:
           pip wheel -r requirements.txt -w .cache/wheels
           pip wheel -r requirements-dev.txt -w .cache/wheels
 
-      - name: Install from wheelhouse
+      # Prefer cached wheels but fall back to PyPI for anything missing.
+      # The wheelhouse is restored via a restore-keys prefix, so a stale
+      # cache silently lacks any newly-added dependency (#2269); --no-index
+      # turned that into a hard failure on every PR that touched
+      # requirements.txt.
+      - name: Install from wheelhouse (PyPI fallback)
         run: |
-          pip install --no-index --find-links=.cache/wheels -r requirements.txt
-          pip install --no-index --find-links=.cache/wheels ruff black isort mypy
+          pip install --find-links=.cache/wheels -r requirements.txt
+          pip install --find-links=.cache/wheels ruff black isort mypy
 
       - name: Cache mypy
         uses: actions/cache@v4
@@ -172,10 +177,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-wheels-
 
-      - name: Install from wheelhouse
+      - name: Install from wheelhouse (PyPI fallback, see #2269)
         run: |
-          pip install --no-index --find-links=.cache/wheels -r requirements.txt
-          pip install --no-index --find-links=.cache/wheels pytest pytest-cov pytest-xdist pytest-timeout
+          pip install --find-links=.cache/wheels -r requirements.txt
+          pip install --find-links=.cache/wheels pytest pytest-cov pytest-xdist pytest-timeout
 
       # Restore pytest cache
       - name: Cache pytest
@@ -452,9 +457,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-wheels-
 
-      - name: Install from wheelhouse
+      - name: Install from wheelhouse (PyPI fallback, see #2269)
         run: |
-          pip install --no-index --find-links=.cache/wheels -r requirements.txt
+          pip install --find-links=.cache/wheels -r requirements.txt
 
       - name: Test application startup
         run: |

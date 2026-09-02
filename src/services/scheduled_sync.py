@@ -709,9 +709,7 @@ def start_wayz_staking_sync_scheduler():
             coalesce=True,
         )
         _wayz_staking_scheduler.start()
-        logger.info(
-            "✅ WAYZ staking sync scheduler started (next run in %s min)", interval_minutes
-        )
+        logger.info("✅ WAYZ staking sync scheduler started (next run in %s min)", interval_minutes)
     except Exception as e:
         logger.error("❌ Failed to start WAYZ staking sync scheduler: %s", e)
         logger.exception(e)

@@ -270,9 +270,7 @@ def get_user_usage_since(user_id: int, since_iso: str) -> dict[str, Any] | None:
             "total_cost_usd": round(sum(float(r.get("cost") or 0.0) for r in rows), 6),
         }
     except Exception as e:
-        logger.error(
-            "Error aggregating usage since %s for user %s: %s", since_iso, user_id, e
-        )
+        logger.error("Error aggregating usage since %s for user %s: %s", since_iso, user_id, e)
         return None
 
 
