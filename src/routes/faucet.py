@@ -216,11 +216,19 @@ async def get_faucet_status(
         configured = False
 
     eligible = has_completed_at_least_one_request(user_id, Config.WAYZ_FAUCET_MIN_REQUESTS)
-    claim = (
-        get_existing_claim(user_id, wallet_address)
-        if wallet_address is not None
-        else get_claim_for_user(user_id)
-    )
+    # Always scope this read to the CALLER's own claim (get_claim_for_user,
+    # a plain user_id filter) -- never get_existing_claim's OR-across-wallet
+    # lookup, which is meant for the claim-write path's duplicate check and
+    # will happily hand back a claim keyed on the wallet_address alone, even
+    # one that belongs to a different user_id (IDOR: any authenticated user
+    # could read another user's claim status/tx_hash by probing their
+    # wallet address). When wallet_address is supplied, only surface the
+    # claim if it actually matches -- otherwise report no claim rather than
+    # leaking that some OTHER wallet is linked to this user.
+    claim = get_claim_for_user(user_id)
+    if claim is not None and wallet_address is not None:
+        if claim.get("wallet_address", "").lower() != wallet_address.lower():
+            claim = None
 
     return {
         "success": True,
