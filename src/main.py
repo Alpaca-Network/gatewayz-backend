@@ -534,6 +534,10 @@ def create_app() -> FastAPI:
             "faucet",
             "WAYZ Testnet Faucet",
         ),  # Testnet WAYZ claim (gatewayz-backend#2245)
+        (
+            "staking",
+            "WAYZ Staking",
+        ),  # Public staking read API (supports gatewayz-backend#2246)
     ]
 
     loaded_count = 0
