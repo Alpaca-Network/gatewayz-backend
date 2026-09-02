@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 _WALLET_STAKES_TABLE = "wallet_stakes"
 _CURSOR_TABLE = "chain_sync_cursors"
 
+# Cap on rows scanned by get_stake_totals -- fine for testnet scale (a
+# handful of wallets), but a real limit rather than an unbounded select.
+_STAKE_TOTALS_ROW_CAP = 10000
+
 
 def get_all_wallet_addresses() -> list[str]:
     """All wallet addresses currently tracked. Empty list on any lookup error."""
@@ -76,6 +80,51 @@ def upsert_wallet_stake(
         return False
 
 
+def get_wallet_stake(wallet_address: str) -> dict | None:
+    """A single wallet_stakes row by primary key, or None if unsynced (or on error)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_WALLET_STAKES_TABLE)
+            .select("*")
+            .eq("wallet_address", wallet_address.lower())
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"wallet_stakes lookup failed for {wallet_address}: {e}")
+        return None
+
+
+def get_stake_totals() -> tuple[str, int]:
+    """(total_staked_wei_str, wallet_count) across all tracked wallets.
+
+    staked_amount is numeric(78,0); PostgREST returns it as a string, so
+    this sums with Python int() rather than float() to avoid precision
+    loss on wei-scale values. Returns ("0", 0) on any lookup error.
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_WALLET_STAKES_TABLE)
+            .select("staked_amount")
+            .limit(_STAKE_TOTALS_ROW_CAP)
+            .execute()
+        )
+        rows = result.data or []
+        if len(rows) >= _STAKE_TOTALS_ROW_CAP:
+            logger.warning(
+                f"get_stake_totals hit the {_STAKE_TOTALS_ROW_CAP}-row cap; totals may be incomplete"
+            )
+        total = sum(int(row["staked_amount"]) for row in rows)
+        return str(total), len(rows)
+    except Exception as e:
+        logger.warning(f"wallet_stakes totals lookup failed: {e}")
+        return "0", 0
+
+
 def get_sync_cursor(contract_address: str) -> int | None:
     """Last-synced block for this contract, or None if never synced (or on error)."""
     try:
@@ -91,6 +140,25 @@ def get_sync_cursor(contract_address: str) -> int | None:
         return int(result.data[0]["last_synced_block"])
     except Exception as e:
         logger.warning(f"chain_sync_cursors lookup failed: {e}")
+        return None
+
+
+def get_sync_cursor_row(contract_address: str) -> dict | None:
+    """Full chain_sync_cursors row (block + updated_at), or None if never
+    synced (or on error)."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_CURSOR_TABLE)
+            .select("*")
+            .eq("contract_address", contract_address.lower())
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"chain_sync_cursors row lookup failed: {e}")
         return None
 
 

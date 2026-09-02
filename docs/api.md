@@ -625,6 +625,133 @@ Delete a chat session.
 }
 ```
 
+## WAYZ Staking & Faucet
+
+WAYZ is Gatewayz's utility token on Avalanche Fuji testnet (chain id `43113`).
+These endpoints are additive and degrade cleanly (sane zeros / `configured:
+false`) when the token/staking contracts aren't deployed, which is the case
+in production today. Big numbers (`staked_amount`, `daily_allowance`,
+`total_staked`) are always decimal strings in wei — never floats or ints in
+JSON, which overflow JS numbers.
+
+### Get Wallet Staking State
+
+```http
+GET /staking/wallets/{wallet_address}
+```
+
+Public, no auth. `wallet_address` must match `^0x[0-9a-fA-F]{40}$` (422
+otherwise). An unknown wallet returns `200` with zeros and `synced: false`,
+not `404` — simpler for the dashboard to render.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "wallet_address": "0x...",
+    "staked_amount": "0",
+    "daily_allowance": "0",
+    "last_synced_block": null,
+    "last_synced_at": null,
+    "synced": false,
+    "total_staked": "0",
+    "daily_inference_capacity": "0",
+    "contracts": { "chain_id": 43113, "token": null, "staking": null },
+    "configured": false
+  }
+}
+```
+
+### Get Staking Summary
+
+```http
+GET /staking/summary
+```
+
+Public, no auth. Protocol-wide totals, aggregated across `wallet_stakes`.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "total_staked": "0",
+    "wallet_count": 0,
+    "daily_inference_capacity": "0",
+    "unstake_cooldown_seconds": 604800,
+    "last_synced_block": null,
+    "last_synced_at": null,
+    "contracts": { "chain_id": 43113, "token": null, "staking": null },
+    "configured": false
+  }
+}
+```
+
+### Get Faucet Status
+
+```http
+GET /faucet/status?wallet_address={wallet_address}
+```
+
+Requires auth. `wallet_address` is optional; when supplied it must match
+the same address pattern as the other endpoints. When omitted, the claim
+lookup is scoped to the authenticated user only.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "configured": false,
+    "eligible": false,
+    "min_requests": 1,
+    "claim_amount": "1000",
+    "claim": null
+  }
+}
+```
+
+`claim`, when present, is `{"status": "pending|sent|failed", "wallet_address":
+"0x...", "tx_hash": null, "claimed_at": "..."}` — the internal `error` column
+is never exposed to the client.
+
+### Request a Faucet Nonce
+
+```http
+POST /faucet/nonce
+```
+
+Requires auth. Body: `{"wallet_address": "0x..."}`. Issues a one-time,
+Redis-backed nonce and the exact message to sign to prove wallet ownership.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": { "message": "Claim testnet WAYZ for Gatewayz account 42. Nonce: ...", "expires_in": 300 }
+}
+```
+
+### Claim Testnet WAYZ
+
+```http
+POST /faucet/claim
+```
+
+Requires auth. Body: `{"wallet_address": "0x...", "signature": "0x..."}` —
+the signature over the message returned by `/faucet/nonce`. Verifies wallet
+ownership, checks eligibility (at least one completed request), and mints
+testnet WAYZ to the wallet. One claim per user and per wallet.
+
+**Response:**
+```json
+{ "success": true, "tx_hash": "0x...", "amount": "1000" }
+```
+
+`amount` is whole WAYZ (human-readable), not the wei-scaled value stored
+internally.
+
 ## Subscription Plans
 
 ### Get All Plans

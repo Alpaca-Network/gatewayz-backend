@@ -18,6 +18,7 @@ from src.config.config import Config
 from src.config.redis_config import get_redis_client
 from src.db.faucet import (
     create_pending_claim,
+    get_claim_for_user,
     get_existing_claim,
     has_completed_at_least_one_request,
     mark_claim_failed,
@@ -39,6 +40,7 @@ _NONCE_KEY_PREFIX = "faucet_nonce:"
 
 faucet_nonce_rl = create_endpoint_rate_limit("faucet_nonce", max_requests=10, window_seconds=60)
 faucet_claim_rl = create_endpoint_rate_limit("faucet_claim", max_requests=5, window_seconds=60)
+faucet_status_rl = create_endpoint_rate_limit("faucet_status", max_requests=30, window_seconds=60)
 
 
 _WALLET_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
@@ -173,4 +175,68 @@ async def claim_faucet(
         # wei-equivalent convention for on-chain reconciliation; this API
         # response deliberately uses the more readable unit instead.
         "amount": str(Config.WAYZ_FAUCET_CLAIM_AMOUNT),
+    }
+
+
+def _claim_view(claim: dict | None) -> dict[str, Any] | None:
+    """Public view of a faucet_claims row -- deliberately never includes
+    the `error` column (internal mint-failure detail)."""
+    if claim is None:
+        return None
+    return {
+        "status": claim.get("status"),
+        "wallet_address": claim.get("wallet_address"),
+        "tx_hash": claim.get("tx_hash"),
+        "claimed_at": claim.get("claimed_at"),
+    }
+
+
+@router.get("/faucet/status", tags=["faucet"])
+async def get_faucet_status(
+    wallet_address: str | None = None,
+    user_id: int = Depends(get_user_id),
+    _rl: None = Depends(faucet_status_rl),
+) -> dict[str, Any]:
+    """Faucet configuration + this user's eligibility/claim state, so the
+    UI can render without attempting a write."""
+    if wallet_address is not None:
+        try:
+            wallet_address = _validate_wallet_address(wallet_address)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
+
+    try:
+        WayzTokenFaucetClient.from_config()
+        configured = True
+    except Exception:
+        # Mirrors claim_faucet's from_config() handling: either an unset
+        # config (WayzTokenFaucetClientError) or a malformed one (raised
+        # from inside __init__) both just mean "not configured" here --
+        # unlike /faucet/claim, a status read has nothing to 503 over.
+        configured = False
+
+    eligible = has_completed_at_least_one_request(user_id, Config.WAYZ_FAUCET_MIN_REQUESTS)
+    # Always scope this read to the CALLER's own claim (get_claim_for_user,
+    # a plain user_id filter) -- never get_existing_claim's OR-across-wallet
+    # lookup, which is meant for the claim-write path's duplicate check and
+    # will happily hand back a claim keyed on the wallet_address alone, even
+    # one that belongs to a different user_id (IDOR: any authenticated user
+    # could read another user's claim status/tx_hash by probing their
+    # wallet address). When wallet_address is supplied, only surface the
+    # claim if it actually matches -- otherwise report no claim rather than
+    # leaking that some OTHER wallet is linked to this user.
+    claim = get_claim_for_user(user_id)
+    if claim is not None and wallet_address is not None:
+        if claim.get("wallet_address", "").lower() != wallet_address.lower():
+            claim = None
+
+    return {
+        "success": True,
+        "data": {
+            "configured": configured,
+            "eligible": eligible,
+            "min_requests": Config.WAYZ_FAUCET_MIN_REQUESTS,
+            "claim_amount": str(Config.WAYZ_FAUCET_CLAIM_AMOUNT),
+            "claim": _claim_view(claim),
+        },
     }

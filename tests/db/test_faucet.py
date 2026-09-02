@@ -6,6 +6,7 @@ import pytest
 
 from src.db.faucet import (
     create_pending_claim,
+    get_claim_for_user,
     get_existing_claim,
     has_completed_at_least_one_request,
     mark_claim_failed,
@@ -107,3 +108,27 @@ def test_mark_claim_failed_updates_status_and_error(sb):
     table_query = client.table("faucet_claims")
     args, kwargs = table_query.update.call_args
     assert args[0] == {"status": "failed", "error": "insufficient funds"}
+
+
+def test_get_claim_for_user_returns_none_when_no_row(sb):
+    client = _mock_table_client({"faucet_claims": []})
+    with patch("src.db.faucet.get_supabase_client", return_value=client):
+        assert get_claim_for_user(42) is None
+
+
+def test_get_claim_for_user_returns_row_when_present(sb):
+    row = {"id": 1, "user_id": 42, "wallet_address": "0xabc", "status": "sent"}
+    client = _mock_table_client({"faucet_claims": [row]})
+    with patch("src.db.faucet.get_supabase_client", return_value=client):
+        assert get_claim_for_user(42) == row
+
+    table_query = client.table("faucet_claims")
+    args, _ = table_query.eq.call_args
+    assert args == ("user_id", 42)
+
+
+def test_get_claim_for_user_returns_none_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.faucet.get_supabase_client", return_value=client):
+        assert get_claim_for_user(42) is None

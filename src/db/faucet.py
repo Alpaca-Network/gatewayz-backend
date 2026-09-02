@@ -54,6 +54,22 @@ def get_existing_claim(user_id: int, wallet_address: str) -> dict | None:
         return None
 
 
+def get_claim_for_user(user_id: int) -> dict | None:
+    """A faucet_claims row for this user, if one exists. Used by GET
+    /faucet/status when the caller doesn't supply a wallet_address --
+    a plain user_id filter, not get_existing_claim's OR-across-wallet
+    lookup (which needs a real wallet_address to be meaningful)."""
+    try:
+        client = get_supabase_client()
+        result = client.table(_CLAIMS_TABLE).select("*").eq("user_id", user_id).execute()
+        if not result.data:
+            return None
+        return result.data[0]
+    except Exception as e:
+        logger.warning(f"faucet_claims lookup failed for user {user_id}: {e}")
+        return None
+
+
 def create_pending_claim(user_id: int, wallet_address: str, amount: int) -> dict | None:
     """Insert a pending claim row. Returns the row, or None on any failure
     (including the expected unique-constraint violation from a duplicate

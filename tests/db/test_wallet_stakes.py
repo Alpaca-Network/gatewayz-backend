@@ -6,7 +6,10 @@ import pytest
 
 from src.db.wallet_stakes import (
     get_all_wallet_addresses,
+    get_stake_totals,
     get_sync_cursor,
+    get_sync_cursor_row,
+    get_wallet_stake,
     set_sync_cursor,
     upsert_wallet_stake,
 )
@@ -31,6 +34,7 @@ def _mock_table_client(table_data: dict):
             query = MagicMock()
             query.select.return_value = query
             query.eq.return_value = query
+            query.limit.return_value = query
             query.upsert.return_value = query
             query.execute.return_value = MagicMock(data=table_data.get(name, []))
             queries[name] = query
@@ -109,3 +113,78 @@ def test_set_sync_cursor_lowercases_contract_address(sb):
     args, kwargs = table_query.upsert.call_args
     assert args[0]["contract_address"] == "0xcontract"
     assert kwargs["on_conflict"] == "contract_address"
+
+
+def test_get_wallet_stake_returns_none_when_no_row(sb):
+    client = _mock_table_client({"wallet_stakes": []})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_wallet_stake("0xabc") is None
+
+
+def test_get_wallet_stake_returns_row_and_lowercases_input(sb):
+    row = {
+        "wallet_address": "0xabc",
+        "staked_amount": "123000000000000000000",
+        "daily_allowance": "10",
+        "last_synced_block": 999,
+        "last_synced_at": "2026-09-01T00:00:00+00:00",
+    }
+    client = _mock_table_client({"wallet_stakes": [row]})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        result = get_wallet_stake("0xABC")
+
+    assert result == row
+    table_query = client.table("wallet_stakes")
+    args, _ = table_query.eq.call_args
+    assert args == ("wallet_address", "0xabc")
+
+
+def test_get_wallet_stake_returns_none_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_wallet_stake("0xabc") is None
+
+
+def test_get_stake_totals_sums_as_int_not_float(sb):
+    rows = [
+        {"staked_amount": "123000000000000000000"},
+        {"staked_amount": "877000000000000000000"},
+    ]
+    client = _mock_table_client({"wallet_stakes": rows})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        total, count = get_stake_totals()
+
+    assert total == "1000000000000000000000"
+    assert count == 2
+
+
+def test_get_stake_totals_returns_zero_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_stake_totals() == ("0", 0)
+
+
+def test_get_sync_cursor_row_returns_none_when_no_row(sb):
+    client = _mock_table_client({"chain_sync_cursors": []})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_sync_cursor_row("0xcontract") is None
+
+
+def test_get_sync_cursor_row_returns_row(sb):
+    row = {
+        "contract_address": "0xcontract",
+        "last_synced_block": 999,
+        "updated_at": "2026-09-01T00:00:00+00:00",
+    }
+    client = _mock_table_client({"chain_sync_cursors": [row]})
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_sync_cursor_row("0xcontract") == row
+
+
+def test_get_sync_cursor_row_returns_none_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.wallet_stakes.get_supabase_client", return_value=client):
+        assert get_sync_cursor_row("0xcontract") is None

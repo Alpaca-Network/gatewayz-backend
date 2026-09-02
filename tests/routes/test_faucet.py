@@ -230,3 +230,150 @@ def test_claim_rejects_oversized_signature(mock_client_cls):
     response = client.post("/faucet/claim", json=body)
 
     assert response.status_code == 422
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+def test_status_unconfigured_returns_false(mock_client_cls):
+    from src.services.chain.wayz_token_faucet_client import WayzTokenFaucetClientError
+
+    mock_client_cls.from_config.side_effect = WayzTokenFaucetClientError("not configured")
+
+    response = client.get("/faucet/status")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["configured"] is False
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_claim_for_user")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_eligible_with_existing_sent_claim(mock_eligible, mock_get_claim, mock_client_cls):
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = True
+    mock_get_claim.return_value = {
+        "status": "sent",
+        "wallet_address": "0x" + "1" * 40,
+        "tx_hash": "0xabc",
+        "claimed_at": "2026-09-01T00:00:00+00:00",
+        "error": "should never reach the client",
+    }
+
+    response = client.get("/faucet/status")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["eligible"] is True
+    assert data["claim"]["status"] == "sent"
+    assert "error" not in data["claim"]
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_claim_for_user")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_with_wallet_address_scopes_to_caller(
+    mock_eligible, mock_get_claim, mock_client_cls
+):
+    """GET /faucet/status must always look up the CALLER's own claim
+    (get_claim_for_user, a plain user_id filter) -- never
+    get_existing_claim's OR-across-wallet lookup, which is meant for the
+    claim-write path's duplicate check and would leak another user's claim
+    to anyone who supplies that user's wallet_address as a query param."""
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = True
+    mock_get_claim.return_value = None
+
+    wallet = "0x" + "4" * 40
+    response = client.get(f"/faucet/status?wallet_address={wallet}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["claim"] is None
+    mock_get_claim.assert_called_once_with(42)
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_claim_for_user")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_wallet_address_mismatch_hides_callers_own_claim(
+    mock_eligible, mock_get_claim, mock_client_cls
+):
+    """If the caller's own claim is for a DIFFERENT wallet than the one
+    queried, don't surface it -- report no claim rather than leaking that
+    some other wallet is linked to this user."""
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = True
+    mock_get_claim.return_value = {
+        "status": "sent",
+        "wallet_address": "0x" + "5" * 40,
+        "tx_hash": "0xabc",
+        "claimed_at": "2026-09-01T00:00:00+00:00",
+    }
+
+    queried_wallet = "0x" + "6" * 40
+    response = client.get(f"/faucet/status?wallet_address={queried_wallet}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["claim"] is None
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_existing_claim")
+@patch("src.db.faucet.get_supabase_client")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_does_not_leak_other_users_claim_by_wallet_probe(
+    mock_eligible, mock_get_client, mock_get_existing, mock_client_cls
+):
+    """Regression for the IDOR found in review: user 999 (no claim of
+    their own) probes user 5's already-claimed wallet_address via GET
+    /faucet/status and must NOT receive user 5's claim. Exercises the
+    real get_claim_for_user against a Supabase-client double that filters
+    by the .eq("user_id", ...) call it actually makes -- not just a
+    patched function -- and asserts get_existing_claim (the OR-across-
+    wallet lookup responsible for the leak) is never even called."""
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = False
+
+    victim_wallet = "0x" + "7" * 40
+    victim_claim_row = {
+        "id": 1,
+        "user_id": 5,
+        "wallet_address": victim_wallet,
+        "status": "sent",
+        "tx_hash": "0xdeadbeef",
+        "claimed_at": "2026-08-01T00:00:00+00:00",
+        "error": None,
+    }
+
+    table = MagicMock()
+    table.select.return_value = table
+
+    def _eq(column, value):
+        assert column == "user_id"
+        matches = [row for row in [victim_claim_row] if row["user_id"] == value]
+        table.execute.return_value = MagicMock(data=matches)
+        return table
+
+    table.eq.side_effect = _eq
+    client_mock = MagicMock()
+    client_mock.table.return_value = table
+    mock_get_client.return_value = client_mock
+
+    app.dependency_overrides[get_user_id] = lambda: 999
+    try:
+        response = client.get(f"/faucet/status?wallet_address={victim_wallet}")
+    finally:
+        app.dependency_overrides[get_user_id] = lambda: 42
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["claim"] is None
+    assert victim_claim_row["tx_hash"] not in str(data)
+    mock_get_existing.assert_not_called()
+
+
+def test_status_requires_auth():
+    app.dependency_overrides.pop(get_user_id, None)
+    try:
+        response = client.get("/faucet/status")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides[get_user_id] = lambda: 42
