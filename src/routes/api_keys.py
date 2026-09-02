@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from src.db.activity import get_user_usage_since
 from src.db.api_keys import (
     create_api_key,
     delete_api_key,
@@ -24,7 +25,6 @@ from src.services.auth_rate_limiting import (
     AuthRateLimitType,
     check_auth_rate_limit,
 )
-from src.db.activity import get_user_usage_since
 from src.services.user_lookup_cache import get_user
 from src.utils.security_validators import sanitize_for_logging
 
