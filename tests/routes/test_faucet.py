@@ -230,3 +230,65 @@ def test_claim_rejects_oversized_signature(mock_client_cls):
     response = client.post("/faucet/claim", json=body)
 
     assert response.status_code == 422
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+def test_status_unconfigured_returns_false(mock_client_cls):
+    from src.services.chain.wayz_token_faucet_client import WayzTokenFaucetClientError
+
+    mock_client_cls.from_config.side_effect = WayzTokenFaucetClientError("not configured")
+
+    response = client.get("/faucet/status")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["configured"] is False
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_claim_for_user")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_eligible_with_existing_sent_claim(mock_eligible, mock_get_claim, mock_client_cls):
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = True
+    mock_get_claim.return_value = {
+        "status": "sent",
+        "wallet_address": "0x" + "1" * 40,
+        "tx_hash": "0xabc",
+        "claimed_at": "2026-09-01T00:00:00+00:00",
+        "error": "should never reach the client",
+    }
+
+    response = client.get("/faucet/status")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["eligible"] is True
+    assert data["claim"]["status"] == "sent"
+    assert "error" not in data["claim"]
+
+
+@patch("src.routes.faucet.WayzTokenFaucetClient")
+@patch("src.routes.faucet.get_existing_claim")
+@patch("src.routes.faucet.has_completed_at_least_one_request")
+def test_status_with_wallet_address_uses_get_existing_claim(
+    mock_eligible, mock_get_existing, mock_client_cls
+):
+    mock_client_cls.from_config.return_value = MagicMock()
+    mock_eligible.return_value = True
+    mock_get_existing.return_value = None
+
+    wallet = "0x" + "4" * 40
+    response = client.get(f"/faucet/status?wallet_address={wallet}")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["claim"] is None
+    mock_get_existing.assert_called_once_with(42, wallet)
+
+
+def test_status_requires_auth():
+    app.dependency_overrides.pop(get_user_id, None)
+    try:
+        response = client.get("/faucet/status")
+        assert response.status_code == 401
+    finally:
+        app.dependency_overrides[get_user_id] = lambda: 42
