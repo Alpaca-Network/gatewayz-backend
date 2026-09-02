@@ -8,6 +8,7 @@ plain dicts, so every successful Anthropic upstream call surfaced as
 500 "unexpected upstream response shape". CM tests only exercised the
 dict-based path, which is how it slipped through.
 """
+
 import json
 
 import pytest

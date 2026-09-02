@@ -95,9 +95,7 @@ class TestGetUserUsageSince:
 
     @pytest.mark.usefixtures("sb")
     def test_db_error_returns_none(self):
-        with patch(
-            "src.db.activity.get_supabase_client", side_effect=RuntimeError("db down")
-        ):
+        with patch("src.db.activity.get_supabase_client", side_effect=RuntimeError("db down")):
             assert get_user_usage_since(123, SINCE) is None
 
 
