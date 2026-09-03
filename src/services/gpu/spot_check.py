@@ -39,6 +39,7 @@ from src.db.gpu_payouts import (
     get_node,
     list_agable_pending_work,
     list_sampled_pending_work,
+    list_verified_work_since,
     node_verification_stats_since,
     set_verification,
     void_earning_for_work,
@@ -296,14 +297,31 @@ async def _verify_sampled_row(work: dict) -> str:
     return "verified"
 
 
-def _apply_sampled_outcome(work: dict, outcome: str) -> None:
+def _apply_sampled_outcome(work: dict, outcome: str) -> str:
+    """Persist `outcome` for a sampled row and its side effects. Returns
+    the FINAL outcome actually written -- may differ from the `outcome`
+    argument when a 'verified' row turns out not payable (PR #2288 review
+    C1: an unknown/unlisted model id): that case is written as 'skipped',
+    not 'verified'. Callers must use the RETURN VALUE for stats, not the
+    argument."""
     work_id = work["id"]
     node_id = work.get("node_id")
-    set_verification(work_id, outcome)
 
     if outcome == "verified":
-        record_earning_for_verified_work(work)
-        return
+        result = record_earning_for_verified_work(work)
+        if result.outcome == "not_payable":
+            set_verification(work_id, "skipped")
+            logger.info(
+                "spot-check: work %s verified but not payable (model %r not on the payout "
+                "allow-list); marked skipped instead",
+                work_id,
+                work.get("model"),
+            )
+            return "skipped"
+        set_verification(work_id, "verified")
+        return "verified"
+
+    set_verification(work_id, outcome)
     if outcome == "failed":
         # Defensive: a 'failed' sampled row never had an earning created
         # (accrual only happens on verified, per record_earning_for_verified_work),
@@ -323,6 +341,7 @@ def _apply_sampled_outcome(work: dict, outcome: str) -> None:
                     node_id,
                     failed_count,
                 )
+    return outcome
 
 
 def _resolve_aged_row(work: dict) -> str:
@@ -339,10 +358,61 @@ def _resolve_aged_row(work: dict) -> str:
     return "verified" if failure_rate < _UNSAMPLED_MAX_DAILY_FAILURE_RATE else "skipped"
 
 
+def _resolve_verified_aged_row_outcome(work: dict) -> str:
+    """For an aged row _resolve_aged_row already decided is 'verified':
+    apply the same C1 payability check the sampled path applies, so an
+    unknown-model row never gets marked 'verified' just because its
+    node's failure rate happens to be low. Returns 'verified' or 'skipped'."""
+    result = record_earning_for_verified_work(work)
+    if result.outcome == "not_payable":
+        logger.info(
+            "spot-check: aged work %s would verify but isn't payable (model %r not on the "
+            "payout allow-list); marked skipped instead",
+            work.get("id"),
+            work.get("model"),
+        )
+        return "skipped"
+    return "verified"
+
+
+def _reconcile_missing_earnings() -> int:
+    """Idempotent retry of earnings accrual for recently-verified work
+    (PR #2288 review I1): a work item can be 'verified' with no
+    provider_earnings row if its first accrual attempt failed for a
+    non-duplicate DB reason (create_earning's 'db_error' outcome).
+    record_earning_for_verified_work is safe to re-attempt -- the UNIQUE
+    (work_id) constraint makes an already-paid row's re-attempt a cheap
+    'duplicate' no-op -- so this simply re-runs it for every row verified
+    in the last COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS (default 48h,
+    double the 24h aging window) instead of tracking which rows failed.
+    Returns the count of earnings actually created this pass (0 is the
+    normal case -- it only creates something when a prior attempt failed
+    non-duplicately)."""
+    since = (
+        datetime.now(UTC) - timedelta(hours=Config.COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS)
+    ).isoformat()
+    created = 0
+    for work in list_verified_work_since(since):
+        result = record_earning_for_verified_work(work)
+        if result.outcome == "created":
+            created += 1
+            logger.warning(
+                "spot-check: reconciled a missing earning for previously-verified work %s "
+                "(its first accrual attempt must have failed non-duplicately)",
+                work.get("id"),
+            )
+    return created
+
+
 async def run_spot_check_verification() -> dict[str, int]:
     """The scheduled job (every COMMUNITY_SPOTCHECK_INTERVAL_MINUTES,
-    default 10). Resolves sampled rows via replay and ages out unresolved
-    rows past 24h. Never raises -- a per-row failure is caught inside
+    default 10). Resolves sampled rows via replay (bounded by
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN and a per-node
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN cap, sequential with
+    a small delay between replays -- PR #2288 review I2, so the job can't
+    run unbounded or hammer a single busy node), ages out unresolved rows
+    past 24h, then reconciles any 'verified' work missing an earnings row
+    (I1). Never raises -- a per-row failure is caught inside
     _verify_sampled_row/_replay and treated as 'skipped' for that row."""
     now = datetime.now(UTC)
     sampled_since = (now - timedelta(hours=_SAMPLED_LOOKBACK_HOURS)).isoformat()
@@ -350,17 +420,42 @@ async def run_spot_check_verification() -> dict[str, int]:
 
     stats = {"verified": 0, "failed": 0, "skipped": 0}
 
+    replays_this_run = 0
+    replays_by_node: dict[int, int] = {}
+    max_replays_per_run = Config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN
+    max_replays_per_node = Config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN
+
     for work in list_sampled_pending_work(sampled_since):
+        if replays_this_run >= max_replays_per_run:
+            logger.info(
+                "spot-check: per-run replay cap (%s) reached; remaining sampled rows deferred "
+                "to a future run",
+                max_replays_per_run,
+            )
+            break
+
+        node_id = work.get("node_id")
+        if node_id is not None and replays_by_node.get(node_id, 0) >= max_replays_per_node:
+            stats["skipped"] += 1
+            continue
+
         try:
             outcome = await _verify_sampled_row(work)
         except Exception as e:
             logger.warning("spot-check: unexpected error verifying work %s: %s", work.get("id"), e)
             outcome = "skipped"
+
+        replays_this_run += 1
+        if node_id is not None:
+            replays_by_node[node_id] = replays_by_node.get(node_id, 0) + 1
+
         if outcome == "skipped":
             stats["skipped"] += 1
-            continue
-        _apply_sampled_outcome(work, outcome)
-        stats[outcome] += 1
+        else:
+            final_outcome = _apply_sampled_outcome(work, outcome)
+            stats[final_outcome] += 1
+
+        await asyncio.sleep(Config.COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS)
 
     for work in list_agable_pending_work(agable_before):
         try:
@@ -368,15 +463,18 @@ async def run_spot_check_verification() -> dict[str, int]:
         except Exception as e:
             logger.warning("spot-check: unexpected error aging work %s: %s", work.get("id"), e)
             outcome = "skipped"
-        set_verification(work["id"], outcome)
         if outcome == "verified":
-            record_earning_for_verified_work(work)
+            outcome = _resolve_verified_aged_row_outcome(work)
+        set_verification(work["id"], outcome)
         stats[outcome] += 1
 
+    reconciled = _reconcile_missing_earnings()
+
     logger.info(
-        "spot-check verification run complete | verified=%s failed=%s skipped=%s",
+        "spot-check verification run complete | verified=%s failed=%s skipped=%s reconciled=%s",
         stats["verified"],
         stats["failed"],
         stats["skipped"],
+        reconciled,
     )
     return stats

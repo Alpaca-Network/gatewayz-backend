@@ -94,6 +94,30 @@ def test_pool_balance_wei_calls_balance_of_with_the_pool_address(sb):
     mock_contract.functions.balanceOf.assert_called_once_with(test_account.address)
 
 
+def test_get_receipt_returns_dict_when_mined(sb):
+    test_account = Account.create()
+    client, mock_w3, _ = _make_client_with_mocked_web3(test_account.key.hex())
+    mock_w3.eth.get_transaction_receipt.return_value = {
+        "status": 1,
+        "transactionHash": b"\xab" * 32,
+    }
+
+    receipt = client.get_receipt("0xabc")
+
+    assert receipt == {"status": 1, "transactionHash": b"\xab" * 32}
+    mock_w3.eth.get_transaction_receipt.assert_called_once_with("0xabc")
+
+
+def test_get_receipt_returns_none_when_not_found(sb):
+    from web3.exceptions import TransactionNotFound
+
+    test_account = Account.create()
+    client, mock_w3, _ = _make_client_with_mocked_web3(test_account.key.hex())
+    mock_w3.eth.get_transaction_receipt.side_effect = TransactionNotFound("not found")
+
+    assert client.get_receipt("0xabc") is None
+
+
 def test_real_eth_account_sign_transaction_uses_raw_transaction_attribute(sb):
     """Regression guard mirroring the faucet client's equivalent test:
     eth_account's SignedTransaction exposes `raw_transaction` (snake_case)
@@ -142,3 +166,36 @@ def test_transfer_and_balance_of_use_real_contract_function_signatures(sb):
     assert not isinstance(
         transfer_exc.value, TypeError
     ), f"transfer call rejected its arguments: {transfer_exc.value}"
+
+    with pytest.raises(Exception) as receipt_exc:
+        client.get_receipt("0x" + "ab" * 32)
+    assert not isinstance(
+        receipt_exc.value, TypeError
+    ), f"get_transaction_receipt call rejected its arguments: {receipt_exc.value}"
+
+
+def test_transfer_and_balance_of_encode_the_literal_expected_selectors(sb):
+    """PR #2288 review nit: proves argument-binding success AND the actual
+    encoded calldata -- not just that binding didn't raise. Uses the same
+    offline ContractFunction._encode_transaction_data() technique
+    (no RPC needed) that was used by hand to sanity-check the ABI before
+    writing any test here. Selectors are the first 4 bytes of
+    keccak256("transfer(address,uint256)") / keccak256("balanceOf(address)"),
+    the standard ERC20 selectors."""
+    import json
+    from pathlib import Path
+
+    from web3 import Web3
+
+    abi = json.loads(
+        (Path(__file__).parents[3] / "src/services/chain/abi/wayz_token.json").read_text()
+    )
+    w3 = Web3()
+    contract = w3.eth.contract(address="0x" + "1" * 40, abi=abi)
+    addr = "0x" + "2" * 40
+
+    transfer_data = contract.functions.transfer(addr, 1000)._encode_transaction_data()
+    balance_data = contract.functions.balanceOf(addr)._encode_transaction_data()
+
+    assert transfer_data.startswith("0xa9059cbb")
+    assert balance_data.startswith("0x70a08231")

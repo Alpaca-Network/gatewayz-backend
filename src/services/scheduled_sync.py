@@ -916,16 +916,29 @@ _last_gpu_settlement_status: dict[str, Any] = {
 
 
 async def run_scheduled_gpu_settlement():
-    """Run one settlement pass (src/services/gpu/settlement.py)."""
+    """Run one settlement pass (src/services/gpu/settlement.py). Reconciles
+    any stuck-pending settlements from a prior crashed run FIRST (PR #2288
+    review I3) so they're freed up in time to be reconsidered the same
+    run, not left for a whole extra day."""
     from src.services.chain.wayz_rewards_client import (
         WayzProviderRewardsClient,
         WayzProviderRewardsClientError,
     )
-    from src.services.gpu.settlement import run_settlement_once
+    from src.services.gpu.settlement import reconcile_stuck_settlements, run_settlement_once
 
     _last_gpu_settlement_status["last_run_time"] = datetime.now(UTC)
     try:
         client = WayzProviderRewardsClient.from_config()
+
+        reconcile_result = await reconcile_stuck_settlements(client)
+        if reconcile_result.settlements_checked:
+            logger.info(
+                "GPU settlement reconciliation | checked=%s confirmed_sent=%s marked_failed=%s",
+                reconcile_result.settlements_checked,
+                reconcile_result.settlements_confirmed_sent,
+                reconcile_result.settlements_marked_failed,
+            )
+
         result = await run_settlement_once(client)
         _last_gpu_settlement_status["last_ok"] = True
         _last_gpu_settlement_status["settlements_sent"] = result.settlements_sent
@@ -948,7 +961,7 @@ def start_gpu_settlement_scheduler():
     global _gpu_settlement_scheduler
 
     if not Config.WAYZ_REWARDS_POOL_PRIVATE_KEY:
-        logger.info("GPU settlement DISABLED: WAYZ_REWARDS_POOL_PRIVATE_KEY not set")
+        logger.warning("GPU settlement DISABLED: WAYZ_REWARDS_POOL_PRIVATE_KEY not set")
         return
 
     interval_hours = Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS

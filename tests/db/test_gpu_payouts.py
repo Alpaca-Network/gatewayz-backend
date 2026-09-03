@@ -192,18 +192,34 @@ def test_list_approved_providers_falls_back_to_direct_query(sb):
 def test_create_earning_inserts_accrued_row(sb):
     client, query = _client_with([{"id": 1, "status": "accrued"}])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        result = gpu_payouts.create_earning(1, 10, 5000)
+        result, outcome = gpu_payouts.create_earning(1, 10, 5000)
     assert result == {"id": 1, "status": "accrued"}
+    assert outcome == "created"
     query.insert.assert_called_once_with(
         {"provider_id": 1, "work_id": 10, "amount_wei": "5000", "status": "accrued"}
     )
 
 
-def test_create_earning_returns_none_on_duplicate_work_id(sb):
+def test_create_earning_returns_duplicate_outcome_on_unique_violation(sb):
     client = MagicMock()
     client.table.side_effect = RuntimeError("duplicate key value violates unique constraint")
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
-        assert gpu_payouts.create_earning(1, 10, 5000) is None
+        result, outcome = gpu_payouts.create_earning(1, 10, 5000)
+    assert result is None
+    assert outcome == "duplicate"
+
+
+def test_create_earning_returns_db_error_outcome_for_non_duplicate_failures(sb):
+    """PR #2288 review I1 regression: a network blip / RLS error / anything
+    that isn't a unique-violation must be distinguishable from a genuine
+    duplicate so the caller can log it loudly instead of silently eating
+    a lost payout."""
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("connection reset by peer")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        result, outcome = gpu_payouts.create_earning(1, 10, 5000)
+    assert result is None
+    assert outcome == "db_error"
 
 
 def test_void_earning_for_work_updates_status(sb):
@@ -233,16 +249,65 @@ def test_earnings_totals_zeroed_on_error(sb):
         assert gpu_payouts.earnings_totals(1) == {"accrued": 0, "settled": 0, "void": 0}
 
 
+def test_mark_earnings_settling_flips_accrued_rows_for_a_provider(sb):
+    client, query = _client_with([{"id": 1, "amount_wei": "1000"}, {"id": 2, "amount_wei": "2000"}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        rows = gpu_payouts.mark_earnings_settling(5, 99)
+    assert rows == [{"id": 1, "amount_wei": "1000"}, {"id": 2, "amount_wei": "2000"}]
+    query.update.assert_called_once_with({"status": "settling", "settlement_id": 99})
+    query.eq.assert_any_call("provider_id", 5)
+    query.eq.assert_any_call("status", "accrued")
+
+
+def test_mark_earnings_settling_returns_empty_list_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.mark_earnings_settling(5, 99) == []
+
+
 def test_mark_earnings_settled_is_a_noop_for_empty_list(sb):
     assert gpu_payouts.mark_earnings_settled([], 1) is True
 
 
-def test_mark_earnings_settled_updates_given_ids(sb):
+def test_mark_earnings_settled_updates_given_ids_from_settling(sb):
     client, query = _client_with([{"id": 1}, {"id": 2}])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.mark_earnings_settled([1, 2], 99) is True
-    query.update.assert_called_once_with({"status": "settled", "settlement_id": 99})
+    query.update.assert_called_once_with({"status": "settled"})
     query.in_.assert_called_once_with("id", [1, 2])
+    query.eq.assert_any_call("status", "settling")
+    query.eq.assert_any_call("settlement_id", 99)
+
+
+def test_mark_earnings_accrued_is_a_noop_for_empty_list(sb):
+    assert gpu_payouts.mark_earnings_accrued([], 1) is True
+
+
+def test_mark_earnings_accrued_reverts_settling_rows(sb):
+    client, query = _client_with([{"id": 1}, {"id": 2}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.mark_earnings_accrued([1, 2], 99) is True
+    query.update.assert_called_once_with({"status": "accrued", "settlement_id": None})
+    query.eq.assert_any_call("status", "settling")
+    query.eq.assert_any_call("settlement_id", 99)
+
+
+def test_list_settling_earnings_for_settlement_returns_rows(sb):
+    rows = [{"id": 1, "status": "settling"}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.list_settling_earnings_for_settlement(99) == rows
+    query.eq.assert_any_call("settlement_id", 99)
+    query.eq.assert_any_call("status", "settling")
+
+
+def test_list_verified_work_since_returns_rows(sb):
+    rows = [{"id": 1, "verification": "verified"}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.list_verified_work_since("2026-09-01T00:00:00Z") == rows
+    query.eq.assert_any_call("verification", "verified")
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +325,21 @@ def test_get_pending_settlement_returns_none_when_absent(sb):
     client, _ = _client_with([])
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.get_pending_settlement(1) is None
+
+
+def test_list_stuck_pending_settlements_returns_rows(sb):
+    rows = [{"id": 1, "status": "pending"}]
+    client, query = _client_with(rows)
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.list_stuck_pending_settlements("2026-09-01T00:00:00Z") == rows
+    query.eq.assert_any_call("status", "pending")
+
+
+def test_update_settlement_amount_updates_row(sb):
+    client, query = _client_with([{"id": 1}])
+    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+        assert gpu_payouts.update_settlement_amount(1, 5000) is True
+    query.update.assert_called_once_with({"amount_wei": "5000"})
 
 
 def test_create_settlement_inserts_pending_row(sb):

@@ -327,11 +327,37 @@ def list_approved_providers() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def create_earning(provider_id: int, work_id: int, amount_wei: int) -> dict | None:
-    """Insert an 'accrued' provider_earnings row. work_id is UNIQUE, so a
-    duplicate call (e.g. a re-run after a crash) raises instead of
-    double-paying -- caught and logged at info level (expected, not an
-    error) and treated as "already recorded"."""
+def _is_duplicate_error(error: Exception) -> bool:
+    """True if *error* is a Postgres unique-violation (duplicate work_id).
+    Mirrors src/db/webhook_events.py's identical helper -- same problem,
+    same convention."""
+    message = str(error).lower()
+    return (
+        "23505" in message
+        or "duplicate key" in message
+        or "already exists" in message
+        or "unique constraint" in message
+    )
+
+
+def create_earning(provider_id: int, work_id: int, amount_wei: int) -> tuple[dict | None, str]:
+    """Insert an 'accrued' provider_earnings row. Returns (row_or_None, outcome):
+
+    'created'   -- inserted successfully.
+    'duplicate' -- work_id's UNIQUE constraint rejected it (e.g. a re-run
+                   after a crash) -- a genuine no-op, logged at INFO.
+    'db_error'  -- the insert failed for any OTHER reason (network blip,
+                   RLS misconfig, malformed payload...) -- logged at
+                   WARNING, not INFO, since this is a real, visible
+                   failure to pay a verified work item. PR #2288 review
+                   I1: the old version caught every exception as "likely
+                   duplicate" and logged it at INFO, silently losing a
+                   legitimate earning with no operator signal. Callers
+                   must NOT assume 'db_error' means the work is unpaid
+                   forever -- src/services/gpu/spot_check.py's
+                   run_spot_check_verification retries these via its
+                   reconciliation pass.
+    """
     try:
         client = get_supabase_client()
         result = (
@@ -346,10 +372,13 @@ def create_earning(provider_id: int, work_id: int, amount_wei: int) -> dict | No
             )
             .execute()
         )
-        return result.data[0] if result.data else None
+        return (result.data[0] if result.data else None), "created"
     except Exception as e:
-        logger.info(f"provider_earnings insert skipped for work {work_id} (likely duplicate): {e}")
-        return None
+        if _is_duplicate_error(e):
+            logger.info(f"provider_earnings insert skipped for work {work_id} (duplicate): {e}")
+            return None, "duplicate"
+        logger.warning(f"provider_earnings insert FAILED for work {work_id} (not a duplicate): {e}")
+        return None, "db_error"
 
 
 def void_earning_for_work(work_id: int) -> bool:
@@ -411,22 +440,117 @@ def earnings_totals(provider_id: int) -> dict[str, int]:
         return totals
 
 
+def mark_earnings_settling(provider_id: int, settlement_id: int) -> list[dict]:
+    """Atomically flip a provider's 'accrued' earnings to 'settling',
+    tagged with settlement_id, and return exactly the rows that were
+    flipped (id + amount_wei). PR #2288 review I4 fix: this single
+    UPDATE ... WHERE status='accrued' is the race-safety mechanism --
+    Postgres applies it as one statement, so a concurrent
+    void_earning_for_work (which also only ever matches status='accrued')
+    can no longer touch a row after this has claimed it, and this can
+    never claim a row a concurrent void got to first. The settlement job
+    must sum ONLY the returned rows (not a separate list_accrued_earnings
+    read) as the authoritative amount to transfer.
+
+    Returns [] on any error -- callers must not treat that as "provider
+    has zero accrued earnings," only as "couldn't claim any this attempt."
+    """
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_EARNINGS_TABLE)
+            .update({"status": "settling", "settlement_id": settlement_id})
+            .eq("provider_id", provider_id)
+            .eq("status", "accrued")
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"provider_earnings settling-flip failed for provider {provider_id}: {e}")
+        return []
+
+
 def mark_earnings_settled(earning_ids: list[int], settlement_id: int) -> bool:
-    """Flip a specific set of earning rows (by id) from 'accrued' to
-    'settled', tagged with the settlement that paid them. Only 'accrued'
-    rows match -- an id that's somehow already settled/void is a no-op,
-    not an error."""
+    """Flip a specific set of earning rows (by id) from 'settling' to
+    'settled' -- the final confirmation after a successful transfer. Only
+    'settling' rows tagged with this settlement_id match."""
     if not earning_ids:
         return True
     try:
         client = get_supabase_client()
-        client.table(_EARNINGS_TABLE).update(
-            {"status": "settled", "settlement_id": settlement_id}
-        ).in_("id", earning_ids).eq("status", "accrued").execute()
+        client.table(_EARNINGS_TABLE).update({"status": "settled"}).in_("id", earning_ids).eq(
+            "status", "settling"
+        ).eq("settlement_id", settlement_id).execute()
         return True
     except Exception as e:
         logger.warning(f"provider_earnings settle failed for settlement {settlement_id}: {e}")
         return False
+
+
+def mark_earnings_accrued(earning_ids: list[int], settlement_id: int) -> bool:
+    """Revert a specific set of earning rows (by id) from 'settling' back
+    to 'accrued' and clear settlement_id -- used when a settlement fails
+    (transfer error, threshold recheck after the atomic flip, or stuck-
+    settlement reconciliation) so the earnings are picked up by a future
+    settlement run instead of being stuck 'settling' forever."""
+    if not earning_ids:
+        return True
+    try:
+        client = get_supabase_client()
+        client.table(_EARNINGS_TABLE).update({"status": "accrued", "settlement_id": None}).in_(
+            "id", earning_ids
+        ).eq("status", "settling").eq("settlement_id", settlement_id).execute()
+        return True
+    except Exception as e:
+        logger.warning(
+            f"provider_earnings revert-to-accrued failed for settlement {settlement_id}: {e}"
+        )
+        return False
+
+
+def list_settling_earnings_for_settlement(settlement_id: int) -> list[dict]:
+    """The earnings currently tagged 'settling' for one settlement --
+    used by stuck-settlement reconciliation to know what to confirm/revert."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_EARNINGS_TABLE)
+            .select("*")
+            .eq("settlement_id", settlement_id)
+            .eq("status", "settling")
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(
+            f"provider_earnings settling-list failed for settlement {settlement_id}: {e}"
+        )
+        return []
+
+
+def list_verified_work_since(since_iso: str) -> list[dict]:
+    """provider_work rows with verification='verified' created at or after
+    since_iso -- the earnings-reconciliation pass's input (PR #2288 review
+    I1): record_earning_for_verified_work is idempotent (create_earning's
+    UNIQUE(work_id) constraint), so simply re-attempting it for every
+    recently-verified row is a safe, cheap way to recover any that failed
+    for a non-duplicate DB reason on their first attempt, without needing
+    a NOT EXISTS / anti-join query."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_WORK_TABLE)
+            .select("*")
+            .eq("verification", "verified")
+            .gte("created_at", since_iso)
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"provider_work verified-since lookup failed: {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -458,6 +582,28 @@ def get_pending_settlement(provider_id: int) -> dict | None:
         return None
 
 
+def list_stuck_pending_settlements(older_than_iso: str) -> list[dict]:
+    """'pending' provider_settlements rows older than older_than_iso --
+    PR #2288 review I3: the reconciliation input for settlements stuck
+    since before a crash. See src/services/gpu/settlement.py's
+    reconcile_stuck_settlements and docs/gpu/VERIFICATION_AND_PAYOUTS.md's
+    runbook."""
+    try:
+        client = get_supabase_client()
+        result = (
+            client.table(_SETTLEMENTS_TABLE)
+            .select("*")
+            .eq("status", "pending")
+            .lt("created_at", older_than_iso)
+            .limit(_WORK_QUERY_ROW_CAP)
+            .execute()
+        )
+        return result.data or []
+    except Exception as e:
+        logger.warning(f"provider_settlements stuck-pending lookup failed: {e}")
+        return []
+
+
 def create_settlement(
     provider_id: int, period_start_iso: str, period_end_iso: str, amount_wei: int
 ) -> dict | None:
@@ -480,6 +626,22 @@ def create_settlement(
     except Exception as e:
         logger.warning(f"provider_settlements insert failed for provider {provider_id}: {e}")
         return None
+
+
+def update_settlement_amount(settlement_id: int, amount_wei: int) -> bool:
+    """Persist the authoritative amount_wei once it's known from the
+    atomic mark_earnings_settling() flip -- the row is created with a
+    provisional 0 before that flip happens (a settlement_id is needed to
+    tag the flipped earnings, so the row must exist first)."""
+    try:
+        client = get_supabase_client()
+        client.table(_SETTLEMENTS_TABLE).update({"amount_wei": str(amount_wei)}).eq(
+            "id", settlement_id
+        ).execute()
+        return True
+    except Exception as e:
+        logger.warning(f"provider_settlements amount update failed for {settlement_id}: {e}")
+        return False
 
 
 def mark_settlement_sent(settlement_id: int, tx_hash: str) -> bool:

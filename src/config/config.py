@@ -213,6 +213,25 @@ class Config:
     COMMUNITY_SETTLEMENT_INTERVAL_HOURS = int(
         _get_env_var("COMMUNITY_SETTLEMENT_INTERVAL_HOURS", "24")
     )
+    # PR #2288 review fix round 1 (C1/I2/I3): optional JSON-object override
+    # for src/services/gpu/model_classes.py's built-in allow-list, e.g.
+    # '{"some-new-model-id": "medium"}'. Bounds the verifier job's replay
+    # load per run and per node, and how long a settlement can sit
+    # 'pending' before the daily job attempts to reconcile it.
+    COMMUNITY_MODEL_CLASS_OVERRIDES = _get_env_var("COMMUNITY_MODEL_CLASS_OVERRIDES")
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN", "50")
+    )
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN", "5")
+    )
+    COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = float(
+        _get_env_var("COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS", "0.5")
+    )
+    COMMUNITY_SETTLEMENT_STUCK_HOURS = int(_get_env_var("COMMUNITY_SETTLEMENT_STUCK_HOURS", "2"))
+    COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS = int(
+        _get_env_var("COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS", "48")
+    )
     # Server-side Privy access-token verification (gatewayz-backend#2248).
     # `POST /auth` used to trust the client-supplied Privy user id outright;
     # this closes that hole. PRIVY_VERIFICATION_KEY is the app's ES256 public

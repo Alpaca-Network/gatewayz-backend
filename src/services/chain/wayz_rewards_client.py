@@ -97,3 +97,21 @@ class WayzProviderRewardsClient:
         synchronous -- callers on the async path should wrap with
         asyncio.to_thread, matching the settlement job's usage."""
         return self._contract.functions.balanceOf(self._account.address).call()
+
+    def get_receipt(self, tx_hash: str) -> dict | None:
+        """Transaction receipt for tx_hash, or None if it isn't mined yet
+        (or was dropped/never broadcast) -- web3.py raises
+        TransactionNotFound rather than returning None for that case, so
+        this normalizes it. Read-only, synchronous (see pool_balance_wei).
+        Used by the settlement job's stuck-pending reconciliation
+        (PR #2288 review I3) to distinguish an on-chain success
+        (receipt.status == 1) from a revert (status == 0) or "never
+        landed" for a settlement whose tx_hash we recorded but never
+        confirmed before a crash."""
+        from web3.exceptions import TransactionNotFound
+
+        try:
+            receipt = self._w3.eth.get_transaction_receipt(tx_hash)
+        except TransactionNotFound:
+            return None
+        return dict(receipt)

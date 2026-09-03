@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.services.gpu import spot_check
+from src.services.gpu.earnings import EarningResult
 
 
 @pytest.fixture
@@ -310,10 +311,32 @@ async def test_verify_sampled_row_verified_with_matching_reference(
 @patch("src.services.gpu.spot_check.record_earning_for_verified_work")
 @patch("src.services.gpu.spot_check.set_verification")
 def test_apply_outcome_verified_records_earning(mock_set_ver, mock_record, sb):
+    mock_record.return_value = EarningResult(earning={"id": 1}, outcome="created")
     work = _work_row()
-    spot_check._apply_sampled_outcome(work, "verified")
+
+    final_outcome = spot_check._apply_sampled_outcome(work, "verified")
+
+    assert final_outcome == "verified"
     mock_set_ver.assert_called_once_with(1, "verified")
     mock_record.assert_called_once_with(work)
+
+
+@patch("src.services.gpu.spot_check.record_earning_for_verified_work")
+@patch("src.services.gpu.spot_check.set_verification")
+def test_apply_outcome_verified_but_not_payable_downgrades_to_skipped(
+    mock_set_ver, mock_record, sb
+):
+    """PR #2288 review C1: a 'verified' row whose model isn't on the
+    payout allow-list must be persisted as 'skipped', not 'verified' --
+    the caller (run_spot_check_verification) must use this return value
+    for stats, not the outcome it was called with."""
+    mock_record.return_value = EarningResult(earning=None, outcome="not_payable")
+    work = _work_row()
+
+    final_outcome = spot_check._apply_sampled_outcome(work, "verified")
+
+    assert final_outcome == "skipped"
+    mock_set_ver.assert_called_once_with(1, "skipped")
 
 
 @patch("src.services.gpu.spot_check.disable_node")
@@ -372,11 +395,56 @@ def test_resolve_aged_row_verified_when_no_history(mock_stats, sb):
 
 
 # ---------------------------------------------------------------------------
-# run_spot_check_verification (end to end orchestration)
+# _resolve_verified_aged_row_outcome / _reconcile_missing_earnings (C1 / I1)
 # ---------------------------------------------------------------------------
 
 
 @patch("src.services.gpu.spot_check.record_earning_for_verified_work")
+def test_resolve_verified_aged_row_outcome_verified_when_payable(mock_record, sb):
+    mock_record.return_value = EarningResult(earning={"id": 1}, outcome="created")
+    assert spot_check._resolve_verified_aged_row_outcome(_work_row()) == "verified"
+
+
+@patch("src.services.gpu.spot_check.record_earning_for_verified_work")
+def test_resolve_verified_aged_row_outcome_skipped_when_not_payable(mock_record, sb):
+    mock_record.return_value = EarningResult(earning=None, outcome="not_payable")
+    assert spot_check._resolve_verified_aged_row_outcome(_work_row()) == "skipped"
+
+
+@patch("src.services.gpu.spot_check.record_earning_for_verified_work")
+@patch("src.services.gpu.spot_check.list_verified_work_since")
+def test_reconcile_missing_earnings_retries_every_recently_verified_row(
+    mock_list_verified, mock_record, sb
+):
+    mock_list_verified.return_value = [_work_row(id=1), _work_row(id=2)]
+    mock_record.side_effect = [
+        EarningResult(earning=None, outcome="duplicate"),  # already paid -- no-op
+        EarningResult(earning={"id": 9}, outcome="created"),  # recovers a lost payout
+    ]
+
+    created = spot_check._reconcile_missing_earnings()
+
+    assert created == 1
+    assert mock_record.call_count == 2
+
+
+@patch("src.services.gpu.spot_check.record_earning_for_verified_work")
+@patch("src.services.gpu.spot_check.list_verified_work_since")
+def test_reconcile_missing_earnings_is_zero_when_nothing_verified(
+    mock_list_verified, mock_record, sb
+):
+    mock_list_verified.return_value = []
+    assert spot_check._reconcile_missing_earnings() == 0
+    mock_record.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# run_spot_check_verification (end to end orchestration)
+# ---------------------------------------------------------------------------
+
+
+@patch("src.services.gpu.spot_check._reconcile_missing_earnings")
+@patch("src.services.gpu.spot_check._resolve_verified_aged_row_outcome")
 @patch("src.services.gpu.spot_check.set_verification")
 @patch("src.services.gpu.spot_check._resolve_aged_row")
 @patch("src.services.gpu.spot_check.list_agable_pending_work")
@@ -391,30 +459,126 @@ async def test_run_spot_check_verification_aggregates_stats(
     mock_list_agable,
     mock_resolve_aged,
     mock_set_ver,
-    mock_record,
+    mock_resolve_verified_aged,
+    mock_reconcile,
     sb,
 ):
     mock_list_sampled.return_value = [_work_row(id=1), _work_row(id=2), _work_row(id=3)]
     mock_verify.side_effect = ["verified", "failed", "skipped"]
+    mock_apply.side_effect = lambda work, outcome: outcome  # no C1 downgrade in this test
     mock_list_agable.return_value = [_work_row(id=4)]
     mock_resolve_aged.return_value = "verified"
+    mock_resolve_verified_aged.return_value = "verified"
+    mock_reconcile.return_value = 0
 
     stats = await spot_check.run_spot_check_verification()
 
     assert stats == {"verified": 2, "failed": 1, "skipped": 1}
-    mock_record.assert_called_once()  # the aged row's earning
+    mock_resolve_verified_aged.assert_called_once()  # the aged row went through the C1 payability check
+    mock_reconcile.assert_called_once()
 
 
+@patch("src.services.gpu.spot_check._reconcile_missing_earnings")
 @patch("src.services.gpu.spot_check.list_agable_pending_work")
 @patch("src.services.gpu.spot_check._verify_sampled_row")
 @patch("src.services.gpu.spot_check.list_sampled_pending_work")
 @pytest.mark.asyncio
 async def test_run_spot_check_verification_never_raises_on_row_error(
-    mock_list_sampled, mock_verify, mock_list_agable, sb
+    mock_list_sampled, mock_verify, mock_list_agable, mock_reconcile, sb
 ):
     mock_list_sampled.return_value = [_work_row(id=1)]
     mock_verify.side_effect = RuntimeError("boom")
     mock_list_agable.return_value = []
+    mock_reconcile.return_value = 0
 
     stats = await spot_check.run_spot_check_verification()
     assert stats["skipped"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-run / per-node replay caps (PR #2288 review I2)
+# ---------------------------------------------------------------------------
+
+
+@patch("src.services.gpu.spot_check._reconcile_missing_earnings")
+@patch("src.services.gpu.spot_check.list_agable_pending_work")
+@patch("src.services.gpu.spot_check.asyncio.sleep")
+@patch("src.services.gpu.spot_check._apply_sampled_outcome")
+@patch("src.services.gpu.spot_check._verify_sampled_row")
+@patch("src.services.gpu.spot_check.list_sampled_pending_work")
+@pytest.mark.asyncio
+async def test_run_spot_check_verification_respects_per_run_replay_cap(
+    mock_list_sampled, mock_verify, mock_apply, mock_sleep, mock_list_agable, mock_reconcile, sb
+):
+    rows = [_work_row(id=i, node_id=i) for i in range(10)]  # distinct nodes -- isolates the run cap
+    mock_list_sampled.return_value = rows
+    mock_verify.return_value = "verified"
+    mock_apply.side_effect = lambda work, outcome: outcome
+    mock_list_agable.return_value = []
+    mock_reconcile.return_value = 0
+
+    with patch("src.services.gpu.spot_check.Config") as mock_config:
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN = 3
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN = 100
+        mock_config.COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = 0
+        stats = await spot_check.run_spot_check_verification()
+
+    assert mock_verify.call_count == 3
+    assert stats["verified"] == 3
+
+
+@patch("src.services.gpu.spot_check._reconcile_missing_earnings")
+@patch("src.services.gpu.spot_check.list_agable_pending_work")
+@patch("src.services.gpu.spot_check.asyncio.sleep")
+@patch("src.services.gpu.spot_check._apply_sampled_outcome")
+@patch("src.services.gpu.spot_check._verify_sampled_row")
+@patch("src.services.gpu.spot_check.list_sampled_pending_work")
+@pytest.mark.asyncio
+async def test_run_spot_check_verification_respects_per_node_replay_cap(
+    mock_list_sampled, mock_verify, mock_apply, mock_sleep, mock_list_agable, mock_reconcile, sb
+):
+    # 5 rows all on the SAME node -- the per-node cap must bind before the
+    # (much higher) per-run cap does.
+    rows = [_work_row(id=i, node_id=7) for i in range(5)]
+    mock_list_sampled.return_value = rows
+    mock_verify.return_value = "verified"
+    mock_apply.side_effect = lambda work, outcome: outcome
+    mock_list_agable.return_value = []
+    mock_reconcile.return_value = 0
+
+    with patch("src.services.gpu.spot_check.Config") as mock_config:
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN = 50
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN = 2
+        mock_config.COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = 0
+        stats = await spot_check.run_spot_check_verification()
+
+    assert mock_verify.call_count == 2
+    assert stats["skipped"] == 3  # the 3 remaining rows for that node
+
+
+@patch("src.services.gpu.spot_check._reconcile_missing_earnings")
+@patch("src.services.gpu.spot_check.list_agable_pending_work")
+@patch("src.services.gpu.spot_check._apply_sampled_outcome")
+@patch("src.services.gpu.spot_check._verify_sampled_row")
+@patch("src.services.gpu.spot_check.list_sampled_pending_work")
+@pytest.mark.asyncio
+async def test_run_spot_check_verification_sleeps_between_replays(
+    mock_list_sampled, mock_verify, mock_apply, mock_list_agable, mock_reconcile, sb
+):
+    mock_list_sampled.return_value = [_work_row(id=1, node_id=1), _work_row(id=2, node_id=2)]
+    mock_verify.return_value = "verified"
+    mock_apply.side_effect = lambda work, outcome: outcome
+    mock_list_agable.return_value = []
+    mock_reconcile.return_value = 0
+
+    with (
+        patch("src.services.gpu.spot_check.Config") as mock_config,
+        patch("src.services.gpu.spot_check.asyncio.sleep") as mock_sleep,
+    ):
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN = 50
+        mock_config.COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN = 50
+        mock_config.COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = 0.5
+        await spot_check.run_spot_check_verification()
+
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_called_with(0.5)
