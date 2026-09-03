@@ -23,15 +23,24 @@ _TEST_USER_ID = 7
 @pytest.fixture(autouse=True)
 def _override_user_id():
     """Set the get_user_id override immediately before each test rather
-    than once at module import. Tests run under pytest-xdist (-n auto, see
-    pytest.ini), and other route test modules (e.g. test_faucet.py) mutate
-    this SAME shared `app.dependency_overrides` dict at their own import
-    time -- a bare module-level assignment here is a coin flip on whichever
-    file's import happened last in a given worker process. Deliberately NOT
-    torn down after: other modules' own bare module-level overrides (set
-    once at collection, never re-applied) rely on this dict staying
-    populated for the rest of the worker's test session."""
+    than once at module import, and restore whatever was there before on
+    teardown. Tests run under pytest-xdist (-n auto, see pytest.ini), and
+    other route test modules (e.g. test_faucet.py) mutate this SAME shared
+    `app.dependency_overrides` dict at their own import time -- a bare
+    module-level assignment here is a coin flip on whichever file's import
+    happened last in a given worker process, and narrower test-selection
+    subsets (e.g. just this file + test_faucet.py) can deterministically
+    interleave the two files' tests within one worker. Save/restore
+    (rather than a bare pop) so whatever override was already in effect
+    when this fixture's setup ran -- another module's, or none -- is put
+    back afterward instead of being clobbered to unset."""
+    previous = app.dependency_overrides.get(get_user_id)
     app.dependency_overrides[get_user_id] = lambda: _TEST_USER_ID
+    yield
+    if previous is None:
+        app.dependency_overrides.pop(get_user_id, None)
+    else:
+        app.dependency_overrides[get_user_id] = previous
 
 
 def _sign(account, message: str) -> str:
@@ -658,3 +667,26 @@ def test_unlink_wallet_404_when_not_linked_to_caller(mock_get_wallet):
     response = client.delete(f"/auth/wallets/{'0x' + 'a' * 40}")
 
     assert response.status_code == 404
+
+
+@patch("src.routes.wallet_auth.unlink_wallet")
+@patch("src.routes.wallet_auth.count_wallets")
+@patch("src.routes.wallet_auth.users_module")
+@patch("src.routes.wallet_auth.get_wallet")
+def test_unlink_wallet_fails_closed_when_user_lookup_errors(
+    mock_get_wallet, mock_users_module, mock_count_wallets, mock_unlink
+):
+    """get_user_by_id returns None on ANY DB error (safe-default
+    convention) as well as a genuinely missing user -- the last_auth_method
+    lockout guard must refuse the unlink rather than silently skip the
+    check, or a transient DB hiccup could let a wallet-only user delete
+    their only auth method."""
+    address = "0x" + "a" * 40
+    mock_get_wallet.return_value = {"user_id": _TEST_USER_ID, "wallet_address": address}
+    mock_users_module.get_user_by_id.return_value = None
+
+    response = client.delete(f"/auth/wallets/{address}")
+
+    assert response.status_code == 503
+    mock_count_wallets.assert_not_called()
+    mock_unlink.assert_not_called()

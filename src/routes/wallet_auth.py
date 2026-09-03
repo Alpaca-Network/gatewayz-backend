@@ -466,12 +466,17 @@ async def unlink_wallet_route(
     if existing is None or existing["user_id"] != user_id:
         raise HTTPException(status_code=404, detail="wallet_not_linked")
 
+    # get_user_by_id returns None on ANY lookup error (safe-default
+    # convention, src/db/users.py) as well as on a genuinely missing user.
+    # This guard exists specifically to prevent a destructive action
+    # (locking the owner out of their only auth method), so it must fail
+    # CLOSED on "can't tell" -- a transient DB hiccup must never be read as
+    # "not their only auth method, proceed." Same rule count_wallets'
+    # own docstring already states for its callers.
     user = users_module.get_user_by_id(user_id)
-    if (
-        user is not None
-        and user.get("auth_method") == AuthMethod.WALLET.value
-        and count_wallets(user_id) <= 1
-    ):
+    if user is None:
+        raise HTTPException(status_code=503, detail="temporarily_unavailable")
+    if user.get("auth_method") == AuthMethod.WALLET.value and count_wallets(user_id) <= 1:
         # This is the only wallet AND the only way to authenticate this
         # account -- unlinking it would lock the owner out.
         raise HTTPException(status_code=400, detail="last_auth_method")
