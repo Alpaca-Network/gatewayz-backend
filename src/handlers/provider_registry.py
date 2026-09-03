@@ -14,6 +14,7 @@ import logging
 
 from fastapi import HTTPException
 
+from src.config import Config
 from src.services.providers.base import ProviderRouting
 
 logger = logging.getLogger(__name__)
@@ -227,6 +228,35 @@ PROVIDER_ROUTING: dict[str, ProviderRouting] = {
     "xiaomi": _safe_adapter_routing("xiaomi"),
     "meta": _safe_adapter_routing("meta"),
 }
+
+# ---------------------------------------------------------------------------
+# Community GPU marketplace provider (gatewayz-backend#2262 #2265, M4 spec §1/§4).
+#
+# Opt-in only: a client must explicitly request model id "community/<model>".
+# Gated by Config.COMMUNITY_ROUTING_ENABLED (default false) -- when off, the
+# key is simply absent from PROVIDER_ROUTING, so "community/<model>" requests
+# fail the same way any other unregistered provider does, rather than
+# silently no-op. This provider is deliberately NEVER added to
+# FALLBACK_PROVIDER_PRIORITY / the multi-provider registry, so it can never
+# be chosen by failover or auto-routing (see src/services/provider_failover.py
+# and the routing-exclusion tests) -- it only ever serves a request that
+# named it explicitly.
+if Config.COMMUNITY_ROUTING_ENABLED:
+    try:
+        from src.services.providers.community_adapter import (
+            community_process,
+            community_request,
+            community_stream,
+        )
+
+        PROVIDER_ROUTING["community"] = {
+            "request": community_request,
+            "process": community_process,
+            "stream": community_stream,
+        }
+    except Exception as e:
+        logger.error("Failed to load community provider adapter: %s", e)
+        _provider_import_errors["community"] = str(e)
 
 # Strip disabled providers from routing so they are completely unreachable
 PROVIDER_ROUTING = {

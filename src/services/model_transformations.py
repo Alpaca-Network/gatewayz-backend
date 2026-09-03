@@ -545,6 +545,16 @@ def detect_provider_from_model_id(
         if prefix == "anthropic":
             logger.info(f"Routing '{model_id}' to native Anthropic provider")
             return "anthropic"
+        # Community GPU-marketplace models (gatewayz-backend#2262 #2265, M4 spec
+        # §1): the "community/" prefix IS the client's explicit opt-in, so this
+        # is checked with the same priority as the native openai/anthropic
+        # prefixes above -- before the mapping loop could route it elsewhere,
+        # and regardless of Config.COMMUNITY_ROUTING_ENABLED (routing here just
+        # names the provider; PROVIDER_ROUTING itself gates whether "community"
+        # is actually registered, so the flag being off still fails safely).
+        if prefix == "community":
+            logger.info(f"Routing '{model_id}' to community provider (opt-in)")
+            return "community"
 
     # Check all mappings to see if this model exists.
     # Returns first matching provider. For models on multiple providers, priority order matters.

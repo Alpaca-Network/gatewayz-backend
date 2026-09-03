@@ -736,6 +736,35 @@ Generate images using AI models.
 }
 ```
 
+## Community GPU Marketplace (opt-in)
+
+Gatewayz can route inference to independently-run GPU nodes registered by
+external operators (gatewayz-backend#2262 #2265, Milestone 4 — testnet
+stage). This is **opt-in per request only** and never automatic:
+
+- To use it, request model id `community/<model>` explicitly, e.g.
+  `"model": "community/llama-3.1-8b-instruct"`. Only that exact prefix opts
+  in — no other model id, provider, or auto-routing/failover path will ever
+  select a community node.
+- Only **open-weight** models are offered, served by operators who have been
+  **approved by an admin**.
+- Registration, node management, and public transparency/utilization
+  endpoints are documented in `docs/gpu/PROVIDER_ONBOARDING.md` (operator
+  side) and served under `/gpu/*` — see that doc and `/gpu/public/schema`
+  for the read side.
+
+**Trust disclosure.** A community GPU operator *is* the compute for that
+request and sees your prompt content by construction — the same way any
+inference provider does. Gatewayz's identity firewall still strips
+Gatewayz-side identity (no user id, email, wallet, or API key reaches the
+node — see `docs/security/ANONYMITY_THREAT_MODEL.md`), but the operator is
+a **non-contractual third party**, unlike Gatewayz's platform providers. The
+`community/<model>` prefix is treated as your explicit consent to that
+trade-off; do not use it for prompts you would not want a third-party
+operator to see. Every community response is receipted (hashes only, never
+content) and a sample is independently re-verified — see
+`docs/gpu/attestation.md`.
+
 ## Chat History Management
 
 ### Create Chat Session

@@ -19,7 +19,8 @@ User-Agent), and a real client-supplied `user` field in the request body.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, Mock
+import uuid
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
@@ -371,6 +372,77 @@ class TestChatCompletionsRealRoute:
         assert resp.status_code == 200, resp.text
         _assert_clean(intercepted_http, f"deepinfra stream={stream}")
 
+    def test_community_adapter(self, app_client, route_env, intercepted_http, monkeypatch):
+        """The community provider (gatewayz-backend#2262 #2265) fans out to
+        one operator-run node instead of a single platform host -- same
+        canary, plus proof it must pass like every other provider (spec §4
+        item 5)."""
+        import importlib
+        import sys
+        import types
+
+        import src.handlers.provider_registry as provider_registry_module
+
+        node = {
+            "id": "canary-node",
+            "provider_id": "canary-provider",
+            "endpoint_url": "https://node1.community.example.test/v1",
+            "endpoint_api_key_encrypted": "",  # decrypt_api_key not exercised (no encrypted key)
+            "name": "canary-node",
+        }
+        fake_gpu = types.ModuleType("src.db.gpu")
+        fake_gpu.select_nodes_for_model = lambda model: [node]
+        fake_gpu.get_provider = lambda provider_id: None
+        fake_gpu.adjust_outstanding = lambda node_id, delta: None
+        monkeypatch.setitem(sys.modules, "src.db.gpu", fake_gpu)
+        monkeypatch.setattr(
+            "src.services.providers.community_adapter._decrypt_node_key", lambda enc: "unused"
+        )
+        monkeypatch.setattr(
+            "tests.security.test_upstream_identity_firewall_e2e._PROVIDER_HOSTS",
+            _PROVIDER_HOSTS | {"node1.community.example.test"},
+        )
+
+        monkeypatch.setattr(Config, "COMMUNITY_ROUTING_ENABLED", True, raising=False)
+        importlib.reload(provider_registry_module)
+        try:
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json=self._payload("community/llama-3.1-8b-instruct", "community", False),
+                headers=_headers(),
+            )
+            assert resp.status_code == 200, resp.text
+            _assert_clean(intercepted_http, "community")
+
+            # N7 scoped exception to G1 (see docs/security/ANONYMITY_THREAT_MODEL.md
+            # and W-E's cross-repo contract note): the server-minted billing_ref
+            # IS forwarded to the node, as X-Gatewayz-Request-Id -- but it must be
+            # the ONLY new field the community path adds, never a vector for any
+            # other identity leaking through.
+            node_requests = [
+                r for r in intercepted_http if r.url.host == "node1.community.example.test"
+            ]
+            assert node_requests, "no request captured to the community node"
+            for request in node_requests:
+                header_names = {k.lower() for k in request.headers}
+                gatewayz_headers = {h for h in header_names if h.startswith("x-gatewayz")}
+                assert gatewayz_headers == {"x-gatewayz-request-id"}, (
+                    f"expected exactly one x-gatewayz-* header (x-gatewayz-request-id), "
+                    f"got {gatewayz_headers}"
+                )
+                billing_ref = request.headers["x-gatewayz-request-id"]
+                # A real per-request uuid4, never the client's own X-Request-ID
+                # (SENTINEL_REQUEST_ID) or any other client/user-identifying value.
+                assert billing_ref not in ALL_SENTINELS
+                uuid.UUID(billing_ref)  # raises if not a valid uuid
+        finally:
+            # Force the module back to the real production default (off)
+            # deterministically -- monkeypatch's own teardown of
+            # COMMUNITY_ROUTING_ENABLED runs after this test function
+            # returns, which would be too late for this reload to see it.
+            monkeypatch.setattr(Config, "COMMUNITY_ROUTING_ENABLED", False, raising=False)
+            importlib.reload(provider_registry_module)
+
     def test_negative_control_anthropic_metadata_user_id_leaks_when_scrub_disabled(
         self, app_client, route_env, intercepted_http, monkeypatch
     ):
@@ -477,3 +549,48 @@ class TestMessagesRealRoute:
 
         params = inspect.signature(transform_anthropic_to_openai).parameters
         assert "metadata" not in params
+
+
+class TestAnonymousCommunityGate:
+    """community/<model> requires auth (fix round 1, gatewayz-backend#2262
+    #2265, spec §1) -- independent of Config.ANONYMOUS_ENABLED, and fires
+    before any provider/node is ever touched. Minimal mocking needed: unlike
+    the authenticated real-route tests above, this gate rejects before user
+    lookup / catalog / credits, matching the low-mocking convention already
+    used for the plain anonymous gate in tests/routes/test_chat_identity.py.
+    """
+
+    def test_anonymous_community_request_is_rejected_even_when_anonymous_enabled(
+        self, app_client, intercepted_http
+    ):
+        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", True):
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "community/llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["error"]["code"] == "community_requires_auth"
+        # Never reached a provider/node at all.
+        assert not intercepted_http
+
+    def test_anonymous_non_community_request_is_not_blocked_by_this_gate(
+        self, app_client, intercepted_http
+    ):
+        # Anonymous-disabled entirely -- hits enforce_anonymous_gate (401),
+        # not enforce_community_auth_gate (403). Proves the two gates are
+        # independent and this one doesn't over-match non-community models.
+        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False):
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "openai/gpt-4o-mini",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["error"]["code"] == "missing_api_key"

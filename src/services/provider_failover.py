@@ -8,10 +8,7 @@ import httpx
 from fastapi import HTTPException
 
 from src.services.provider_alerting import alert_provider_auth_failure
-from src.utils.errors import (
-    is_provider_budget_error,
-    sanitize_provider_error_for_user,
-)
+from src.utils.errors import is_provider_budget_error, sanitize_provider_error_for_user
 
 logger = logging.getLogger(__name__)
 # OpenAI Python SDK raises its own exception hierarchy which we need to
@@ -106,12 +103,26 @@ _NATIVE_PROVIDER_PREFIXES = {
 }
 
 
+# Community GPU-marketplace nodes are opt-in only (M4 spec §1): a client
+# must explicitly request "community/<model>". They must never be entered
+# as a fallback for another provider's chain, and never chosen by
+# auto-routing. This filter is defense in depth against "community"
+# acquiring a DB-backed failover_priority entry (src/services/gateway_registry.py)
+# on top of the structural fact that it's never added to
+# FALLBACK_PROVIDER_PRIORITY or the multi-provider registry — see
+# tests/services/test_community_routing_exclusion.py.
+_ROUTING_EXCLUDED_FROM_FAILOVER = frozenset({"community"})
+
+
 def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
     """Return the provider attempt order starting with the initial provider.
 
     Always includes all eligible providers in the failover chain.
     Provider availability checks happen at request time, not at chain building time.
     Disabled providers (per ENABLED_PROVIDERS) are strictly excluded.
+    Community-marketplace providers (see _ROUTING_EXCLUDED_FROM_FAILOVER) are
+    opt-in only: an explicit request for one gets exactly that provider and
+    nothing else, and no other provider's chain can ever contain one.
     """
     from src.utils.provider_filter import is_provider_enabled
 
@@ -122,7 +133,12 @@ def build_provider_failover_chain(initial_provider: str | None) -> list[str]:
         logger.warning("Provider '%s' is disabled; excluded from failover chain", provider)
         provider = ""
 
-    priority = _get_failover_priority()
+    if provider in _ROUTING_EXCLUDED_FROM_FAILOVER:
+        return [provider]
+
+    priority = tuple(
+        p for p in _get_failover_priority() if p not in _ROUTING_EXCLUDED_FROM_FAILOVER
+    )
     eligible = set(priority)
     if provider not in eligible:
         return [provider] if provider else ["openrouter"]

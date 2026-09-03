@@ -175,3 +175,47 @@ def enforce_anonymous_gate(
             }
         },
     )
+
+
+def enforce_community_auth_gate(
+    is_anonymous: bool,
+    model_id: str | None,
+    request_id: str | None = None,
+) -> None:
+    """
+    Raise HTTPException 403 if an anonymous caller requests a community/<model>
+    (gatewayz-backend#2262 #2265, M4 spec §1).
+
+    Community nodes are an elevated-trust, non-contractual party (the operator
+    sees prompt content by construction) -- the model id prefix is the
+    client's *explicit* consent to that trade-off, which an anonymous caller
+    (no account, no accountability) cannot meaningfully give. It also has a
+    practical consequence: without an authenticated request there is no
+    reliable billing_ref-keyed accounting trail, so a community node would do
+    unpaid, unattributable work. This runs independently of
+    ``enforce_anonymous_gate`` (which only gates on ``Config.ANONYMOUS_ENABLED``
+    being off) -- community is blocked for anonymous callers regardless of
+    that flag.
+    """
+    if not is_anonymous:
+        return
+    if not model_id or not model_id.startswith("community/"):
+        return
+    logger.warning(
+        "Rejected anonymous request for community model (request_id=%s, model=%s)",
+        request_id,
+        model_id,
+    )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "error": {
+                "message": (
+                    "Community-provided models require an authenticated request. "
+                    "Provide a valid API key in the Authorization header."
+                ),
+                "type": "permission_error",
+                "code": "community_requires_auth",
+            }
+        },
+    )
