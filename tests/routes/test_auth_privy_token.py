@@ -240,9 +240,9 @@ class TestEmailUsernameCollisionTakeover:
 
         body = _auth_body(token=token)
         body["user"]["id"] = self.ATTACKER_SUB
-        body[
-            "email"
-        ] = "victim@attacker-controlled.example"  # local-part collides with victim's username
+        body["email"] = (
+            "victim@attacker-controlled.example"  # local-part collides with victim's username
+        )
 
         response = client.post("/auth", json=body)
 
