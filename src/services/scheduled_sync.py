@@ -877,7 +877,8 @@ def start_gpu_spotcheck_scheduler():
         )
         _gpu_spotcheck_scheduler.start()
         logger.info(
-            "✅ GPU spot-check verification scheduler started (next run in %s min)", interval_minutes
+            "✅ GPU spot-check verification scheduler started (next run in %s min)",
+            interval_minutes,
         )
     except Exception as e:
         logger.error("❌ Failed to start GPU spot-check verification scheduler: %s", e)
