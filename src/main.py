@@ -538,6 +538,10 @@ def create_app() -> FastAPI:
             "staking",
             "WAYZ Staking",
         ),  # Public staking read API (supports gatewayz-backend#2246)
+        (
+            "wallet_auth",
+            "Wallet Auth",
+        ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)
     ]
 
     loaded_count = 0
