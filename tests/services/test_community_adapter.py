@@ -194,6 +194,28 @@ def test_adapter_client_factory_uses_decrypted_key(monkeypatch):
     assert captured["base_url"] == NODE["endpoint_url"]
 
 
+def test_gpu_routes_invalidate_node_adapter_evicts_the_real_cache(monkeypatch):
+    """End-to-end proof of the W-A1/W-A2 integration point (post-rebase,
+    A1 merged as #2285): src/routes/gpu.py's PATCH/DELETE/rotate-token
+    routes call `_invalidate_node_adapter(node_id)`, which lazy-imports
+    `src.services.providers.community_adapter.invalidate_adapter` by that
+    exact name and calls it. A1's own tests (tests/routes/test_gpu.py)
+    prove the route calls through to a FAKE community_adapter module
+    (written before this module existed on their branch) -- this proves
+    the real function on both sides actually evicts a real cache entry,
+    not just that a mock was called.
+    """
+    monkeypatch.setattr(ca, "_decrypt_node_key", lambda enc: "plain-key")
+    a1 = ca.adapter_for_node(NODE)
+
+    from src.routes.gpu import _invalidate_node_adapter
+
+    _invalidate_node_adapter(NODE["id"])
+
+    a2 = ca.adapter_for_node(NODE)
+    assert a1 is not a2
+
+
 # --- non-streaming request: outstanding count, receipts, attestation --------
 
 

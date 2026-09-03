@@ -159,6 +159,49 @@ def _apply_health_gating(models: list) -> list:
         return models
 
 
+def _append_community_models(models: list, gateway_value: str) -> list:
+    """Live top-up: union active community-node models onto the catalog
+    response (gatewayz-backend#2262, M4 spec §4 item 3).
+
+    Unlike every other gateway, ``community`` has no ``<slug>_catalog.py``
+    fetch function and is never synced into the ``models_catalog`` table by
+    a scheduled job -- its "catalog" IS the current set of active nodes
+    (``src.db.gpu.list_active_nodes``, W-A1), which can change between
+    scheduled syncs. So this merges live, on every call (both the cache-hit
+    and cache-miss response paths -- called from both, and the result is
+    what gets cached, so a cache hit also reflects the snapshot at cache-write
+    time rather than showing nothing until the next sync).
+
+    Flag-gated (``Config.COMMUNITY_ROUTING_ENABLED``) and gateway-scoped: only
+    contributes to ``gateway=all`` or ``gateway=community``, matching every
+    other provider's convention that ``gateway=<other-slug>`` never shows
+    another provider's models. Fails open (returns ``models`` unchanged) on
+    any error -- the community catalog is additive; it must never break the
+    rest of the catalog response.
+
+    Returns a NEW list (never mutates ``models``, which may be a cached list
+    shared with other requests).
+    """
+    from src.config import Config
+
+    if not Config.COMMUNITY_ROUTING_ENABLED:
+        return models
+    if gateway_value not in ("all", "community"):
+        return models
+    try:
+        from src.services.gpu.catalog import sync_community_catalog
+
+        community_models = sync_community_catalog()
+    except Exception as e:
+        logger.warning(f"community catalog projection failed, skipping: {e}")
+        return models
+    if not community_models:
+        return models
+
+    existing_ids = {m.get("id") for m in models if isinstance(m, dict)}
+    return models + [m for m in community_models if m.get("id") not in existing_ids]
+
+
 def _row_is_servable(m: dict) -> bool:
     """Whether the inference pricing gate would admit this catalog row.
 
@@ -889,6 +932,12 @@ async def get_models(
                 )
                 # Instead of raising 503, return an empty but valid response
                 # This prevents the entire API from failing when a single provider is unavailable
+
+        # Community GPU marketplace (gatewayz-backend#2262, M4 spec §4 item 3):
+        # merged in before pagination/provider-grouping so totals, offsets, and
+        # the `?provider=` filter below all treat community/<model> like any
+        # other catalog row.
+        models = _append_community_models(models, gateway_value)
 
         provider_groups: list[list[dict]] = []
 
