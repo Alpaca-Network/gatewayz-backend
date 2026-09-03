@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 
 from src.schemas.proxy import ProxyRequest
 from src.security.deps import get_optional_api_key
+from src.security.identity import get_request_identity
 from src.services.providers.anthropic_transformer import (
     transform_anthropic_to_openai,
     transform_openai_to_anthropic,
@@ -368,12 +369,20 @@ async def create_message(
     message_id = f"msg_{uuid.uuid4().hex[:24]}"
 
     try:
+        # chat_completions() takes `identity` via Depends(get_request_identity);
+        # calling it directly bypasses FastAPI's injection, so resolve the
+        # identity here from the SAME key we resolved above (which may have
+        # come from Anthropic-style `x-api-key`, invisible to the Bearer-only
+        # dependency). Regression: #2274 added the parameter and this call
+        # site was missed, 500ing every /v1/messages request.
+        identity = await get_request_identity(request, api_key=resolved_key)
         result = await chat_completions(
             req=proxy_request,
             background_tasks=background_tasks,
             api_key=resolved_key,
             session_id=None,
             request=request,
+            identity=identity,
         )
     except HTTPException as exc:
         # Re-wrap gateway errors in Anthropic's envelope so Anthropic SDKs
