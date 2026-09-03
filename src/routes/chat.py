@@ -18,6 +18,7 @@ from src.config import Config
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest
 from src.security.deps import get_optional_api_key
+from src.security.identity import RequestIdentity, get_request_identity
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     get_anonymous_allowed_models_sample,
@@ -321,6 +322,7 @@ async def chat_completions(
     api_key: str | None = Depends(get_optional_api_key),
     session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
+    identity: RequestIdentity = Depends(get_request_identity),
 ):
     # === 0) Setup / sanity ===
     # Generate request correlation ID for distributed tracing
@@ -339,8 +341,13 @@ async def chat_completions(
                     f"Malformed Authorization header in testing mode: {auth_header[:20]}..."
                 )
 
-    # Determine if this is an authenticated or anonymous request
-    is_anonymous = api_key is None
+    # Determine if this is an authenticated or anonymous request. `identity`
+    # is resolved via the same get_optional_api_key dependency (see
+    # src/security/identity.py) before the IS_TESTING override above runs;
+    # the two agree because that override only re-derives the same bearer
+    # token get_optional_api_key already validated (validate_api_key_security
+    # short-circuits to "any token is valid" under IS_TESTING).
+    is_anonymous = identity.is_anonymous
 
     logger.info(
         "chat_completions start (request_id=%s, api_key=%s, model=%s, anonymous=%s)",
@@ -470,14 +477,19 @@ async def chat_completions(
                 # OPTIMIZED: Run auth operations in parallel to reduce overhead from 200-500ms → 100-150ms
                 from src.utils.api_key_lookup import get_api_key_id_with_retry
 
+                # `identity` (Depends(get_request_identity)) already looked the
+                # user up via the cached get_user(api_key) while resolving
+                # identity for the is_anonymous check above -- reuse it instead
+                # of calling get_user(api_key) a second time on every
+                # authenticated request.
+                user = identity.user
+
                 # Parallelize independent auth operations
-                user_task = _to_thread(get_user, api_key)
                 api_key_id_task = get_api_key_id_with_retry(api_key, max_retries=3, retry_delay=0.1)
                 trial_task = _to_thread(validate_trial_access, api_key)
 
-                # Wait for all operations to complete in parallel
-                user, api_key_id, trial = await asyncio.gather(
-                    user_task,
+                # Wait for both operations to complete in parallel
+                api_key_id, trial = await asyncio.gather(
                     api_key_id_task,
                     trial_task,
                 )

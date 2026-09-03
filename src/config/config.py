@@ -179,6 +179,20 @@ class Config:
     PRIVY_APP_ID = _get_env_var("PRIVY_APP_ID")
     PRIVY_VERIFICATION_KEY = _get_env_var("PRIVY_VERIFICATION_KEY")
     PRIVY_TOKEN_VERIFICATION = _get_env_var("PRIVY_TOKEN_VERIFICATION")
+    # SIWE wallet sign-in/link (gatewayz-backend#2249/#2250/#2251/#2252).
+    # domain/uri are fixed and server-authored -- part of what makes the
+    # signed message resistant to cross-dapp replay (design spec section 7).
+    SIWE_DOMAIN = _get_env_var("SIWE_DOMAIN", "gatewayz.ai")
+    SIWE_URI = _get_env_var("SIWE_URI", "https://gatewayz.ai")
+    # Avalanche Fuji (testnet, default) + Avalanche C-Chain mainnet.
+    SIWE_ALLOWED_CHAIN_IDS = {
+        int(c.strip())
+        for c in _get_env_var("SIWE_ALLOWED_CHAIN_IDS", "43113,43114").split(",")
+        if c.strip()
+    }
+    # A wallet "session" is an expiring API key, not a JWT -- see design
+    # spec section 4.2. 30 days, same as a typical login-session lifetime.
+    WALLET_SESSION_KEY_DAYS = int(_get_env_var("WALLET_SESSION_KEY_DAYS", "30"))
     # Nightly pricing-drift monitor: audits active-provider catalog pricing against
     # current OpenRouter reference pricing so we never bill below provider cost even
     # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when

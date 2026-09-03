@@ -203,6 +203,204 @@ Get user's current credit balance and status.
 }
 ```
 
+## Wallet Authentication (SIWE)
+
+Sign in or sign up with nothing but an Ethereum wallet signature — no
+password, no Privy account required (gatewayz-backend#2249 #2250 #2251
+#2252). A wallet **session is an expiring API key**
+(`WALLET_SESSION_KEY_DAYS`, default 30 days), not a JWT — no new session
+infrastructure was introduced. Re-signing after expiry via
+`POST /auth/wallet/verify` transparently mints a fresh key.
+
+**Message format.** The server always builds the message you must sign
+(the client never chooses its contents — this is what makes it resistant
+to a signature obtained on a different dapp being replayed here):
+
+```
+{domain} wants you to sign in with your Ethereum account:
+{address, EIP-55 checksummed}
+
+{statement}
+
+URI: {uri}
+Version: 1
+Chain ID: {chain_id}
+Nonce: {nonce}
+Issued At: {issued_at, ISO-8601 Z}
+Expiration Time: {issued_at + 300s}
+```
+
+`domain`/`uri` default to `gatewayz.ai` / `https://gatewayz.ai`
+(`Config.SIWE_DOMAIN`/`SIWE_URI`). `chain_id` defaults to `43113`
+(Avalanche Fuji) and must be one of `Config.SIWE_ALLOWED_CHAIN_IDS`
+(default `43113,43114`). The server stores the exact message in Redis
+(TTL 300s) and compares the client's submitted message byte-for-byte
+before recovering the signer — a tampered or replayed message is rejected
+before any signature check runs.
+
+### Get a Sign-In Nonce
+
+```http
+POST /auth/wallet/nonce
+```
+
+No auth required. Body: `{"wallet_address": "0x...", "chain_id": 43113}`
+(`chain_id` optional). Rate limited to 20 requests / 15 min / IP. Response
+is identical whether or not the wallet is already registered (no address
+enumeration).
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": { "message": "gatewayz.ai wants you to sign in...", "expires_in": 300 }
+}
+```
+
+### Verify and Sign In / Sign Up
+
+```http
+POST /auth/wallet/verify
+```
+
+No auth required. Body: `{"wallet_address": "0x...", "message": "...", "signature": "0x..."}`
+— `message` must be exactly what `/auth/wallet/nonce` returned, signed
+with `personal_sign`. Rate limited to 10 requests / 15 min / IP
+(sign-ups additionally count against the 3/hour/IP registration limit).
+
+Returns the **same response shape as `POST /auth`** — an existing wallet
+logs into its linked account and returns its active API key; an unknown
+wallet creates a new wallet-first account (`auth_method: "wallet"`, 0
+credits, placeholder email `wallet+{address}@wallet.placeholder`) and
+returns a fresh one.
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "user_id": 123,
+  "api_key": "gw_live_...",
+  "auth_method": "wallet",
+  "is_new_user": false,
+  "credits": 0.0,
+  "subscription_status": "inactive"
+}
+```
+
+**Errors:** `400 nonce_missing_or_expired` (no pending nonce, or the
+submitted message doesn't match the one stored — also covers replay,
+since the nonce is consumed atomically on first use), `401
+invalid_signature` (signature doesn't parse/recover), `401
+signature_address_mismatch` (signature is valid but recovers to a
+different address than claimed), `422` (disallowed `chain_id` or
+malformed address), `429` (rate limited).
+
+### Link a Wallet Nonce
+
+```http
+POST /auth/wallet/link/nonce
+```
+
+Requires auth. Body: `{"wallet_address": "0x...", "chain_id": 43113}`.
+Rate limited to 10 requests / min. Same message format as sign-in, with
+statement `Link this wallet to Gatewayz account {user_id}.`.
+
+### Link a Wallet
+
+```http
+POST /auth/wallet/link
+```
+
+Requires auth. Body: `{"wallet_address": "0x...", "message": "...", "signature": "0x..."}`.
+Rate limited to 5 requests / min. Idempotent (`200`) if the wallet is
+already linked to the caller. The first wallet linked to an account
+becomes its primary wallet.
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": {
+    "wallet": {
+      "wallet_address": "0x...",
+      "source": "siwe",
+      "wallet_client_type": null,
+      "is_primary": true,
+      "verified_at": "2026-09-03T00:00:00Z"
+    }
+  }
+}
+```
+
+**Errors:** `409 wallet_linked_to_other_account` (never reveals whose
+account it is — just that it's taken), plus the same `400`/`401`/`422`
+codes as `/auth/wallet/verify`.
+
+### List Linked Wallets
+
+```http
+GET /auth/wallets
+```
+
+Requires auth. Returns every wallet linked to the caller's account.
+
+**Response:**
+```json
+{ "success": true, "data": { "wallets": [ { "wallet_address": "0x...", "source": "privy", "wallet_client_type": "metamask", "is_primary": true, "verified_at": "..." } ] } }
+```
+
+### Unlink a Wallet
+
+```http
+DELETE /auth/wallets/{wallet_address}
+```
+
+Requires auth. `404 wallet_not_linked` if the address isn't linked to the
+caller. `400 last_auth_method` if the account's only auth method is
+`wallet` and this is its only linked wallet — unlinking it would lock the
+owner out, so it's refused.
+
+### Signing example (Python, `eth_account`)
+
+```python
+import requests
+from eth_account import Account
+from eth_account.messages import encode_defunct
+
+account = Account.from_key("0x...")  # never hardcode a real key
+
+nonce_resp = requests.post(
+    "https://api.gatewayz.ai/auth/wallet/nonce",
+    json={"wallet_address": account.address},
+).json()
+message = nonce_resp["data"]["message"]
+
+signature = account.sign_message(encode_defunct(text=message)).signature.hex()
+if not signature.startswith("0x"):
+    signature = "0x" + signature
+
+verify_resp = requests.post(
+    "https://api.gatewayz.ai/auth/wallet/verify",
+    json={"wallet_address": account.address, "message": message, "signature": signature},
+).json()
+print(verify_resp["api_key"])
+```
+
+### Signing example (curl)
+
+```bash
+NONCE_RESPONSE=$(curl -s -X POST https://api.gatewayz.ai/auth/wallet/nonce \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address": "0xYourAddress"}')
+
+# Sign the returned `data.message` with your wallet (e.g. MetaMask's
+# personal_sign), then:
+curl -X POST https://api.gatewayz.ai/auth/wallet/verify \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_address": "0xYourAddress", "message": "...", "signature": "0x..."}'
+```
+
 ## API Key Management
 
 ### Create API Key

@@ -383,6 +383,32 @@ Comprehensive security implementation:
   `gatewayz_privy_token_verification_total{result,mode}` Prometheus counter:
   `missing`, `expired`, `bad_signature`, `sub_mismatch`, `malformed`,
   `not_configured`.
+#### identity.py — Request identity
+
+`get_request_identity()` composes `get_optional_api_key` + `get_optional_user`
+(and, when a user is found, a wallet lookup) into one `RequestIdentity`
+dataclass: `kind` (`"api_key"` or `"anonymous"`), `user_id`, `api_key`,
+`auth_method`, `is_guest`, and `wallet_addresses`. It does not replace
+`get_api_key` / `get_user_id` / `get_optional_*` — those keep their existing
+signatures and behavior for every current caller — it is additive, composing
+the same primitives so a route only has to ask one dependency "who is this
+request from" instead of re-deriving anonymity from `api_key is None` (or
+similar) locally. Cached per-request on `request.state.identity`.
+
+Three shapes a caller can resolve to:
+1. **API key** — `kind="api_key"`, `user_id`/`auth_method` set from the
+   looked-up user, `is_anonymous` False.
+2. **Wallet-linked API key** — same shape as above with `auth_method ==
+   "wallet"`; `is_guest` is True until the account shows a payment signal
+   (reuses `src.services.payment_gate.has_payment_signal`, the same check
+   that gates live API-key issuance).
+3. **Anonymous** — no Authorization header, or one that doesn't resolve to a
+   user; the `ANONYMOUS` singleton (`is_anonymous` True, no wallets).
+
+New code that needs to branch on "is this an anonymous caller" should depend
+on `get_request_identity` and read `identity.is_anonymous`, rather than
+re-deriving it from `api_key is None` the way older routes historically did
+(e.g. `chat.py`'s `chat_completions`, now migrated to `identity`).
 
 Security features:
 - API key prefixes: `gw_live_`, `gw_test_`, `gw_staging_`, `gw_dev_`
