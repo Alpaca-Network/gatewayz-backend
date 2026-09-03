@@ -743,6 +743,26 @@ async def lifespan(app):
         logger.warning(f"Failed to start GPU node liveness sweep scheduler: {e}")
         # Don't fail startup if the liveness sweep fails to start
 
+    # Start community GPU spot-check verification (gatewayz-backend#2265)
+    try:
+        from src.services.scheduled_sync import start_gpu_spotcheck_scheduler
+
+        start_gpu_spotcheck_scheduler()
+        logger.info("GPU spot-check verification service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start GPU spot-check verification scheduler: {e}")
+        # Don't fail startup if spot-check verification fails to start
+
+    # Start community GPU WAYZ settlement (gatewayz-backend#2266)
+    try:
+        from src.services.scheduled_sync import start_gpu_settlement_scheduler
+
+        start_gpu_settlement_scheduler()
+        logger.info("GPU settlement service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start GPU settlement scheduler: {e}")
+        # Don't fail startup if settlement fails to start
+
     # Start nightly pricing-drift monitor (read-only; alerts if catalog price *
     # markup would ever bill below current provider/reference cost)
     try:
@@ -953,6 +973,24 @@ async def lifespan(app):
         logger.info("GPU node liveness sweep service stopped")
     except Exception as e:
         logger.warning(f"GPU node liveness sweep shutdown warning: {e}")
+
+    # Stop community GPU spot-check verification
+    try:
+        from src.services.scheduled_sync import stop_gpu_spotcheck_scheduler
+
+        stop_gpu_spotcheck_scheduler()
+        logger.info("GPU spot-check verification service stopped")
+    except Exception as e:
+        logger.warning(f"GPU spot-check verification shutdown warning: {e}")
+
+    # Stop community GPU WAYZ settlement
+    try:
+        from src.services.scheduled_sync import stop_gpu_settlement_scheduler
+
+        stop_gpu_settlement_scheduler()
+        logger.info("GPU settlement service stopped")
+    except Exception as e:
+        logger.warning(f"GPU settlement shutdown warning: {e}")
 
     # Stop nightly pricing-drift monitor
     try:
