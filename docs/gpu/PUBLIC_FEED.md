@@ -42,7 +42,20 @@ Spec §6 requires these endpoints never expose a wallet address, `user_id`,
    `tests/security/test_upstream_identity_firewall.py`'s canary for the M3
    anonymity threat model.
 
-## `active_nodes`: a documented deviation from the literal spec text
+## `active_nodes` means two different things depending on the endpoint
+
+`GpuPublicSummary.active_nodes` (`/summary`) is a **live snapshot**: the
+count of `gpu_nodes` currently in `status='active'` (approved providers
+only) at request time. `GpuUtilizationPoint.active_nodes` (`/utilization`
+points, and the rollup row it comes from) is a **historical traffic
+count**: nodes that completed at least one request in that specific past
+hour (see the next section). The two are not the same number and won't
+generally agree even for "now" vs. "the current hour" — one is a status
+check, the other is derived from `provider_work` rows. Both Pydantic field
+descriptions state this explicitly so it's visible in the generated JSON
+Schema, not just here.
+
+## `active_nodes` (utilization rollup): a documented deviation from the literal spec text
 
 Spec §6 says the hourly rollup's `active_nodes` column is "nodes with a
 heartbeat in that hour." Taken literally, this can't be computed correctly:
@@ -107,4 +120,23 @@ not be double-counted when grouping by region alone.
   don't use `AuthRateLimitType` (a closed enum of auth-specific actions) or
   `create_endpoint_rate_limit` (API-key-keyed; these routes have no key),
   so they call `sliding_window_check` directly with their own
-  `gpu_public:{ip}` key prefix.
+  `gpu_public:{ip}` key prefix. Like every other caller of
+  `sliding_window_check`, this rate limit **fails open** when Redis is
+  down (`RATE_LIMIT_FAIL_CLOSED` defaults to `false`, the existing
+  repo-wide default) — a Redis outage means unlimited requests, not a
+  blocked feed.
+
+## Who can reach this data
+
+Per W-A1's migration (`20260903200000_gpu_marketplace.sql`), RLS is
+enabled service-role-only (no policy at all) on `gpu_providers`,
+`gpu_nodes`, and `provider_work` — there is no anon grant on any of them,
+so this API (using the service-role Supabase client, same as every other
+`src/db/*` module) is the **only** public path to node/provider data;
+nothing can read them directly with an anon key. `gpu_utilization_hourly`
+is the one exception the spec calls for: it carries its own narrow,
+aggregate-only `SELECT ... TO anon` policy, since the table by
+construction can never contain wallet/endpoint/provider/user identity —
+this API still reads it through the service-role client for consistent
+caching and rate limiting, but a client with only the anon key could also
+query that one table directly.

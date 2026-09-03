@@ -33,7 +33,15 @@ class GpuLastHourStats(BaseModel):
 class GpuPublicSummary(BaseModel):
     """GET /gpu/public/summary"""
 
-    active_nodes: int
+    active_nodes: int = Field(
+        description=(
+            "Live snapshot: count of gpu_nodes currently in status='active' "
+            "(approved providers only) at request time -- NOT an hourly "
+            "aggregate. Contrast with GpuUtilizationPoint.active_nodes, "
+            "which counts nodes with traffic in a specific past hour. See "
+            "docs/gpu/PUBLIC_FEED.md."
+        )
+    )
     approved_providers: int
     regions: list[GpuRegionCount]
     models: list[GpuModelCount]
@@ -76,7 +84,15 @@ class GpuUtilizationPoint(BaseModel):
     completion_tokens: int
     avg_latency_ms: int
     error_rate: float
-    active_nodes: int
+    active_nodes: int = Field(
+        description=(
+            "Nodes that completed at least one provider_work request in "
+            "THIS hour bucket -- a historical traffic count, NOT a live "
+            "status snapshot. Contrast with GpuPublicSummary.active_nodes, "
+            "which reflects current gpu_nodes.status. See "
+            "docs/gpu/PUBLIC_FEED.md."
+        )
+    )
 
 
 class GpuPublicUtilizationResponse(BaseModel):
