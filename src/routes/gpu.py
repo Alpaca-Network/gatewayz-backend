@@ -213,6 +213,24 @@ def _probe_and_validate_models(
         raise HTTPException(status_code=400, detail="models_mismatch")
 
 
+def _invalidate_node_adapter(node_id: int) -> None:
+    """Best-effort: drop any cached per-node OpenAI-compat client after a
+    node mutation so it can't keep serving traffic against a stale
+    endpoint/key. `community_adapter` is W-A2's module and merges after
+    this PR -- lazy import behind try/except ImportError so this route
+    keeps working standalone until then, and any other failure is
+    swallowed the same way (never let cache invalidation fail the
+    request that triggered it)."""
+    try:
+        from src.services.providers.community_adapter import invalidate_adapter
+
+        invalidate_adapter(node_id)
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.warning(f"community adapter invalidation failed for node {node_id}: {e}")
+
+
 def _encrypt_endpoint_key(plaintext: str) -> str:
     try:
         token, _version = encrypt_api_key(plaintext)
@@ -254,7 +272,8 @@ def _earnings_summary(provider_id: int) -> dict[str, Any]:
 
     accrued = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "accrued")
     settled = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "settled")
-    return {"accrued_wei": str(accrued), "settled_wei": str(settled)}
+    void = sum(int(r["amount_wei"]) for r in rows if r.get("status") == "void")
+    return {"accrued_wei": str(accrued), "settled_wei": str(settled), "void_wei": str(void)}
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +411,7 @@ async def update_node_route(
     updated = update_node(node_id, updates)
     if updated is None:
         raise HTTPException(status_code=500, detail="node_update_failed")
+    _invalidate_node_adapter(node_id)
     return {"success": True, "data": _node_view(updated)}
 
 
@@ -401,6 +421,7 @@ async def delete_node_route(node_id: int, user_id: int = Depends(get_user_id)) -
     updated = set_node_status(node_id, "disabled")
     if updated is None:
         raise HTTPException(status_code=500, detail="node_disable_failed")
+    _invalidate_node_adapter(node_id)
     return {"success": True, "data": _node_view(updated)}
 
 
@@ -411,6 +432,7 @@ async def rotate_node_token(node_id: int, user_id: int = Depends(get_user_id)) -
     updated = update_node(node_id, {"node_token_hash": sha256_key_hash(node_token)})
     if updated is None:
         raise HTTPException(status_code=500, detail="node_token_rotation_failed")
+    _invalidate_node_adapter(node_id)
     return {"success": True, "data": {"node": _node_view(updated), "node_token": node_token}}
 
 

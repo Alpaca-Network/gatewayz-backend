@@ -331,6 +331,46 @@ def select_nodes_for_model(model: str) -> list[dict[str, Any]]:
         return []
 
 
+_LIST_ACTIVE_NODES_COLUMNS = (
+    "id, provider_id, name, region, gpu_model, vram_gb, models, status, last_heartbeat_at"
+)
+
+
+def list_active_nodes() -> list[dict[str, Any]]:
+    """Active nodes of approved providers, projected to the columns W-A2's
+    catalog projection (and W-C's public listing) need -- no wallet,
+    endpoint, or provider-identity fields. Empty list on any lookup error
+    or if no node is both active and approved. Same fetch-then-filter
+    tradeoff as select_nodes_for_model (jsonb `models` containment isn't a
+    clean PostgREST filter)."""
+    try:
+        client = get_supabase_client()
+        nodes_result = (
+            client.table(_NODES_TABLE)
+            .select(_LIST_ACTIVE_NODES_COLUMNS)
+            .eq("status", "active")
+            .execute()
+        )
+        candidate_nodes = nodes_result.data or []
+        if not candidate_nodes:
+            return []
+
+        provider_ids = sorted({n["provider_id"] for n in candidate_nodes})
+        providers_result = (
+            client.table(_PROVIDERS_TABLE)
+            .select("id")
+            .eq("status", "approved")
+            .in_("id", provider_ids)
+            .execute()
+        )
+        approved_provider_ids = {p["id"] for p in (providers_result.data or [])}
+
+        return [n for n in candidate_nodes if n["provider_id"] in approved_provider_ids]
+    except Exception as e:
+        logger.warning(f"gpu_nodes list_active_nodes failed: {e}")
+        return []
+
+
 def sweep_liveness(now: datetime, degraded_after_s: int, offline_after_s: int) -> tuple[int, int]:
     """Downgrade nodes that have stopped heartbeating: 'active' -> 'degraded'
     after `degraded_after_s` without a heartbeat, and 'active'/'degraded' ->

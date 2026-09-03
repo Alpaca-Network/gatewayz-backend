@@ -1,7 +1,9 @@
 """Tests for src.routes.gpu (Milestone 4 W-A1, gatewayz-backend#2262)."""
 
 import os
+import sys
 import time
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,6 +12,7 @@ from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
 
 from src.main import app
+from src.routes.gpu import _earnings_summary, _invalidate_node_adapter
 from src.security.deps import get_user_id, require_admin
 from src.security.node_auth import get_node as get_auth_node
 
@@ -165,7 +168,7 @@ def test_get_my_provider_returns_provider_nodes_and_earnings(
 ):
     mock_get_provider.return_value = _APPROVED_PROVIDER
     mock_list_nodes.return_value = [{"id": 1, "provider_id": 1, "status": "active"}]
-    mock_earnings.return_value = {"accrued_wei": "0", "settled_wei": "0"}
+    mock_earnings.return_value = {"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}
 
     response = client.get("/gpu/providers/me")
 
@@ -173,7 +176,40 @@ def test_get_my_provider_returns_provider_nodes_and_earnings(
     data = response.json()["data"]
     assert data["provider"]["id"] == 1
     assert len(data["nodes"]) == 1
-    assert data["earnings"] == {"accrued_wei": "0", "settled_wei": "0"}
+    assert data["earnings"] == {"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}
+
+
+@patch("src.config.supabase_config.get_supabase_client")
+def test_earnings_summary_sums_accrued_settled_and_void_separately(mock_get_client):
+    fake_client = MagicMock()
+    fake_client.table.return_value.select.return_value.eq.return_value.execute.return_value = (
+        MagicMock(
+            data=[
+                {"amount_wei": "100", "status": "accrued"},
+                {"amount_wei": "40", "status": "accrued"},
+                {"amount_wei": "50", "status": "settled"},
+                {"amount_wei": "25", "status": "void"},
+            ]
+        )
+    )
+    mock_get_client.return_value = fake_client
+
+    assert _earnings_summary(1) == {
+        "accrued_wei": "140",
+        "settled_wei": "50",
+        "void_wei": "25",
+    }
+
+
+@patch("src.config.supabase_config.get_supabase_client")
+def test_earnings_summary_zeros_on_lookup_error(mock_get_client):
+    mock_get_client.side_effect = RuntimeError("boom")
+
+    assert _earnings_summary(1) == {
+        "accrued_wei": "0",
+        "settled_wei": "0",
+        "void_wei": "0",
+    }
 
 
 @patch("src.routes.gpu.get_provider_by_user")
@@ -358,6 +394,104 @@ def test_rotate_token_returns_new_token_once(mock_get_provider, mock_get_node, m
 
     assert response.status_code == 200
     assert response.json()["data"]["node_token"].startswith("gw_node_")
+
+
+# ---------------------------------------------------------------------------
+# Community adapter cache invalidation (W-A2's community_adapter.py merges
+# after this PR -- _invalidate_node_adapter must degrade gracefully until
+# then, and every mutating node route must call it on success).
+# ---------------------------------------------------------------------------
+
+
+def test_invalidate_node_adapter_is_a_noop_when_community_adapter_not_installed():
+    """community_adapter.py doesn't exist yet (W-A2) -- this must not raise."""
+    sys.modules.pop("src.services.providers.community_adapter", None)
+    _invalidate_node_adapter(5)  # must not raise
+
+
+def test_invalidate_node_adapter_calls_through_when_module_present(monkeypatch):
+    fake_module = types.ModuleType("src.services.providers.community_adapter")
+    mock_invalidate = MagicMock()
+    fake_module.invalidate_adapter = mock_invalidate
+    monkeypatch.setitem(sys.modules, "src.services.providers.community_adapter", fake_module)
+
+    _invalidate_node_adapter(5)
+
+    mock_invalidate.assert_called_once_with(5)
+
+
+def test_invalidate_node_adapter_swallows_unexpected_errors(monkeypatch):
+    fake_module = types.ModuleType("src.services.providers.community_adapter")
+    fake_module.invalidate_adapter = MagicMock(side_effect=RuntimeError("cache boom"))
+    monkeypatch.setitem(sys.modules, "src.services.providers.community_adapter", fake_module)
+
+    _invalidate_node_adapter(5)  # must not raise
+
+
+@patch("src.routes.gpu._invalidate_node_adapter")
+@patch("src.routes.gpu.update_node")
+@patch("src.routes.gpu.get_node")
+@patch("src.routes.gpu.get_provider_by_user")
+def test_update_node_invalidates_adapter_on_success(
+    mock_get_provider, mock_get_node, mock_update_node, mock_invalidate
+):
+    mock_get_provider.return_value = _APPROVED_PROVIDER
+    mock_get_node.return_value = {"id": 5, "provider_id": 1, "endpoint_url": "https://x"}
+    mock_update_node.return_value = {"id": 5, "provider_id": 1}
+
+    response = client.patch("/gpu/nodes/5", json={"name": "renamed"})
+
+    assert response.status_code == 200
+    mock_invalidate.assert_called_once_with(5)
+
+
+@patch("src.routes.gpu._invalidate_node_adapter")
+@patch("src.routes.gpu.get_node")
+@patch("src.routes.gpu.get_provider_by_user")
+def test_update_node_does_not_invalidate_adapter_when_nothing_changed(
+    mock_get_provider, mock_get_node, mock_invalidate
+):
+    mock_get_provider.return_value = _APPROVED_PROVIDER
+    mock_get_node.return_value = {"id": 5, "provider_id": 1, "endpoint_url": "https://x"}
+
+    response = client.patch("/gpu/nodes/5", json={})
+
+    assert response.status_code == 200
+    mock_invalidate.assert_not_called()
+
+
+@patch("src.routes.gpu._invalidate_node_adapter")
+@patch("src.routes.gpu.set_node_status")
+@patch("src.routes.gpu.get_node")
+@patch("src.routes.gpu.get_provider_by_user")
+def test_delete_node_invalidates_adapter_on_success(
+    mock_get_provider, mock_get_node, mock_set_status, mock_invalidate
+):
+    mock_get_provider.return_value = _APPROVED_PROVIDER
+    mock_get_node.return_value = {"id": 5, "provider_id": 1}
+    mock_set_status.return_value = {"id": 5, "provider_id": 1, "status": "disabled"}
+
+    response = client.delete("/gpu/nodes/5")
+
+    assert response.status_code == 200
+    mock_invalidate.assert_called_once_with(5)
+
+
+@patch("src.routes.gpu._invalidate_node_adapter")
+@patch("src.routes.gpu.update_node")
+@patch("src.routes.gpu.get_node")
+@patch("src.routes.gpu.get_provider_by_user")
+def test_rotate_token_invalidates_adapter_on_success(
+    mock_get_provider, mock_get_node, mock_update_node, mock_invalidate
+):
+    mock_get_provider.return_value = _APPROVED_PROVIDER
+    mock_get_node.return_value = {"id": 5, "provider_id": 1}
+    mock_update_node.return_value = {"id": 5, "provider_id": 1}
+
+    response = client.post("/gpu/nodes/5/rotate-token")
+
+    assert response.status_code == 200
+    mock_invalidate.assert_called_once_with(5)
 
 
 # ---------------------------------------------------------------------------

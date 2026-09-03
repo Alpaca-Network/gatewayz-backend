@@ -13,6 +13,7 @@ from src.db.gpu import (
     get_node_by_token_hash,
     get_provider,
     get_provider_by_user,
+    list_active_nodes,
     list_nodes,
     list_providers,
     record_heartbeat,
@@ -300,6 +301,39 @@ def test_select_nodes_for_model_returns_empty_on_error(sb):
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.gpu.get_supabase_client", return_value=client):
         assert select_nodes_for_model("anything") == []
+
+
+# ---------------------------------------------------------------------------
+# list_active_nodes
+# ---------------------------------------------------------------------------
+
+
+def test_list_active_nodes_filters_by_approval_only(sb):
+    nodes = [
+        {"id": 1, "provider_id": 100, "status": "active", "name": "a"},
+        {"id": 2, "provider_id": 200, "status": "active", "name": "b"},  # provider not approved
+    ]
+    providers = [{"id": 100}]  # only provider 100 is 'approved'
+
+    client = _mock_table_client({"gpu_nodes": nodes, "gpu_providers": providers})
+    with patch("src.db.gpu.get_supabase_client", return_value=client):
+        result = list_active_nodes()
+
+    assert [n["id"] for n in result] == [1]
+    client.table("gpu_nodes").eq.assert_called_with("status", "active")
+
+
+def test_list_active_nodes_returns_empty_when_no_active_nodes(sb):
+    client = _mock_table_client({"gpu_nodes": []})
+    with patch("src.db.gpu.get_supabase_client", return_value=client):
+        assert list_active_nodes() == []
+
+
+def test_list_active_nodes_returns_empty_on_error(sb):
+    client = MagicMock()
+    client.table.side_effect = RuntimeError("boom")
+    with patch("src.db.gpu.get_supabase_client", return_value=client):
+        assert list_active_nodes() == []
 
 
 # ---------------------------------------------------------------------------

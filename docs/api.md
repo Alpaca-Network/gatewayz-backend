@@ -1009,7 +1009,7 @@ GET /gpu/providers/me
 ```
 
 Requires auth. Returns the caller's provider row, their nodes, and an
-earnings summary (`{"accrued_wei": "0", "settled_wei": "0"}`, zeros until
+earnings summary (`{"accrued_wei": "0", "settled_wei": "0", "void_wei": "0"}`, zeros until
 Milestone 4's payout workstream ships). `404` if not yet registered.
 
 ### Register a Node
