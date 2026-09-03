@@ -14,6 +14,7 @@ See spec: .../scratchpad/m4/spec.md sections 2-3.
 
 import logging
 import secrets
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -52,6 +53,10 @@ _NODE_TOKEN_PREFIX = "gw_node_"
 # extracts the raw Authorization bearer value), which is unique per node --
 # equivalent to keying by the token hash without needing a second lookup.
 heartbeat_rl = create_endpoint_rate_limit("gpu_heartbeat", max_requests=6, window_seconds=60)
+
+# A signature older (or newer, clock skew) than this is never attested --
+# matches the W-E node agent's assumption that `ts` is close to send time.
+_HEARTBEAT_SIGNATURE_MAX_SKEW_SECONDS = 300
 
 
 # ---------------------------------------------------------------------------
@@ -117,16 +122,25 @@ class HeartbeatLoad(BaseModel):
     gpu_util_pct: float | None = Field(default=None, ge=0, le=100)
 
 
+class HeartbeatSignature(BaseModel):
+    """Wire shape decided by W-E (scripts/gpu_node_agent.py,
+    build_heartbeat_payload): the spec names the signed message
+    (f"gatewayz-heartbeat:{node_id}:{ts}") but not how it's carried. `ts`
+    travels alongside the signature rather than being re-derived from
+    server time -- clock skew/latency would otherwise break verification."""
+
+    ts: int = Field(..., gt=0)
+    value: str = Field(..., min_length=1, max_length=200)
+
+
 class HeartbeatRequest(BaseModel):
     load: HeartbeatLoad
-    models: list[NodeModelSpec] | None = None
+    # Model ids the node currently serves (self-reported from its local
+    # /v1/models) -- plain strings, not the richer {id, max_context, dtype}
+    # shape used at node registration (spec section 2's gpu_nodes.models).
+    models: list[str] | None = None
     version: str | None = Field(default=None, max_length=100)
-    # Unix timestamp the signature (if present) is signed over -- required
-    # whenever `signature` is set so the signed message
-    # (f"gatewayz-heartbeat:{node_id}:{ts}", spec section 3) is
-    # reconstructible and time-bound.
-    ts: int | None = Field(default=None, gt=0)
-    signature: str | None = Field(default=None, max_length=200)
+    signature: HeartbeatSignature | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -206,6 +220,16 @@ def _encrypt_endpoint_key(plaintext: str) -> str:
     except RuntimeError as e:
         logger.error("Node endpoint key encryption unavailable: %s", e)
         raise HTTPException(status_code=503, detail="encryption_unavailable") from e
+
+
+def _merge_heartbeat_models(
+    existing_models: list[dict[str, Any]] | None, reported_ids: list[str]
+) -> list[dict[str, Any]]:
+    """Rebuild the stored `models` jsonb (spec section 2's {id, max_context,
+    dtype} shape) from a heartbeat's plain id list, preserving max_context/
+    dtype for ids that were already declared at registration/patch time."""
+    existing_by_id = {m.get("id"): m for m in (existing_models or [])}
+    return [existing_by_id.get(model_id, {"id": model_id}) for model_id in reported_ids]
 
 
 def _earnings_summary(provider_id: int) -> dict[str, Any]:
@@ -408,14 +432,22 @@ async def node_heartbeat(
         raise HTTPException(status_code=403, detail="node_token_mismatch")
 
     attested_heartbeat = False
-    if body.signature and body.ts is not None:
-        provider = get_provider(node["provider_id"])
-        payout_wallet = provider.get("payout_wallet_address") if provider else None
-        if payout_wallet:
-            message = f"gatewayz-heartbeat:{node_id}:{body.ts}"
-            attested_heartbeat = verify_wallet_signature(payout_wallet, message, body.signature)
+    if body.signature is not None:
+        skew = abs(int(time.time()) - body.signature.ts)
+        if skew <= _HEARTBEAT_SIGNATURE_MAX_SKEW_SECONDS:
+            provider = get_provider(node["provider_id"])
+            payout_wallet = provider.get("payout_wallet_address") if provider else None
+            if payout_wallet:
+                message = f"gatewayz-heartbeat:{node_id}:{body.signature.ts}"
+                attested_heartbeat = verify_wallet_signature(
+                    payout_wallet, message, body.signature.value
+                )
 
-    models_payload = [m.model_dump() for m in body.models] if body.models is not None else None
+    models_payload = (
+        _merge_heartbeat_models(node.get("models"), body.models)
+        if body.models is not None
+        else None
+    )
     updated = record_heartbeat(
         node_id=node_id,
         outstanding=body.load.outstanding,

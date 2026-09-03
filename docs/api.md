@@ -1083,18 +1083,28 @@ user's `gw_live_*` API key. Rate-limited 6/min/node. Body:
 ```json
 {
   "load": { "outstanding": 2, "gpu_util_pct": 55.0 },
-  "models": [{"id": "llama-3.1-8b-instruct"}],
+  "models": ["llama-3.1-8b-instruct"],
   "version": "0.1.0",
-  "ts": 1735920000,
-  "signature": "0x..."
+  "signature": { "ts": 1735920000, "value": "0x..." }
 }
 ```
 
-`signature` is optional: a wallet signature (by the provider's payout
-wallet) over `f"gatewayz-heartbeat:{node_id}:{ts}"`. When present and
-valid, the response's `attested_heartbeat` is `true` — an invalid or
-missing signature does not fail the heartbeat, it's just unattested. A
-successful heartbeat marks the node `active` and refreshes
+`models` is a plain list of model id strings (what the node currently
+self-reports from its local `/v1/models`) — the richer `{id, max_context,
+dtype}` shape from node registration is preserved server-side per id and
+merged with whatever the heartbeat reports; a newly-seen id is stored as
+`{"id": "..."}`.
+
+`signature` is optional (wire shape decided by the node agent,
+`scripts/gpu_node_agent.py`): `{"ts": <unix seconds>, "value": "0x..."}`, a
+wallet signature (by the provider's payout wallet) over
+`f"gatewayz-heartbeat:{node_id}:{ts}"`. `ts` travels with the signature
+rather than being taken from server time, so verification isn't broken by
+clock skew or latency. A signature is only attested if it's both valid
+*and* within 300s of the current server time (replay protection) — the
+response's `attested_heartbeat` is `true` only then. An invalid, stale, or
+missing signature never fails the heartbeat itself, it's just unattested.
+A successful heartbeat marks the node `active` and refreshes
 `last_heartbeat_at`.
 
 A node that stops heartbeating is downgraded automatically by a background

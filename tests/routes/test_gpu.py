@@ -414,6 +414,40 @@ def test_heartbeat_success_without_signature(mock_record):
 
 
 @patch("src.routes.gpu.record_heartbeat")
+def test_heartbeat_models_are_plain_ids_and_merge_with_declared_specs(mock_record):
+    """The node agent reports `models` as plain id strings (W-E contract) --
+    the route must rebuild the richer {id, max_context, dtype} shape
+    gpu_nodes.models stores, preserving specs declared at registration for
+    ids the heartbeat still reports."""
+    mock_record.return_value = {"id": 5, "provider_id": 1, "status": "active"}
+    previous = _override_node(
+        {
+            "id": 5,
+            "provider_id": 1,
+            "status": "active",
+            "models": [{"id": "llama-3.1-8b-instruct", "max_context": 8192}],
+        }
+    )
+    try:
+        response = client.post(
+            "/gpu/nodes/5/heartbeat",
+            json={
+                "load": {"outstanding": 0},
+                "models": ["llama-3.1-8b-instruct", "new-model"],
+            },
+        )
+    finally:
+        _restore_node(previous)
+
+    assert response.status_code == 200
+    _, kwargs = mock_record.call_args
+    assert kwargs["models"] == [
+        {"id": "llama-3.1-8b-instruct", "max_context": 8192},
+        {"id": "new-model"},
+    ]
+
+
+@patch("src.routes.gpu.record_heartbeat")
 @patch("src.routes.gpu.get_provider")
 def test_heartbeat_with_valid_wallet_signature_is_attested(mock_get_provider, mock_record):
     account = Account.create()
@@ -433,7 +467,10 @@ def test_heartbeat_with_valid_wallet_signature_is_attested(mock_get_provider, mo
     try:
         response = client.post(
             "/gpu/nodes/5/heartbeat",
-            json={"load": {"outstanding": 0}, "ts": ts, "signature": signature},
+            json={
+                "load": {"outstanding": 0},
+                "signature": {"ts": ts, "value": signature},
+            },
         )
     finally:
         _restore_node(previous)
@@ -442,6 +479,38 @@ def test_heartbeat_with_valid_wallet_signature_is_attested(mock_get_provider, mo
     assert response.json()["data"]["attested_heartbeat"] is True
     _, kwargs = mock_record.call_args
     assert kwargs["attested"] is True
+
+
+@patch("src.routes.gpu.record_heartbeat")
+@patch("src.routes.gpu.get_provider")
+def test_heartbeat_with_stale_signature_is_not_attested(mock_get_provider, mock_record):
+    """A signature more than _HEARTBEAT_SIGNATURE_MAX_SKEW_SECONDS old is
+    never attested, even with a valid signer -- replay protection."""
+    account = Account.create()
+    mock_get_provider.return_value = {"id": 1, "payout_wallet_address": account.address.lower()}
+    mock_record.return_value = {"id": 5, "provider_id": 1, "status": "active"}
+
+    stale_ts = int(time.time()) - 3600
+    message = f"gatewayz-heartbeat:5:{stale_ts}"
+    signature = account.sign_message(encode_defunct(text=message)).signature.hex()
+    if not signature.startswith("0x"):
+        signature = f"0x{signature}"
+
+    previous = _override_node({"id": 5, "provider_id": 1, "status": "active"})
+    try:
+        response = client.post(
+            "/gpu/nodes/5/heartbeat",
+            json={
+                "load": {"outstanding": 0},
+                "signature": {"ts": stale_ts, "value": signature},
+            },
+        )
+    finally:
+        _restore_node(previous)
+
+    assert response.status_code == 200
+    assert response.json()["data"]["attested_heartbeat"] is False
+    mock_get_provider.assert_not_called()
 
 
 @patch("src.routes.gpu.record_heartbeat")
@@ -462,7 +531,10 @@ def test_heartbeat_with_wrong_signer_is_not_attested(mock_get_provider, mock_rec
     try:
         response = client.post(
             "/gpu/nodes/5/heartbeat",
-            json={"load": {"outstanding": 0}, "ts": ts, "signature": signature},
+            json={
+                "load": {"outstanding": 0},
+                "signature": {"ts": ts, "value": signature},
+            },
         )
     finally:
         _restore_node(previous)
