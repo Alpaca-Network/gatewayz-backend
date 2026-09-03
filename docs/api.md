@@ -554,6 +554,8 @@ OpenAI-compatible chat completions endpoint. This endpoint is fully compatible w
 | `service_tier` | string | No | null | Latency tier: `auto` or `default` |
 | `provider` | string | No | null | Gateway-specific: provider selection (`openrouter`, `featherless`, etc.) |
 
+> **Identity fields are accepted for OpenAI-SDK compatibility and discarded, never forwarded upstream.** `user` (and, on any route, `metadata`/`extra_body`/`extra_headers`/`extra_query`) is stripped before the request reaches any model provider — see `docs/security/ANONYMITY_THREAT_MODEL.md` (G1). Gatewayz still resolves your identity to check quota and bill you; it just never tells the provider who you are.
+
 **Message Object:**
 
 | Field | Type | Required | Description |
