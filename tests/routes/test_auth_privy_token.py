@@ -303,7 +303,6 @@ class TestEmailUsernameCollisionTakeover:
         assert used_email.startswith("noemail+")
         assert "privy_auth.legacy_account_claim_blocked" in caplog.text
 
-    @patch("src.routes.auth.invalidate_user_cache")
     @patch("src.routes.auth._handle_existing_user")
     @patch("src.routes.auth.get_cached_user_by_username")
     @patch("src.routes.auth.users_module.get_user_by_privy_id")
@@ -316,7 +315,6 @@ class TestEmailUsernameCollisionTakeover:
         mock_get_by_privy_id,
         mock_cached_username,
         mock_handle_existing_user,
-        mock_invalidate_cache,
         monkeypatch,
         key_pair,
         caplog,
@@ -341,5 +339,56 @@ class TestEmailUsernameCollisionTakeover:
 
         assert response.status_code == 200
         assert "privy_auth.rebind_blocked" in caplog.text
-        # The rebind (DB update + cache invalidation) must never have run.
-        mock_invalidate_cache.assert_not_called()
+        # The row handed to _handle_existing_user must be untouched: its
+        # privy_user_id must still be the victim's, never the caller's.
+        passed_user = mock_handle_existing_user.call_args.kwargs["existing_user"]
+        assert passed_user["privy_user_id"] == self.VICTIM_PRIVY_ID
+
+    @patch("src.routes.auth.users_module.get_user_by_email")
+    @patch("src.routes.auth.supabase_config.get_supabase_client")
+    @patch("src.routes.auth._generate_unique_username")
+    @patch("src.routes.auth.users_module.create_enhanced_user")
+    @patch("src.routes.auth.get_cached_user_by_username")
+    @patch("src.routes.auth.users_module.get_user_by_privy_id")
+    @patch("src.routes.auth.get_cached_user_by_privy_id")
+    def test_log_mode_never_claims_a_null_privy_id_legacy_account(
+        self,
+        mock_cached_privy,
+        mock_get_by_privy_id,
+        mock_cached_username,
+        mock_create_user,
+        mock_gen_username,
+        mock_get_client,
+        mock_get_by_email,
+        monkeypatch,
+        key_pair,
+        caplog,
+    ):
+        """gatewayz-backend#2248 review, "Fix round 2": in log mode (no token,
+        hence unverified), a username match on a legacy account that has never
+        linked Privy (privy_user_id IS NULL) must not be rebound or have its key
+        returned — reproduces the reviewer's live repro. A new account is
+        created instead, exactly as the verified-token path already does."""
+        _configure(monkeypatch, key_pair, mode="log")
+
+        mock_cached_privy.return_value = None
+        mock_get_by_privy_id.return_value = None
+        mock_cached_username.return_value = {
+            "id": 42,
+            "username": "wallet-user",
+            "privy_user_id": None,
+        }
+        mock_get_by_email.return_value = None
+        self._new_account_mocks(
+            mock_gen_username, mock_create_user, resolved_username="wallet-user_ab12"
+        )
+
+        with caplog.at_level("WARNING", logger="src.routes.auth"):
+            response = client.post("/auth", json=_auth_body())  # no token -> log mode, unverified
+
+        assert response.status_code == 200
+        assert response.json()["is_new_user"] is True
+        assert response.json()["user_id"] == 501  # the new account, not user 42's
+        assert "privy_auth.legacy_account_claim_blocked" in caplog.text
+        mock_create_user.assert_called_once()
+        assert mock_create_user.call_args.kwargs["privy_user_id"] == TEST_DID
