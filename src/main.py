@@ -551,6 +551,10 @@ def create_app() -> FastAPI:
             "wallet_auth",
             "Wallet Auth",
         ),  # SIWE wallet sign-in/sign-up + linking (gatewayz-backend#2249-#2252)
+        (
+            "gpu",
+            "GPU Marketplace",
+        ),  # Provider/node registry, node auth, heartbeats (gatewayz-backend#2262)
     ]
 
     loaded_count = 0
