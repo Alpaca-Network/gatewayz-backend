@@ -861,19 +861,20 @@ async def privy_auth(
                 # so nothing below may treat `request.user.id` as proven.
                 current_privy_id = existing_user.get("privy_user_id")
                 if current_privy_id and current_privy_id != request.user.id:
-                    # SECURITY: never rebind an account that already belongs to a
-                    # different Privy identity — that is an account takeover, not a
-                    # legacy merge, and is refused unconditionally regardless of
-                    # verification mode. Backward compatibility during rollout: this
-                    # account's key is still returned below (unlike the null-DID
-                    # case) since it was already discoverable by an unverified
-                    # caller before this fix; only the corrupting rebind is refused.
+                    # SECURITY (gatewayz-backend#2248 review, "Fix round 3"): a row
+                    # whose privy_user_id is a different, non-null DID is not this
+                    # caller's account, full stop — not just "don't rebind it," but
+                    # don't touch or return it either. Returning its API key without
+                    # rebinding was still a takeover (round 1/2 only closed the
+                    # rebind; this closes the return). Refuse entirely and fall
+                    # through to new-account creation, in every mode.
                     logger.warning(
-                        "privy_auth.rebind_blocked base=%s existing_privy_id=%s attempted_sub=%s",
+                        "privy_auth.did_mismatch_on_username_match base=%s existing_privy_id=%s attempted_sub=%s",
                         username,
                         current_privy_id,
                         request.user.id,
                     )
+                    existing_user = None
                 else:
                     # SECURITY (gatewayz-backend#2248 review, "Fix round 2"):
                     # current_privy_id is None — a legacy account (email/password or
