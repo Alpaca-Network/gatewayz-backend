@@ -27,22 +27,24 @@ Dependencies: stdlib + httpx (already in requirements.txt) + eth_account
 is only imported when `--wallet-keyfile`/`--attest-proxy` need it, so the
 agent runs on a bare node with neither.
 
-CROSS-REPO CONTRACT (see this PR's body and docs/api.md "GPU Marketplace"):
-the gateway must forward the request's billing_ref to the node as an
-inbound `X-Gatewayz-Request-Id` header (today that header only exists on
-the *response* the client sees -- see src/middleware/request_id_middleware.py
--- forwarding it to the node on the *outbound* proxied request is new,
-W-A2's job). Without it, `--attest-proxy` cannot attribute a response to a
-billing_ref and skips attestation for that request (passes it through
-unmodified) rather than guessing.
+CROSS-REPO CONTRACT (see docs/api.md "GPU Marketplace" and docs/gpu/
+attestation.md): the community adapter (`src/services/providers/
+community_adapter.py`) forwards the request's billing_ref to the node as
+an inbound `X-Gatewayz-Request-Id` header on the outbound call it makes --
+a second, distinct use of the header name `RequestIDMiddleware` also
+echoes back to the client on the *response* (see
+src/middleware/request_id_middleware.py). Without it, `--attest-proxy`
+cannot attribute a response to a billing_ref and skips attestation for
+that request (passes it through unmodified) rather than guessing.
 
 CROSS-REPO CONTRACT (canonicalisation): the exact byte-for-byte hashing
-rule below (`hash_prompt`/`hash_response`) MUST match
-`src/services/gpu/hashing.py`, written by W-A2 (not merged as of this
-writing -- see tests/scripts/test_gpu_node_agent.py's vendored expected
-values and this PR's body). If W-A2 lands a different canonicalisation,
-this file's hash functions must be updated to match, or every node's
-attestation signatures silently stop verifying.
+rule below (`hash_prompt`/`hash_response`) matches
+`src/services/gpu/hashing.py` (verified in
+tests/scripts/test_gpu_node_agent.py by importing and comparing against
+the real backend module, including a non-ASCII fixture -- both sides rely
+on `json.dumps`' default `ensure_ascii=True`). If either side's
+canonicalisation ever drifts, every node's attestation signatures
+silently stop verifying -- that test is the guard.
 """
 
 from __future__ import annotations
@@ -199,7 +201,8 @@ def build_heartbeat_payload(
     used, so it travels alongside the signature rather than being
     re-derived server-side from request time (clock skew/latency would
     otherwise break verification): `{"ts": <unix seconds>, "value": "0x..."}`.
-    W-A1's `get_node` heartbeat handler must verify against this shape.
+    `src/routes/gpu.py`'s `node_heartbeat` handler verifies against exactly
+    this shape (`HeartbeatSignature`, within a 300s skew window).
     """
     load: dict[str, Any] = {"outstanding": outstanding}
     if gpu_util_pct is not None:

@@ -208,23 +208,41 @@ real token address on a real chain, but the network itself is a testnet,
 so it has no monetary value yet.
 
 Every unit of verified work accrues WAYZ per 1k tokens, by model size
-class:
+class (seeded rates, `provider_payout_rates`):
 
-| Class | Model size | Illustrative rate (WAYZ / 1k tokens) |
+| Class | Model size | Rate (WAYZ / 1k tokens) |
 |---|---|---|
-| `small` | ≤ 13B params | placeholder — see current value below |
-| `medium` | ≤ 34B params | placeholder — see current value below |
-| `large` | > 34B params | placeholder — see current value below |
+| `small` | ≤ 13B params | 0.05 |
+| `medium` | ≤ 34B params | 0.10 |
+| `large` | > 34B params | 0.25 |
 
-These specific numbers are seeded by the backend and may change during
-testnet; the table above is illustrative, not a commitment. Check your
-actual accrued/settled amounts and the rate applied any time at
-`GET /gpu/providers/me/earnings`.
+These are testnet values and may change; check your actual accrued/settled
+amounts any time at `GET /gpu/providers/me/earnings`.
+
+**Model class is an exact allow-list, not a guess from your model's
+name.** Only a fixed set of known open-weight model ids is recognized —
+declaring a model id Gatewayz doesn't recognize means that work is
+**not payable** (`skipped`, not `verified`), even if it otherwise passes
+every check. Stick to well-known instruct model ids (the kind named
+throughout this doc, e.g. `llama-3.1-8b-instruct`) to be sure your work
+counts.
+
+**Effective rate at testnet launch:** until Gatewayz has a configured
+spot-check reference provider (an operator-side setting, not something
+you control) *and* your work is attested, `medium`/`large`-class work is
+still paid at the `small` rate as a safety margin against a node
+misreporting output quality within loose token-count checks — the
+allow-list above still determines *whether* you're paid at all, this only
+caps *how much*. Attested work (`--wallet-keyfile`, ideally
+`--attest-proxy`) is the one lever you control to get closer to full
+rate once a reference provider is configured.
 
 - Earnings accrue only from **verified** work (see "Verification" below)
-  — unsampled, unverified, or failed-verification work is unpaid.
+  — unsampled-and-unresolved, unverified, or failed-verification work is
+  unpaid.
 - Settlement runs **daily**: any provider with ≥ 10 WAYZ accrued gets a
-  single on-chain `transfer()` to their payout wallet.
+  single on-chain `transfer()` to their payout wallet, capped per run
+  across all providers combined.
 - Every settlement gets a transaction hash you can look up on
   [Snowtrace (Fuji)](https://testnet.snowtrace.io/).
 - `GET /gpu/providers/me/earnings` lists accrued/settled totals, your
@@ -238,11 +256,13 @@ prompts to check by default (see the threat model). Instead:
 
 - A random sample of your completed requests (`COMMUNITY_SPOTCHECK_RATE`,
   5% by default — **doubled** for nodes without attested heartbeats) is
-  spot-checked: the same prompt is re-run against your node (and,
-  where configured, a trusted reference provider serving the same
-  open-weight model) at `temperature=0`, and the outputs are compared for
-  plausibility (deterministic prefix similarity, token counts within
-  25% of what you reported, non-empty).
+  spot-checked: the same prompt is re-run against your node at
+  `temperature=0`, and the reply must be non-empty with a token count
+  within 25% of what you reported. If Gatewayz has a trusted reference
+  provider configured for your model, the reply is additionally compared
+  against that provider's reply for prefix similarity — a stronger check
+  that's only active once a reference provider is configured (see
+  "Payouts" for how this also affects your effective rate).
 - **Pass** → the work is marked `verified` and earnings accrue.
 - **Fail** → the work is marked `failed`, its earnings are voided, and
   your node's `health_score` drops by 20. **Three failures in 24 hours

@@ -5,7 +5,6 @@ for HTTP so nothing touches the network (gatewayz-backend#2267).
 """
 
 import argparse
-import hashlib
 import json
 import time
 
@@ -27,6 +26,7 @@ from scripts.gpu_node_agent import (
     sign_message,
 )
 from src.security.wallet_signature import verify_wallet_signature
+from src.services.gpu import hashing as backend_hashing
 
 # ---------------------------------------------------------------------------
 # Heartbeat payload shape
@@ -252,32 +252,46 @@ def test_run_loop_once_raises_on_failure_without_retrying():
 
 
 # ---------------------------------------------------------------------------
-# Attestation hashing -- vendored expected values (src/services/gpu/hashing.py
-# does not exist yet as of this PR; W-A2 has not merged. These hand-compute
-# the canonical rule this file's docstring commits to, independent of the
-# implementation under test, so the test would catch either side drifting.
-# See this PR's body for the cross-repo contract note to W-A2.
+# Attestation hashing -- parity with the REAL backend implementation
+# (src/services/gpu/hashing.py, merged by W-A2). Both sides independently
+# chose json.dumps' default ensure_ascii=True; a non-ASCII fixture is the
+# case that would actually catch either side drifting to ensure_ascii=False
+# (see both modules' docstrings for the cross-repo contract).
 # ---------------------------------------------------------------------------
 
 
-def test_hash_prompt_matches_hand_computed_canonical_json_sha256():
+def test_hash_prompt_matches_backend_hashing_module():
     messages = [{"role": "user", "content": "hi"}]
-    expected = hashlib.sha256(
-        json.dumps(messages, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-    assert hash_prompt(messages) == expected
+    assert hash_prompt(messages) == backend_hashing.hash_prompt(messages)
+
+
+def test_hash_prompt_matches_backend_on_non_ascii_content():
+    # Accents, CJK, and an emoji -- exactly the content ensure_ascii=False
+    # would hash differently.
+    messages = [{"role": "user", "content": "café 你好 \U0001f600"}]
+    assert hash_prompt(messages) == backend_hashing.hash_prompt(messages)
+    # And explicitly against canonical_json/sha256_hex, proving the
+    # \uXXXX-escaping default (not just hash_prompt's behavior) matches.
+    assert backend_hashing.canonical_json(messages) == json.dumps(
+        messages, sort_keys=True, separators=(",", ":")
+    )
+    assert "café" not in backend_hashing.canonical_json(messages)  # escaped, not literal UTF-8
 
 
 def test_hash_prompt_is_key_order_independent():
     a = [{"role": "user", "content": "hi"}]
     b = [{"content": "hi", "role": "user"}]
-    assert hash_prompt(a) == hash_prompt(b)
+    assert hash_prompt(a) == hash_prompt(b) == backend_hashing.hash_prompt(a)
 
 
-def test_hash_response_matches_hand_computed_sha256_of_raw_text():
+def test_hash_response_matches_backend_hashing_module():
     text = "The answer is 42."
-    expected = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    assert hash_response(text) == expected
+    assert hash_response(text) == backend_hashing.hash_response(text)
+
+
+def test_hash_response_matches_backend_on_non_ascii_content():
+    text = "L'école dit 你好 \U0001f600"
+    assert hash_response(text) == backend_hashing.hash_response(text)
 
 
 def test_build_attestation_signs_the_documented_message_and_verifies():
