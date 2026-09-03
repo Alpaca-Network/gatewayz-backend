@@ -127,7 +127,10 @@ async def get_request_identity(
     `get_optional_api_key` above, so the user lookup below goes straight to
     the (cached) `get_user(api_key)` instead of re-validating.
     """
-    cached = getattr(request.state, "identity", None) if request is not None else None
+    # `request` may be a lightweight test double without `.state`
+    # (tests/services/test_anthropic_messages_api.py) -- treat it as uncached.
+    state = getattr(request, "state", None) if request is not None else None
+    cached = getattr(state, "identity", None) if state is not None else None
     if cached is not None:
         return cached
 
@@ -163,6 +166,6 @@ async def get_request_identity(
         len(identity.wallet_addresses),
     )
 
-    if request is not None:
-        request.state.identity = identity
+    if state is not None:
+        state.identity = identity
     return identity
