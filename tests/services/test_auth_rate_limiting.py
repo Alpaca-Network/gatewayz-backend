@@ -43,6 +43,10 @@ class TestAuthRateLimitConfig:
         assert config.api_key_create_attempts_per_window == 10
         assert config.api_key_create_window_seconds == 3600  # 1 hour
 
+        # Wallet SIWE nonce limits
+        assert config.wallet_nonce_attempts_per_window == 20
+        assert config.wallet_nonce_window_seconds == 900  # 15 minutes
+
     def test_custom_config(self):
         """Test custom configuration values"""
         config = AuthRateLimitConfig(
@@ -72,6 +76,8 @@ class TestAuthRateLimiter:
                 password_reset_window_seconds=60,
                 api_key_create_attempts_per_window=2,
                 api_key_create_window_seconds=60,
+                wallet_nonce_attempts_per_window=2,
+                wallet_nonce_window_seconds=60,
             )
         )
 
@@ -151,6 +157,19 @@ class TestAuthRateLimiter:
         result = await limiter.check_rate_limit(user_id, AuthRateLimitType.API_KEY_CREATE)
         assert result.allowed is False
         assert result.reason == "api_key_create rate limit exceeded"
+
+    @pytest.mark.asyncio
+    async def test_wallet_nonce_rate_limit(self, limiter):
+        """Test wallet SIWE nonce issuance rate limiting"""
+        ip = "10.0.0.1"
+
+        for _ in range(2):
+            result = await limiter.check_rate_limit(ip, AuthRateLimitType.WALLET_NONCE)
+            assert result.allowed is True
+
+        result = await limiter.check_rate_limit(ip, AuthRateLimitType.WALLET_NONCE)
+        assert result.allowed is False
+        assert result.reason == "wallet_nonce rate limit exceeded"
 
     @pytest.mark.asyncio
     async def test_different_ips_have_separate_limits(self, limiter):
