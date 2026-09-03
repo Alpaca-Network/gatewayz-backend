@@ -574,6 +574,24 @@ def get_user_by_username(username: str) -> dict[str, Any] | None:
         return None
 
 
+def get_user_by_email(email: str) -> dict[str, Any] | None:
+    """Get user by email (gatewayz-backend#2248: used to check email ownership
+    before an unauthenticated client-supplied email is used for a new account)."""
+    try:
+        client = get_supabase_client()
+
+        result = client.table("users").select("*").eq("email", email).execute()
+
+        if result.data:
+            return result.data[0]
+
+        return None
+
+    except Exception as e:
+        logger.error("Error getting user by email: %s", sanitize_for_logging(str(e)))
+        return None
+
+
 def _atomic_add_credits_rpc(
     client,
     *,

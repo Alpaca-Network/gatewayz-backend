@@ -181,3 +181,165 @@ class TestOffMode:
         response = client.post("/auth", json=_auth_body())
 
         assert response.status_code == 200
+
+
+class TestEmailUsernameCollisionTakeover:
+    """
+    gatewayz-backend#2248 security review, "Fix round 1": `request.email` is
+    unauthenticated client input, not part of the verified token's claims. It
+    must never be used to locate, rebind, or return the API key of someone
+    else's account. See src.routes.auth around the `token_verified` guards.
+    """
+
+    ATTACKER_SUB = "did:privy:attacker"
+    VICTIM_PRIVY_ID = "did:privy:realvictim"
+
+    def _new_account_mocks(self, mock_gen_username, mock_create_user, *, resolved_username):
+        mock_gen_username.return_value = resolved_username
+        mock_create_user.return_value = {
+            "user_id": 501,
+            "username": resolved_username,
+            "credits": 0,
+            "primary_api_key": "gw_test_new_501",
+            "subscription_status": "inactive",
+            "tier": "basic",
+            "trial_expires_at": None,
+            "subscription_end_date": None,
+        }
+
+    @patch("src.routes.auth.users_module.get_user_by_email")
+    @patch("src.routes.auth.supabase_config.get_supabase_client")
+    @patch("src.routes.auth._generate_unique_username")
+    @patch("src.routes.auth.users_module.create_enhanced_user")
+    @patch("src.routes.auth.get_cached_user_by_username")
+    @patch("src.routes.auth.users_module.get_user_by_privy_id")
+    @patch("src.routes.auth.get_cached_user_by_privy_id")
+    def test_attacker_email_colliding_with_victim_username_creates_new_account(
+        self,
+        mock_cached_privy,
+        mock_get_by_privy_id,
+        mock_cached_username,
+        mock_create_user,
+        mock_gen_username,
+        mock_get_client,
+        mock_get_by_email,
+        monkeypatch,
+        key_pair,
+    ):
+        """Attacker's own valid token + email whose local-part == victim's
+        username must NOT touch the victim's row at all (a)."""
+        private_key = _configure(monkeypatch, key_pair, mode="enforce")
+        token = _mint_token(private_key, sub=self.ATTACKER_SUB)
+
+        mock_cached_privy.return_value = None
+        mock_get_by_privy_id.return_value = None
+        mock_get_by_email.return_value = None  # attacker's own (fake) email is unowned
+        self._new_account_mocks(
+            mock_gen_username, mock_create_user, resolved_username="victim_9f3a"
+        )
+
+        body = _auth_body(token=token)
+        body["user"]["id"] = self.ATTACKER_SUB
+        body[
+            "email"
+        ] = "victim@attacker-controlled.example"  # local-part collides with victim's username
+
+        response = client.post("/auth", json=body)
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == 501  # the new account, not the victim's
+        assert response.json()["is_new_user"] is True
+        # The username-fallback lookup must never have been touched.
+        mock_cached_username.assert_not_called()
+        mock_create_user.assert_called_once()
+        assert mock_create_user.call_args.kwargs["privy_user_id"] == self.ATTACKER_SUB
+
+    @patch("src.routes.auth.users_module.get_user_by_email")
+    @patch("src.routes.auth.supabase_config.get_supabase_client")
+    @patch("src.routes.auth._generate_unique_username")
+    @patch("src.routes.auth.users_module.create_enhanced_user")
+    @patch("src.routes.auth.get_cached_user_by_username")
+    @patch("src.routes.auth.users_module.get_user_by_privy_id")
+    @patch("src.routes.auth.get_cached_user_by_privy_id")
+    def test_attacker_email_equal_to_victim_email_falls_back_to_placeholder(
+        self,
+        mock_cached_privy,
+        mock_get_by_privy_id,
+        mock_cached_username,
+        mock_create_user,
+        mock_gen_username,
+        mock_get_client,
+        mock_get_by_email,
+        monkeypatch,
+        key_pair,
+        caplog,
+    ):
+        """Attacker's own valid token + email == victim's actual email must NOT
+        claim the victim's account; a placeholder email is used instead (b)."""
+        private_key = _configure(monkeypatch, key_pair, mode="enforce")
+        token = _mint_token(private_key, sub=self.ATTACKER_SUB)
+
+        mock_cached_privy.return_value = None
+        mock_get_by_privy_id.return_value = None
+        mock_get_by_email.return_value = {
+            "id": 42,
+            "privy_user_id": self.VICTIM_PRIVY_ID,
+            "email": "victim@example.com",
+        }
+        self._new_account_mocks(mock_gen_username, mock_create_user, resolved_username="victim")
+
+        body = _auth_body(token=token)
+        body["user"]["id"] = self.ATTACKER_SUB
+        body["email"] = "victim@example.com"
+
+        with caplog.at_level("WARNING", logger="src.routes.auth"):
+            response = client.post("/auth", json=body)
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == 501
+        mock_create_user.assert_called_once()
+        used_email = mock_create_user.call_args.kwargs["email"]
+        assert used_email != "victim@example.com"
+        assert used_email.startswith("noemail+")
+        assert "privy_auth.legacy_account_claim_blocked" in caplog.text
+
+    @patch("src.routes.auth.invalidate_user_cache")
+    @patch("src.routes.auth._handle_existing_user")
+    @patch("src.routes.auth.get_cached_user_by_username")
+    @patch("src.routes.auth.users_module.get_user_by_privy_id")
+    @patch("src.routes.auth.supabase_config.get_supabase_client")
+    @patch("src.routes.auth.get_cached_user_by_privy_id")
+    def test_log_mode_never_rebinds_a_different_existing_privy_id(
+        self,
+        mock_cached_privy,
+        mock_get_client,
+        mock_get_by_privy_id,
+        mock_cached_username,
+        mock_handle_existing_user,
+        mock_invalidate_cache,
+        monkeypatch,
+        key_pair,
+        caplog,
+    ):
+        """In log mode (unverified request), a username match on an account that
+        already has a *different* privy_user_id must never be rebound (c)."""
+        _configure(monkeypatch, key_pair, mode="log")
+
+        mock_cached_privy.return_value = None
+        mock_get_by_privy_id.return_value = None
+        mock_cached_username.return_value = {
+            "id": 42,
+            "username": "wallet-user",
+            "privy_user_id": self.VICTIM_PRIVY_ID,
+        }
+        mock_handle_existing_user.return_value = PrivyAuthResponse(
+            success=True, message="Login successful", user_id=42
+        )
+
+        with caplog.at_level("WARNING", logger="src.routes.auth"):
+            response = client.post("/auth", json=_auth_body())  # no token -> log mode, unverified
+
+        assert response.status_code == 200
+        assert "privy_auth.rebind_blocked" in caplog.text
+        # The rebind (DB update + cache invalidation) must never have run.
+        mock_invalidate_cache.assert_not_called()
