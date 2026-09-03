@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from src.config import Config
 from src.security.deps import get_api_key
 from src.services.connection_pool import get_http_client
+from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,11 @@ async def create_embeddings(
         payload["encoding_format"] = req.encoding_format
     if req.dimensions:
         payload["dimensions"] = req.dimensions
+    # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md G1):
+    # `req.user` is accepted for OpenAI-SDK compatibility but never forwarded --
+    # this is a no-op today (the dict above never included it) and guards
+    # against a future regression that adds it.
+    payload = scrub_upstream_kwargs(payload)
 
     logger.info("Embeddings request: provider=%s, model=%s", provider, upstream_model)
 

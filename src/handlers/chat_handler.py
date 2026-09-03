@@ -27,6 +27,7 @@ from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
 from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
+from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 # Providers with native async streaming use direct imports (currently OpenRouter).
 # All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
@@ -221,6 +222,17 @@ class ChatInferenceHandler:
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
         )
+
+    def _billing_ref(self) -> str | None:
+        """Opaque per-request correlator for the upstream pseudonym, if any.
+
+        Minted by W-C's billing-ref middleware (``request.state.billing_ref``,
+        not yet merged) -- read defensively so this module works standalone.
+        Never the client-settable ``X-Request-ID``.
+        """
+        if self.request is None:
+            return None
+        return getattr(self.request.state, "billing_ref", None)
 
     async def _initialize_user_context(self) -> None:
         """
@@ -970,6 +982,11 @@ class ChatInferenceHandler:
             }
             # Remove None values
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md
+            # G1): strip client-supplied identity passthrough fields before any
+            # provider ever sees this dict. Must be the last thing done to
+            # `kwargs` before it reaches a provider client.
+            kwargs = scrub_upstream_kwargs(kwargs, billing_ref=self._billing_ref())
 
             # Try using provider selector for multi-provider models
             selector = get_selector()
@@ -1249,6 +1266,8 @@ class ChatInferenceHandler:
                 "user": request.user,
             }
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            # Upstream identity firewall -- see the non-streaming call site above.
+            kwargs = scrub_upstream_kwargs(kwargs, billing_ref=self._billing_ref())
 
             # Check if model is in multi-provider registry
             selector = get_selector()
