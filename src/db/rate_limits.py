@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
+from src.db.api_keys import get_api_key_by_key
 from src.db.users import get_user
 
 logger = logging.getLogger(__name__)
@@ -651,18 +652,28 @@ def get_rate_limit_usage_stats(api_key: str, time_window: str = "minute") -> dic
         else:
             raise ValueError(f"Invalid time window: {time_window}")
 
-        # Get usage records for the time window
-        result = (
-            client.table("usage_records")
-            .select("tokens_used, created_at")
-            .eq("api_key", api_key)
-            .gte("created_at", start_time.isoformat())
-            .lt("created_at", end_time.isoformat())
-            .execute()
-        )
+        # usage_records no longer carries the plaintext api_key (gatewayz-backend#2258,
+        # threat model L9) -- filter by api_key_id instead. An unresolvable key has no
+        # rows to find, so skip the query rather than pass api_key_id=None to .eq().
+        api_key_record = get_api_key_by_key(api_key)
+        api_key_id = api_key_record.get("id") if api_key_record else None
 
-        total_requests = len(result.data or [])
-        total_tokens = sum(record.get("tokens_used", 0) for record in (result.data or []))
+        if api_key_id is None:
+            usage_rows: list[dict[str, Any]] = []
+        else:
+            # Get usage records for the time window
+            result = (
+                client.table("usage_records")
+                .select("tokens_used, created_at")
+                .eq("api_key_id", api_key_id)
+                .gte("created_at", start_time.isoformat())
+                .lt("created_at", end_time.isoformat())
+                .execute()
+            )
+            usage_rows = result.data or []
+
+        total_requests = len(usage_rows)
+        total_tokens = sum(record.get("tokens_used", 0) for record in usage_rows)
 
         return {
             "time_window": time_window,
@@ -697,22 +708,24 @@ def get_system_rate_limit_stats() -> dict[str, Any]:
         hour_ago = now - timedelta(hours=1)
         day_ago = now - timedelta(days=1)
 
-        # Get usage stats for different time windows
+        # Get usage stats for different time windows. usage_records no longer carries
+        # the plaintext api_key (gatewayz-backend#2258, threat model L9) -- group by
+        # api_key_id for the unique-active-keys count instead.
         minute_result = (
             client.table("usage_records")
-            .select("api_key, tokens_used")
+            .select("api_key_id, tokens_used")
             .gte("created_at", minute_ago.isoformat())
             .execute()
         )
         hour_result = (
             client.table("usage_records")
-            .select("api_key, tokens_used")
+            .select("api_key_id, tokens_used")
             .gte("created_at", hour_ago.isoformat())
             .execute()
         )
         day_result = (
             client.table("usage_records")
-            .select("api_key, tokens_used")
+            .select("api_key_id, tokens_used")
             .gte("created_at", day_ago.isoformat())
             .execute()
         )
@@ -727,10 +740,17 @@ def get_system_rate_limit_stats() -> dict[str, Any]:
         day_requests = len(day_result.data or [])
         day_tokens = sum(record.get("tokens_used", 0) for record in (day_result.data or []))
 
-        # Get unique active keys
-        active_keys_minute = len({record["api_key"] for record in (minute_result.data or [])})
-        active_keys_hour = len({record["api_key"] for record in (hour_result.data or [])})
-        active_keys_day = len({record["api_key"] for record in (day_result.data or [])})
+        # Get unique active keys (skip rows with no resolved api_key_id, e.g. legacy
+        # rows written before this migration, so they don't collapse into one entry)
+        active_keys_minute = len(
+            {r["api_key_id"] for r in (minute_result.data or []) if r.get("api_key_id")}
+        )
+        active_keys_hour = len(
+            {r["api_key_id"] for r in (hour_result.data or []) if r.get("api_key_id")}
+        )
+        active_keys_day = len(
+            {r["api_key_id"] for r in (day_result.data or []) if r.get("api_key_id")}
+        )
 
         return {
             "timestamp": now.isoformat(),

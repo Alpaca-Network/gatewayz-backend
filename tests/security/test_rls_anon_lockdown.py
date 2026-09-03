@@ -25,7 +25,15 @@ pytestmark = pytest.mark.skipif(
     reason="Set SUPABASE_URL + SUPABASE_ANON_KEY to verify the RLS lockdown live",
 )
 
-SENSITIVE_TABLES = ["users", "payments", "api_keys_new", "credit_transactions", "rate_limit_usage"]
+SENSITIVE_TABLES = [
+    "users",
+    "payments",
+    "api_keys_new",
+    "credit_transactions",
+    "rate_limit_usage",
+    "usage_records",
+    "activity_log",
+]
 
 
 @pytest.mark.parametrize("table", SENSITIVE_TABLES)

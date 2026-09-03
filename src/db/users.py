@@ -5,7 +5,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.config.supabase_config import get_supabase_client
-from src.db.api_keys import create_api_key
+from src.db.api_keys import create_api_key, get_api_key_by_key
+from src.utils.crypto import last4
 from src.utils.db_instrumentation import track_database_query
 from src.utils.db_safety import DatabaseResultError, safe_get_first, safe_get_value
 from src.utils.security_validators import sanitize_for_logging
@@ -1602,6 +1603,13 @@ def record_usage(
     Record usage in the usage_records table.
     Note: latency_ms is accepted for backward compatibility but not stored (column doesn't exist in DB).
     Use activity_log for detailed metrics including latency and gateway info.
+
+    Security (gatewayz-backend#2258, threat model L9): the `api_key` parameter is kept
+    for call-site compatibility but is never persisted. Only `api_key_id` (resolved
+    here from the key string) and `api_key_last4` are written; the row's plaintext
+    api_key column is left NULL. The historical column itself is dropped in a later,
+    human-gated staged migration once this stops writing to it in production -- see
+    supabase/staged-migrations/20260903100000_drop_usage_records_api_key.sql.
     """
     try:
         client = get_supabase_client()
@@ -1609,10 +1617,26 @@ def record_usage(
         # Ensure timestamp is timezone-aware
         timestamp = datetime.now(UTC).replace(tzinfo=UTC).isoformat()
 
-        # Only include columns that exist in the schema
+        api_key_id = None
+        if api_key:
+            try:
+                api_key_record = get_api_key_by_key(api_key)
+                if api_key_record:
+                    api_key_id = api_key_record.get("id")
+            except Exception as lookup_error:
+                logger.warning(
+                    "api_key_id lookup failed while recording usage: %s",
+                    sanitize_for_logging(str(lookup_error)),
+                )
+
+        # Only include columns that exist in the schema. api_key is intentionally
+        # NOT written (plaintext key -- see docstring); api_key_id/api_key_last4
+        # replace it as the joinable/display-safe references.
         usage_data = {
             "user_id": user_id,
-            "api_key": api_key,
+            "api_key": None,
+            "api_key_id": api_key_id,
+            "api_key_last4": last4(api_key) if api_key else None,
             "model": model,
             "tokens_used": tokens_used,
             "cost": cost,
@@ -1622,9 +1646,9 @@ def record_usage(
         client.table("usage_records").insert(usage_data).execute()
 
         logger.info(
-            "Usage recorded successfully: user_id=%s, api_key=%s, model=%s, tokens=%s, cost=%s",
+            "Usage recorded successfully: user_id=%s, api_key_id=%s, model=%s, tokens=%s, cost=%s",
             sanitize_for_logging(str(user_id)),
-            sanitize_for_logging(api_key[:20] + "..."),
+            sanitize_for_logging(str(api_key_id)),
             sanitize_for_logging(model),
             sanitize_for_logging(str(tokens_used)),
             sanitize_for_logging(str(cost)),
