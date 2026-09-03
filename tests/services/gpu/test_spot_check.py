@@ -185,9 +185,10 @@ async def test_verify_sampled_row_skipped_when_node_missing(mock_get_stash, mock
 async def test_verify_sampled_row_skipped_when_adapter_unavailable(
     mock_get_stash, mock_get_node, mock_get_adapter, sb
 ):
-    """Real-world case: src.services.providers.community_adapter doesn't
-    exist yet (W-A2 in progress) -- _get_node_adapter's own ImportError
-    handling returns None, and this must degrade to 'skipped', not crash."""
+    """adapter_for_node (W-A2's real community_adapter) can fail to build
+    a client for a given node (e.g. a malformed/missing endpoint) --
+    _get_node_adapter must return None for that, and this must degrade to
+    'skipped', not crash."""
     mock_get_stash.return_value = {"messages": [{"role": "user", "content": "hi"}], "model": "m"}
     mock_get_node.return_value = {"id": 7}
     mock_get_adapter.return_value = None
@@ -196,12 +197,29 @@ async def test_verify_sampled_row_skipped_when_adapter_unavailable(
     assert outcome == "skipped"
 
 
-def test_get_node_adapter_real_import_error_returns_none(sb):
-    """The real (unmocked) _get_node_adapter, exercised directly: since
-    src.services.providers.community_adapter genuinely does not exist in
-    this worktree, this proves the ImportError branch really engages
-    rather than assuming it does."""
-    assert spot_check._get_node_adapter({"id": 7}) is None
+def test_get_node_adapter_returns_a_real_adapter_for_a_well_formed_node(sb):
+    """Exercises the REAL, unmocked community_adapter.adapter_for_node
+    (merged W-A2, gatewayz-backend#2287) -- there is no lazy-import/
+    ImportError branch anymore. A node with no encrypted key needs
+    nothing decrypted, and building an OpenAI client never makes a
+    network call, so this is safe to run unmocked."""
+    from src.services.providers.community_adapter import clear_adapter_cache
+
+    clear_adapter_cache()
+    try:
+        node = {"id": 999999999, "endpoint_url": "http://127.0.0.1:1", "name": "test-node"}
+        adapter = spot_check._get_node_adapter(node)
+        assert adapter is not None
+        assert hasattr(adapter, "request")
+    finally:
+        clear_adapter_cache()
+
+
+def test_get_node_adapter_returns_none_on_a_malformed_node(sb):
+    """A node missing required fields (e.g. endpoint_url) makes the real
+    adapter_for_node raise -- _get_node_adapter must catch that and
+    return None, not propagate."""
+    assert spot_check._get_node_adapter({"id": 1}) is None
 
 
 @patch("src.services.gpu.spot_check._get_reference_request_fn")

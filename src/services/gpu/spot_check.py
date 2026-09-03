@@ -45,6 +45,7 @@ from src.db.gpu_payouts import (
     void_earning_for_work,
 )
 from src.services.gpu.earnings import record_earning_for_verified_work
+from src.services.providers.community_adapter import adapter_for_node
 
 logger = logging.getLogger(__name__)
 
@@ -164,27 +165,17 @@ def _extract_reply(raw: Any) -> tuple[str, int]:
 
 
 def _get_node_adapter(node: dict) -> Any:
-    """Lazily import W-A2's per-node adapter getter. Expected contract:
-    `get_node_adapter(node: dict) -> ProviderAdapter` (object exposing
+    """The per-node `OpenAICompatAdapter` for replay (object exposing
     `.request(messages, model, **params) -> raw`, see
-    src/services/providers/base.py), built from the node's decrypted
-    endpoint key (m4/spec.md §4). Returns None (logged) on ImportError --
-    W-A2 not merged yet -- or any construction failure; callers must treat
-    None as "can't replay this run", not crash the job."""
+    src/services/providers/base.py), built by W-A2's
+    community_adapter.adapter_for_node (merged gatewayz-backend#2287) from
+    the node's decrypted endpoint key. Cached per node id by that module;
+    returns None (logged) on any construction failure -- callers must
+    treat None as "can't replay this run", not crash the job."""
     try:
-        from src.services.providers.community_adapter import (  # type: ignore[import-not-found]
-            get_node_adapter,
-        )
-    except ImportError:
-        logger.info(
-            "src.services.providers.community_adapter.get_node_adapter not available yet "
-            "(W-A2 not merged) -- spot-check replay skipped this run"
-        )
-        return None
-    try:
-        return get_node_adapter(node)
+        return adapter_for_node(node)
     except Exception as e:
-        logger.warning("get_node_adapter failed for node %s: %s", node.get("id"), e)
+        logger.warning("adapter_for_node failed for node %s: %s", node.get("id"), e)
         return None
 
 
