@@ -22,6 +22,21 @@ from eth_account.messages import encode_defunct
 logger = logging.getLogger(__name__)
 
 
+def recover_wallet_address(message: str, signature: str) -> str | None:
+    """Recover the signer address of `message`/`signature`, or None if the
+    signature doesn't parse/recover -- the ONE call site into
+    eth_account.Account.recover_message in this codebase. Callers that need
+    to tell "malformed signature" apart from "signature valid but wrong
+    signer" (e.g. wallet_auth's distinct 401 error codes) use this
+    directly; callers that only need a yes/no use verify_wallet_signature.
+    """
+    try:
+        return Account.recover_message(encode_defunct(text=message), signature=signature)
+    except Exception as e:
+        logger.info("Wallet signature recovery failed: %s", e)
+        return None
+
+
 def verify_wallet_signature(address: str, message: str, signature: str) -> bool:
     """Return True iff `signature` is a valid EOA signature of `message` by `address`.
 
@@ -29,9 +44,5 @@ def verify_wallet_signature(address: str, message: str, signature: str) -> bool:
     signature, wrong length, bad hex, etc.) is caught and mapped to False,
     same as the faucet's existing verification path.
     """
-    try:
-        recovered = Account.recover_message(encode_defunct(text=message), signature=signature)
-    except Exception as e:
-        logger.info("Wallet signature recovery failed: %s", e)
-        return False
-    return recovered.lower() == address.lower()
+    recovered = recover_wallet_address(message, signature)
+    return recovered is not None and recovered.lower() == address.lower()

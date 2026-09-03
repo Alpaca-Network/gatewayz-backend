@@ -4,7 +4,7 @@
 from eth_account import Account
 from eth_account.messages import encode_defunct
 
-from src.security.wallet_signature import verify_wallet_signature
+from src.security.wallet_signature import recover_wallet_address, verify_wallet_signature
 
 
 def _sign(account, message: str) -> str:
@@ -55,3 +55,18 @@ def test_verify_wallet_signature_rejects_empty_signature():
     account = Account.create()
 
     assert verify_wallet_signature(account.address, "Sign in to Gatewayz.", "") is False
+
+
+def test_recover_wallet_address_returns_the_real_signer():
+    account = Account.create()
+    message = "Sign in to Gatewayz."
+    signature = _sign(account, message)
+
+    recovered = recover_wallet_address(message, signature)
+
+    assert recovered is not None
+    assert recovered.lower() == account.address.lower()
+
+
+def test_recover_wallet_address_returns_none_on_garbage_signature():
+    assert recover_wallet_address("Sign in to Gatewayz.", "0xnotasignature") is None
