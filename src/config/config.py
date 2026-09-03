@@ -156,9 +156,7 @@ class Config:
     # intentionally >1 year to cover payment disputes.
     USAGE_RECORDS_RETENTION_DAYS = int(os.environ.get("USAGE_RECORDS_RETENTION_DAYS", "400"))
     ACTIVITY_LOG_RETENTION_DAYS = int(os.environ.get("ACTIVITY_LOG_RETENTION_DAYS", "400"))
-    RETENTION_CLEANUP_INTERVAL_HOURS = int(
-        os.environ.get("RETENTION_CLEANUP_INTERVAL_HOURS", "24")
-    )
+    RETENTION_CLEANUP_INTERVAL_HOURS = int(os.environ.get("RETENTION_CLEANUP_INTERVAL_HOURS", "24"))
     # WAYZ staking on-chain sync (gatewayz-backend#2244). Unset contract
     # address (the default -- nothing is deployed to Fuji yet) means the
     # scheduler no-ops at startup rather than erroring.

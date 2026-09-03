@@ -52,9 +52,7 @@ def _log(mock_get_client, mock_retry, **kwargs):
 
 class TestMetadataAllowList:
     def test_known_keys_pass_through(self, sb):
-        data = _log(
-            metadata={"model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 5}
-        )
+        data = _log(metadata={"model": "gpt-4o", "prompt_tokens": 10, "completion_tokens": 5})
         assert data["metadata"] == {
             "model": "gpt-4o",
             "prompt_tokens": 10,

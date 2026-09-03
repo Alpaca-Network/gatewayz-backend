@@ -57,7 +57,9 @@ def _delete_older_than(
     return total_deleted
 
 
-def cleanup_usage_records(retention_days: int, batch_size: int = 5000, max_batches: int = 20) -> int:
+def cleanup_usage_records(
+    retention_days: int, batch_size: int = 5000, max_batches: int = 20
+) -> int:
     """Delete usage_records rows older than retention_days. Never raises —
     retention is a background job and a DB error must not crash the scheduler.
 

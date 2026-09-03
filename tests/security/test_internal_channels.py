@@ -191,7 +191,5 @@ class TestFreeFormColumnsEndToEnd:
     def test_activity_log_metadata_drops_sentinel_content(self):
         from src.db.activity import _sanitize_metadata
 
-        sanitized = _sanitize_metadata(
-            {"prompt_tokens": 10, "prompt": SENTINEL_PROMPT_FRAGMENT}
-        )
+        sanitized = _sanitize_metadata({"prompt_tokens": 10, "prompt": SENTINEL_PROMPT_FRAGMENT})
         assert sanitized == {"prompt_tokens": 10}
