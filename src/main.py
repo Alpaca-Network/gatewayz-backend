@@ -72,11 +72,20 @@ if Config.SENTRY_ENABLED and Config.SENTRY_DSN:
         # All other endpoints: 10% sampling
         return 0.1
 
+    from src.utils.sentry_scrub import strip_sensitive_event
+
     _on_vercel = bool(os.getenv("VERCEL"))
     _profiles_rate = 0.0 if _on_vercel else float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.05"))
     _sentry_init_kwargs = {
         "dsn": Config.SENTRY_DSN,
-        "send_default_pii": True,
+        # Threat model G5: Gatewayz's own error tooling must not be able to
+        # re-link content to identity. send_default_pii would attach the raw
+        # client IP and other PII the SDK collects automatically; we set our
+        # own minimal, deliberate context in AutoSentryMiddleware instead.
+        # before_send is a second, independent layer that strips request
+        # bodies/cookies/auth headers and bounds exception text.
+        "send_default_pii": False,
+        "before_send": strip_sensitive_event,
         "environment": Config.SENTRY_ENVIRONMENT,
         "release": Config.SENTRY_RELEASE,
         "profiles_sample_rate": _profiles_rate,
