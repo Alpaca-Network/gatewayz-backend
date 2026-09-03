@@ -34,6 +34,7 @@ class AuthRateLimitType(Enum):
     REGISTER = "register"
     PASSWORD_RESET = "password_reset"
     API_KEY_CREATE = "api_key_create"
+    WALLET_NONCE = "wallet_nonce"
 
 
 @dataclass
@@ -55,6 +56,12 @@ class AuthRateLimitConfig:
     # API key creation: 10 per hour per user
     api_key_create_attempts_per_window: int = 10
     api_key_create_window_seconds: int = 3600  # 1 hour
+
+    # Wallet SIWE nonce issuance: 20 per 15 minutes per IP -- looser than
+    # LOGIN since a nonce request alone can't authenticate anything (spec
+    # section 4.2).
+    wallet_nonce_attempts_per_window: int = 20
+    wallet_nonce_window_seconds: int = 900  # 15 minutes
 
 
 @dataclass
@@ -108,6 +115,11 @@ class AuthRateLimiter:
             return (
                 self.config.api_key_create_attempts_per_window,
                 self.config.api_key_create_window_seconds,
+            )
+        if limit_type == AuthRateLimitType.WALLET_NONCE:
+            return (
+                self.config.wallet_nonce_attempts_per_window,
+                self.config.wallet_nonce_window_seconds,
             )
         raise ValueError(f"Unknown rate limit type: {limit_type}")
 
