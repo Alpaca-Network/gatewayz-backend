@@ -645,6 +645,92 @@ def stop_ledger_reconciliation_scheduler():
 
 
 # ============================================================================
+# Data retention cleanup (gatewayz-backend M3, threat model L11) — deletes
+# usage_records/activity_log rows past their configured retention window.
+# credit_transactions is the financial audit ledger and is never pruned here.
+# chat_completion_requests already has its own pg_cron rollup+delete job (see
+# supabase/migrations/20260525010000_fix_ttl_cleanup_jobs.sql).
+# ============================================================================
+_retention_scheduler: AsyncIOScheduler | None = None
+_last_retention_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_usage_records_deleted": None,
+    "last_activity_log_deleted": None,
+}
+
+
+async def run_scheduled_retention_cleanup():
+    """Delete usage_records/activity_log rows past their retention window."""
+    from src.db.retention import cleanup_activity_log, cleanup_usage_records
+
+    now = datetime.now(UTC)
+    _last_retention_status["last_run_time"] = now
+
+    try:
+        usage_deleted = await asyncio.to_thread(
+            cleanup_usage_records, Config.USAGE_RECORDS_RETENTION_DAYS
+        )
+        activity_deleted = await asyncio.to_thread(
+            cleanup_activity_log, Config.ACTIVITY_LOG_RETENTION_DAYS
+        )
+        _last_retention_status["last_usage_records_deleted"] = usage_deleted
+        _last_retention_status["last_activity_log_deleted"] = activity_deleted
+
+        logger.info(
+            "Retention cleanup: usage_records deleted=%s (older than %sd), "
+            "activity_log deleted=%s (older than %sd)",
+            usage_deleted,
+            Config.USAGE_RECORDS_RETENTION_DAYS,
+            activity_deleted,
+            Config.ACTIVITY_LOG_RETENTION_DAYS,
+        )
+    except Exception as e:
+        # cleanup_usage_records/cleanup_activity_log already catch and log
+        # their own DB errors (returning 0); this guards the job runner itself.
+        logger.warning("Retention cleanup run failed (non-fatal): %s", e)
+
+
+def start_retention_scheduler():
+    """Start the APScheduler for data retention cleanup (app lifespan)."""
+    global _retention_scheduler
+
+    interval_hours = Config.RETENTION_CLEANUP_INTERVAL_HOURS
+    logger.info("Starting data retention cleanup scheduler (interval: %s h)", interval_hours)
+    try:
+        _retention_scheduler = AsyncIOScheduler()
+        _retention_scheduler.add_job(
+            run_scheduled_retention_cleanup,
+            trigger=IntervalTrigger(hours=interval_hours),
+            id="retention_cleanup",
+            name="Data Retention Cleanup Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _retention_scheduler.start()
+        logger.info("✅ Retention cleanup scheduler started (next run in %s h)", interval_hours)
+    except Exception as e:
+        logger.error("❌ Failed to start retention cleanup scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_retention_scheduler():
+    """Stop the retention cleanup APScheduler gracefully (called during shutdown)."""
+    global _retention_scheduler
+
+    if _retention_scheduler is None:
+        return
+    logger.info("Stopping data retention cleanup scheduler...")
+    try:
+        _retention_scheduler.shutdown(wait=True)
+        logger.info("✅ Retention cleanup scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping retention cleanup scheduler: %s", e)
+    finally:
+        _retention_scheduler = None
+
+
+# ============================================================================
 # WAYZ staking on-chain sync (gatewayz-backend#2244) — polls the WAYZStaking
 # contract on Avalanche Fuji for stake events and re-reads current balances
 # into wallet_stakes. No-ops at startup if no contract address is configured.

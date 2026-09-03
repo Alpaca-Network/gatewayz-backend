@@ -713,6 +713,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start ledger reconciliation scheduler: {e}")
         # Don't fail startup if reconciliation fails to start
 
+    # Start data retention cleanup (gatewayz-backend M3, threat model L11)
+    try:
+        from src.services.scheduled_sync import start_retention_scheduler
+
+        start_retention_scheduler()
+        logger.info("Data retention cleanup service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start retention cleanup scheduler: {e}")
+        # Don't fail startup if retention cleanup fails to start
+
     # Start WAYZ staking on-chain sync (gatewayz-backend#2244)
     try:
         from src.services.scheduled_sync import start_wayz_staking_sync_scheduler
@@ -893,6 +903,15 @@ async def lifespan(app):
         logger.info("Ledger reconciliation service stopped")
     except Exception as e:
         logger.warning(f"Ledger reconciliation shutdown warning: {e}")
+
+    # Stop data retention cleanup
+    try:
+        from src.services.scheduled_sync import stop_retention_scheduler
+
+        stop_retention_scheduler()
+        logger.info("Data retention cleanup service stopped")
+    except Exception as e:
+        logger.warning(f"Retention cleanup shutdown warning: {e}")
 
     # Stop WAYZ staking on-chain sync
     try:
