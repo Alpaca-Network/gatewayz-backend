@@ -35,6 +35,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
+from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,17 @@ class ChatInferenceHandler:
         logger.debug(
             f"[ChatHandler] Initialized with request_id={self.request_id}, anonymous={self.is_anonymous}"
         )
+
+    def _billing_ref(self) -> str | None:
+        """Opaque per-request correlator for the upstream pseudonym, if any.
+
+        Minted by W-C's billing-ref middleware (``request.state.billing_ref``,
+        not yet merged) -- read defensively so this module works standalone.
+        Never the client-settable ``X-Request-ID``.
+        """
+        if self.request is None:
+            return None
+        return getattr(self.request.state, "billing_ref", None)
 
     async def _initialize_user_context(self) -> None:
         """
@@ -970,6 +982,11 @@ class ChatInferenceHandler:
             }
             # Remove None values
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md
+            # G1): strip client-supplied identity passthrough fields before any
+            # provider ever sees this dict. Must be the last thing done to
+            # `kwargs` before it reaches a provider client.
+            kwargs = scrub_upstream_kwargs(kwargs, billing_ref=self._billing_ref())
 
             # Try using provider selector for multi-provider models
             selector = get_selector()
@@ -1249,6 +1266,8 @@ class ChatInferenceHandler:
                 "user": request.user,
             }
             kwargs = {k: v for k, v in kwargs.items() if v is not None}
+            # Upstream identity firewall -- see the non-streaming call site above.
+            kwargs = scrub_upstream_kwargs(kwargs, billing_ref=self._billing_ref())
 
             # Check if model is in multi-provider registry
             selector = get_selector()

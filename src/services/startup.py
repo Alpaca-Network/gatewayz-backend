@@ -30,6 +30,40 @@ logger = logging.getLogger(__name__)
 _background_tasks: set[asyncio.Task] = set()
 
 
+def _validate_upstream_pseudonym_config(config) -> None:
+    """Fail startup fast if the upstream abuse-pseudonym mode is misconfigured.
+
+    UPSTREAM_PSEUDONYM_SECRET (docs/security/ANONYMITY_THREAT_MODEL.md) is
+    only read inside scrub_upstream_kwargs(), at request time, once per chat
+    completion -- if UPSTREAM_ABUSE_PSEUDONYM is turned on with the secret
+    missing/short, that raises on EVERY chat completion instead of failing
+    loudly once, here, before the app accepts any traffic. This is an opt-in
+    security feature; turning it on with a broken secret should not 500
+    every future request.
+
+    Args:
+        config: the Config class (or a test double exposing the same two
+            attributes) -- passed in rather than imported so this is a pure
+            function callers can unit test without patching a module global.
+
+    Raises:
+        RuntimeError: if the flag is on and the secret is missing or <32 chars.
+    """
+    if not config.UPSTREAM_ABUSE_PSEUDONYM:
+        return
+    secret = config.UPSTREAM_PSEUDONYM_SECRET
+    if not secret or len(secret) < 32:
+        logger.error(
+            "❌ CRITICAL: UPSTREAM_ABUSE_PSEUDONYM is enabled but "
+            "UPSTREAM_PSEUDONYM_SECRET is missing or shorter than 32 characters."
+        )
+        raise RuntimeError(
+            "UPSTREAM_ABUSE_PSEUDONYM=true requires UPSTREAM_PSEUDONYM_SECRET "
+            "(>=32 chars) to be set"
+        )
+    logger.info("✅ Upstream abuse-pseudonym secret validated")
+
+
 def _log_telemetry_startup_status() -> None:
     """
     Emit a structured startup banner summarising every telemetry signal.
@@ -127,6 +161,11 @@ async def lifespan(app):
         raise RuntimeError(f"Missing required environment variables: {missing_vars}")
     else:
         logger.info("✅ All critical environment variables validated")
+
+    # Fail fast, like validate_critical_env_vars() above, rather than
+    # silently degrading into a 100%-request-failure outage discovered on
+    # the first chat completion after someone flips the flag.
+    _validate_upstream_pseudonym_config(Config)
 
     # Eagerly initialize Supabase client during startup with retry logic
     # This ensures the database is ready before accepting requests, preventing

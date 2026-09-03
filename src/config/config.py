@@ -312,6 +312,18 @@ class Config:
     OPENROUTER_SITE_URL = _get_env_var("OPENROUTER_SITE_URL", "https://your-site.com")
     OPENROUTER_SITE_NAME = _get_env_var("OPENROUTER_SITE_NAME", "Openrouter AI Gateway")
 
+    # Upstream identity firewall (docs/security/ANONYMITY_THREAT_MODEL.md).
+    # Off by default: client-supplied identity fields (user/metadata/extra_body/
+    # extra_headers/extra_query) are simply stripped before any provider call.
+    # When enabled, an unlinkable per-request pseudonym is sent as `user`
+    # instead, for providers' own abuse detection -- never the client's value.
+    UPSTREAM_ABUSE_PSEUDONYM = os.environ.get("UPSTREAM_ABUSE_PSEUDONYM", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    UPSTREAM_PSEUDONYM_SECRET = os.environ.get("UPSTREAM_PSEUDONYM_SECRET")
+
     # DeepInfra Configuration (for direct API access)
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
