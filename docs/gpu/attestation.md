@@ -9,28 +9,41 @@ without Gatewayz storing what was said.
 
 ## Canonical hashing
 
-`src/services/gpu/hashing.py` (`canonical_json` + `sha256_hex`) defines the
-**only** correct way to hash a prompt or response for this system. Both the
-gateway and the node agent (`scripts/gpu_node_agent.py`) MUST produce
-byte-identical hashes, or attestation signatures will never verify.
+`src/services/gpu/hashing.py` (`canonical_json`/`sha256_hex`, and the
+`hash_prompt`/`hash_response` wrappers named to match the node agent) defines
+the **only** correct way to hash a prompt or response for this system. Both
+the gateway and the node agent (`scripts/gpu_node_agent.py`'s own
+`_canonical_json`/`hash_prompt`/`hash_response`) MUST produce byte-identical
+hashes, or attestation signatures will never verify.
 
 ```python
-canonical_json(value) = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+canonical_json(value) = json.dumps(value, sort_keys=True, separators=(",", ":"))
 sha256_hex(text)       = sha256(text.encode("utf-8")).hexdigest()
+
+hash_prompt(messages)       = sha256_hex(canonical_json(messages))
+hash_response(response_text) = sha256_hex(response_text)
 ```
 
-- `prompt_hash = sha256_hex(canonical_json(messages))` — `messages` is the
-  exact OpenAI-format list Gatewayz sends to the node (list of
+- `prompt_hash = hash_prompt(messages)` — `messages` is the exact
+  OpenAI-format list Gatewayz sends to the node (list of
   `{"role": ..., "content": ...}` dicts, in the order sent).
-- `response_hash = sha256_hex(response_text)` — `response_text` is the
+- `response_hash = hash_response(response_text)` — `response_text` is the
   assistant's final message content as a plain string (streamed responses:
   the concatenation of every `delta.content` chunk, in order — not the raw
   SSE bytes).
 
+**`ensure_ascii` matters.** `json.dumps` defaults to `ensure_ascii=True`
+(non-ASCII characters rendered as `\uXXXX` escapes) unless told otherwise —
+neither side passes `ensure_ascii`, so both get that default. Do **not**
+"clean this up" to `ensure_ascii=False` on either side: it reads more
+naturally but silently changes every hash of a prompt/response containing a
+non-ASCII character (accents, CJK, emoji, ...), breaking attestation for
+exactly the traffic most likely to use it.
+
 If your language's JSON encoder doesn't support `sort_keys`/compact
-separators/`ensure_ascii=False` directly, reproduce the same output byte for
-byte: keys sorted lexicographically, no spaces after `:` or `,`, and UTF-8
-characters emitted literally (not `\uXXXX`-escaped).
+separators/`ensure_ascii=True` directly, reproduce the same output byte for
+byte: keys sorted lexicographically, no spaces after `:` or `,`, and every
+non-ASCII character emitted as a `\uXXXX` (lowercase hex) escape.
 
 ## Attestation header
 

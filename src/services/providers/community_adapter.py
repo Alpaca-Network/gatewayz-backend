@@ -28,7 +28,7 @@ from typing import Any, Iterator
 
 from fastapi import HTTPException
 
-from src.services.gpu.hashing import canonical_json, sha256_hex
+from src.services.gpu.hashing import hash_prompt, hash_response
 from src.services.providers.openai_compat import OpenAICompatAdapter, ProviderConfig, make_adapter
 
 logger = logging.getLogger(__name__)
@@ -250,8 +250,8 @@ def _record_receipt(
 ) -> None:
     from src.db.gpu_work import mark_attested, record_work
 
-    prompt_hash = sha256_hex(canonical_json(messages))
-    response_hash = sha256_hex(response_text or "")
+    prompt_hash = hash_prompt(messages)
+    response_hash = hash_response(response_text or "")
 
     work = record_work(
         billing_ref=billing_ref,

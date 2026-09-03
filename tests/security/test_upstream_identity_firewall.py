@@ -361,6 +361,27 @@ def test_skipped_providers_documented(label, reason):
     pytest.skip(f"{label}: {reason}")
 
 
+def test_community_billing_ref_header_is_the_only_new_field(monkeypatch, intercepted_http):
+    """N7 scoped exception to G1 (docs/security/ANONYMITY_THREAT_MODEL.md):
+    community/<model> forwards billing_ref to the node as
+    X-Gatewayz-Request-Id (W-E's attest-proxy needs it -- see
+    scripts/gpu_node_agent.py's cross-repo contract note). This must be the
+    ONLY new field the community path adds -- never a vector for any other
+    identity to leak alongside it.
+    """
+    clean_kwargs = scrub_upstream_kwargs({"temperature": 0.1, "user": SENTINEL_USER})
+
+    _call_community(monkeypatch, _gatewayz_billing_ref="billing-ref-canary-123", **clean_kwargs)
+
+    assert intercepted_http, "no outbound request captured"
+    for request in intercepted_http:
+        header_names = {k.lower() for k in request.headers}
+        gatewayz_headers = {h for h in header_names if h.startswith("x-gatewayz")}
+        assert gatewayz_headers == {"x-gatewayz-request-id"}
+        assert request.headers["x-gatewayz-request-id"] == "billing-ref-canary-123"
+    _assert_clean(intercepted_http, ALL_SENTINELS, "community (billing_ref scoped exception)")
+
+
 # --- Pseudonym mode ----------------------------------------------------------
 
 

@@ -19,6 +19,7 @@ User-Agent), and a real client-supplied `user` field in the request body.
 
 from __future__ import annotations
 
+import uuid
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -412,6 +413,28 @@ class TestChatCompletionsRealRoute:
             )
             assert resp.status_code == 200, resp.text
             _assert_clean(intercepted_http, "community")
+
+            # N7 scoped exception to G1 (see docs/security/ANONYMITY_THREAT_MODEL.md
+            # and W-E's cross-repo contract note): the server-minted billing_ref
+            # IS forwarded to the node, as X-Gatewayz-Request-Id -- but it must be
+            # the ONLY new field the community path adds, never a vector for any
+            # other identity leaking through.
+            node_requests = [
+                r for r in intercepted_http if r.url.host == "node1.community.example.test"
+            ]
+            assert node_requests, "no request captured to the community node"
+            for request in node_requests:
+                header_names = {k.lower() for k in request.headers}
+                gatewayz_headers = {h for h in header_names if h.startswith("x-gatewayz")}
+                assert gatewayz_headers == {"x-gatewayz-request-id"}, (
+                    f"expected exactly one x-gatewayz-* header (x-gatewayz-request-id), "
+                    f"got {gatewayz_headers}"
+                )
+                billing_ref = request.headers["x-gatewayz-request-id"]
+                # A real per-request uuid4, never the client's own X-Request-ID
+                # (SENTINEL_REQUEST_ID) or any other client/user-identifying value.
+                assert billing_ref not in ALL_SENTINELS
+                uuid.UUID(billing_ref)  # raises if not a valid uuid
         finally:
             # Force the module back to the real production default (off)
             # deterministically -- monkeypatch's own teardown of
