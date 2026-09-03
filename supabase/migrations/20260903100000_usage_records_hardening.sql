@@ -42,6 +42,23 @@
 --   migrations (no new deny policy: these tables' remaining policies are
 --   real per-row predicates, not always-true, so REVOKE alone restores the
 --   intended default-deny posture without touching them).
+--
+--   Fix round 1 (review): the same base schema dump also GRANTs anon/
+--   authenticated ALL on the owned sequences behind these tables' bigint PKs
+--   (`usage_records_id_seq`, `activity_log_id_seq`, `api_keys_new_id_seq`,
+--   `credit_transactions_id_seq`) -- table-level REVOKE doesn't touch
+--   sequence-level grants, and USAGE on a sequence alone doesn't expose row
+--   data but does let anon/authenticated read currval/nextval (a minor
+--   enumeration/DoS-adjacent leak, and inconsistent with "service_role
+--   only"). Extending the static footgun test for this (rule 3) also
+--   surfaced that `users_id_seq` and `payments_id_seq` have the exact same
+--   never-revoked grant, despite their tables being locked down in
+--   20260527000000 -- table-level REVOKE there didn't touch the sequences
+--   either. Section 5 revokes all six, looked up dynamically so a missing
+--   or differently-named sequence (e.g. chat_completion_requests, whose id
+--   column is a bare BIGSERIAL from the 20251226000000 stub migration with
+--   no explicit sequence GRANT anywhere in this history) is skipped instead
+--   of erroring the migration.
 
 -- ============================================================================
 -- 1) usage_records: add api_key_id / api_key_last4 (writer stops persisting
@@ -92,3 +109,38 @@ REVOKE ALL ON public.credit_transactions FROM anon, authenticated;
 GRANT ALL ON public.activity_log TO service_role;
 GRANT ALL ON public.api_keys_new TO service_role;
 GRANT ALL ON public.credit_transactions TO service_role;
+
+-- ============================================================================
+-- 5) Revoke anon/authenticated grants on the owned sequences behind
+--    usage_records/activity_log/api_keys_new/credit_transactions/users/
+--    payments' bigint PKs (base schema dump granted ALL on every sequence to
+--    every role -- including users/payments, whose *tables* were already
+--    locked down in 20260527000000 but not their sequences). Looked up
+--    dynamically via to_regclass so a sequence that doesn't exist, or is
+--    named differently than the <table>_id_seq convention, is skipped
+--    rather than failing the migration -- see chat_completion_requests note
+--    above.
+-- ============================================================================
+DO $seq$
+DECLARE
+    seqs text[] := ARRAY[
+        'usage_records_id_seq',
+        'activity_log_id_seq',
+        'api_keys_new_id_seq',
+        'credit_transactions_id_seq',
+        'users_id_seq',
+        'payments_id_seq',
+        'chat_completion_requests_id_seq'
+    ];
+    s text;
+BEGIN
+    FOREACH s IN ARRAY seqs LOOP
+        IF to_regclass('public.' || s) IS NOT NULL THEN
+            EXECUTE format('REVOKE ALL ON SEQUENCE public.%I FROM anon, authenticated', s);
+            EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE public.%I TO service_role', s);
+        ELSE
+            RAISE NOTICE 'Sequence public.% not found, skipping', s;
+        END IF;
+    END LOOP;
+END;
+$seq$;

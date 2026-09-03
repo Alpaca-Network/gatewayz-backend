@@ -23,6 +23,16 @@ RLS-sensitive table named in the threat model's §5 inventory:
      no-policy" -- default-deny by omission, the same posture usage_records
      had before this PR and user_wallets/wallet_stakes/faucet_claims have
      today).
+  3. Its owned `<table>_id_seq` sequence, if ever GRANTed to anon/
+     authenticated, has a later `REVOKE ALL ON SEQUENCE ... FROM anon,
+     authenticated` -- literal, or via the dynamic sequence-array REVOKE
+     loop added in 20260903100000_usage_records_hardening.sql. Table-level
+     REVOKE does not touch sequence-level grants, so this is a separate
+     check (found in fix round 1 of PR review: usage_records/activity_log/
+     api_keys_new/credit_transactions/users/payments' owned sequences still
+     carried their base-schema-dump GRANT ALL to anon/authenticated even
+     after rule 2 passed -- users/payments' *tables* were already locked
+     down in 20260527000000, but not their sequences).
 
 This intentionally does not try to be a general policy analyzer: it exists
 to catch the *shape* of the 2026-05-27 incident recurring on these specific
@@ -100,11 +110,34 @@ class DynamicBlock:
 
 
 @dataclass
+class SequenceGrant:
+    file: str
+    order: tuple
+    sequence: str
+    role: str
+
+
+@dataclass
+class SequenceRevoke:
+    order: tuple
+    sequence: str
+
+
+@dataclass
+class DynamicSequenceRevokeBlock:
+    order: tuple
+    sequences: frozenset
+
+
+@dataclass
 class Timeline:
     creates: list = field(default_factory=list)
     drops: list = field(default_factory=list)
     revokes: list = field(default_factory=list)  # (order, table)
     dynamic_blocks: list = field(default_factory=list)
+    sequence_grants: list = field(default_factory=list)
+    sequence_revokes: list = field(default_factory=list)
+    dynamic_sequence_revoke_blocks: list = field(default_factory=list)
 
 
 # Matches both quoted ("public"."table") and unquoted (public.table) forms.
@@ -136,6 +169,27 @@ _TABLE_LIST_RE = re.compile(
     r"(?:ARRAY\s*\[|tablename\s+IN\s*\()(?P<list>[^\])]*)[\])]", re.IGNORECASE | re.DOTALL
 )
 _QUOTED_NAME_RE = re.compile(r"'(\w+)'")
+
+# Sequence grant/revoke -- separate from table grants: REVOKE ALL ON a table
+# does not touch grants on its owned sequence (fix round 1, PR review).
+_SEQ_REF = r'"?public"?\.\s*"?(?P<sequence>\w+)"?'
+
+_GRANT_SEQUENCE_RE = re.compile(
+    r"GRANT\s+[\w,\s]+?\s+ON\s+SEQUENCE\s+" + _SEQ_REF + r'\s+TO\s+"?(?P<role>\w+)"?',
+    re.IGNORECASE,
+)
+
+_REVOKE_SEQUENCE_RE = re.compile(
+    r"REVOKE\s+ALL\s+ON\s+SEQUENCE\s+" + _SEQ_REF + r"\s+"
+    r"FROM\s+(?:.*?anon.*?authenticated|.*?authenticated.*?anon)",
+    re.IGNORECASE,
+)
+
+# The dynamic sequence-array REVOKE loop pattern (20260903100000, section 5):
+# `EXECUTE format('REVOKE ALL ON SEQUENCE public.%I FROM anon, authenticated', s)`.
+_DYNAMIC_SEQUENCE_REVOKE_RE = re.compile(
+    r"REVOKE\s+ALL\s+ON\s+SEQUENCE\s+public\.%I", re.IGNORECASE
+)
 
 
 def _roles_from_body(body: str) -> frozenset:
@@ -188,13 +242,30 @@ def _parse_timeline() -> Timeline:
         for m in _REVOKE_RE.finditer(text):
             tl.revokes.append(((file_idx, m.start()), m.group("table")))
 
+        for m in _GRANT_SEQUENCE_RE.finditer(text):
+            role = m.group("role").lower()
+            if role in PUBLIC_ROLES:
+                tl.sequence_grants.append(
+                    SequenceGrant(
+                        file=fname,
+                        order=(file_idx, m.start()),
+                        sequence=m.group("sequence"),
+                        role=role,
+                    )
+                )
+
+        for m in _REVOKE_SEQUENCE_RE.finditer(text):
+            tl.sequence_revokes.append(
+                SequenceRevoke(order=(file_idx, m.start()), sequence=m.group("sequence"))
+            )
+
         for m in _DO_BLOCK_RE.finditer(text):
             block_body = m.group("body")
             list_match = _TABLE_LIST_RE.search(block_body)
             if not list_match:
                 continue
-            tables = frozenset(_QUOTED_NAME_RE.findall(list_match.group("list")))
-            if not tables:
+            names = frozenset(_QUOTED_NAME_RE.findall(list_match.group("list")))
+            if not names:
                 continue
             drops_policies = bool(re.search(r"DROP\s+POLICY", block_body, re.IGNORECASE))
             revokes = bool(re.search(r"REVOKE\s+ALL\s+ON\s+public\.%I", block_body, re.IGNORECASE))
@@ -203,10 +274,15 @@ def _parse_timeline() -> Timeline:
                     DynamicBlock(
                         file=fname,
                         order=(file_idx, m.start()),
-                        tables=tables,
+                        tables=names,
                         drops_policies=drops_policies,
                         revokes=revokes,
                     )
+                )
+
+            if _DYNAMIC_SEQUENCE_REVOKE_RE.search(block_body):
+                tl.dynamic_sequence_revoke_blocks.append(
+                    DynamicSequenceRevokeBlock(order=(file_idx, m.start()), sequences=names)
                 )
 
     return tl
@@ -239,11 +315,24 @@ def _table_is_revoked(table: str) -> bool:
     return any(b.revokes and table in b.tables for b in TIMELINE.dynamic_blocks)
 
 
+def _later_sequence_revoke_exists(grant: SequenceGrant) -> bool:
+    for revoke in TIMELINE.sequence_revokes:
+        if revoke.sequence == grant.sequence and revoke.order > grant.order:
+            return True
+    for block in TIMELINE.dynamic_sequence_revoke_blocks:
+        if grant.sequence in block.sequences and block.order > grant.order:
+            return True
+    return False
+
+
 def test_migration_files_found():
     """Sanity check the scan actually parsed something -- an empty result would
     make every assertion below vacuously pass."""
     assert TIMELINE.creates, "parsed zero CREATE POLICY statements; regex likely broken"
     assert TIMELINE.revokes or TIMELINE.dynamic_blocks
+    assert (
+        TIMELINE.sequence_grants
+    ), "parsed zero GRANT ... ON SEQUENCE statements; regex likely broken"
 
 
 class TestNoLiveAlwaysTruePolicy:
@@ -281,6 +370,25 @@ class TestGrantsLockedDown:
         )
 
 
+class TestSequenceGrantsLockedDown:
+    """Rule 3 (fix round 1): a target table's owned <table>_id_seq sequence,
+    if ever GRANTed to anon/authenticated, must have a later REVOKE ALL ON
+    SEQUENCE. Table-level REVOKE does not imply sequence-level REVOKE."""
+
+    def test_every_granted_sequence_has_a_later_revoke(self):
+        offenders = []
+        target_seqs = {f"{table}_id_seq" for table in TARGET_TABLES}
+        for grant in TIMELINE.sequence_grants:
+            if grant.sequence not in target_seqs:
+                continue
+            if not _later_sequence_revoke_exists(grant):
+                offenders.append(
+                    f"{grant.sequence} granted to {grant.role} ({grant.file}) has no later "
+                    "REVOKE ALL ON SEQUENCE"
+                )
+        assert not offenders, "granted sequence with no later revoke:\n" + "\n".join(offenders)
+
+
 class TestKnownIncidentFixturesStillParse:
     """Pins the scanner to the two incidents this test exists for, so a change
     to the regex logic itself can't silently stop detecting them."""
@@ -300,6 +408,11 @@ class TestKnownIncidentFixturesStillParse:
         ]
         assert stub_creates, "expected the known stub policy to still be parseable"
         assert _later_drop_exists(stub_creates[0])
+
+    def test_usage_records_sequence_grant_was_revoked(self):
+        grants = [g for g in TIMELINE.sequence_grants if g.sequence == "usage_records_id_seq"]
+        assert grants, "expected the known base-schema sequence grant to still be parseable"
+        assert all(_later_sequence_revoke_exists(g) for g in grants)
 
 
 class TestUsageRecordsHardeningMigrationContent:
@@ -337,6 +450,18 @@ class TestUsageRecordsHardeningMigrationContent:
         assert re.search(
             r"DROP\s+POLICY\s+IF\s+EXISTS\s+usage_records_service_only", sql, re.IGNORECASE
         )
+
+    def test_contains_sequence_revokes_for_all_four_owned_sequences(self):
+        sql = self._sql
+        for seq in (
+            "usage_records_id_seq",
+            "activity_log_id_seq",
+            "api_keys_new_id_seq",
+            "credit_transactions_id_seq",
+        ):
+            assert f"'{seq}'" in sql, f"expected {seq} in the dynamic sequence-revoke array"
+        assert re.search(r"REVOKE\s+ALL\s+ON\s+SEQUENCE\s+public\.%I", sql, re.IGNORECASE)
+        assert re.search(r"to_regclass\('public\.'\s*\|\|\s*s\)", sql, re.IGNORECASE)
 
     def test_references_exact_stub_policy_name(self):
         sql = self._sql
