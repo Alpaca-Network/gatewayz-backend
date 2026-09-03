@@ -224,17 +224,15 @@ class AISpanContext:
         api_key_hash: str | None = None,
         tier: str | None = None,
     ) -> AISpanContext:
-        """Set user context information (redacted for privacy).
+        """Set non-identifying span context (tier only).
 
-        Sets both custom user.* attributes and customer.id for model popularity tracking.
+        `user_id` and `api_key_hash` are accepted for call-site compatibility
+        but deliberately NOT attached to the span (threat model L8: spans have
+        no configured exporter today, but the attribute must not exist so a
+        future exporter can't silently ship identity alongside traces). Only
+        `tier` is set — useful for aggregate analysis, not identifying.
         """
         if self.span and OTEL_AVAILABLE:
-            if user_id:
-                self.span.set_attribute("user.id", user_id)
-                # Also set customer.id for popularity tracking (OpenLLMetry convention)
-                self.span.set_attribute("customer.id", user_id)
-            if api_key_hash:
-                self.span.set_attribute("user.api_key_hash", api_key_hash)
             if tier:
                 self.span.set_attribute("user.tier", tier)
         return self
