@@ -170,6 +170,22 @@ class Config:
     )
     # Placeholder; the real value is a product decision, not set here.
     WAYZ_DAILY_INFERENCE_CAPACITY = int(_get_env_var("WAYZ_DAILY_INFERENCE_CAPACITY", "0"))
+    # GPU marketplace provider/node registry (Milestone 4 W-A1,
+    # gatewayz-backend#2262). Community routing itself defaults off until
+    # W-A2 ships; the registry (register/approve/add nodes) is always on.
+    COMMUNITY_ROUTING_ENABLED = os.environ.get("COMMUNITY_ROUTING_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # No heartbeat for this many seconds -> node marked 'degraded'.
+    GPU_NODE_DEGRADED_AFTER_SECONDS = int(os.environ.get("GPU_NODE_DEGRADED_AFTER_SECONDS", "180"))
+    # No heartbeat for this many seconds -> node marked 'offline'.
+    GPU_NODE_OFFLINE_AFTER_SECONDS = int(os.environ.get("GPU_NODE_OFFLINE_AFTER_SECONDS", "600"))
+    GPU_LIVENESS_SWEEP_INTERVAL_MINUTES = int(
+        os.environ.get("GPU_LIVENESS_SWEEP_INTERVAL_MINUTES", "2")
+    )
+
     # WAYZ testnet faucet (gatewayz-backend#2245). Unset contract address
     # or minter key (the default -- nothing is deployed to Fuji yet, no
     # minter key provisioned) means /faucet/claim returns 503.

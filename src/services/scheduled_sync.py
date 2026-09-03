@@ -943,6 +943,89 @@ def stop_pricing_drift_scheduler():
         _pricing_drift_scheduler = None
 
 
+# ============================================================================
+# GPU node liveness sweep (Milestone 4 W-A1, gatewayz-backend#2262) --
+# downgrades community GPU nodes that have stopped heartbeating: 'active' ->
+# 'degraded' after GPU_NODE_DEGRADED_AFTER_SECONDS, 'active'/'degraded' ->
+# 'offline' after GPU_NODE_OFFLINE_AFTER_SECONDS. Runs every
+# GPU_LIVENESS_SWEEP_INTERVAL_MINUTES; always on (no contract-address gate,
+# unlike the on-chain sync jobs -- this is pure DB bookkeeping).
+# ============================================================================
+
+_gpu_liveness_scheduler: AsyncIOScheduler | None = None
+_last_gpu_liveness_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_degraded": None,
+    "last_offline": None,
+}
+
+
+async def run_gpu_liveness_sweep() -> tuple[int, int]:
+    """Run one liveness sweep pass. Returns (n_degraded, n_offline)."""
+    from src.db.gpu import sweep_liveness
+
+    now = datetime.now(UTC)
+    _last_gpu_liveness_status["last_run_time"] = now
+
+    try:
+        n_degraded, n_offline = await asyncio.to_thread(
+            sweep_liveness,
+            now,
+            Config.GPU_NODE_DEGRADED_AFTER_SECONDS,
+            Config.GPU_NODE_OFFLINE_AFTER_SECONDS,
+        )
+        _last_gpu_liveness_status["last_degraded"] = n_degraded
+        _last_gpu_liveness_status["last_offline"] = n_offline
+        if n_degraded or n_offline:
+            logger.info("GPU liveness sweep: degraded=%s offline=%s", n_degraded, n_offline)
+        return n_degraded, n_offline
+    except Exception as e:
+        logger.warning("GPU liveness sweep failed (non-fatal): %s", e)
+        return 0, 0
+
+
+def start_gpu_liveness_scheduler():
+    """Start the APScheduler for the GPU node liveness sweep (app lifespan)."""
+    global _gpu_liveness_scheduler
+
+    interval_minutes = Config.GPU_LIVENESS_SWEEP_INTERVAL_MINUTES
+    logger.info("Starting GPU node liveness sweep scheduler (interval: %s min)", interval_minutes)
+    try:
+        _gpu_liveness_scheduler = AsyncIOScheduler()
+        _gpu_liveness_scheduler.add_job(
+            run_gpu_liveness_sweep,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="gpu_liveness_sweep",
+            name="GPU Node Liveness Sweep",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _gpu_liveness_scheduler.start()
+        logger.info(
+            "✅ GPU node liveness sweep scheduler started (next run in %s min)", interval_minutes
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start GPU node liveness sweep scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_gpu_liveness_scheduler():
+    """Stop the GPU node liveness sweep APScheduler gracefully (shutdown)."""
+    global _gpu_liveness_scheduler
+
+    if _gpu_liveness_scheduler is None:
+        return
+    logger.info("Stopping GPU node liveness sweep scheduler...")
+    try:
+        _gpu_liveness_scheduler.shutdown(wait=True)
+        logger.info("✅ GPU node liveness sweep scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping GPU node liveness sweep scheduler: %s", e)
+    finally:
+        _gpu_liveness_scheduler = None
+
+
 def get_pricing_drift_status() -> dict[str, Any]:
     """Get the current status of the pricing-drift monitor (for health monitoring)."""
     return {

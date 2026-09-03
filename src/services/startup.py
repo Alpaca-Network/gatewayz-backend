@@ -733,6 +733,16 @@ async def lifespan(app):
         logger.warning(f"Failed to start WAYZ staking sync scheduler: {e}")
         # Don't fail startup if WAYZ staking sync fails to start
 
+    # Start GPU node liveness sweep (Milestone 4 W-A1, gatewayz-backend#2262)
+    try:
+        from src.services.scheduled_sync import start_gpu_liveness_scheduler
+
+        start_gpu_liveness_scheduler()
+        logger.info("GPU node liveness sweep service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start GPU node liveness sweep scheduler: {e}")
+        # Don't fail startup if the liveness sweep fails to start
+
     # Start nightly pricing-drift monitor (read-only; alerts if catalog price *
     # markup would ever bill below current provider/reference cost)
     try:
@@ -921,6 +931,15 @@ async def lifespan(app):
         logger.info("WAYZ staking sync service stopped")
     except Exception as e:
         logger.warning(f"WAYZ staking sync shutdown warning: {e}")
+
+    # Stop GPU node liveness sweep
+    try:
+        from src.services.scheduled_sync import stop_gpu_liveness_scheduler
+
+        stop_gpu_liveness_scheduler()
+        logger.info("GPU node liveness sweep service stopped")
+    except Exception as e:
+        logger.warning(f"GPU node liveness sweep shutdown warning: {e}")
 
     # Stop nightly pricing-drift monitor
     try:
