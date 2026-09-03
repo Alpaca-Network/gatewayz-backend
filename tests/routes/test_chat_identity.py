@@ -14,10 +14,12 @@ import ast
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi import Depends
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 
+import src.security.deps as deps_module
 from src.main import app
+from src.security.deps import get_optional_api_key
 from src.security.identity import ANONYMOUS, RequestIdentity, get_request_identity
 
 CHAT_PY = Path(__file__).resolve().parents[2] / "src" / "routes" / "chat.py"
@@ -110,10 +112,7 @@ def test_overriding_identity_bypasses_the_anonymous_gate():
     app.dependency_overrides[get_request_identity] = lambda: fake_identity
 
     try:
-        with (
-            patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False),
-            patch("src.routes.chat.get_user", return_value=None),
-        ):
+        with patch("src.security.inference_gates.Config.ANONYMOUS_ENABLED", False):
             resp = client.post(
                 "/v1/chat/completions",
                 json={"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
@@ -126,6 +125,55 @@ def test_overriding_identity_bypasses_the_anonymous_gate():
     body = resp.json()
     error_code = body.get("error", {}).get("code") if isinstance(body.get("error"), dict) else None
     assert error_code != "missing_api_key", body
+
+
+def test_dependency_chain_validates_key_and_looks_up_user_exactly_once():
+    """Regression for a fix-round-1 review finding: `chat_completions`
+    declares BOTH `api_key: str | None = Depends(get_optional_api_key)` and
+    `identity: RequestIdentity = Depends(get_request_identity)` -- exactly
+    mirrored here. `get_request_identity` used to also depend on
+    `get_optional_user`, which independently re-ran `get_api_key()` ->
+    `validate_api_key_security()` (a second Supabase read + `last_used_at`
+    write) instead of reusing the key `get_optional_api_key` already
+    validated, and it duplicated the `get_user()` lookup chat.py did itself.
+    This asserts FastAPI's per-request dependency cache resolves
+    `get_optional_api_key` exactly once (shared between the two `Depends`)
+    and that `get_user` is called exactly once.
+
+    Uses a minimal router with chat_completions' exact dependency signature
+    rather than posting to the real `/v1/chat/completions` -- that endpoint's
+    business logic needs a live database/Redis beyond the auth layer, which
+    this sandbox doesn't have, and hitting it for real only adds ~25s of
+    unrelated connection-retry latency without changing what this test needs
+    to prove about the dependency graph.
+    """
+    probe_app = FastAPI()
+
+    @probe_app.post("/_test/identity_dedup_probe")
+    async def _probe(
+        api_key: str | None = Depends(get_optional_api_key),
+        identity: RequestIdentity = Depends(get_request_identity),
+    ):
+        return {"api_key": api_key, "identity_api_key": identity.api_key}
+
+    probe_client = TestClient(probe_app)
+
+    user = {"id": 1, "auth_method": "email"}
+    real_validate = deps_module.validate_api_key_security
+
+    with (
+        patch("src.security.deps.validate_api_key_security", wraps=real_validate) as mock_validate,
+        patch("src.security.identity.get_user", return_value=user) as mock_get_user,
+    ):
+        resp = probe_client.post(
+            "/_test/identity_dedup_probe", headers={"Authorization": "Bearer test-key"}
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["api_key"] == body["identity_api_key"] == "test-key"
+    assert mock_validate.call_count == 1
+    assert mock_get_user.call_count == 1
 
 
 def test_anonymous_constant_is_the_no_header_identity():

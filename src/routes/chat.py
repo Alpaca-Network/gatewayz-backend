@@ -477,14 +477,19 @@ async def chat_completions(
                 # OPTIMIZED: Run auth operations in parallel to reduce overhead from 200-500ms → 100-150ms
                 from src.utils.api_key_lookup import get_api_key_id_with_retry
 
+                # `identity` (Depends(get_request_identity)) already looked the
+                # user up via the cached get_user(api_key) while resolving
+                # identity for the is_anonymous check above -- reuse it instead
+                # of calling get_user(api_key) a second time on every
+                # authenticated request.
+                user = identity.user
+
                 # Parallelize independent auth operations
-                user_task = _to_thread(get_user, api_key)
                 api_key_id_task = get_api_key_id_with_retry(api_key, max_retries=3, retry_delay=0.1)
                 trial_task = _to_thread(validate_trial_access, api_key)
 
-                # Wait for all operations to complete in parallel
-                user, api_key_id, trial = await asyncio.gather(
-                    user_task,
+                # Wait for both operations to complete in parallel
+                api_key_id, trial = await asyncio.gather(
                     api_key_id_task,
                     trial_task,
                 )
