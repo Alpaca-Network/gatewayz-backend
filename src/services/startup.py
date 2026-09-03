@@ -122,6 +122,36 @@ def _log_telemetry_startup_status() -> None:
         logger.info(line)
 
 
+# Standard OTEL SDK env vars that auto-instrumentation/exporters read directly,
+# bypassing our own Config layer entirely.
+_OTLP_ENDPOINT_ENV_VARS = ("OTEL_EXPORTER_OTLP_ENDPOINT", "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+
+
+def _check_otlp_exporter_guard() -> None:
+    """Refuse to let a stray OTLP endpoint env var silently enable trace export.
+
+    No span exporter is configured anywhere in this codebase today (AI trace
+    spans in src/utils/ai_tracing.py are local-only — there is no
+    TracerProvider/exporter wired up). If either OTEL_EXPORTER_OTLP_* var is
+    present, it means a misconfigured deployment or an as-yet-unreviewed intent
+    to export, and either way spans have not been vetted for identity leakage
+    (threat model L8, docs/security/ANONYMITY_THREAT_MODEL.md). This function
+    does not configure anything either way — it only makes the misconfiguration
+    loudly visible so it can't slip through unnoticed. Anything that later adds
+    a real exporter must do so deliberately and update the threat model.
+    """
+    present = [name for name in _OTLP_ENDPOINT_ENV_VARS if os.environ.get(name)]
+    if present:
+        logger.critical(
+            "otlp_exporter_env_present_but_export_disabled: %s set but no OTLP "
+            "span exporter is configured in this codebase (see "
+            "docs/security/ANONYMITY_THREAT_MODEL.md L8) — spans are not vetted "
+            "for identity leakage. No exporter has been enabled. Remove the "
+            "env var(s) or review before wiring one up.",
+            ", ".join(present),
+        )
+
+
 def _create_background_task(coro, name: str = None) -> asyncio.Task:
     """Create a background task and track it to prevent garbage collection."""
     task = asyncio.create_task(coro, name=name)
@@ -316,6 +346,7 @@ async def lifespan(app):
         # This makes it trivial to spot misconfiguration (missing env vars, etc.)
         # without having to trace through individual service init log lines.
         _log_telemetry_startup_status()
+        _check_otlp_exporter_guard()
 
         # Initialize Prometheus remote write in background
         async def init_prometheus_background():
