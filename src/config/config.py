@@ -193,6 +193,45 @@ class Config:
     WAYZ_FAUCET_MINTER_PRIVATE_KEY = _get_env_var("WAYZ_FAUCET_MINTER_PRIVATE_KEY")
     WAYZ_FAUCET_CLAIM_AMOUNT = int(_get_env_var("WAYZ_FAUCET_CLAIM_AMOUNT", "1000"))
     WAYZ_FAUCET_MIN_REQUESTS = int(_get_env_var("WAYZ_FAUCET_MIN_REQUESTS", "1"))
+    # Community GPU spot-check verification + WAYZ payouts (gatewayz-backend
+    # #2265, #2266; spec m4/spec.md §5). Unset WAYZ_REWARDS_POOL_PRIVATE_KEY
+    # (the default -- nothing is provisioned yet) means the settlement job
+    # no-ops with a warning; earnings still accrue in the meantime.
+    COMMUNITY_SPOTCHECK_RATE = float(_get_env_var("COMMUNITY_SPOTCHECK_RATE", "0.05"))
+    COMMUNITY_SPOTCHECK_INTERVAL_MINUTES = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_INTERVAL_MINUTES", "10")
+    )
+    # Trusted reference provider slug used for cross-checking a sampled
+    # community response, e.g. "together". Unset -- same-node determinism
+    # is the only check performed.
+    COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER = _get_env_var("COMMUNITY_SPOTCHECK_REFERENCE_PROVIDER")
+    WAYZ_REWARDS_POOL_PRIVATE_KEY = _get_env_var("WAYZ_REWARDS_POOL_PRIVATE_KEY")
+    COMMUNITY_MIN_PAYOUT_WAYZ = int(_get_env_var("COMMUNITY_MIN_PAYOUT_WAYZ", "10"))
+    COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ = int(
+        _get_env_var("COMMUNITY_MAX_PAYOUT_PER_RUN_WAYZ", "100000")
+    )
+    COMMUNITY_SETTLEMENT_INTERVAL_HOURS = int(
+        _get_env_var("COMMUNITY_SETTLEMENT_INTERVAL_HOURS", "24")
+    )
+    # PR #2288 review fix round 1 (C1/I2/I3): optional JSON-object override
+    # for src/services/gpu/model_classes.py's built-in allow-list, e.g.
+    # '{"some-new-model-id": "medium"}'. Bounds the verifier job's replay
+    # load per run and per node, and how long a settlement can sit
+    # 'pending' before the daily job attempts to reconcile it.
+    COMMUNITY_MODEL_CLASS_OVERRIDES = _get_env_var("COMMUNITY_MODEL_CLASS_OVERRIDES")
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_RUN", "50")
+    )
+    COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN = int(
+        _get_env_var("COMMUNITY_SPOTCHECK_MAX_REPLAYS_PER_NODE_PER_RUN", "5")
+    )
+    COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS = float(
+        _get_env_var("COMMUNITY_SPOTCHECK_REPLAY_DELAY_SECONDS", "0.5")
+    )
+    COMMUNITY_SETTLEMENT_STUCK_HOURS = int(_get_env_var("COMMUNITY_SETTLEMENT_STUCK_HOURS", "2"))
+    COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS = int(
+        _get_env_var("COMMUNITY_EARNINGS_RECONCILE_LOOKBACK_HOURS", "48")
+    )
     # Server-side Privy access-token verification (gatewayz-backend#2248).
     # `POST /auth` used to trust the client-supplied Privy user id outright;
     # this closes that hole. PRIVY_VERIFICATION_KEY is the app's ES256 public

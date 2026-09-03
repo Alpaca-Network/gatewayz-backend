@@ -559,6 +559,10 @@ def create_app() -> FastAPI:
             "gpu_public",
             "GPU Public Transparency",
         ),  # Public, no-auth GPU utilization feed (gatewayz-backend#2263 #2264)
+        (
+            "gpu_earnings",
+            "GPU Earnings",
+        ),  # Community GPU provider earnings/settlements (gatewayz-backend#2265-#2266)
     ]
 
     loaded_count = 0

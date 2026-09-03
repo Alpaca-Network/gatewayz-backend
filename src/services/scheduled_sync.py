@@ -745,10 +745,7 @@ _last_wayz_staking_sync_status: dict[str, Any] = {
 
 async def run_scheduled_wayz_staking_sync():
     """Sync wallet_stakes from the on-chain WAYZStaking contract."""
-    from src.services.chain.wayz_staking_client import (
-        WayzStakingClient,
-        WayzStakingClientError,
-    )
+    from src.services.chain.wayz_staking_client import WayzStakingClient, WayzStakingClientError
     from src.services.chain.wayz_staking_sync import sync_once
 
     _last_wayz_staking_sync_status["last_run_time"] = datetime.now(UTC)
@@ -815,6 +812,193 @@ def stop_wayz_staking_sync_scheduler():
         logger.error("❌ Error stopping WAYZ staking sync scheduler: %s", e)
     finally:
         _wayz_staking_scheduler = None
+
+
+# ============================================================================
+# Community GPU spot-check verification (gatewayz-backend#2265) — replays a
+# sample of community-provider work to catch nodes that misreport what they
+# ran, and ages out unresolved rows after 24h. No-ops cleanly if there's
+# nothing to verify (list_sampled_pending_work/list_agable_pending_work
+# return [] on any lookup error, per src/db/gpu_payouts.py's convention).
+# ============================================================================
+_gpu_spotcheck_scheduler: AsyncIOScheduler | None = None
+_last_gpu_spotcheck_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_ok": None,
+    "verified": None,
+    "failed": None,
+    "skipped": None,
+}
+
+
+async def run_scheduled_gpu_spot_check():
+    """Run one spot-check verification pass (src/services/gpu/spot_check.py)."""
+    from src.services.gpu.spot_check import run_spot_check_verification
+
+    _last_gpu_spotcheck_status["last_run_time"] = datetime.now(UTC)
+    try:
+        stats = await run_spot_check_verification()
+        _last_gpu_spotcheck_status["last_ok"] = True
+        _last_gpu_spotcheck_status["verified"] = stats["verified"]
+        _last_gpu_spotcheck_status["failed"] = stats["failed"]
+        _last_gpu_spotcheck_status["skipped"] = stats["skipped"]
+        logger.info(
+            "✅ GPU spot-check verification OK | verified=%s failed=%s skipped=%s",
+            stats["verified"],
+            stats["failed"],
+            stats["skipped"],
+        )
+    except Exception as e:
+        _last_gpu_spotcheck_status["last_ok"] = False
+        logger.warning("GPU spot-check verification failed (non-fatal): %s", e)
+
+
+def start_gpu_spotcheck_scheduler():
+    """Start the APScheduler for community GPU spot-check verification
+    (app lifespan). Always runs -- unlike the WAYZ staking/settlement jobs,
+    there's no "unconfigured" state to gate on; an empty result set is a
+    normal, cheap no-op."""
+    global _gpu_spotcheck_scheduler
+
+    interval_minutes = Config.COMMUNITY_SPOTCHECK_INTERVAL_MINUTES
+    logger.info(
+        "Starting GPU spot-check verification scheduler (interval: %s min)", interval_minutes
+    )
+    try:
+        _gpu_spotcheck_scheduler = AsyncIOScheduler()
+        _gpu_spotcheck_scheduler.add_job(
+            run_scheduled_gpu_spot_check,
+            trigger=IntervalTrigger(minutes=interval_minutes),
+            id="gpu_spotcheck_verification",
+            name="Community GPU Spot-Check Verification Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _gpu_spotcheck_scheduler.start()
+        logger.info(
+            "✅ GPU spot-check verification scheduler started (next run in %s min)",
+            interval_minutes,
+        )
+    except Exception as e:
+        logger.error("❌ Failed to start GPU spot-check verification scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_gpu_spotcheck_scheduler():
+    """Stop the GPU spot-check verification APScheduler gracefully (shutdown)."""
+    global _gpu_spotcheck_scheduler
+
+    if _gpu_spotcheck_scheduler is None:
+        return
+    logger.info("Stopping GPU spot-check verification scheduler...")
+    try:
+        _gpu_spotcheck_scheduler.shutdown(wait=True)
+        logger.info("✅ GPU spot-check verification scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping GPU spot-check verification scheduler: %s", e)
+    finally:
+        _gpu_spotcheck_scheduler = None
+
+
+# ============================================================================
+# Community GPU WAYZ settlement (gatewayz-backend#2266) — daily payout of
+# accrued provider_earnings from the providerRewardsPool EOA. No-ops with a
+# warning at startup if WAYZ_REWARDS_POOL_PRIVATE_KEY/WAYZ_TOKEN_CONTRACT_ADDRESS
+# aren't set (true today -- nothing is provisioned yet), mirroring the WAYZ
+# staking sync / faucet's "unset config -> scheduler doesn't start" pattern.
+# ============================================================================
+_gpu_settlement_scheduler: AsyncIOScheduler | None = None
+_last_gpu_settlement_status: dict[str, Any] = {
+    "last_run_time": None,
+    "last_ok": None,
+    "settlements_sent": None,
+}
+
+
+async def run_scheduled_gpu_settlement():
+    """Run one settlement pass (src/services/gpu/settlement.py). Reconciles
+    any stuck-pending settlements from a prior crashed run FIRST (PR #2288
+    review I3) so they're freed up in time to be reconsidered the same
+    run, not left for a whole extra day."""
+    from src.services.chain.wayz_rewards_client import (
+        WayzProviderRewardsClient,
+        WayzProviderRewardsClientError,
+    )
+    from src.services.gpu.settlement import reconcile_stuck_settlements, run_settlement_once
+
+    _last_gpu_settlement_status["last_run_time"] = datetime.now(UTC)
+    try:
+        client = WayzProviderRewardsClient.from_config()
+
+        reconcile_result = await reconcile_stuck_settlements(client)
+        if reconcile_result.settlements_checked:
+            logger.info(
+                "GPU settlement reconciliation | checked=%s confirmed_sent=%s marked_failed=%s",
+                reconcile_result.settlements_checked,
+                reconcile_result.settlements_confirmed_sent,
+                reconcile_result.settlements_marked_failed,
+            )
+
+        result = await run_settlement_once(client)
+        _last_gpu_settlement_status["last_ok"] = True
+        _last_gpu_settlement_status["settlements_sent"] = result.settlements_sent
+        logger.info(
+            "✅ GPU settlement OK | considered=%s sent=%s failed=%s total_wei=%s",
+            result.providers_considered,
+            result.settlements_sent,
+            result.settlements_failed,
+            result.total_sent_wei,
+        )
+    except WayzProviderRewardsClientError as e:
+        logger.info("GPU settlement skipped: %s", e)
+    except Exception as e:
+        _last_gpu_settlement_status["last_ok"] = False
+        logger.warning("GPU settlement failed (non-fatal): %s", e)
+
+
+def start_gpu_settlement_scheduler():
+    """Start the APScheduler for community GPU WAYZ settlement (app lifespan)."""
+    global _gpu_settlement_scheduler
+
+    if not Config.WAYZ_REWARDS_POOL_PRIVATE_KEY:
+        logger.warning("GPU settlement DISABLED: WAYZ_REWARDS_POOL_PRIVATE_KEY not set")
+        return
+
+    interval_hours = Config.COMMUNITY_SETTLEMENT_INTERVAL_HOURS
+    logger.info("Starting GPU settlement scheduler (interval: %s h)", interval_hours)
+    try:
+        _gpu_settlement_scheduler = AsyncIOScheduler()
+        _gpu_settlement_scheduler.add_job(
+            run_scheduled_gpu_settlement,
+            trigger=IntervalTrigger(hours=interval_hours),
+            id="gpu_settlement",
+            name="Community GPU WAYZ Settlement Job",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        _gpu_settlement_scheduler.start()
+        logger.info("✅ GPU settlement scheduler started (next run in %s h)", interval_hours)
+    except Exception as e:
+        logger.error("❌ Failed to start GPU settlement scheduler: %s", e)
+        logger.exception(e)
+
+
+def stop_gpu_settlement_scheduler():
+    """Stop the GPU settlement APScheduler gracefully (shutdown)."""
+    global _gpu_settlement_scheduler
+
+    if _gpu_settlement_scheduler is None:
+        return
+    logger.info("Stopping GPU settlement scheduler...")
+    try:
+        _gpu_settlement_scheduler.shutdown(wait=True)
+        logger.info("✅ GPU settlement scheduler stopped successfully")
+    except Exception as e:
+        logger.error("❌ Error stopping GPU settlement scheduler: %s", e)
+    finally:
+        _gpu_settlement_scheduler = None
 
 
 # ============================================================================
