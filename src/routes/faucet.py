@@ -5,12 +5,9 @@ See docs/superpowers/specs/2026-09-01-wayz-testnet-faucet-design.md.
 """
 
 import logging
-import re
 import secrets
 from typing import Any
 
-from eth_account import Account
-from eth_account.messages import encode_defunct
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
@@ -25,11 +22,13 @@ from src.db.faucet import (
     mark_claim_sent,
 )
 from src.security.deps import get_user_id
+from src.security.wallet_signature import verify_wallet_signature
 from src.services.chain.wayz_token_faucet_client import (
     WayzTokenFaucetClient,
     WayzTokenFaucetClientError,
 )
 from src.services.endpoint_rate_limiter import create_endpoint_rate_limit
+from src.utils.wallet_address import normalize_wallet_address
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +42,13 @@ faucet_claim_rl = create_endpoint_rate_limit("faucet_claim", max_requests=5, win
 faucet_status_rl = create_endpoint_rate_limit("faucet_status", max_requests=30, window_seconds=60)
 
 
-_WALLET_ADDRESS_RE = re.compile(r"^0x[0-9a-fA-F]{40}$")
-
-
-def _validate_wallet_address(v: str) -> str:
-    if not _WALLET_ADDRESS_RE.match(v):
-        raise ValueError("wallet_address must be a 0x-prefixed 40-character hex address")
-    return v.lower()
-
-
 class FaucetNonceRequest(BaseModel):
     wallet_address: str = Field(..., min_length=42, max_length=42)
 
     @field_validator("wallet_address")
     @classmethod
     def validate_wallet_address(cls, v):
-        return _validate_wallet_address(v)
+        return normalize_wallet_address(v)
 
 
 class FaucetClaimRequest(BaseModel):
@@ -71,7 +61,7 @@ class FaucetClaimRequest(BaseModel):
     @field_validator("wallet_address")
     @classmethod
     def validate_wallet_address(cls, v):
-        return _validate_wallet_address(v)
+        return normalize_wallet_address(v)
 
 
 def _nonce_key(user_id: int, wallet_address: str) -> str:
@@ -139,13 +129,12 @@ async def claim_faucet(
     nonce = nonce.decode() if isinstance(nonce, bytes) else nonce
 
     message = _claim_message(user_id, nonce)
-    try:
-        recovered = Account.recover_message(encode_defunct(text=message), signature=body.signature)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Invalid signature") from e
-
-    if recovered.lower() != body.wallet_address.lower():
-        raise HTTPException(status_code=401, detail="Signature does not match wallet_address")
+    # Shared verifier (src/security/wallet_signature.py) -- a malformed
+    # signature and a valid-but-wrong-signer both fail closed to the same
+    # 401, same as before this refactor (only the two now-merged detail
+    # messages changed; the status code and control flow didn't).
+    if not verify_wallet_signature(body.wallet_address, message, body.signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
     if not has_completed_at_least_one_request(user_id, Config.WAYZ_FAUCET_MIN_REQUESTS):
         raise HTTPException(status_code=403, detail="Account not eligible for the faucet yet")
@@ -201,7 +190,7 @@ async def get_faucet_status(
     UI can render without attempting a write."""
     if wallet_address is not None:
         try:
-            wallet_address = _validate_wallet_address(wallet_address)
+            wallet_address = normalize_wallet_address(wallet_address)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
 
