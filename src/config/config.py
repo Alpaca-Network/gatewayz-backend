@@ -169,6 +169,16 @@ class Config:
     WAYZ_FAUCET_MINTER_PRIVATE_KEY = _get_env_var("WAYZ_FAUCET_MINTER_PRIVATE_KEY")
     WAYZ_FAUCET_CLAIM_AMOUNT = int(_get_env_var("WAYZ_FAUCET_CLAIM_AMOUNT", "1000"))
     WAYZ_FAUCET_MIN_REQUESTS = int(_get_env_var("WAYZ_FAUCET_MIN_REQUESTS", "1"))
+    # Server-side Privy access-token verification (gatewayz-backend#2248).
+    # `POST /auth` used to trust the client-supplied Privy user id outright;
+    # this closes that hole. PRIVY_VERIFICATION_KEY is the app's ES256 public
+    # key (PEM) from the Privy dashboard. PRIVY_TOKEN_VERIFICATION picks the
+    # rollout mode explicitly ("enforce"|"log"|"off"); when unset it defaults
+    # to "enforce" once a verification key is configured, else "log" so
+    # environments without the key don't 401 every login.
+    PRIVY_APP_ID = _get_env_var("PRIVY_APP_ID")
+    PRIVY_VERIFICATION_KEY = _get_env_var("PRIVY_VERIFICATION_KEY")
+    PRIVY_TOKEN_VERIFICATION = _get_env_var("PRIVY_TOKEN_VERIFICATION")
     # Nightly pricing-drift monitor: audits active-provider catalog pricing against
     # current OpenRouter reference pricing so we never bill below provider cost even
     # with PRICING_MARKUP applied. Read-only: logs at ERROR + captures to Sentry when

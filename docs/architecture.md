@@ -365,6 +365,25 @@ Comprehensive security implementation:
 - **IP Allowlists**: IP-based access control
 - **Domain Restrictions**: Referer-based control
 
+#### privy_token.py (gatewayz-backend#2248)
+- **Privy Access-Token Verification**: `verify_privy_access_token()` validates
+  the ES256-signed JWT Privy issues per session (`iss=privy.io`,
+  `aud=PRIVY_APP_ID`, verified against `PRIVY_VERIFICATION_KEY`, the app's
+  public key from the Privy dashboard) so `POST /auth` can't be called with a
+  bare, unproven Privy user id.
+- **Rollout modes** (`Config.PRIVY_TOKEN_VERIFICATION`, resolved by
+  `privy_verification_mode()`):
+  - `enforce` — invalid/missing token → `401`. Default once
+    `PRIVY_VERIFICATION_KEY` is configured.
+  - `log` — verification failure is logged (`privy_token_unverified
+    reason=...`) but the request proceeds. Default when the key is unset, and
+    the intended state during the frontend rollout window.
+  - `off` — no verification (tests only).
+- Failure reasons are explicit and counted via the
+  `gatewayz_privy_token_verification_total{result,mode}` Prometheus counter:
+  `missing`, `expired`, `bad_signature`, `sub_mismatch`, `malformed`,
+  `not_configured`.
+
 Security features:
 - API key prefixes: `gw_live_`, `gw_test_`, `gw_staging_`, `gw_dev_`
 - Encrypted storage of sensitive data
@@ -615,6 +634,29 @@ Business logic implementation:
    ↓
 8. Inject user context into request
 ```
+
+### Privy Login Flow (`POST /auth`, gatewayz-backend#2248)
+
+```
+1. Client posts { user: <Privy user object>, token: <Privy access token> }
+   ↓
+2. IP rate limit (10 attempts / 15 min)
+   ↓
+3. Verify Privy access token (src/security/privy_token.py)
+   │  • enforce: invalid/missing token → 401 (privy_token_required /
+   │    invalid_privy_token)
+   │  • log: failure logged, request proceeds
+   │  • off: skipped
+   ↓
+4. Look up or create user by Privy id
+   ↓
+5. Return API key (existing user's active key, or a newly minted one)
+```
+
+This check runs before any account lookup/creation — the token's `sub` claim
+must match the client-supplied `user.id`, so a caller can no longer obtain
+another account's API key by posting its Privy DID without also holding a
+valid session for it.
 
 ## Database Schema
 

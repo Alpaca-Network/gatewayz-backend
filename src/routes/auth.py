@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from postgrest import APIError
+from prometheus_client import Counter
 
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
@@ -20,6 +21,11 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
+from src.security.privy_token import (
+    PrivyTokenError,
+    privy_verification_mode,
+    verify_privy_access_token,
+)
 from src.services.auth_cache import (
     cache_user_by_privy_id,
     cache_user_by_username,
@@ -27,14 +33,8 @@ from src.services.auth_cache import (
     get_cached_user_by_username,
     invalidate_user_cache,
 )
-from src.services.auth_rate_limiting import (
-    AuthRateLimitType,
-    check_auth_rate_limit,
-    get_client_ip,
-)
-from src.services.email_verification import (
-    EmailVerificationResult,
-)
+from src.services.auth_rate_limiting import AuthRateLimitType, check_auth_rate_limit, get_client_ip
+from src.services.email_verification import EmailVerificationResult
 from src.services.email_verification import verify_email as emailable_verify_email
 from src.services.query_timeout import (
     AUTH_QUERY_TIMEOUT,
@@ -600,6 +600,65 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
         )
 
 
+# gatewayz-backend#2248: tracks the outcome of server-side Privy access-token
+# verification on POST /auth so the "log" -> "enforce" rollout can be watched.
+privy_token_verification_total = Counter(
+    "gatewayz_privy_token_verification_total",
+    "Outcome of Privy access-token verification on POST /auth",
+    ["result", "mode"],
+)
+
+# Reasons that should read as "no token was given" vs. "a token was given but invalid".
+_MISSING_TOKEN_ERROR = "privy_token_required"
+_INVALID_TOKEN_ERROR = "invalid_privy_token"
+
+
+def _enforce_privy_token(request: PrivyAuthRequest, raw_request: Request, client_ip: str) -> None:
+    """
+    Verify the Privy access token before any account lookup/creation runs.
+
+    `request.user.id` is client-supplied; without this check anyone who knows
+    (or guesses) a Privy DID could obtain that account's API key. Behavior is
+    controlled by `Config.PRIVY_TOKEN_VERIFICATION` (see
+    `src.security.privy_token.privy_verification_mode`):
+      - "off": no-op (tests only).
+      - "log": verification failures are logged, not blocked, so the frontend
+        rollout can be watched before enforcing.
+      - "enforce": verification failures raise 401.
+
+    Sets `raw_request.state.privy_token_verified` so downstream wallet
+    ingestion (gatewayz-backend#2251) can gate on a verified token.
+    """
+    mode = privy_verification_mode()
+    raw_request.state.privy_token_verified = False
+
+    if mode == "off":
+        return
+
+    token = request.token or request.privy_access_token
+    try:
+        verify_privy_access_token(token, expected_sub=request.user.id)
+        raw_request.state.privy_token_verified = True
+        privy_token_verification_total.labels(result="verified", mode=mode).inc()
+        return
+    except PrivyTokenError as e:
+        privy_token_verification_total.labels(result=e.reason, mode=mode).inc()
+        if mode == "log":
+            logger.warning(
+                "privy_token_unverified reason=%s privy_id=%s ip=%s",
+                e.reason,
+                request.user.id,
+                client_ip,
+            )
+            return
+
+        error_code = _MISSING_TOKEN_ERROR if e.reason == "missing" else _INVALID_TOKEN_ERROR
+        raise HTTPException(
+            status_code=401,
+            detail={"error": error_code, "reason": e.reason},
+        ) from e
+
+
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
 async def privy_auth(
     request: PrivyAuthRequest,
@@ -620,6 +679,12 @@ async def privy_auth(
             },
             headers={"Retry-After": str(rate_limit_result.retry_after)},
         )
+
+    # Verify the Privy access token before touching any account (gatewayz-backend#2248).
+    # Deliberately kept outside the try/except below: that block's broad
+    # `except Exception` converts any exception (HTTPException included) into a
+    # generic 500, which would swallow this 401.
+    _enforce_privy_token(request, raw_request, client_ip)
 
     try:
         logger.info(f"Privy auth request for user: {request.user.id}")
