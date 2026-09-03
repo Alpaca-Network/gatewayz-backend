@@ -477,6 +477,12 @@ class ChatInferenceHandler:
 
                 routing = PROVIDER_ROUTING.get(provider_name)
                 if routing and routing.get("request"):
+                    # Community adapter needs billing_ref for the provider_work
+                    # receipt (spec §4) but it isn't one of the OpenAI-shaped
+                    # generation params filter_params_for_provider() forwards --
+                    # inject it as a private kwarg the adapter pops immediately.
+                    if provider_name == "community":
+                        kwargs = {**kwargs, "_gatewayz_billing_ref": self._billing_ref()}
                     result = routing["request"](messages, model_id, **kwargs)
                 else:
                     # Fallback to OpenRouter for unknown providers
@@ -709,6 +715,9 @@ class ChatInferenceHandler:
 
                 routing = PROVIDER_ROUTING.get(provider_name)
                 if routing and routing.get("stream"):
+                    # See the non-stream call site above for why this is injected here.
+                    if provider_name == "community":
+                        kwargs = {**kwargs, "_gatewayz_billing_ref": self._billing_ref()}
                     # All non-OpenRouter providers use sync streaming clients
                     stream = routing["stream"](messages, model_id, **kwargs)
                     is_sync_stream = True
@@ -1387,9 +1396,7 @@ class ChatInferenceHandler:
                                 completion_tokens = (
                                     _rfield(chunk_usage, "completion_tokens", 0) or 0
                                 )
-                                from src.services.pricing.cache_pricing import (
-                                    extract_cache_tokens,
-                                )
+                                from src.services.pricing.cache_pricing import extract_cache_tokens
 
                                 cache_read_tokens, cache_write_tokens = extract_cache_tokens(
                                     chunk_usage

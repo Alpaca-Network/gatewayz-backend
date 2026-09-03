@@ -196,6 +196,24 @@ _FALLBACK_REGISTRY: dict[str, dict[str, Any]] = {
         "fetch_slug_override": None,
         "logo_url": None,
     },
+    # Community GPU marketplace (gatewayz-backend#2262 #2265, M4 spec §1).
+    # Display-only entry: deliberately has no "failover_priority" key, so
+    # _get_failover_priority() never includes it (belt-and-suspenders with
+    # the explicit exclusion in src/services/provider_failover.py). Its
+    # catalog comes from active nodes' declared models
+    # (src/services/gpu/catalog.py), not an upstream fetch function.
+    "community": {
+        "name": "Community",
+        "color": "bg-teal-600",
+        "priority": "slow",
+        "site_url": "https://gatewayz.ai/gpu",
+        "timeout": 30,
+        "has_fetch_function": False,
+        "aliases": [],
+        "icon": None,
+        "fetch_slug_override": None,
+        "logo_url": None,
+    },
 }
 
 

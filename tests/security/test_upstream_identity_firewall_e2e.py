@@ -371,6 +371,55 @@ class TestChatCompletionsRealRoute:
         assert resp.status_code == 200, resp.text
         _assert_clean(intercepted_http, f"deepinfra stream={stream}")
 
+    def test_community_adapter(self, app_client, route_env, intercepted_http, monkeypatch):
+        """The community provider (gatewayz-backend#2262 #2265) fans out to
+        one operator-run node instead of a single platform host -- same
+        canary, plus proof it must pass like every other provider (spec §4
+        item 5)."""
+        import importlib
+        import sys
+        import types
+
+        import src.handlers.provider_registry as provider_registry_module
+
+        node = {
+            "id": "canary-node",
+            "provider_id": "canary-provider",
+            "endpoint_url": "https://node1.community.example.test/v1",
+            "endpoint_api_key_encrypted": "",  # decrypt_api_key not exercised (no encrypted key)
+            "name": "canary-node",
+        }
+        fake_gpu = types.ModuleType("src.db.gpu")
+        fake_gpu.select_nodes_for_model = lambda model: [node]
+        fake_gpu.get_provider = lambda provider_id: None
+        fake_gpu.adjust_outstanding = lambda node_id, delta: None
+        monkeypatch.setitem(sys.modules, "src.db.gpu", fake_gpu)
+        monkeypatch.setattr(
+            "src.services.providers.community_adapter._decrypt_node_key", lambda enc: "unused"
+        )
+        monkeypatch.setattr(
+            "tests.security.test_upstream_identity_firewall_e2e._PROVIDER_HOSTS",
+            _PROVIDER_HOSTS | {"node1.community.example.test"},
+        )
+
+        monkeypatch.setattr(Config, "COMMUNITY_ROUTING_ENABLED", True, raising=False)
+        importlib.reload(provider_registry_module)
+        try:
+            resp = app_client.post(
+                "/v1/chat/completions",
+                json=self._payload("community/llama-3.1-8b-instruct", "community", False),
+                headers=_headers(),
+            )
+            assert resp.status_code == 200, resp.text
+            _assert_clean(intercepted_http, "community")
+        finally:
+            # Force the module back to the real production default (off)
+            # deterministically -- monkeypatch's own teardown of
+            # COMMUNITY_ROUTING_ENABLED runs after this test function
+            # returns, which would be too late for this reload to see it.
+            monkeypatch.setattr(Config, "COMMUNITY_ROUTING_ENABLED", False, raising=False)
+            importlib.reload(provider_registry_module)
+
     def test_negative_control_anthropic_metadata_user_id_leaks_when_scrub_disabled(
         self, app_client, route_env, intercepted_http, monkeypatch
     ):

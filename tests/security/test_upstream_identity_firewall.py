@@ -236,6 +236,41 @@ def _call_adapter(slug: str):
     return _call
 
 
+def _call_community(monkeypatch, **kwargs):
+    """One fake node standing in for the community provider (gatewayz-backend
+    #2262 #2265): community_request() calls a per-node client built from
+    src.db.gpu.select_nodes_for_model() (owned by the parallel W-A1
+    workstream and not present on this branch), so a fake module is
+    installed the same way tests/services/test_community_adapter.py does.
+    """
+    import sys
+    import types
+
+    from src.services.providers import community_adapter
+
+    community_adapter.clear_adapter_cache()
+    node = {
+        "id": "canary-node",
+        "provider_id": "canary-provider",
+        "endpoint_url": "https://node1.community.example.test/v1",
+        "endpoint_api_key_encrypted": "",
+        "name": "canary-node",
+    }
+    fake_gpu = types.ModuleType("src.db.gpu")
+    fake_gpu.select_nodes_for_model = lambda model: [node]
+    fake_gpu.get_provider = lambda provider_id: None
+    fake_gpu.adjust_outstanding = lambda node_id, delta: None
+    monkeypatch.setitem(sys.modules, "src.db.gpu", fake_gpu)
+    monkeypatch.setattr(community_adapter, "_decrypt_node_key", lambda enc: "unused")
+    # community_request() writes a provider_work receipt via a real Supabase
+    # client -- irrelevant to this canary and unreachable in tests, so it's
+    # skipped rather than letting its own try/except swallow a slow DNS
+    # failure per call.
+    monkeypatch.setattr("src.db.gpu_work.record_work", lambda **_: None)
+
+    community_adapter.community_request(MESSAGES, "community/canary-model", **kwargs)
+
+
 # Bespoke provider clients (direct HTTP or a stainless SDK, both httpx-based).
 BESPOKE_PROVIDERS = {
     "openai": _call_openai,
@@ -262,7 +297,11 @@ ADAPTER_SLUGS = [
     "meta",
 ]
 
-ALL_PROVIDERS = {**BESPOKE_PROVIDERS, **{f"adapter:{s}": _call_adapter(s) for s in ADAPTER_SLUGS}}
+ALL_PROVIDERS = {
+    **BESPOKE_PROVIDERS,
+    **{f"adapter:{s}": _call_adapter(s) for s in ADAPTER_SLUGS},
+    "community": _call_community,
+}
 
 # Modules that make outbound HTTP but are not covered above, with reasons.
 # See tests/security/README section below (also in the PR body) for detail.
