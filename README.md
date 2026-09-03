@@ -288,6 +288,21 @@ Client Requests (Web, Mobile, CLI)
 
 ---
 
+## 🖥️ Community GPU Marketplace (Milestone 4, testnet)
+
+Alongside the providers above, Gatewayz supports opt-in community compute:
+external operators register their own GPUs, serve open-weight models over
+vLLM, and get paid in WAYZ per verified request. It's strictly opt-in —
+traffic only reaches a community node when a client requests a
+`community/<model>` id, never via automatic failover or smart routing —
+because a community node sees prompt content by construction, unlike
+Gatewayz's other providers. See
+[docs/gpu/PROVIDER_ONBOARDING.md](./docs/gpu/PROVIDER_ONBOARDING.md) to
+run a node, and `docs/api.md`'s "GPU Marketplace" section for the API and
+trust model.
+
+---
+
 ## 🗂️ Project Structure
 
 ```
@@ -563,6 +578,7 @@ curl http://localhost:8000/api/monitoring/stats/realtime
 | [CHAT_REQUESTS_ENDPOINTS_TEST_REPORT.md](./docs/CHAT_REQUESTS_ENDPOINTS_TEST_REPORT.md) | Comprehensive endpoint testing | QA Engineers |
 | [MONITORING_ENDPOINTS_VERIFICATION.md](./docs/MONITORING_ENDPOINTS_VERIFICATION.md) | Monitoring endpoint verification | Ops, QA |
 | [MONITORING_API_REFERENCE.md](./docs/MONITORING_API_REFERENCE.md) | API reference documentation | All Developers |
+| [gpu/PROVIDER_ONBOARDING.md](./docs/gpu/PROVIDER_ONBOARDING.md) | Run a community GPU node, get paid in WAYZ | GPU Operators |
 
 ---
 
