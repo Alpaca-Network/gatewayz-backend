@@ -17,6 +17,7 @@ from fastapi import Request
 
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.db.users import deduct_credits, get_user, record_usage
+from src.handlers.error_persistence import format_error_for_persistence
 from src.schemas.internal.chat import (
     InternalChatRequest,
     InternalChatResponse,
@@ -224,11 +225,14 @@ class ChatInferenceHandler:
         )
 
     def _billing_ref(self) -> str | None:
-        """Opaque per-request correlator for the upstream pseudonym, if any.
+        """Opaque per-request correlator: the upstream pseudonym source, and
+        (as of M3 W-C) the idempotency key for credit deduction and the join
+        key between chat_completion_requests/credit_transactions rows.
 
-        Minted by W-C's billing-ref middleware (``request.state.billing_ref``,
-        not yet merged) -- read defensively so this module works standalone.
-        Never the client-settable ``X-Request-ID``.
+        Minted by RequestIDMiddleware (``request.state.billing_ref``), read
+        defensively so this module still works if invoked without a Request
+        (returns None; callers fall back to ``self.request_id``). Never the
+        client-settable ``X-Request-ID``.
         """
         if self.request is None:
             return None
@@ -807,6 +811,15 @@ class ChatInferenceHandler:
 
         total_tokens = prompt_tokens + completion_tokens
 
+        # Server-minted billing correlation ref (threat model G4/L7): prefer
+        # request.state.billing_ref (set by RequestIDMiddleware, independent of
+        # any client input); fall back to this handler's own instance-level
+        # uuid4 if unavailable (e.g. invoked outside the normal middleware
+        # stack). Either way it's never client-controlled. This is the value
+        # deduct_credits uses as its idempotency key -- passing it is what
+        # makes get_transaction_by_request_id's double-charge guard apply here.
+        billing_ref = self._billing_ref() or self.request_id
+
         # Deduct credits
         try:
             await asyncio.to_thread(
@@ -820,8 +833,9 @@ class ChatInferenceHandler:
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "cost_usd": cost,
-                    "request_id": self.request_id,
+                    "request_id": billing_ref,
                 },
+                billing_ref,
             )
 
             # Record usage for analytics
@@ -879,7 +893,10 @@ class ChatInferenceHandler:
             pricing_source = "calculated"  # DB default; tokens/cost will be 0
 
         save_kwargs = {
-            "request_id": self.request_id,
+            # Same billing_ref used for credit deduction (see _charge_user) so
+            # chat_completion_requests and credit_transactions rows for the
+            # same request share one join key (threat model G4).
+            "request_id": self._billing_ref() or self.request_id,
             "model_name": model_name,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
@@ -1181,7 +1198,7 @@ class ChatInferenceHandler:
                 input_tokens=0,
                 output_tokens=0,
                 status="failed",
-                error_message=str(e),
+                error_message=format_error_for_persistence(e),
             )
 
             raise
@@ -1494,7 +1511,7 @@ class ChatInferenceHandler:
                 input_tokens=prompt_tokens,
                 output_tokens=completion_tokens,
                 status="failed",
-                error_message=str(e),
+                error_message=format_error_for_persistence(e),
             )
 
             raise

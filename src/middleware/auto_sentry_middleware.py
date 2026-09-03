@@ -82,13 +82,27 @@ class AutoSentryMiddleware:
             sentry_scope.set_tag("method", request_context["method"])
             sentry_scope.set_tag("endpoint_type", request_context["endpoint_type"])
 
-            # Add user context if available
+            # Add user context if available. Sentry's user object carries only
+            # the numeric id (needed so support can look up a request) — no
+            # email, no IP (threat model G5/L5: Gatewayz's own error tooling
+            # must not be able to re-link content to identity).
             user_context = self._extract_user_context(scope)
             if user_context:
                 sentry_scope.set_user(user_context)
                 sentry_scope.set_tag("has_user", "true")
             else:
                 sentry_scope.set_tag("has_user", "false")
+
+            # Hashed API key and the server-minted billing ref are safe,
+            # filterable correlators that don't require exposing the user
+            # object — set as tags regardless of authentication state.
+            api_key_hash = self._extract_api_key_hash(scope)
+            if api_key_hash:
+                sentry_scope.set_tag("api_key_hash", api_key_hash)
+
+            billing_ref = self._extract_billing_ref(scope)
+            if billing_ref:
+                sentry_scope.set_tag("billing_ref", billing_ref)
 
             try:
                 # Process request
@@ -191,10 +205,6 @@ class AutoSentryMiddleware:
         headers = dict(scope.get("headers", []))
         sanitized_headers = self._sanitize_headers(headers)
 
-        # Get client info
-        client = scope.get("client")
-        client_host = client[0] if client else "unknown"
-
         # Get query params
         query_string = scope.get("query_string", b"").decode()
         query_params = {}
@@ -204,12 +214,14 @@ class AutoSentryMiddleware:
                     key, value = param.split("=", 1)
                     query_params[key] = value
 
+        # NOTE: the requester's real client IP is intentionally NOT included
+        # here (threat model G5/L5) — Sentry must not be able to re-link
+        # content to identity via the client's network address.
         context = {
             "method": method,
             "path": path,
             "query_params": query_params,
             "endpoint_type": endpoint_type,
-            "client_host": client_host,
             "headers": sanitized_headers,
         }
 
@@ -223,42 +235,49 @@ class AutoSentryMiddleware:
 
     def _extract_user_context(self, scope: Scope) -> dict | None:
         """
-        Extract user context from scope or headers.
+        Extract Sentry user context from scope state.
 
-        Returns user information if available (email, ID, etc.).
-        Does NOT include sensitive data like passwords or API keys.
+        Returns only {"id": user_id} when authenticated — needed so support can
+        look up a request by user — and nothing otherwise. Deliberately does
+        NOT include email or client IP (threat model G5/L5: Gatewayz's own
+        error tooling must not be able to re-link content to identity). API key
+        hash and billing ref are set separately as tags, not as part of the
+        user object (see _extract_api_key_hash / _extract_billing_ref).
         """
-        user_context = {}
-
-        # Try to get user from scope state (set by auth middleware)
-        # State can be either a Starlette State object (with attributes) or a dict
         state = scope.get("state")
-        if state is not None:
-            # Handle both object-style (State) and dict-style access
-            if hasattr(state, "user_id"):
-                user_context["id"] = state.user_id
-            elif isinstance(state, dict) and "user_id" in state:
-                user_context["id"] = state["user_id"]
+        if state is None:
+            return None
 
-            if hasattr(state, "email"):
-                user_context["email"] = state.email
-            elif isinstance(state, dict) and "email" in state:
-                user_context["email"] = state["email"]
+        # Handle both object-style (State) and dict-style access
+        if hasattr(state, "user_id"):
+            user_id = state.user_id
+        elif isinstance(state, dict) and "user_id" in state:
+            user_id = state["user_id"]
+        else:
+            user_id = None
 
-            if hasattr(state, "api_key_id"):
-                user_context["api_key_id"] = state.api_key_id
-            elif isinstance(state, dict) and "api_key_id" in state:
-                user_context["api_key_id"] = state["api_key_id"]
+        return {"id": user_id} if user_id is not None else None
 
-        # Try to get user from authorization header (hash it for privacy)
+    def _extract_api_key_hash(self, scope: Scope) -> str | None:
+        """Hash of the raw Authorization header value, for filtering in Sentry
+        without exposing the key itself. Independent of authentication state."""
         headers = dict(scope.get("headers", []))
         auth_header = headers.get(b"authorization", b"").decode()
-        if auth_header:
-            # Create a hash of the API key for tracking (not the actual key!)
-            auth_hash = hashlib.sha256(auth_header.encode()).hexdigest()[:16]
-            user_context["api_key_hash"] = auth_hash
+        if not auth_header:
+            return None
+        return hashlib.sha256(auth_header.encode()).hexdigest()[:16]
 
-        return user_context if user_context else None
+    def _extract_billing_ref(self, scope: Scope) -> str | None:
+        """The server-minted billing correlation ref (request.state.billing_ref,
+        set by RequestIDMiddleware) — never the client-settable X-Request-ID."""
+        state = scope.get("state")
+        if state is None:
+            return None
+        if hasattr(state, "billing_ref"):
+            return state.billing_ref
+        if isinstance(state, dict):
+            return state.get("billing_ref")
+        return None
 
     def _sanitize_headers(self, headers: dict) -> dict:
         """

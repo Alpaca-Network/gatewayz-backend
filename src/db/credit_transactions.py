@@ -16,6 +16,106 @@ from src.utils.sentry_context import capture_database_error
 
 logger = logging.getLogger(__name__)
 
+# Threat model G6 (docs/security/ANONYMITY_THREAT_MODEL.md): credit_transactions
+# is a free-form-column table that must never carry prompt/response content —
+# description and metadata are reason strings / token-breakdown-style fields
+# only. Derived from every legitimate caller as of 2026-09 (db/users.py's
+# trial/allowance/purchase bookkeeping, services/billing/credit_handler.py's
+# usage + refund metadata, services/billing/payments.py's subscription
+# upgrade/downgrade/cancellation + top-up metadata, routes/admin.py and
+# routes/credits.py's admin grant/debit/bulk metadata, routes/audio.py's
+# per-minute billing metadata). A key outside this list is dropped with a
+# warning rather than silently persisted — defense-in-depth against a future
+# caller accidentally passing prompt text, a raw error message, or any other
+# free-form field under a novel key. NOTE: "error_message" is deliberately
+# excluded — chat_streaming.py's auto-refund path currently passes
+# str(exception)[:200] under that key, which is exactly the kind of
+# unbounded/potentially-content-bearing value this allow-list exists to stop.
+_METADATA_ALLOWED_KEYS = frozenset(
+    {
+        # Balance bookkeeping (db/users.py: trial usage, allowance/purchased
+        # credit transitions, subscription tier changes, cancellations).
+        "allowance_before",
+        "allowance_after",
+        "purchased_before",
+        "purchased_after",
+        "from_allowance",
+        "from_purchased",
+        "is_trial",
+        "tier",
+        "forfeited_allowance",
+        "new_allowance",
+        "purchased_credits_unchanged",
+        "retained_purchased_credits",
+        "effective_date",
+        # Refunds (services/billing/credit_handler.py:refund_credits).
+        "refund_reason",
+        "auto_refund",
+        "original_request_id",
+        # Admin grants/debits (routes/admin.py, routes/credits.py).
+        "reason",
+        "admin_user_id",
+        "admin_username",
+        "bulk_operation",
+        "original_transaction_id",
+        # Usage/token breakdown (credit_handler.py, routes/audio.py).
+        "model",
+        "total_tokens",
+        "prompt_tokens",
+        "completion_tokens",
+        "cost_usd",
+        "endpoint",
+        "is_streaming",
+        "attempt_number",
+        "request_id",
+        "provider",
+        "error_type",
+        "stream_chunks_received",
+        "duration_minutes",
+        # Subscription upgrade/downgrade/cancellation + top-up
+        # (services/billing/payments.py).
+        "from_tier",
+        "to_tier",
+        "old_tier_allowance",
+        "old_remaining_allowance",
+        "old_used_allowance",
+        "proration_method",
+        "stripe_proration_amount",
+        "subscription_id",
+        "product_id",
+        "price_id",
+        "allowance_handled_at",
+        "pending_forfeiture_allowance",
+        "cancellation_type",
+        "cancellation_reason",
+        "current_tier",
+        "stripe_session_id",
+        "trigger_amount",
+        "stripe_payment_intent_id",
+        "amount_paid",
+        "topup_fee_rate",
+        "topup_fee",
+    }
+)
+
+# credit_transactions.description is a short human-readable label, not a log —
+# bound it defensively so a caller can't accidentally concatenate unbounded
+# text (e.g. an exception message) into it.
+_DESCRIPTION_MAX_LENGTH = 200
+
+
+def _sanitize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop any metadata key outside the allow-list, logging what was dropped."""
+    if not metadata:
+        return {}
+    dropped = [key for key in metadata if key not in _METADATA_ALLOWED_KEYS]
+    if dropped:
+        logger.warning(
+            "log_credit_transaction: dropping non-allow-listed metadata keys: %s",
+            dropped,
+        )
+    return {key: value for key, value in metadata.items() if key in _METADATA_ALLOWED_KEYS}
+
 
 # Transaction Types
 class TransactionType:
@@ -104,11 +204,11 @@ def log_credit_transaction(
         "user_id": user_id,
         "amount": amount,
         "transaction_type": transaction_type,
-        "description": description,
+        "description": (description or "")[:_DESCRIPTION_MAX_LENGTH],
         "balance_before": balance_before,
         "balance_after": balance_after,
         "payment_id": payment_id,
-        "metadata": metadata or {},
+        "metadata": _sanitize_metadata(metadata),
         "created_by": created_by,
         "created_at": datetime.now(UTC).isoformat(),
     }

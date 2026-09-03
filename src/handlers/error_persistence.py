@@ -3,7 +3,45 @@
 import logging
 import time
 
+from src.utils.errors import sanitize_provider_error_for_user
+from src.utils.provider_error_logging import ProviderErrorType, classify_provider_error
+
 logger = logging.getLogger(__name__)
+
+# Error categories whose message text originates from the upstream provider or
+# transport (HTTP status text, timeout/network exceptions) rather than from
+# arbitrary internal application state. sanitize_provider_error_for_user only
+# strips URLs and hex-secret-shaped tokens — it does NOT strip arbitrary text —
+# so only these categories get a sanitized rendering of str(error) persisted.
+_PROVIDER_MESSAGE_TYPES = frozenset(
+    {
+        ProviderErrorType.API_TIMEOUT,
+        ProviderErrorType.HTTP_ERROR,
+        ProviderErrorType.AUTH_FAILURE,
+        ProviderErrorType.RATE_LIMITED,
+        ProviderErrorType.NETWORK_ERROR,
+    }
+)
+
+
+def format_error_for_persistence(error: Exception) -> str:
+    """Build a safe, bounded string for chat_completion_requests.error_message.
+
+    Guarantee (threat model L6/G5 — error_message must never echo user input):
+    for exceptions classified as provider/network-shaped, this returns the
+    exception type name plus a URL- and hex-secret-scrubbed, 200-char-truncated
+    rendering of str(error). For every other exception type — parsing,
+    configuration, database, cache, unknown — whose message routinely embeds
+    arbitrary internal state (a dict key, an attribute name, part of a request
+    payload), str(error) is never included; only the type name and a generic
+    category are persisted.
+    """
+    error_type = type(error).__name__
+    category = classify_provider_error(error)
+    if category in _PROVIDER_MESSAGE_TYPES:
+        detail = sanitize_provider_error_for_user(str(error))[:200]
+        return f"{error_type}: {detail}"
+    return f"{error_type}: {category.value}"
 
 
 async def save_failed_request(

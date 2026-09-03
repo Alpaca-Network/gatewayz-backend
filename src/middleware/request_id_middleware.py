@@ -15,6 +15,10 @@ Features:
 - Accepts existing X-Request-ID header if provided
 - Attaches request_id to request.state for access in routes
 - Adds X-Request-ID to response headers
+- Mints a separate, server-only billing_ref (request.state.billing_ref) that is
+  never derived from client input; echoed as X-Gatewayz-Request-Id. This is the
+  only id billing code should use for idempotency/persistence (see
+  docs/security/ANONYMITY_THREAT_MODEL.md L7/G4).
 - Thread-safe and async-compatible
 """
 
@@ -109,6 +113,17 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         # Attach to request state for access in routes
         request.state.request_id = request_id
 
+        # Server-minted billing correlation ref (threat model L7/G4): the
+        # client-supplied request_id above is echoed back for the client's own
+        # tracing, but must never be the join key between billing rows and a
+        # request — a client could otherwise force idempotency-key collisions
+        # or make billing rows correlatable to a value they chose. billing_ref
+        # is generated here, independent of any client input, and is the only
+        # id passed into credit deduction/refund idempotency and persisted to
+        # chat_completion_requests/credit_transactions.
+        billing_ref = str(uuid.uuid4())
+        request.state.billing_ref = billing_ref
+
         # Log request with ID for debugging
         logger.debug(f"Request ID: {request_id} | {request.method} {request.url.path}")
 
@@ -128,6 +143,10 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
         # Also add as X-Correlation-ID for compatibility
         response.headers["X-Correlation-ID"] = request_id
+
+        # Echo the billing ref so a user can quote it to support; it is not the
+        # same value as X-Request-ID (see billing_ref comment above).
+        response.headers["X-Gatewayz-Request-Id"] = billing_ref
 
         return response
 

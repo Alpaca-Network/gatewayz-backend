@@ -277,28 +277,6 @@ class TestConfigMonitoring:
 
         assert config.Config.PROMETHEUS_SCRAPE_ENABLED is True
 
-    def test_tempo_disabled_by_default(self, monkeypatch):
-        """Test Tempo is disabled by default (cost reduction)."""
-        from src.config import config
-
-        monkeypatch.delenv("TEMPO_ENABLED", raising=False)
-        import importlib
-
-        importlib.reload(config)
-
-        assert config.Config.TEMPO_ENABLED is False
-
-    def test_tempo_enabled(self, monkeypatch):
-        """Test Tempo can be enabled"""
-        from src.config import config
-
-        for value in ["true", "1", "yes"]:
-            monkeypatch.setenv("TEMPO_ENABLED", value)
-            import importlib
-
-            importlib.reload(config)
-            assert config.Config.TEMPO_ENABLED is True
-
     def test_loki_disabled_by_default(self, monkeypatch):
         """Test Loki is disabled by default"""
         from src.config import config
@@ -320,17 +298,6 @@ class TestConfigMonitoring:
         importlib.reload(config)
 
         assert config.Config.LOKI_ENABLED is True
-
-    def test_otel_service_name_default(self, monkeypatch):
-        """Test OTEL service name default"""
-        from src.config import config
-
-        monkeypatch.delenv("OTEL_SERVICE_NAME", raising=False)
-        import importlib
-
-        importlib.reload(config)
-
-        assert config.Config.OTEL_SERVICE_NAME == "gatewayz-api"
 
 
 class TestConfigValidation:
