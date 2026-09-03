@@ -128,15 +128,16 @@ not be double-counted when grouping by region alone.
 
 ## Who can reach this data
 
-Per W-A1's migration (`20260903200000_gpu_marketplace.sql`), RLS is
-enabled service-role-only (no policy at all) on `gpu_providers`,
-`gpu_nodes`, and `provider_work` — there is no anon grant on any of them,
-so this API (using the service-role Supabase client, same as every other
-`src/db/*` module) is the **only** public path to node/provider data;
-nothing can read them directly with an anon key. `gpu_utilization_hourly`
-is the one exception the spec calls for: it carries its own narrow,
-aggregate-only `SELECT ... TO anon` policy, since the table by
-construction can never contain wallet/endpoint/provider/user identity —
-this API still reads it through the service-role client for consistent
-caching and rate limiting, but a client with only the anon key could also
-query that one table directly.
+Per W-A1's merged migration (`20260903200000_gpu_marketplace.sql`), RLS is
+enabled service-role-only (no policy at all) on **every** M4 table,
+`gpu_utilization_hourly` included — there is no anon grant anywhere, not
+even on the aggregate-only rollup. An earlier draft of the migration did
+carry a narrow `SELECT ... TO anon` policy on `gpu_utilization_hourly`
+(the spec's original suggestion); it was deliberately removed before
+merge because a direct anon PostgREST policy would let any holder of the
+public anon key read the table straight from Supabase, bypassing this
+API's 60/min/IP rate limit and 30s cache entirely (see the migration's own
+header comment). So this API — using the service-role Supabase client,
+same as every other `src/db/*` module — is the **only** public path to
+any of this data, full stop; nothing here can be read directly with an
+anon key.

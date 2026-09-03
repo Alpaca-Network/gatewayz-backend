@@ -6,11 +6,23 @@ convention exactly -- every lookup here backs a public, no-auth endpoint or a
 background rollup job, neither of which may ever hard-fail the caller.
 
 gpu_utilization_hourly, gpu_nodes, and gpu_providers are owned by W-A1's
-migration (20260903200000_gpu_marketplace.sql, not yet merged as of this
-writing). This module only reads/writes rows shaped per spec §2 -- until
-that migration lands, every function below degrades to its safe default
-(empty list / zeroed summary) via the same try/except path a missing table
-would hit, so nothing here needs to special-case "table doesn't exist yet".
+migration (20260903200000_gpu_marketplace.sql, merged to main as 48ace7ef).
+This module only reads/writes rows shaped per spec §2; every function below
+still degrades to its safe default (empty list / zeroed summary) via the
+same try/except path a missing/unreachable table would hit, so nothing
+here needs to special-case "table doesn't exist" as a distinct case from
+"DB unreachable".
+
+get_summary()'s active-node count reuses src.db.gpu.list_active_nodes()
+(W-A1) rather than re-implementing the active-status + approved-provider
+join here -- see that function's own docstring. get_public_nodes() does
+NOT reuse it: the public node listing intentionally shows nodes of every
+status (registered/active/degraded/offline/disabled) for transparency, not
+just 'active' ones (that's the whole reason `status` is a field in the
+response), and list_active_nodes() hardcodes status='active' server-side.
+No equivalent "all statuses, approved providers only" helper exists in
+src/db/gpu.py, so _fetch_approved_nodes() below stays a local
+implementation for that one call site.
 
 active_nodes semantics (a deliberate deviation from a literal reading of
 spec §6, recorded here per the standing instructions): the spec text says
@@ -31,6 +43,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from src.db.client import get_db
+from src.db.gpu import list_active_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -301,6 +314,11 @@ def _fetch_approved_nodes() -> list[dict]:
     gpu_providers!inner(status) so the filter runs server-side. Selects
     only public-safe columns plus the join key -- no wallet, endpoint, node
     token, or provider identity ever leaves this function.
+
+    Deliberately NOT src.db.gpu.list_active_nodes(): that helper hardcodes
+    status='active' server-side, but get_public_nodes() (the only caller of
+    this function -- get_summary() uses list_active_nodes() directly)
+    intentionally lists nodes of every status for public transparency.
     """
     try:
         client = get_db()
@@ -406,8 +424,11 @@ def get_summary() -> dict:
     zeroed default independently, so a failure in one (e.g. gpu_providers
     unreachable) doesn't blank out the rest.
     """
-    nodes = _fetch_approved_nodes()
-    active_nodes = [n for n in nodes if n.get("status") == "active"]
+    # list_active_nodes() (src/db/gpu.py, W-A1) already does exactly the
+    # active-status + approved-provider join this needs -- reused here
+    # instead of re-implementing it via _fetch_approved_nodes() + a
+    # status=='active' filter.
+    active_nodes = list_active_nodes()
 
     try:
         client = get_db()

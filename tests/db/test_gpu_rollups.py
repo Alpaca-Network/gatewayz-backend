@@ -432,48 +432,38 @@ def test_get_public_nodes_returns_empty_on_error():
         assert get_public_nodes() == []
 
 
-def test_get_summary_counts_active_nodes_and_breaks_down_regions_models():
-    client = _mock_table_client(
+@patch("src.db.gpu_rollups.list_active_nodes")
+def test_get_summary_counts_active_nodes_and_breaks_down_regions_models(mock_list_active_nodes):
+    # list_active_nodes() (src.db.gpu) already filters to status=='active' +
+    # approved providers server-side -- get_summary() trusts its output
+    # as-is, so the fixture here only contains what it would actually return.
+    mock_list_active_nodes.return_value = [
         {
-            "gpu_nodes": [
-                {
-                    "name": "n1",
-                    "region": "us-east",
-                    "gpu_model": "A100",
-                    "vram_gb": 80,
-                    "status": "active",
-                    "models": [{"id": "m1"}],
-                    "gpu_providers": {"status": "approved"},
-                },
-                {
-                    "name": "n2",
-                    "region": "us-east",
-                    "gpu_model": "A100",
-                    "vram_gb": 80,
-                    "status": "degraded",
-                    "models": [{"id": "m1"}],
-                    "gpu_providers": {"status": "approved"},
-                },
-            ],
-            "gpu_providers": [],
-            "gpu_utilization_hourly": [],
-        },
-        counts={"gpu_providers": 3},
+            "name": "n1",
+            "region": "us-east",
+            "gpu_model": "A100",
+            "vram_gb": 80,
+            "status": "active",
+            "models": [{"id": "m1"}],
+        }
+    ]
+    client = _mock_table_client(
+        {"gpu_providers": [], "gpu_utilization_hourly": []}, counts={"gpu_providers": 3}
     )
     with patch("src.db.gpu_rollups.get_db", return_value=client):
         summary = get_summary()
 
-    assert summary["active_nodes"] == 1  # only status=='active' counted
+    assert summary["active_nodes"] == 1
     assert summary["approved_providers"] == 3
     assert summary["regions"] == [{"region": "us-east", "nodes": 1}]
     assert summary["models"] == [{"id": "m1", "nodes": 1}]
     assert "updated_at" in summary
 
 
-def test_get_summary_last_hour_weighted_average():
+@patch("src.db.gpu_rollups.list_active_nodes", return_value=[])
+def test_get_summary_last_hour_weighted_average(mock_list_active_nodes):
     client = _mock_table_client(
         {
-            "gpu_nodes": [],
             "gpu_providers": [],
             "gpu_utilization_hourly": [
                 {
@@ -504,7 +494,8 @@ def test_get_summary_last_hour_weighted_average():
     assert last_hour["error_rate"] == pytest.approx(0.025)  # (0.1*10 + 0*30) / 40
 
 
-def test_get_summary_no_data_returns_zeros_not_error():
+@patch("src.db.gpu_rollups.list_active_nodes", return_value=[])
+def test_get_summary_no_data_returns_zeros_not_error(mock_list_active_nodes):
     client = MagicMock()
     client.table.side_effect = RuntimeError("boom")
     with patch("src.db.gpu_rollups.get_db", return_value=client):
@@ -520,3 +511,16 @@ def test_get_summary_no_data_returns_zeros_not_error():
         "avg_latency_ms": 0,
         "error_rate": 0.0,
     }
+
+
+def test_get_summary_active_nodes_lookup_failure_defaults_to_empty():
+    """list_active_nodes() already returns [] on its own internal errors
+    (src.db.gpu's convention) -- get_summary() must not additionally choke
+    if that empty list is all it gets."""
+    with patch("src.db.gpu_rollups.list_active_nodes", return_value=[]):
+        client = MagicMock()
+        client.table.side_effect = RuntimeError("boom")
+        with patch("src.db.gpu_rollups.get_db", return_value=client):
+            summary = get_summary()
+    assert summary["active_nodes"] == 0
+    assert summary["regions"] == []
