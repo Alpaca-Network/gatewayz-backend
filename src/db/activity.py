@@ -11,6 +11,43 @@ from src.config.supabase_config import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+# Threat model G6 (docs/security/ANONYMITY_THREAT_MODEL.md): activity_log is a
+# free-form-column table that must never carry prompt/response content —
+# metadata is token-breakdown / auth-event fields only. Derived from every
+# legitimate caller as of 2026-09: routes/chat.py's per-request token/endpoint
+# breakdown, and routes/auth.py's login/registration event fields (this table
+# doubles as an auth-activity log, app="Auth", model="auth"). A key outside
+# this list is dropped with a warning rather than silently persisted.
+_METADATA_ALLOWED_KEYS = frozenset(
+    {
+        # Inference token/endpoint breakdown (routes/chat.py).
+        "prompt_tokens",
+        "completion_tokens",
+        "endpoint",
+        "session_id",
+        "gateway",
+        # Auth events (routes/auth.py login/registration).
+        "action",
+        "auth_method",
+        "privy_user_id",
+        "is_new_user",
+        "initial_credits",
+    }
+)
+
+
+def _sanitize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+    """Drop any metadata key outside the allow-list, logging what was dropped."""
+    if not metadata:
+        return {}
+    dropped = [key for key in metadata if key not in _METADATA_ALLOWED_KEYS]
+    if dropped:
+        logger.warning(
+            "log_activity: dropping non-allow-listed metadata keys: %s",
+            dropped,
+        )
+    return {key: value for key, value in metadata.items() if key in _METADATA_ALLOWED_KEYS}
+
 
 def log_activity(
     user_id: int,
@@ -56,7 +93,7 @@ def log_activity(
             "speed": speed,
             "finish_reason": finish_reason,
             "app": app,
-            "metadata": metadata or {},
+            "metadata": _sanitize_metadata(metadata),
         }
 
         result = client.table("activity_log").insert(activity_data).execute()
