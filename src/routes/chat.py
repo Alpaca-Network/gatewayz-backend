@@ -40,10 +40,25 @@ def set_traceloop_properties(**kwargs):
 
 
 # Unified chat handler and adapters for chat unification
-from src.handlers.error_persistence import save_failed_request
+from src.handlers.error_persistence import format_error_for_persistence, save_failed_request
 
 # Request correlation ID for distributed tracing
 request_id_var: ContextVar[str] = ContextVar("request_id", default="")
+
+
+def _resolve_billing_ref(request: Request | None) -> str:
+    """Resolve the server-minted billing correlation ref for this request.
+
+    Reads request.state.billing_ref, set by RequestIDMiddleware independently of
+    any client-supplied header (threat model L7/G4: the client-settable
+    X-Request-ID must never be the join key between billing rows and a
+    request). Falls back to a fresh UUID only when no request/middleware state
+    is available (e.g. a handler invoked outside the normal middleware stack in
+    a test), so billing never silently lacks an idempotency key.
+    """
+    state = getattr(request, "state", None) if request is not None else None
+    billing_ref = getattr(state, "billing_ref", None) if state is not None else None
+    return billing_ref or str(uuid.uuid4())
 
 
 # Braintrust removed for cost reduction (see docs/superpowers/specs/2026-05-25-cost-reduction-design.md)
@@ -325,8 +340,10 @@ async def chat_completions(
     identity: RequestIdentity = Depends(get_request_identity),
 ):
     # === 0) Setup / sanity ===
-    # Generate request correlation ID for distributed tracing
-    request_id = str(uuid.uuid4())
+    # Request correlation ID used for logging AND as the billing idempotency key
+    # (handle_credits_and_usage, refund_credits, chat_completion_requests.request_id).
+    # Server-minted only — see _resolve_billing_ref.
+    request_id = _resolve_billing_ref(request)
     request_id_var.set(request_id)
 
     # Never print keys; log masked
@@ -1147,7 +1164,7 @@ async def chat_completions(
             prompt_tokens=prompt_tokens if "prompt_tokens" in dir() else 0,
             start_time=start if "start" in dir() else 0,
             error=e,
-            error_message=f"{type(e).__name__}: {str(e)[:500]}",
+            error_message=format_error_for_persistence(e),
             user=user if "user" in dir() else None,
             provider=provider if "provider" in dir() else None,
             api_key_id=api_key_id if "api_key_id" in dir() else None,
