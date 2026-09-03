@@ -348,6 +348,23 @@ class Config:
     }
     UPSTREAM_PSEUDONYM_SECRET = os.environ.get("UPSTREAM_PSEUDONYM_SECRET")
 
+    # Community GPU marketplace (gatewayz-backend#2262 #2265, Milestone 4).
+    # Off by default: the "community" provider is not registered in
+    # PROVIDER_ROUTING at all until this is true (src/handlers/provider_registry.py),
+    # so community/<model> requests 404/503 rather than silently no-op.
+    COMMUNITY_ROUTING_ENABLED = os.environ.get("COMMUNITY_ROUTING_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    # OpenAICompatAdapter._get_client() requires a truthy Config attribute
+    # named by ProviderConfig.api_key_env before it will even consult
+    # client_factory (see src/services/providers/openai_compat.py). Community
+    # nodes each have their own per-node decrypted key supplied via
+    # client_factory, not a single platform-wide key, so this constant only
+    # exists to satisfy that truthiness check -- it is never sent anywhere.
+    COMMUNITY_NODE_API_KEY_PLACEHOLDER = "community-node-key-supplied-via-client-factory"
+
     # DeepInfra Configuration (for direct API access)
     DEEPINFRA_API_KEY = os.environ.get("DEEPINFRA_API_KEY")
     XAI_API_KEY = os.environ.get("XAI_API_KEY")
