@@ -647,6 +647,33 @@ class TestEnabledProvidersRoster:
     to the aggregator North Star §5 bars as primary supply.
     """
 
+    @pytest.fixture(autouse=True)
+    def _restore_config_module_after_reload(self):
+        """Every test below calls importlib.reload(config) to make a
+        monkeypatched ENABLED_PROVIDERS env var take effect. monkeypatch only
+        reverts the ENV VAR after the test -- the reload has already baked
+        that value into the live `Config` CLASS OBJECT sitting in
+        sys.modules['src.config.config'], and nothing undoes that. Every
+        other test in this worker process for the rest of the run then reads
+        that same poisoned Config (is_provider_enabled() etc. do a fresh
+        `from src.config.config import Config` per call, so they always see
+        the latest reload) -- confirmed this flipped is_provider_enabled
+        ("community") to False and broke the community routing tests
+        ordered after this class (gatewayz-backend#2262 #2265 flake,
+        tests/services/test_community_routing_exclusion.py and
+        tests/security/test_upstream_identity_firewall_e2e.py's
+        test_community_adapter). Fixture teardown runs after the test
+        function's own `monkeypatch` fixture has already restored the env
+        var, so reloading again here resyncs Config with the real ambient
+        environment -- restoring exactly the state this class found it in.
+        """
+        yield
+        import importlib
+
+        from src.config import config
+
+        importlib.reload(config)
+
     def test_unset_enables_all_and_is_not_explicit(self, monkeypatch):
         import importlib
 
