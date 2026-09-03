@@ -969,6 +969,154 @@ testnet WAYZ to the wallet. One claim per user and per wallet.
 `amount` is whole WAYZ (human-readable), not the wei-scaled value stored
 internally.
 
+## GPU Marketplace — Providers & Nodes
+
+Milestone 4: community GPU operators register a provider account, get
+admin-approved, then register nodes that serve open-weight models through
+an OpenAI-compatible server (vLLM first). Routing traffic to these nodes
+(the `community` provider), spot-check verification, payouts, and the
+public transparency feed ship in later Milestone 4 workstreams — this
+section covers registration, node management, heartbeats, and admin
+approval only (gatewayz-backend#2262).
+
+**Trust disclosure:** a community GPU operator is the compute and sees
+prompt content by construction. Community routing (when it ships) is
+opt-in per request only, via the `community/<model>` id prefix.
+
+All routes are under `/gpu`. Errors use `HTTPException` with a snake_case
+`detail` code; the app-wide error handler masks 403/404/429 response
+bodies into a canned message, so clients should key on the HTTP status
+code for those, and on `error.context.parameter_value` for 400s (same
+contract as `/auth/wallet/*`).
+
+### Register as a Provider
+
+```http
+POST /gpu/providers
+```
+
+Requires auth. Body: `{"display_name": "...", "payout_wallet_address":
+"0x...", "contact_email"?: "...", "region_default"?: "..."}`. The wallet
+must already be linked to the caller's account (`GET /auth/wallets`) —
+`400 wallet_not_linked` otherwise. One provider registration per user
+(`409` on a second attempt). New providers start `status: "pending"` and
+need admin approval before they can register nodes.
+
+### Get My Provider
+
+```http
+GET /gpu/providers/me
+```
+
+Requires auth. Returns the caller's provider row, their nodes, and an
+earnings summary (`{"accrued_wei": "0", "settled_wei": "0"}`, zeros until
+Milestone 4's payout workstream ships). `404` if not yet registered.
+
+### Register a Node
+
+```http
+POST /gpu/nodes
+```
+
+Requires auth; the caller's provider must be `approved` (`403
+provider_not_approved` otherwise). Body:
+```json
+{
+  "name": "node-a",
+  "region": "us-east",
+  "gpu_model": "H100",
+  "vram_gb": 80,
+  "bandwidth_mbps": 1000,
+  "endpoint_url": "https://node.example.com",
+  "endpoint_api_key": "...",
+  "models": [{"id": "llama-3.1-8b-instruct", "max_context": 8192}]
+}
+```
+
+`endpoint_url` must be `https`. At registration Gatewayz probes
+`GET {endpoint_url}/v1/models` with the given key (5s timeout) and
+verifies every declared model id is actually served — `400
+endpoint_unreachable` or `400 models_mismatch` otherwise. The endpoint key
+is encrypted at rest; it is never returned in any response.
+
+**Response** (`201`):
+```json
+{
+  "success": true,
+  "data": {
+    "node": { "id": 5, "status": "registered", "...": "..." },
+    "node_token": "gw_node_..."
+  }
+}
+```
+
+`node_token` is the node's heartbeat bearer credential — shown **exactly
+once**. Only its hash is stored; if it's lost, rotate it
+(`POST /gpu/nodes/{id}/rotate-token`).
+
+### Update / Disable / Rotate a Node
+
+```http
+PATCH /gpu/nodes/{id}
+DELETE /gpu/nodes/{id}
+POST /gpu/nodes/{id}/rotate-token
+```
+
+All require auth + ownership (`404 node_not_found` otherwise, whether the
+node doesn't exist or belongs to someone else). `PATCH` accepts any subset
+of the registration fields; changing `endpoint_url`, `endpoint_api_key`,
+or `models` re-runs the reachability probe (`endpoint_api_key` must be
+re-supplied whenever the endpoint or model list changes, so the probe has
+a key to test with). `DELETE` sets the node to `disabled` (soft delete —
+it stops serving and its heartbeat token is rejected). `rotate-token`
+returns a fresh `node_token`, shown once, same as registration.
+
+### Node Heartbeat
+
+```http
+POST /gpu/nodes/{id}/heartbeat
+```
+
+**Node-bearer auth**, not user auth: `Authorization: Bearer gw_node_...`
+(the token from registration/rotation) — a different credential from a
+user's `gw_live_*` API key. Rate-limited 6/min/node. Body:
+```json
+{
+  "load": { "outstanding": 2, "gpu_util_pct": 55.0 },
+  "models": [{"id": "llama-3.1-8b-instruct"}],
+  "version": "0.1.0",
+  "ts": 1735920000,
+  "signature": "0x..."
+}
+```
+
+`signature` is optional: a wallet signature (by the provider's payout
+wallet) over `f"gatewayz-heartbeat:{node_id}:{ts}"`. When present and
+valid, the response's `attested_heartbeat` is `true` — an invalid or
+missing signature does not fail the heartbeat, it's just unattested. A
+successful heartbeat marks the node `active` and refreshes
+`last_heartbeat_at`.
+
+A node that stops heartbeating is downgraded automatically by a background
+sweep (every `GPU_LIVENESS_SWEEP_INTERVAL_MINUTES`, default 2 min):
+`active` → `degraded` after `GPU_NODE_DEGRADED_AFTER_SECONDS` (180s) with
+no heartbeat, then → `offline` after `GPU_NODE_OFFLINE_AFTER_SECONDS`
+(600s). `disabled` nodes are never touched by the sweep.
+
+### Admin: Approve / Suspend Providers
+
+```http
+POST /gpu/admin/providers/{id}/approve
+POST /gpu/admin/providers/{id}/suspend
+GET  /gpu/admin/providers?status=pending
+```
+
+Admin only (`require_admin`). `approve` sets `status: "approved"` and
+records `approved_at`/`approved_by`; `suspend` sets `status: "suspended"`
+(an approved provider can be suspended; its existing nodes are left as-is
+— disable them individually if needed). `GET` lists providers, optionally
+filtered by `status`.
+
 ## Subscription Plans
 
 ### Get All Plans
