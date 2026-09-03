@@ -302,6 +302,60 @@ def test_register_node_rejects_non_https_endpoint():
 
 
 # ---------------------------------------------------------------------------
+# Free-text validation (gpu_providers.display_name, gpu_nodes.name/
+# gpu_model/region) -- operator-supplied text republished verbatim and
+# permanently on the public transparency feed (W-C review finding).
+# ---------------------------------------------------------------------------
+
+_INVALID_DISPLAY_TEXT_CASES = [
+    ("too_short", "ab"),
+    ("email_like", "operator@example.com"),
+    ("wallet_like", "0x" + "a" * 40),
+    ("url_like", "https://example.com"),
+    ("www_url_like", "www.example.com"),
+    ("leading_space", " leadingspace"),
+    ("bad_char", "node<script>"),
+]
+
+
+@pytest.mark.parametrize("label,value", _INVALID_DISPLAY_TEXT_CASES)
+def test_register_provider_rejects_invalid_display_name(label, value):
+    response = client.post(
+        "/gpu/providers",
+        json={"display_name": value, "payout_wallet_address": "0x" + "a" * 40},
+    )
+    assert response.status_code == 422, label
+
+
+@pytest.mark.parametrize("field", ["name", "gpu_model", "region"])
+@pytest.mark.parametrize("label,value", _INVALID_DISPLAY_TEXT_CASES)
+def test_register_node_rejects_invalid_display_text(label, value, field):
+    body = {**_VALID_NODE_BODY, field: value}
+    response = client.post("/gpu/nodes", json=body)
+    assert response.status_code == 422, f"{field}/{label}"
+
+
+def test_register_node_accepts_valid_display_text_with_allowed_punctuation():
+    # Allowed charset is alnum plus space/._- only.
+    body = {**_VALID_NODE_BODY, "name": "node-us-east.primary_1"}
+    response = client.post("/gpu/nodes", json=body)
+    assert response.status_code != 422
+
+
+@patch("src.routes.gpu.update_node")
+@patch("src.routes.gpu.get_node")
+@patch("src.routes.gpu.get_provider_by_user")
+def test_update_node_rejects_invalid_display_text(mock_get_provider, mock_get_node, mock_update):
+    mock_get_provider.return_value = _APPROVED_PROVIDER
+    mock_get_node.return_value = {"id": 5, "provider_id": 1, "endpoint_url": "https://x"}
+
+    response = client.patch("/gpu/nodes/5", json={"name": "operator@example.com"})
+
+    assert response.status_code == 422
+    mock_update.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # PATCH /gpu/nodes/{id}, DELETE, rotate-token
 # ---------------------------------------------------------------------------
 
@@ -363,7 +417,7 @@ def test_update_node_404_when_not_owned(mock_get_provider, mock_get_node):
     mock_get_provider.return_value = _APPROVED_PROVIDER
     mock_get_node.return_value = {"id": 5, "provider_id": 999}  # different provider
 
-    response = client.patch("/gpu/nodes/5", json={"name": "x"})
+    response = client.patch("/gpu/nodes/5", json={"name": "renamed-node"})
 
     assert response.status_code == 404
 

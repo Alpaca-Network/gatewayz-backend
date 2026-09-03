@@ -13,6 +13,7 @@ See spec: .../scratchpad/m4/spec.md sections 2-3.
 """
 
 import logging
+import re
 import secrets
 import time
 from typing import Any
@@ -63,6 +64,29 @@ _HEARTBEAT_SIGNATURE_MAX_SKEW_SECONDS = 300
 # Request/response schemas
 # ---------------------------------------------------------------------------
 
+# Operator-supplied free text that gets republished verbatim and
+# permanently on the public transparency feed (spec section 6; W-C review
+# finding): gpu_providers.display_name, gpu_nodes.name/gpu_model/region.
+# Plain alnum + space/._- shape, 3-40 chars, plus explicit rejection of
+# anything that could self-dox an operator (email, wallet address) or
+# inject a link -- `region` gets the same regex rather than a curated
+# allow-list, since the spec doesn't define one and a hand-maintained list
+# would need its own governance this PR doesn't own.
+_DISPLAY_TEXT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._-]{2,39}$")
+_WALLET_LIKE_RE = re.compile(r"0x[0-9a-fA-F]{40}")
+_URL_LIKE_RE = re.compile(r"(https?://|www\.)", re.IGNORECASE)
+
+
+def _validate_display_text(v: str) -> str:
+    if (
+        not _DISPLAY_TEXT_RE.match(v)
+        or "@" in v
+        or _WALLET_LIKE_RE.search(v)
+        or _URL_LIKE_RE.search(v)
+    ):
+        raise ValueError("invalid_display_text")
+    return v
+
 
 class CreateProviderRequest(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=200)
@@ -74,6 +98,11 @@ class CreateProviderRequest(BaseModel):
     @classmethod
     def _validate_wallet(cls, v):
         return normalize_wallet_address(v)
+
+    @field_validator("display_name")
+    @classmethod
+    def _validate_display_name(cls, v):
+        return _validate_display_text(v)
 
 
 class NodeModelSpec(BaseModel):
@@ -98,6 +127,11 @@ class CreateNodeRequest(BaseModel):
             raise ValueError("endpoint_url must be https")
         return v
 
+    @field_validator("name", "gpu_model", "region")
+    @classmethod
+    def _validate_display_fields(cls, v):
+        return _validate_display_text(v)
+
 
 class UpdateNodeRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
@@ -115,6 +149,11 @@ class UpdateNodeRequest(BaseModel):
         if v is not None and not v.startswith("https://"):
             raise ValueError("endpoint_url must be https")
         return v
+
+    @field_validator("name", "gpu_model", "region")
+    @classmethod
+    def _validate_display_fields(cls, v):
+        return v if v is None else _validate_display_text(v)
 
 
 class HeartbeatLoad(BaseModel):

@@ -1002,6 +1002,12 @@ must already be linked to the caller's account (`GET /auth/wallets`) —
 (`409` on a second attempt). New providers start `status: "pending"` and
 need admin approval before they can register nodes.
 
+`display_name` (and, on node registration below, `name`/`gpu_model`/
+`region`) is published verbatim and permanently on the public
+transparency feed — it must match `^[A-Za-z0-9][A-Za-z0-9 ._-]{2,39}$`
+and must not contain `@`, a `0x`-prefixed 40-hex-char wallet-looking
+string, or a URL (`http(s)://`/`www.`) — `422` otherwise.
+
 ### Get My Provider
 
 ```http
@@ -1033,11 +1039,16 @@ provider_not_approved` otherwise). Body:
 }
 ```
 
-`endpoint_url` must be `https`. At registration Gatewayz probes
-`GET {endpoint_url}/v1/models` with the given key (5s timeout) and
-verifies every declared model id is actually served — `400
-endpoint_unreachable` or `400 models_mismatch` otherwise. The endpoint key
-is encrypted at rest; it is never returned in any response.
+`endpoint_url` must be `https`. At registration (and on any `PATCH` that
+changes the endpoint) Gatewayz probes `GET {endpoint_url}/v1/models` with
+the given key (5s timeout, no redirects followed, capped response size)
+and verifies every declared model id is actually served — `400
+endpoint_unreachable` or `400 models_mismatch` otherwise. The hostname is
+resolved and SSRF-checked first (only public addresses are allowed — no
+loopback/private/link-local/cloud-metadata/CGNAT targets), and the probe
+connects to that resolved IP directly so a later DNS change can't
+retarget it. The endpoint key is encrypted at rest; it is never returned
+in any response.
 
 **Response** (`201`):
 ```json
