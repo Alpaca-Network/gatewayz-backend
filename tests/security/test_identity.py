@@ -95,7 +95,7 @@ def test_request_identity_is_frozen():
 # --- (a) valid API key -------------------------------------------------------
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_valid_api_key_resolves_api_key_identity(mock_get_user):
     mock_get_user.return_value = _user(id=7, auth_method="email", credits=5)
 
@@ -119,7 +119,7 @@ def test_valid_api_key_resolves_api_key_identity(mock_get_user):
 # --- (b) wallet-linked user ---------------------------------------------------
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_wallet_linked_user_has_primary_wallet(mock_get_user):
     mock_get_user.return_value = _user(id=9, auth_method="wallet", credits=0)
 
@@ -137,7 +137,7 @@ def test_wallet_linked_user_has_primary_wallet(mock_get_user):
     assert body["is_guest"] is True
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_wallet_linked_user_with_payment_signal_is_not_guest(mock_get_user):
     mock_get_user.return_value = _user(id=10, auth_method="wallet", credits=25.0)
 
@@ -185,13 +185,13 @@ def test_invalid_key_falls_back_to_anonymous():
 
 # A validly-formatted key with no matching user is a *different* case from
 # "invalid key": get_optional_api_key still returns the key (kind stays
-# "api_key", is_anonymous False) even though get_optional_user's separate
-# lookup finds nothing -- this preserves parity with the pre-existing
+# "api_key", is_anonymous False) even though the get_user(api_key) lookup
+# below finds nothing -- this preserves parity with the pre-existing
 # `is_anonymous = api_key is None` derivation in chat.py, which never looked
 # at whether a user existed.
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_key_with_no_matching_user_keeps_api_key_kind(mock_get_user):
     mock_get_user.return_value = None
 
@@ -206,7 +206,7 @@ def test_key_with_no_matching_user_keeps_api_key_kind(mock_get_user):
 # --- (e) user_wallets import missing/raising -> wallets () without error ----
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_missing_user_wallets_module_yields_empty_wallets(mock_get_user):
     mock_get_user.return_value = _user(id=11, auth_method="email")
 
@@ -219,7 +219,7 @@ def test_missing_user_wallets_module_yields_empty_wallets(mock_get_user):
     assert body["primary_wallet"] is None
 
 
-@patch("src.security.deps.get_user")
+@patch("src.security.identity.get_user")
 def test_wallet_lookup_raising_yields_empty_wallets(mock_get_user):
     mock_get_user.return_value = _user(id=12, auth_method="email")
 

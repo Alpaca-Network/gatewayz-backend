@@ -4,14 +4,16 @@ Three shapes of caller reach the backend today: an API-key holder, a
 wallet-linked API-key holder (same shape, `users.auth_method == "wallet"`),
 and an anonymous caller with no key at all. Each route currently re-derives
 "is this anonymous?" locally (e.g. `chat.py`'s `is_anonymous = api_key is
-None`). `RequestIdentity` composes the existing `get_optional_api_key` /
-`get_optional_user` dependency chain plus wallet lookups into one object so
-new code has exactly one place to ask.
+None`). `RequestIdentity` composes `get_optional_api_key` (the existing
+validated-key dependency) with a direct, cached `get_user(api_key)` lookup
+and wallet lookups into one object so new code has exactly one place to ask.
 
 This module does **not** replace `get_api_key` / `get_user_id` /
 `get_optional_*` — those keep their signatures and behaviour unchanged for
 every existing caller. `get_request_identity` is additive: it depends on the
-same primitives and adds nothing to the validation path.
+same validated-key primitive and adds nothing to the validation path (see
+`get_request_identity`'s docstring for why it does NOT also depend on
+`get_optional_user`).
 """
 
 from __future__ import annotations
@@ -22,7 +24,8 @@ from typing import Any, Literal
 
 from fastapi import Depends, Request
 
-from src.security.deps import get_optional_api_key, get_optional_user
+from src.security.deps import get_optional_api_key
+from src.services.user_lookup_cache import get_user
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,11 @@ class RequestIdentity:
     auth_method: str | None
     is_guest: bool
     wallet_addresses: tuple[str, ...]
+    user: dict[str, Any] | None = None
+    """The full user row from `get_user(api_key)`, already looked up while
+    resolving identity. Routes that would otherwise call `get_user(api_key)`
+    again (e.g. chat.py's authenticated branch) should read this instead --
+    it's the same cached lookup, just already done."""
 
     @property
     def is_anonymous(self) -> bool:
@@ -62,6 +70,7 @@ ANONYMOUS = RequestIdentity(
     auth_method=None,
     is_guest=True,
     wallet_addresses=(),
+    user=None,
 )
 
 
@@ -103,12 +112,20 @@ def _is_guest(auth_method: str | None, user: dict[str, Any]) -> bool:
 async def get_request_identity(
     request: Request,
     api_key: str | None = Depends(get_optional_api_key),
-    user: dict[str, Any] | None = Depends(get_optional_user),
 ) -> RequestIdentity:
     """FastAPI dependency: resolve the caller's identity once per request.
 
     Cached on `request.state.identity` so multiple `Depends(get_request_identity)`
     in one request don't repeat the wallet lookup.
+
+    Deliberately does NOT depend on `get_optional_user`: that function
+    re-parses its own `HTTPBearer` credentials and calls `get_api_key(...)`
+    again directly (not via `Depends`, so FastAPI's per-request dependency
+    cache can't dedupe it), which re-runs `validate_api_key_security()` --
+    including its `last_used_at` write to Supabase -- a second time for every
+    authenticated request. `api_key` is already validated by
+    `get_optional_api_key` above, so the user lookup below goes straight to
+    the (cached) `get_user(api_key)` instead of re-validating.
     """
     cached = getattr(request.state, "identity", None) if request is not None else None
     if cached is not None:
@@ -121,11 +138,11 @@ async def get_request_identity(
         # `is_anonymous = api_key is None` it replaces.
         identity = ANONYMOUS
     else:
-        # `user` is resolved independently by get_optional_user and can be
-        # None even though api_key is a validly-formatted key (e.g. no
-        # matching account) -- keep kind == "api_key" in that case; the
-        # existing per-route auth flow (unchanged by this dependency) is
+        # `user` can be None even though api_key is a validly-formatted key
+        # (e.g. no matching account) -- keep kind == "api_key" in that case;
+        # the existing per-route auth flow (unchanged by this dependency) is
         # still responsible for 404ing on a missing user.
+        user = get_user(api_key)
         user_id = user.get("id") if user else None
         auth_method = user.get("auth_method") if user else None
         wallets = _wallet_addresses_for(user_id) if user_id is not None else ()
@@ -136,6 +153,7 @@ async def get_request_identity(
             auth_method=auth_method,
             is_guest=_is_guest(auth_method, user) if user else False,
             wallet_addresses=wallets,
+            user=user,
         )
 
     logger.debug(
