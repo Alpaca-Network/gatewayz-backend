@@ -53,6 +53,8 @@ import argparse
 import hashlib
 import json
 import logging
+import os
+import stat
 import sys
 import threading
 import time
@@ -69,6 +71,7 @@ MAX_BACKOFF_SECONDS = 300
 HEARTBEAT_MESSAGE_PREFIX = "gatewayz-heartbeat"
 BILLING_REF_HEADER = "X-Gatewayz-Request-Id"
 ATTESTATION_HEADER = "X-Gatewayz-Attestation"
+_SSE_CONTENT_TYPE = "text/event-stream"
 
 # vLLM's Prometheus metric names for in-flight requests (both counted --
 # "waiting" is queued but not yet dispatched, "running" is actively serving).
@@ -129,9 +132,20 @@ def load_wallet_account(keyfile: Path):
     """Load a payout wallet's private key from a local file (one line, hex,
     `0x`-prefixed or not -- eth_account.Account.from_key accepts both).
     Never logs the key. The file is the operator's responsibility to keep
-    off any shared machine and out of version control.
+    off any shared machine and out of version control (`chmod 600` --
+    warned below on POSIX if that's not already the case).
     """
     from eth_account import Account
+
+    if os.name == "posix":
+        mode = keyfile.stat().st_mode
+        if mode & (stat.S_IRWXG | stat.S_IRWXO):
+            logger.warning(
+                "%s is readable by group/other -- run `chmod 600 %s` "
+                "(this file holds your payout wallet's private key)",
+                keyfile,
+                keyfile,
+            )
 
     key = keyfile.read_text().strip()
     return Account.from_key(key)
@@ -292,9 +306,10 @@ def build_attestation(
     raising) keeps the proxy transparent for everything else.
 
     v1 limitation: non-streaming only. A streaming response's body isn't
-    a single JSON document to hash; the proxy still forwards it, just
-    without an attestation header. Documented in
-    docs/gpu/PROVIDER_ONBOARDING.md.
+    a single JSON document to hash; `_AttestProxyHandler` never calls this
+    for a streaming exchange in the first place (see `_relay_streaming`) --
+    the proxy still forwards it, unbuffered, just without an attestation
+    header. Documented in docs/gpu/PROVIDER_ONBOARDING.md.
     """
     try:
         req_json = json.loads(request_body)
@@ -311,7 +326,12 @@ def build_attestation(
     prompt_tokens = usage.get("prompt_tokens", 0)
     completion_tokens = usage.get("completion_tokens", 0)
     choices = resp_json.get("choices") or []
-    response_text = "".join((c.get("message") or {}).get("content") or "" for c in choices)
+    # n > 1: only choices[0] counts -- must match community_adapter.py's
+    # _record_receipt, which never hashes any choice past the first (see
+    # docs/gpu/attestation.md). Concatenating every choice would hash
+    # something the gateway's own receipt was never computed against.
+    first_choice = choices[0] if choices else {}
+    response_text = (first_choice.get("message") or {}).get("content") or ""
 
     prompt_hash = hash_prompt(messages)
     response_hash = hash_response(response_text)
@@ -321,10 +341,27 @@ def build_attestation(
     return sign_message(account, message)
 
 
+def _request_wants_streaming(body: bytes) -> bool:
+    """True iff the inbound request body is JSON with `"stream": true`.
+    Used alongside the upstream response's Content-Type (see `_forward`)
+    to decide whether to relay chunk-by-chunk or buffer.
+    """
+    try:
+        parsed = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    return bool(isinstance(parsed, dict) and parsed.get("stream"))
+
+
 class _AttestProxyHandler(BaseHTTPRequestHandler):
-    # Set per-instance by make_attest_proxy_handler() below.
+    # Set per-instance by make_attest_proxy_handler() below. `client` is an
+    # httpx.Client rather than the module-level httpx.stream()/httpx.request()
+    # shortcuts specifically so tests can inject one built with
+    # httpx.MockTransport (see tests/scripts/test_gpu_node_agent.py) instead
+    # of hitting a real upstream.
     upstream: str
     account: Any
+    client: httpx.Client
 
     def log_message(self, fmt: str, *fmt_args) -> None:  # noqa: D401 -- BaseHTTPRequestHandler hook
         logger.debug("attest-proxy: " + fmt, *fmt_args)
@@ -344,24 +381,66 @@ class _AttestProxyHandler(BaseHTTPRequestHandler):
             k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length")
         }
         upstream_url = f"{self.upstream.rstrip('/')}{self.path}"
+
+        # client.stream() connects and reads headers eagerly but the body
+        # lazily -- this lets us decide streaming vs. buffered (by the
+        # request's own `stream: true`, or the response's actual
+        # Content-Type, whichever signals it first) before committing to
+        # either path, without ever fully reading a long SSE body upfront.
         try:
-            resp = httpx.request(
-                self.command,
-                upstream_url,
-                content=body,
-                headers=forward_headers,
-                timeout=60.0,
-            )
+            with self.client.stream(
+                self.command, upstream_url, content=body, headers=forward_headers, timeout=60.0
+            ) as resp:
+                is_streaming = _request_wants_streaming(
+                    body
+                ) or _SSE_CONTENT_TYPE in resp.headers.get("content-type", "")
+                if is_streaming:
+                    self._relay_streaming(resp)
+                else:
+                    resp.read()
+                    self._relay_buffered(resp, body, billing_ref)
         except httpx.HTTPError as e:
             logger.warning("attest-proxy: upstream request failed: %s", e)
             self.send_response(502)
             self.end_headers()
             self.wfile.write(str(e).encode("utf-8"))
-            return
 
+    def _relay_streaming(self, resp: httpx.Response) -> None:
+        """Copy a streamed (SSE) response through chunk by chunk, in real
+        time, instead of buffering the whole thing -- vLLM's token-by-token
+        delivery would otherwise be lost and a long completion could
+        exceed `_forward`'s request timeout for no reason (a real streaming
+        client wouldn't need to). Attestation is skipped here: headers must
+        be sent before the body starts, and there's no single response
+        document to hash yet anyway (documented limitation, see
+        docs/gpu/PROVIDER_ONBOARDING.md).
+        """
+        self.send_response(resp.status_code)
+        for k, v in resp.headers.items():
+            if k.lower() in ("content-length", "transfer-encoding", "connection"):
+                continue
+            self.send_header(k, v)
+        self.end_headers()
+        try:
+            for chunk in resp.iter_bytes():
+                if chunk:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+        except (httpx.HTTPError, BrokenPipeError, ConnectionError) as e:
+            # Headers are already on the wire -- there's no way to turn this
+            # into a clean error response now, just stop and log.
+            logger.warning("attest-proxy: streaming relay interrupted: %s", e)
+
+    def _relay_buffered(
+        self, resp: httpx.Response, request_body: bytes, billing_ref: str | None
+    ) -> None:
+        """Buffer-then-send path for ordinary (non-streaming) JSON
+        responses -- small enough to hold in memory, and buffering is what
+        lets `build_attestation` hash the complete response.
+        """
         attestation = None
         if billing_ref:
-            attestation = build_attestation(body, resp.content, billing_ref, self.account)
+            attestation = build_attestation(request_body, resp.content, billing_ref, self.account)
         elif resp.status_code < 400:
             logger.debug(
                 "attest-proxy: no %s on inbound request; forwarding without attestation "
@@ -381,18 +460,24 @@ class _AttestProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(resp.content)
 
 
-def make_attest_proxy_handler(upstream: str, account) -> type[_AttestProxyHandler]:
+def make_attest_proxy_handler(
+    upstream: str, account, client: httpx.Client | None = None
+) -> type[_AttestProxyHandler]:
     return type(
         "BoundAttestProxyHandler",
         (_AttestProxyHandler,),
-        {"upstream": upstream, "account": account},
+        {"upstream": upstream, "account": account, "client": client or httpx.Client()},
     )
 
 
-def start_attest_proxy(port: int, upstream: str, account) -> ThreadingHTTPServer:
+def start_attest_proxy(
+    port: int, upstream: str, account, client: httpx.Client | None = None
+) -> ThreadingHTTPServer:
     if account is None:
         raise ValueError("--attest-proxy requires --wallet-keyfile (attestation must be signed)")
-    server = ThreadingHTTPServer(("127.0.0.1", port), make_attest_proxy_handler(upstream, account))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", port), make_attest_proxy_handler(upstream, account, client)
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="gpu-attest-proxy")
     thread.start()
     logger.info("attest-proxy listening on 127.0.0.1:%d -> %s", port, upstream)

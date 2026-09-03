@@ -13,6 +13,7 @@ import pytest
 from eth_account import Account
 
 from scripts.gpu_node_agent import (
+    ATTESTATION_HEADER,
     BILLING_REF_HEADER,
     build_attestation,
     build_heartbeat_payload,
@@ -24,6 +25,7 @@ from scripts.gpu_node_agent import (
     run_loop,
     send_heartbeat,
     sign_message,
+    start_attest_proxy,
 )
 from src.security.wallet_signature import verify_wallet_signature
 from src.services.gpu import hashing as backend_hashing
@@ -330,3 +332,164 @@ def test_build_attestation_returns_none_for_non_chat_exchange():
 def test_build_attestation_returns_none_when_request_not_json():
     account = Account.create()
     assert build_attestation(b"not json", b"{}", "billing-ref-123", account) is None
+
+
+def test_build_attestation_uses_only_first_choice_for_n_greater_than_1():
+    """community_adapter.py's _record_receipt only ever hashes
+    raw.choices[0].message.content -- for n>1 the agent must match that
+    exactly, not concatenate every choice (that produced a signature the
+    backend could never verify -- the bug this test guards against).
+    """
+    account = Account.create()
+    request_body = json.dumps(
+        {
+            "model": "community/llama-3.1-8b-instruct",
+            "messages": [{"role": "user", "content": "hi"}],
+            "n": 2,
+        }
+    ).encode()
+    response_body = json.dumps(
+        {
+            "model": "community/llama-3.1-8b-instruct",
+            "choices": [
+                {"message": {"content": "first reply"}},
+                {"message": {"content": "second reply"}},
+            ],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+        }
+    ).encode()
+
+    attestation = build_attestation(request_body, response_body, "billing-ref-123", account)
+
+    prompt_hash = hash_prompt([{"role": "user", "content": "hi"}])
+    # Backend-equivalent: choices[0] only, via the real backend module.
+    response_hash = backend_hashing.hash_response("first reply")
+    expected_message = (
+        f"billing-ref-123|community/llama-3.1-8b-instruct|{prompt_hash}|{response_hash}|5|3"
+    )
+    assert verify_wallet_signature(account.address, expected_message, attestation) is True
+
+    # And explicitly: concatenating both choices would NOT verify -- proving
+    # this is a real fix, not a test that would pass either way.
+    wrong_response_hash = backend_hashing.hash_response("first replysecond reply")
+    wrong_message = (
+        f"billing-ref-123|community/llama-3.1-8b-instruct|{prompt_hash}|{wrong_response_hash}|5|3"
+    )
+    assert verify_wallet_signature(account.address, wrong_message, attestation) is False
+
+
+# ---------------------------------------------------------------------------
+# attest-proxy: buffered (non-streaming) vs. streaming passthrough.
+# The upstream leg is httpx.MockTransport (no real HTTP to any upstream);
+# the proxy itself is a real ThreadingHTTPServer bound to 127.0.0.1 (a real
+# socket is unavoidable -- BaseHTTPRequestHandler parses off one -- but
+# loopback-only, no network beyond this process).
+# ---------------------------------------------------------------------------
+
+
+def _run_attest_proxy(handler):
+    """Start a real attest-proxy server on an OS-assigned port, backed by
+    an httpx.MockTransport upstream. Returns (base_url, server); caller
+    must call server.shutdown() + server.server_close().
+    """
+    account = Account.create()
+    mock_client = httpx.Client(transport=httpx.MockTransport(handler))
+    server = start_attest_proxy(0, "http://fake-upstream.invalid", account, client=mock_client)
+    port = server.socket.getsockname()[1]
+    return f"http://127.0.0.1:{port}", server, account
+
+
+def test_attest_proxy_buffered_response_gets_attestation_header():
+    def upstream_handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get(BILLING_REF_HEADER) == "billing-ref-xyz"
+        return httpx.Response(
+            200,
+            json={
+                "model": "llama-3.1-8b-instruct",
+                "choices": [{"message": {"content": "hello!"}}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 3},
+            },
+        )
+
+    base_url, server, account = _run_attest_proxy(upstream_handler)
+    try:
+        with httpx.Client() as caller:
+            resp = caller.post(
+                f"{base_url}/v1/chat/completions",
+                json={
+                    "model": "llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+                headers={BILLING_REF_HEADER: "billing-ref-xyz"},
+                timeout=5.0,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert resp.status_code == 200
+    assert resp.json()["choices"][0]["message"]["content"] == "hello!"
+    attestation = resp.headers.get(ATTESTATION_HEADER.lower())
+    assert attestation is not None
+
+    prompt_hash = hash_prompt([{"role": "user", "content": "hi"}])
+    response_hash = hash_response("hello!")
+    expected_message = f"billing-ref-xyz|llama-3.1-8b-instruct|{prompt_hash}|{response_hash}|5|3"
+    assert verify_wallet_signature(account.address, expected_message, attestation) is True
+
+
+def test_attest_proxy_streaming_request_passes_through_unbuffered_without_attestation():
+    sse_body = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n'
+
+    def upstream_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse_body)
+
+    base_url, server, _account = _run_attest_proxy(upstream_handler)
+    try:
+        with httpx.Client() as caller:
+            resp = caller.post(
+                f"{base_url}/v1/chat/completions",
+                json={
+                    "model": "llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "stream": True,
+                },
+                headers={BILLING_REF_HEADER: "billing-ref-xyz"},
+                timeout=5.0,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert resp.status_code == 200
+    assert resp.content == sse_body  # forwarded byte-for-byte, not re-encoded
+    assert ATTESTATION_HEADER.lower() not in {k.lower() for k in resp.headers}
+
+
+def test_attest_proxy_detects_streaming_from_response_content_type_even_without_stream_flag():
+    """The request didn't declare stream:true, but the upstream answered
+    text/event-stream anyway -- the proxy must still relay unbuffered
+    rather than trying (and failing) to treat it as a JSON document."""
+    sse_body = b"data: unexpected-but-real-sse\n\n"
+
+    def upstream_handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=sse_body)
+
+    base_url, server, _account = _run_attest_proxy(upstream_handler)
+    try:
+        with httpx.Client() as caller:
+            resp = caller.post(
+                f"{base_url}/v1/chat/completions",
+                json={
+                    "model": "llama-3.1-8b-instruct",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+                headers={BILLING_REF_HEADER: "billing-ref-xyz"},
+                timeout=5.0,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert resp.content == sse_body
+    assert ATTESTATION_HEADER.lower() not in {k.lower() for k in resp.headers}

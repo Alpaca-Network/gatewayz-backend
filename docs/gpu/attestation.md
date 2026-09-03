@@ -31,6 +31,13 @@ hash_response(response_text) = sha256_hex(response_text)
   assistant's final message content as a plain string (streamed responses:
   the concatenation of every `delta.content` chunk, in order — not the raw
   SSE bytes).
+- **`n > 1` (multiple completions): only `choices[0]` counts.** If a
+  request asks for more than one completion, `response_text` is
+  `choices[0].message.content` alone (`""` if absent) — matching
+  `community_adapter.py`'s `_record_receipt`, which never hashes any
+  choice past the first. Do not concatenate every choice's content; that
+  produces a hash the gateway's own receipt was never computed against,
+  so the attestation signature won't verify.
 
 **`ensure_ascii` matters.** `json.dumps` defaults to `ensure_ascii=True`
 (non-ASCII characters rendered as `\uXXXX` escapes) unless told otherwise —

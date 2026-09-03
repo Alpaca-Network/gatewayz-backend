@@ -122,10 +122,18 @@ Content-Type: application/json
   "vram_gb": 24,
   "bandwidth_mbps": 1000,
   "endpoint_url": "https://your-node.example.com",
-  "endpoint_api_key": "any-bearer-token-your-server-expects-or-empty",
+  "endpoint_api_key": "any-bearer-token-your-server-expects",
   "models": [{"id": "llama-3.1-8b-instruct", "max_context": 8192}]
 }
 ```
+
+`endpoint_api_key` is **required and cannot be empty** (an empty string
+422s) — vLLM's default OpenAI-compat server doesn't require a bearer
+token, so if yours doesn't either, put any random placeholder string here
+rather than trying to omit it. Gatewayz still sends it as a bearer token
+on every call to your endpoint, so if you'd rather actually require one,
+generate a real one (e.g. `openssl rand -hex 32`) and configure vLLM to
+expect it (`--api-key`).
 
 Gatewayz probes `GET {endpoint_url}/v1/models` at registration time and
 checks your declared model ids are actually being served (5 second
@@ -163,8 +171,10 @@ signed. Gatewayz marks a signed, valid heartbeat `attested_heartbeat:
 true`, which lowers your spot-check sampling rate (see "Verification") —
 signing costs you nothing and reduces how often you're re-checked.
 
-**Keep this file off shared machines and out of version control.** It
-holds your payout wallet's key — the same key you'd use to receive WAYZ.
+**Keep this file off shared machines and out of version control**, and
+lock down its permissions so only the account running the agent can read
+it: `chmod 600 ~/.gatewayz/payout-key`. It holds your payout wallet's
+key — the same key you'd use to receive WAYZ.
 
 ### Response attestation (optional, recommended)
 
