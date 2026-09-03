@@ -27,7 +27,6 @@ from src.services.circuit_breaker import CircuitBreakerError
 from src.services.credit_precheck import estimate_and_check_credits
 from src.services.pricing import calculate_cost_split, get_model_pricing
 from src.services.provider_selector import get_selector
-from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 # Providers with native async streaming use direct imports (currently OpenRouter).
 # All other providers are dispatched via PROVIDER_ROUTING (lazy-imported to avoid
@@ -36,6 +35,7 @@ from src.services.providers.openrouter_client import (
     make_openrouter_request_openai,
     make_openrouter_request_openai_stream_async,
 )
+from src.services.upstream.anonymize import scrub_upstream_kwargs
 
 logger = logging.getLogger(__name__)
 
