@@ -9,9 +9,12 @@
 --   migrations of its own. Owned by W-A1 (#2262).
 --
 --   RLS is enabled on every table, service-role only (no policy), matching
---   user_wallets/wallet_stakes/faucet_claims -- EXCEPT
---   gpu_utilization_hourly, which is an aggregate-only public rollup and
---   gets an explicit anon SELECT policy (spec section 6).
+--   user_wallets/wallet_stakes/faucet_claims -- including
+--   gpu_utilization_hourly. It's an aggregate-only rollup (spec section 6),
+--   but public reads go through the rate-limited, cached W-C API
+--   (/gpu/public/*), not a direct anon PostgREST policy -- a policy here
+--   would let any holder of the public anon key bypass that endpoint's
+--   60/min/IP limit and 30s cache entirely (W-C review finding).
 --
 --   provider_work intentionally stores NO prompt/response content -- only
 --   hashes (threat model G3, spec section 3 / 4). Community GPU operators
@@ -152,10 +155,18 @@ CREATE INDEX IF NOT EXISTS idx_provider_settlements_provider_id
 ALTER TABLE public.provider_settlements ENABLE ROW LEVEL SECURITY;
 
 -- provider_earnings.settlement_id references provider_settlements -- added
--- after both tables exist (created_by-order FK).
-ALTER TABLE public.provider_earnings
-    ADD CONSTRAINT fk_provider_earnings_settlement
-    FOREIGN KEY (settlement_id) REFERENCES public.provider_settlements(id);
+-- after both tables exist (created_by-order FK). Guarded so reapplying
+-- this migration is idempotent, same as every CREATE/POLICY above.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'fk_provider_earnings_settlement'
+    ) THEN
+        ALTER TABLE public.provider_earnings
+            ADD CONSTRAINT fk_provider_earnings_settlement
+            FOREIGN KEY (settlement_id) REFERENCES public.provider_settlements(id);
+    END IF;
+END $$;
 
 
 CREATE TABLE IF NOT EXISTS public.gpu_utilization_hourly (
@@ -173,11 +184,7 @@ CREATE TABLE IF NOT EXISTS public.gpu_utilization_hourly (
 
 -- Public transparency rollup (spec section 6) -- aggregate only, no
 -- wallet/endpoint/provider/user identity is ever stored in this table.
+-- No anon policy: public access is served exclusively through W-C's
+-- rate-limited, cached /gpu/public/* API (server-side reads use the
+-- service-role client, which RLS never restricts) -- see migration header.
 ALTER TABLE public.gpu_utilization_hourly ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS gpu_utilization_hourly_public_read ON public.gpu_utilization_hourly;
-CREATE POLICY gpu_utilization_hourly_public_read
-    ON public.gpu_utilization_hourly
-    FOR SELECT
-    TO anon
-    USING (true);

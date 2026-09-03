@@ -63,6 +63,19 @@ TARGET_TABLES = frozenset(
         "user_wallets",
         "wallet_stakes",
         "faucet_claims",
+        # Milestone 4 GPU marketplace (gatewayz-backend#2262) -- all
+        # service-role-only, including gpu_utilization_hourly (its anon
+        # SELECT policy was dropped: public reads go through W-C's
+        # rate-limited, cached /gpu/public/* API instead of direct
+        # PostgREST access). Included here as a regression guard against a
+        # future change loosening RLS on any of these.
+        "gpu_providers",
+        "gpu_nodes",
+        "provider_work",
+        "provider_payout_rates",
+        "provider_earnings",
+        "provider_settlements",
+        "gpu_utilization_hourly",
     }
 )
 
