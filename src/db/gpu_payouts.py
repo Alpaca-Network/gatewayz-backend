@@ -88,15 +88,19 @@ def list_sampled_pending_work(since_iso: str) -> list[dict]:
 
 
 def list_agable_pending_work(older_than_iso: str) -> list[dict]:
-    """provider_work rows never selected for spot-check (verification still
-    'pending') and older than older_than_iso -- the 24h aging path that
-    resolves them to verified/skipped without ever being replayed."""
+    """provider_work rows older than older_than_iso still awaiting a final
+    outcome -- 'pending' (never selected for spot-check) OR 'sampled' (was
+    selected, but the verifier job could never resolve it -- no stash, no
+    node, no replay infra available -- so it never advanced past
+    'sampled'). Both cases fall through to the same 24h aging resolution
+    (src/services/gpu/spot_check.py's _resolve_aged_row) rather than
+    getting stuck unresolved forever."""
     try:
         client = get_supabase_client()
         result = (
             client.table(_WORK_TABLE)
             .select("*")
-            .eq("verification", "pending")
+            .in_("verification", ["pending", "sampled"])
             .lt("created_at", older_than_iso)
             .order("created_at", desc=False)
             .limit(_WORK_QUERY_ROW_CAP)

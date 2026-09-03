@@ -69,7 +69,7 @@ def test_list_agable_pending_work_returns_rows(sb):
     client, query = _client_with(rows)
     with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
         assert gpu_payouts.list_agable_pending_work("2026-09-02T00:00:00Z") == rows
-    query.eq.assert_any_call("verification", "pending")
+    query.in_.assert_any_call("verification", ["pending", "sampled"])
 
 
 def test_set_verification_updates_and_returns_true(sb):
