@@ -20,6 +20,21 @@ class PrivyLinkedAccount(BaseModel):
     verified_at: int | None = None
     first_verified_at: int | None = None
     latest_verified_at: int | None = None
+    # Wallet fields (gatewayz-backend#2251) -- present on type in
+    # ("wallet", "smart_wallet") entries. Privy's own objects use camelCase,
+    # so accept both spellings like phone_number above.
+    chain_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("chain_type", "chainType"),
+    )
+    wallet_client_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("wallet_client_type", "walletClientType"),
+    )
+    connector_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("connector_type", "connectorType"),
+    )
 
     @field_validator("type")
     @classmethod
@@ -61,13 +76,21 @@ class PrivyLinkedAccount(BaseModel):
 
         return normalized
 
-    @field_validator("email", "address")
+    @field_validator("email")
     @classmethod
     def validate_email_format(cls, v):
         """Validate email format if provided"""
         if v is not None and "@" not in v:
             raise ValueError("Invalid email format")
         return v
+
+    # NOTE (gatewayz-backend#2251): `address` is intentionally NOT validated
+    # as an email here. It's overloaded across account types -- an email-ish
+    # value for some OAuth accounts (used as an email fallback by
+    # `_resolve_account_email`, which itself checks for "@"), but a raw
+    # 0x-prefixed hex address for `wallet`/`smart_wallet` accounts. Rejecting
+    # non-email-shaped addresses here would 422 every real wallet
+    # linked-account payload once the frontend stops filtering them out.
 
 
 class PrivyUserData(BaseModel):
