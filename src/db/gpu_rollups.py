@@ -243,7 +243,9 @@ def aggregate_hour(hour: datetime) -> list[dict]:
         node_ids = sorted({r["node_id"] for r in work_rows if r.get("node_id") is not None})
         region_by_node: dict[str, str] = {}
         if node_ids:
-            nodes_result = client.table(_NODES_TABLE).select("id,region").in_("id", node_ids).execute()
+            nodes_result = (
+                client.table(_NODES_TABLE).select("id,region").in_("id", node_ids).execute()
+            )
             region_by_node = {
                 n["id"]: n.get("region") or "unknown" for n in (nodes_result.data or [])
             }
@@ -269,7 +271,9 @@ def get_utilization(window: str, group: str) -> list[dict]:
     """
     hours = _WINDOW_HOURS.get(window)
     if hours is None:
-        raise ValueError(f"unsupported window: {window!r} (expected one of {sorted(_WINDOW_HOURS)})")
+        raise ValueError(
+            f"unsupported window: {window!r} (expected one of {sorted(_WINDOW_HOURS)})"
+        )
     if group not in ("region", "model"):
         raise ValueError(f"unsupported group: {group!r} (expected 'region' or 'model')")
 
@@ -317,7 +321,10 @@ def _recent_hourly_rows(hours: int) -> list[dict]:
     try:
         client = get_db()
         result = (
-            client.table(_UTIL_TABLE).select("hour,region,model,active_nodes").gte("hour", since).execute()
+            client.table(_UTIL_TABLE)
+            .select("hour,region,model,active_nodes")
+            .gte("hour", since)
+            .execute()
         )
         return result.data or []
     except Exception as e:
@@ -374,7 +381,10 @@ def _last_hour_summary() -> dict:
     tokens = sum((r.get("prompt_tokens") or 0) + (r.get("completion_tokens") or 0) for r in rows)
     if requests:
         avg_latency = int(
-            round(sum((r.get("avg_latency_ms") or 0) * (r.get("requests") or 0) for r in rows) / requests)
+            round(
+                sum((r.get("avg_latency_ms") or 0) * (r.get("requests") or 0) for r in rows)
+                / requests
+            )
         )
         error_rate = round(
             sum((r.get("error_rate") or 0) * (r.get("requests") or 0) for r in rows) / requests, 4
@@ -402,7 +412,10 @@ def get_summary() -> dict:
     try:
         client = get_db()
         providers_result = (
-            client.table(_PROVIDERS_TABLE).select("id", count="exact").eq("status", "approved").execute()
+            client.table(_PROVIDERS_TABLE)
+            .select("id", count="exact")
+            .eq("status", "approved")
+            .execute()
         )
         approved_providers = providers_result.count or 0
     except Exception as e:

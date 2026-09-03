@@ -164,9 +164,9 @@ def test_no_sentinel_in_public_response(path, params, sentinel_db_client):
     assert response.status_code == 200, response.text
     haystack = _recursive_haystack(response.json())
     for sentinel in ALL_SENTINELS:
-        assert sentinel.lower() not in haystack, (
-            f"{path}: sentinel {sentinel!r} leaked into the public response body"
-        )
+        assert (
+            sentinel.lower() not in haystack
+        ), f"{path}: sentinel {sentinel!r} leaked into the public response body"
 
 
 def test_nodes_response_exposes_only_allowlisted_keys(sentinel_db_client):

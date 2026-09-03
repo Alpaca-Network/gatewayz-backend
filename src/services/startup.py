@@ -754,6 +754,19 @@ async def lifespan(app):
         logger.warning(f"Failed to start pricing drift monitor scheduler: {e}")
         # Don't fail startup if the drift monitor fails to start
 
+    # Start GPU utilization hourly rollup (gatewayz-backend#2263 #2264).
+    # Backfills 7 days on first run once gpu_utilization_hourly exists; a
+    # no-op (empty aggregates, nothing upserted) before that migration lands
+    # or before any provider_work rows exist.
+    try:
+        from src.services.gpu.rollup import start_gpu_rollup_scheduler
+
+        start_gpu_rollup_scheduler()
+        logger.info("GPU utilization rollup service initialized")
+    except Exception as e:
+        logger.warning(f"Failed to start GPU utilization rollup scheduler: {e}")
+        # Don't fail startup if the GPU rollup scheduler fails to start
+
     # ---------------------------------------------------------------------------
     # Additional startup work (migrated from @app.on_event("startup"))
     # ---------------------------------------------------------------------------
@@ -949,6 +962,15 @@ async def lifespan(app):
         logger.info("Pricing drift monitor service stopped")
     except Exception as e:
         logger.warning(f"Pricing drift monitor shutdown warning: {e}")
+
+    # Stop GPU utilization hourly rollup
+    try:
+        from src.services.gpu.rollup import stop_gpu_rollup_scheduler
+
+        stop_gpu_rollup_scheduler()
+        logger.info("GPU utilization rollup service stopped")
+    except Exception as e:
+        logger.warning(f"GPU utilization rollup shutdown warning: {e}")
 
     # Cancel any pending background tasks
     if _background_tasks:

@@ -13,8 +13,8 @@ import pytest
 from src.db.gpu_rollups import (
     _estimate_uptime_pct,
     _regroup,
-    compute_hourly_aggregates,
     aggregate_hour,
+    compute_hourly_aggregates,
     get_public_nodes,
     get_summary,
     get_utilization,

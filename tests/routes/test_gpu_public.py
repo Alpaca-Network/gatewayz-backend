@@ -225,9 +225,7 @@ def test_falls_back_to_in_process_cache_when_redis_unavailable():
 
 def test_rate_limit_exceeded_returns_429_with_retry_after():
     with patch("src.routes.gpu_public.get_summary", return_value=_SUMMARY):
-        with patch.object(
-            gpu_public, "sliding_window_check", return_value=(False, 0, 17)
-        ):
+        with patch.object(gpu_public, "sliding_window_check", return_value=(False, 0, 17)):
             response = client.get("/gpu/public/summary")
 
     assert response.status_code == 429
@@ -236,9 +234,7 @@ def test_rate_limit_exceeded_returns_429_with_retry_after():
 
 def test_rate_limit_allowed_passes_through():
     with patch("src.routes.gpu_public.get_summary", return_value=_SUMMARY):
-        with patch.object(
-            gpu_public, "sliding_window_check", return_value=(True, 59, None)
-        ):
+        with patch.object(gpu_public, "sliding_window_check", return_value=(True, 59, None)):
             response = client.get("/gpu/public/summary")
 
     assert response.status_code == 200
