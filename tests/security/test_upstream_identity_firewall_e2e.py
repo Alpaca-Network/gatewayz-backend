@@ -101,14 +101,18 @@ def _fake_response(request: httpx.Request) -> httpx.Response:
 
 
 # Real model-provider hosts this test cares about. Only requests to one of
-# these are captured and faked; everything else (Gatewayz's own Supabase
-# REST calls for identity/billing/analytics -- which legitimately DO carry
-# the sentinel user_id, that's not a leak, see G1's "Gatewayz still knows
-# who you are" carve-out) is passed through to the REAL httpx.Client.send,
-# exactly as it behaves in production (and in this sandboxed test env,
-# fails fast on DNS resolution -- every DB write on this route is already
-# wrapped in try/except by the application code, so that's non-fatal, not
-# something this file needs to work around).
+# these are captured and faked. Gatewayz's own Supabase REST calls for
+# identity/billing/analytics legitimately DO carry the sentinel user_id --
+# that's not a leak, see G1's "Gatewayz still knows who you are" carve-out --
+# so they aren't asserted against, but they must not make a real network
+# call either ("no real network calls in tests" applies file-wide, not just
+# to provider hosts). Raising a synthetic ConnectError immediately (rather
+# than letting a real DNS lookup fail on its own) also keeps this file fast
+# and deterministic: every one of these DB calls is already wrapped in
+# try/except by the application code, so failing them instantly is
+# equivalent to production behavior, just without the multi-second local
+# DNS-failure latency that made this file flaky under full `-n auto`
+# parallelism (each worker's real failed lookups compounded).
 _PROVIDER_HOSTS = {
     "api.openai.com",
     "api.anthropic.com",
@@ -116,9 +120,23 @@ _PROVIDER_HOSTS = {
     "openrouter.ai",
 }
 
+# Starlette's TestClient IS an httpx.Client subclass talking to the ASGI app
+# over an in-process ASGITransport -- it reaches httpx.Client.send() exactly
+# like any real provider call would, so our patch below sees it too. It must
+# be passed through to the REAL (unpatched) send, not faked or blocked:
+# faking/blocking it would prevent the app from ever running, making every
+# assertion in this file vacuous (this was caught and fixed during
+# fix-round-1 review -- see the negative-control tests, which rely on this
+# distinction to prove the app actually ran).
+_TEST_CLIENT_HOSTS = {"testserver", "test"}
+
 
 def _is_provider_request(request: httpx.Request) -> bool:
     return request.url.host in _PROVIDER_HOSTS
+
+
+def _is_test_client_self_request(request: httpx.Request) -> bool:
+    return request.url.host in _TEST_CLIENT_HOSTS
 
 
 @pytest.fixture
@@ -131,13 +149,17 @@ def intercepted_http(monkeypatch):
         if _is_provider_request(request):
             captured.append(request)
             return _fake_response(request)
-        return real_send(self, request, **kwargs)
+        if _is_test_client_self_request(request):
+            return real_send(self, request, **kwargs)
+        raise httpx.ConnectError("blocked by test: no real network calls", request=request)
 
     async def fake_async_send(self, request, **kwargs):
         if _is_provider_request(request):
             captured.append(request)
             return _fake_response(request)
-        return await real_async_send(self, request, **kwargs)
+        if _is_test_client_self_request(request):
+            return await real_async_send(self, request, **kwargs)
+        raise httpx.ConnectError("blocked by test: no real network calls", request=request)
 
     monkeypatch.setattr(httpx.Client, "send", fake_send)
     monkeypatch.setattr(httpx.AsyncClient, "send", fake_async_send)
@@ -382,32 +404,13 @@ class TestMessagesRealRoute:
     would carry if it forwarded the client's `metadata` field.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Pre-existing bug, unrelated to the identity firewall, found while "
-            "writing this real-route test: create_message() (routes/messages.py "
-            "~L371) calls chat_completions(...) as a plain Python function, "
-            "without an `identity=` argument. chat_completions' signature "
-            "(routes/chat.py:319-326) declares `identity: RequestIdentity = "
-            "Depends(get_request_identity)` -- that default is a FastAPI "
-            "`Depends(...)` sentinel, only ever resolved by FastAPI's own DI "
-            "machinery when the function is invoked AS a registered endpoint. "
-            "A direct call bypasses that, so `identity` is left holding the "
-            "raw Depends object, and `is_anonymous = identity.is_anonymous` "
-            "(chat.py:350) raises AttributeError for every request to "
-            "/v1/messages -- reproduced here with a TestClient hitting the "
-            "real, unmocked route (not a fixture artifact: the same call with "
-            "no auth header fails identically, since the crash is on the "
-            "very first line that reads `identity`). Flagged to the team lead "
-            "in fix-round-1 review rather than fixed here: it needs its own "
-            "impact analysis and belongs in a dedicated PR, not folded into "
-            "the identity-firewall diff."
-        ),
-    )
     def test_anthropic_native_via_messages_endpoint(
         self, app_client, route_env, intercepted_http, monkeypatch
     ):
+        """Was xfail (chat.py:350 AttributeError, every /v1/messages request
+        500'd) until hotfix #2281 (179ca948) taught create_message() to
+        resolve and pass `identity=` explicitly. Now a real passing
+        assertion through the real, unmocked route."""
         monkeypatch.setattr(Config, "ANTHROPIC_API_KEY", "sk-ant-canary", raising=False)
         resp = app_client.post(
             "/v1/messages",
@@ -423,6 +426,38 @@ class TestMessagesRealRoute:
         # AnthropicMessagesRequest.metadata IS a declared schema field (no 422)
         # but never read into ProxyRequest/optional -- see
         # test_messages_metadata_field_is_schema_accepted_but_dropped below.
+        haystack = "\n".join(r.content.decode() for r in intercepted_http)
+        assert "canary-meta" not in haystack
+        _assert_clean(intercepted_http, "anthropic-native via /v1/messages")
+
+    def test_negative_control_scrub_disabled_still_clean_via_messages(
+        self, app_client, route_env, intercepted_http, monkeypatch
+    ):
+        """Not a leak-detecting negative control like chat.py's (there is no
+        `scrub_upstream_kwargs` call left to disable that would change this
+        route's outcome): AnthropicMessagesRequest.metadata never reaches
+        ProxyRequest/optional/kwargs at all (see the structural test below),
+        so disabling scrub is a no-op here. Asserting that explicitly
+        documents the two-independent-reasons story for /v1/messages --
+        schema-layer drop AND the scrub boundary, not just the boundary --
+        rather than silently relying on one of them.
+        """
+        monkeypatch.setattr(Config, "ANTHROPIC_API_KEY", "sk-ant-canary", raising=False)
+        monkeypatch.setattr(
+            "src.handlers.chat_handler.scrub_upstream_kwargs",
+            lambda kwargs, **_: kwargs,
+        )
+        resp = app_client.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": "hi"}],
+                "metadata": {"user_id": "canary-meta"},
+            },
+            headers=_headers(),
+        )
+        assert resp.status_code == 200, resp.text
         haystack = "\n".join(r.content.decode() for r in intercepted_http)
         assert "canary-meta" not in haystack
 
