@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import secrets
 from datetime import UTC, datetime
@@ -6,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from postgrest import APIError
+from prometheus_client import Counter
 
 import src.config.supabase_config as supabase_config
 import src.db.users as users_module
@@ -20,21 +22,19 @@ from src.schemas import (
     UserRegistrationRequest,
     UserRegistrationResponse,
 )
+from src.security.privy_token import (
+    PrivyTokenError,
+    privy_verification_mode,
+    verify_privy_access_token,
+)
 from src.services.auth_cache import (
     cache_user_by_privy_id,
     cache_user_by_username,
     get_cached_user_by_privy_id,
     get_cached_user_by_username,
-    invalidate_user_cache,
 )
-from src.services.auth_rate_limiting import (
-    AuthRateLimitType,
-    check_auth_rate_limit,
-    get_client_ip,
-)
-from src.services.email_verification import (
-    EmailVerificationResult,
-)
+from src.services.auth_rate_limiting import AuthRateLimitType, check_auth_rate_limit, get_client_ip
+from src.services.email_verification import EmailVerificationResult
 from src.services.email_verification import verify_email as emailable_verify_email
 from src.services.query_timeout import (
     AUTH_QUERY_TIMEOUT,
@@ -600,6 +600,65 @@ def _log_registration_activity_background(user_id: str, metadata: dict):
         )
 
 
+# gatewayz-backend#2248: tracks the outcome of server-side Privy access-token
+# verification on POST /auth so the "log" -> "enforce" rollout can be watched.
+privy_token_verification_total = Counter(
+    "gatewayz_privy_token_verification_total",
+    "Outcome of Privy access-token verification on POST /auth",
+    ["result", "mode"],
+)
+
+# Reasons that should read as "no token was given" vs. "a token was given but invalid".
+_MISSING_TOKEN_ERROR = "privy_token_required"
+_INVALID_TOKEN_ERROR = "invalid_privy_token"
+
+
+def _enforce_privy_token(request: PrivyAuthRequest, raw_request: Request, client_ip: str) -> None:
+    """
+    Verify the Privy access token before any account lookup/creation runs.
+
+    `request.user.id` is client-supplied; without this check anyone who knows
+    (or guesses) a Privy DID could obtain that account's API key. Behavior is
+    controlled by `Config.PRIVY_TOKEN_VERIFICATION` (see
+    `src.security.privy_token.privy_verification_mode`):
+      - "off": no-op (tests only).
+      - "log": verification failures are logged, not blocked, so the frontend
+        rollout can be watched before enforcing.
+      - "enforce": verification failures raise 401.
+
+    Sets `raw_request.state.privy_token_verified` so downstream wallet
+    ingestion (gatewayz-backend#2251) can gate on a verified token.
+    """
+    mode = privy_verification_mode()
+    raw_request.state.privy_token_verified = False
+
+    if mode == "off":
+        return
+
+    token = request.token or request.privy_access_token
+    try:
+        verify_privy_access_token(token, expected_sub=request.user.id)
+        raw_request.state.privy_token_verified = True
+        privy_token_verification_total.labels(result="verified", mode=mode).inc()
+        return
+    except PrivyTokenError as e:
+        privy_token_verification_total.labels(result=e.reason, mode=mode).inc()
+        if mode == "log":
+            logger.warning(
+                "privy_token_unverified reason=%s privy_id=%s ip=%s",
+                e.reason,
+                request.user.id,
+                client_ip,
+            )
+            return
+
+        error_code = _MISSING_TOKEN_ERROR if e.reason == "missing" else _INVALID_TOKEN_ERROR
+        raise HTTPException(
+            status_code=401,
+            detail={"error": error_code, "reason": e.reason},
+        ) from e
+
+
 @router.post("/auth", response_model=PrivyAuthResponse, tags=["authentication"])
 async def privy_auth(
     request: PrivyAuthRequest,
@@ -620,6 +679,12 @@ async def privy_auth(
             },
             headers={"Retry-After": str(rate_limit_result.retry_after)},
         )
+
+    # Verify the Privy access token before touching any account (gatewayz-backend#2248).
+    # Deliberately kept outside the try/except below: that block's broad
+    # `except Exception` converts any exception (HTTPException included) into a
+    # generic 500, which would swallow this 401.
+    _enforce_privy_token(request, raw_request, client_ip)
 
     try:
         logger.info(f"Privy auth request for user: {request.user.id}")
@@ -742,8 +807,29 @@ async def privy_auth(
                 logger.error(f"Privy ID lookup timed out: {e}")
                 existing_user = None
 
+        # SECURITY (gatewayz-backend#2248 security review, "Fix round 1"): once the
+        # Privy access token has been cryptographically verified, privy_user_id is
+        # the ONLY authoritative key for locating an existing account. `email` (and
+        # therefore `username`, derived from it above) is unauthenticated
+        # client-supplied input — it is not part of the token's claims — so it must
+        # never be used to locate, rebind, or return the API key of someone else's
+        # account. If no row has this DID, this is unconditionally a NEW account,
+        # even if the derived username/email collides with an existing user. The
+        # username-fallback block below (a legacy-account merge path for accounts
+        # created before privy_user_id was captured) is therefore skipped entirely
+        # once the token is verified; the new-account path a few lines down already
+        # handles a username collision safely (_generate_unique_username) and gets
+        # its own email-collision guard.
+        token_verified = bool(getattr(raw_request.state, "privy_token_verified", False))
+
         # Fallback: check by username if privy_user_id lookup failed
-        if not existing_user:
+        if not existing_user and token_verified:
+            logger.debug(
+                "Privy ID lookup failed for verified token sub=%s; skipping the "
+                "username fallback and treating this as a new account",
+                request.user.id,
+            )
+        elif not existing_user:
             logger.debug(f"Privy ID lookup failed, trying username: {username}")
 
             # Try cache first
@@ -769,32 +855,44 @@ async def privy_auth(
                     existing_user = None
 
             if existing_user:
-                logger.warning(
-                    f"User found by username '{username}' but not by privy_user_id. Updating privy_user_id..."
-                )
-                # Update the existing user with the privy_user_id
-                try:
-                    client = supabase_config.get_supabase_client()
-                    safe_query_with_timeout(
-                        client,
-                        "users",
-                        lambda: client.table("users")
-                        .update({"privy_user_id": request.user.id})
-                        .eq("id", existing_user["id"])
-                        .execute(),
-                        timeout_seconds=AUTH_QUERY_TIMEOUT,
-                        operation_name="update privy_user_id",
-                        fallback_value=None,
-                        log_errors=True,
+                # This whole `elif` only runs when the token was NOT verified (the
+                # `if not existing_user and token_verified:` branch above already
+                # skipped straight to new-account creation for verified callers) —
+                # so nothing below may treat `request.user.id` as proven.
+                current_privy_id = existing_user.get("privy_user_id")
+                if current_privy_id and current_privy_id != request.user.id:
+                    # SECURITY (gatewayz-backend#2248 review, "Fix round 3"): a row
+                    # whose privy_user_id is a different, non-null DID is not this
+                    # caller's account, full stop — not just "don't rebind it," but
+                    # don't touch or return it either. Returning its API key without
+                    # rebinding was still a takeover (round 1/2 only closed the
+                    # rebind; this closes the return). Refuse entirely and fall
+                    # through to new-account creation, in every mode.
+                    logger.warning(
+                        "privy_auth.did_mismatch_on_username_match base=%s existing_privy_id=%s attempted_sub=%s",
+                        username,
+                        current_privy_id,
+                        request.user.id,
                     )
-                    existing_user["privy_user_id"] = request.user.id
-                    logger.info(f"Updated user {existing_user['id']} with privy_user_id")
-                    # Invalidate caches since we updated the user
-                    invalidate_user_cache(privy_id=request.user.id, username=username)
-                except QueryTimeoutError as e:
-                    logger.error(f"Failed to update privy_user_id (timeout): {e}")
-                except Exception as e:
-                    logger.error(f"Failed to update privy_user_id: {e}")
+                    existing_user = None
+                else:
+                    # SECURITY (gatewayz-backend#2248 review, "Fix round 2"):
+                    # current_privy_id is None — a legacy account (email/password or
+                    # wallet signup) that never linked Privy. Claiming ANY account,
+                    # linked or not, via unauthenticated client-supplied
+                    # username/email is a takeover; the previous behavior (rebind +
+                    # return this account's key with zero proof of ownership) let an
+                    # unverified caller take over any never-linked account by
+                    # guessing its username. Refuse the claim entirely — this falls
+                    # through to the new-account path below (which safely
+                    # suffixes a colliding username and placeholder-guards a
+                    # colliding email) rather than adopting someone else's row.
+                    logger.warning(
+                        "privy_auth.legacy_account_claim_blocked username=%s sub=%s",
+                        username,
+                        request.user.id,
+                    )
+                    existing_user = None
 
         if existing_user:
             return _handle_existing_user(
@@ -839,7 +937,15 @@ async def privy_auth(
             # This prevents duplicate username errors, especially for phone auth
             # where multiple users might have phone numbers ending in the same 4 digits
             client = supabase_config.get_supabase_client()
+            _base_username = username
             username = _generate_unique_username(client, username)
+            if username != _base_username:
+                logger.info(
+                    "privy_auth.username_collision base=%s sub=%s resolved=%s",
+                    _base_username,
+                    request.user.id,
+                    username,
+                )
             logger.debug(f"Resolved unique username for new user: {username}")
 
             # Create user with Privy ID
@@ -851,11 +957,32 @@ async def privy_auth(
                 # Use a placeholder email if no valid email is available
                 # Note: We use a safe placeholder instead of the Privy ID because
                 # Privy IDs contain colons which are not valid in email addresses
-                user_email = (
-                    email
-                    if email and is_valid_email(email)
-                    else f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
+                _placeholder_email = (
+                    f"noemail+{request.user.id.replace(':', '_')}@privy.placeholder"
                 )
+                user_email = email if email and is_valid_email(email) else _placeholder_email
+
+                # SECURITY (gatewayz-backend#2248 review, "Fix round 1"/"Fix round 2"):
+                # `email` is unauthenticated client input. This point in the function
+                # is reached whenever no account was found (or claimable) by
+                # privy_user_id — a genuinely new account, in every verification
+                # mode. If the derived email belongs to an existing (necessarily
+                # different) account, letting create_enhanced_user proceed would
+                # either fail on the DB's UNIQUE constraint or, worse, be adopted as
+                # a "claim" of that account by the duplicate-insert fallback below.
+                # Refuse the claim up front, unconditionally: fall back to the
+                # placeholder email and flag it for manual merge.
+                if user_email != _placeholder_email:
+                    email_owner = users_module.get_user_by_email(user_email)
+                    if email_owner and email_owner.get("privy_user_id") != request.user.id:
+                        email_hash = hashlib.sha256(user_email.lower().encode()).hexdigest()[:12]
+                        logger.warning(
+                            "privy_auth.legacy_account_claim_blocked email_hash=%s sub=%s",
+                            email_hash,
+                            request.user.id,
+                        )
+                        user_email = _placeholder_email
+
                 user_data = users_module.create_enhanced_user(
                     username=username,
                     email=user_email,
@@ -873,10 +1000,14 @@ async def privy_auth(
 
                 client = supabase_config.get_supabase_client()
 
-                # Re-check for existing user before attempting manual insert to avoid TOCTOU issues
+                # Re-check for existing user before attempting manual insert to avoid TOCTOU issues.
+                # SECURITY (gatewayz-backend#2248 review, "Fix round 1"/"Fix round 2"):
+                # only an exact privy_user_id match may be adopted here, in every mode —
+                # a username match is unauthenticated client input and adopting/
+                # returning that row would be the same account-takeover class fixed
+                # above (a legitimate concurrent-insert race is still caught: that
+                # row already carries this same request's privy_user_id).
                 existing_user_after_failure = users_module.get_user_by_privy_id(request.user.id)
-                if not existing_user_after_failure:
-                    existing_user_after_failure = users_module.get_user_by_username(username)
 
                 if existing_user_after_failure:
                     logger.info(
@@ -936,12 +1067,14 @@ async def privy_auth(
                     created_user = None
                     created_new_user = False
 
-                    # Detect partially created user records before attempting an insert
+                    # Detect partially created user records before attempting an insert.
+                    # SECURITY: same rule as above, in every mode — only an exact
+                    # privy_user_id match may be adopted here, never an
+                    # unauthenticated username lookup (which would then get its row
+                    # updated/rebound below).
                     partial_user = None
                     try:
-                        partial_user = users_module.get_user_by_privy_id(
-                            request.user.id
-                        ) or users_module.get_user_by_username(username)
+                        partial_user = users_module.get_user_by_privy_id(request.user.id)
                     except Exception as lookup_error:
                         logger.warning(
                             "Failed to lookup partially created user prior to fallback insert: %s",
@@ -1010,7 +1143,30 @@ async def privy_auth(
                                         status_code=500,
                                         detail="Failed to fetch existing user after duplicate insert",
                                     ) from insert_error
-                                created_user = existing_user.data[0]
+                                conflicting_user = existing_user.data[0]
+                                # SECURITY (gatewayz-backend#2248 review, "Fix round
+                                # 1"/"Fix round 2"): the row that collided is whatever
+                                # unauthenticated username/email pointed at — do not
+                                # adopt it as "our" created user (and hand back its API
+                                # key) unless it's genuinely this same request's own
+                                # row (a real insert race), i.e. its privy_user_id
+                                # already matches. This check is unconditional — in
+                                # every verification mode — because adopting a legacy,
+                                # never-linked (privy_user_id IS NULL) row here would
+                                # reopen exactly the takeover this function's primary
+                                # username fallback refuses further up.
+                                if conflicting_user.get("privy_user_id") != request.user.id:
+                                    logger.warning(
+                                        "privy_auth.duplicate_insert_claim_blocked "
+                                        "conflicting_user_id=%s sub=%s",
+                                        conflicting_user.get("id"),
+                                        request.user.id,
+                                    )
+                                    raise HTTPException(
+                                        status_code=500,
+                                        detail="Failed to create user account",
+                                    ) from insert_error
+                                created_user = conflicting_user
                             else:
                                 raise
 

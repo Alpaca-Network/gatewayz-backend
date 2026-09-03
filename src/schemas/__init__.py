@@ -26,14 +26,7 @@ from src.schemas.api_keys import (
 )
 
 # Auth models
-from src.schemas.auth import (
-    PrivyAuthRequest,
-    PrivyAuthResponse,
-    PrivyLinkedAccount,
-    PrivySigninRequest,
-    PrivySignupRequest,
-    PrivyUserData,
-)
+from src.schemas.auth import PrivyAuthRequest, PrivyAuthResponse, PrivyLinkedAccount, PrivyUserData
 
 # Common enums
 from src.schemas.common import AuthMethod, PaymentMethod, PlanType, SubscriptionStatus
@@ -131,8 +124,6 @@ __all__ = [
     "SubscriptionStatus",
     "PlanType",
     # Auth
-    "PrivySignupRequest",
-    "PrivySigninRequest",
     "PrivyAuthRequest",
     "PrivyAuthResponse",
     # Users

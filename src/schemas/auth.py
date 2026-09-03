@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import AliasChoices, BaseModel, EmailStr, Field, field_validator
+from pydantic import AliasChoices, BaseModel, Field, field_validator
 
 from src.schemas.common import AuthMethod
 
@@ -87,24 +87,12 @@ class PrivyUserData(BaseModel):
         return v
 
 
-class PrivySignupRequest(BaseModel):
-    privy_user_id: str
-    auth_method: AuthMethod
-    email: EmailStr | None = None
-    username: str | None = None
-    display_name: str | None = None
-    gmail_address: EmailStr | None = None
-    github_username: str | None = None
-
-
-class PrivySigninRequest(BaseModel):
-    privy_user_id: str
-    auth_method: AuthMethod
-
-
 class PrivyAuthRequest(BaseModel):
     user: PrivyUserData
-    token: str | None = None  # Privy access token (optional - not currently used for validation)
+    # Privy access token, verified server-side (src/security/privy_token.py, ES256
+    # against Config.PRIVY_VERIFICATION_KEY) before this request's user.id is trusted —
+    # see privy_auth()/_enforce_privy_token() in src/routes/auth.py (gatewayz-backend#2248).
+    token: str | None = None
     email: str | None = None  # Optional top-level email field for frontend to send
     privy_access_token: str | None = None
     refresh_token: str | None = None

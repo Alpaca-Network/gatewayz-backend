@@ -692,6 +692,23 @@ async def lifespan(app):
     except Exception:
         pass
 
+    # Warn if Privy token verification is disabled in production (gatewayz-backend#2248).
+    # "off" means POST /auth trusts the client-supplied Privy user id outright — the
+    # account-takeover hole this milestone closes. Spec says "off" is for tests only.
+    try:
+        from src.config import Config as _Config4
+        from src.security.privy_token import privy_verification_mode
+
+        if _Config4.IS_PRODUCTION and privy_verification_mode() == "off":
+            logger.warning(
+                "  [WARN] PRIVY_TOKEN_VERIFICATION=off in production. "
+                "POST /auth will trust the client-supplied Privy user id "
+                "with no server-side proof — this is a known account-takeover "
+                "vector (gatewayz-backend#2248)."
+            )
+    except Exception:
+        pass
+
     # Warn if ops alert email is missing (don't fail startup)
     try:
         from src.config import Config as _Config3
