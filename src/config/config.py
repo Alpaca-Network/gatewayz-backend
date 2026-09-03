@@ -149,6 +149,16 @@ class Config:
     LEDGER_RECONCILIATION_WINDOW_HOURS = int(
         os.environ.get("LEDGER_RECONCILIATION_WINDOW_HOURS", "24")
     )
+
+    # Data retention (threat model L11, docs/security/DATA_RETENTION.md).
+    # usage_records and activity_log grow unbounded otherwise; credit_transactions
+    # is the financial ledger and is never pruned by this job. 400 days is
+    # intentionally >1 year to cover payment disputes.
+    USAGE_RECORDS_RETENTION_DAYS = int(os.environ.get("USAGE_RECORDS_RETENTION_DAYS", "400"))
+    ACTIVITY_LOG_RETENTION_DAYS = int(os.environ.get("ACTIVITY_LOG_RETENTION_DAYS", "400"))
+    RETENTION_CLEANUP_INTERVAL_HOURS = int(
+        os.environ.get("RETENTION_CLEANUP_INTERVAL_HOURS", "24")
+    )
     # WAYZ staking on-chain sync (gatewayz-backend#2244). Unset contract
     # address (the default -- nothing is deployed to Fuji yet) means the
     # scheduler no-ops at startup rather than erroring.
@@ -476,38 +486,6 @@ class Config:
         "yes",
     }
 
-    # Tempo/OpenTelemetry OTLP Configuration
-    # Hard-defaulted off as part of cost reduction; consumers no-op when false.
-    TEMPO_ENABLED = os.environ.get("TEMPO_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "gatewayz-api")
-    # Default to localhost for local development with docker-compose monitoring stack
-    # For Railway: set TEMPO_OTLP_HTTP_ENDPOINT=http://tempo.railway.internal:4318
-    TEMPO_OTLP_HTTP_ENDPOINT = os.environ.get(
-        "TEMPO_OTLP_HTTP_ENDPOINT",
-        "http://localhost:4318",
-    )
-    TEMPO_OTLP_GRPC_ENDPOINT = os.environ.get(
-        "TEMPO_OTLP_GRPC_ENDPOINT",
-        "localhost:4317",
-    )
-    # Skip endpoint reachability check during startup (allows async connection)
-    TEMPO_SKIP_REACHABILITY_CHECK = os.environ.get(
-        "TEMPO_SKIP_REACHABILITY_CHECK", "true"
-    ).lower() in {"1", "true", "yes"}
-    # When FastAPIInstrumentor is active it already creates a server span per request
-    # (including HTTP method, route, and status code). Set this to true to prevent
-    # TraceContextMiddleware from emitting duplicate request/response log lines.
-    # Header injection (x-trace-id, x-span-id) is always performed regardless of this flag.
-    OTEL_AUTO_INSTRUMENTED = os.environ.get("OTEL_AUTO_INSTRUMENTED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-
     # Grafana Loki Configuration
     LOKI_ENABLED = os.environ.get("LOKI_ENABLED", "false").lower() in {
         "1",
@@ -527,20 +505,6 @@ class Config:
     GRAFANA_PROMETHEUS_REMOTE_WRITE_URL = os.environ.get("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")
     GRAFANA_PROMETHEUS_USERNAME = os.environ.get("GRAFANA_PROMETHEUS_USERNAME")
     GRAFANA_PROMETHEUS_API_KEY = os.environ.get("GRAFANA_PROMETHEUS_API_KEY")
-
-    # Grafana Cloud Tempo (Traces)
-    GRAFANA_TEMPO_USERNAME = os.environ.get("GRAFANA_TEMPO_USERNAME")
-    GRAFANA_TEMPO_API_KEY = os.environ.get("GRAFANA_TEMPO_API_KEY")
-
-    # Arize AI Observability Configuration
-    ARIZE_ENABLED = os.environ.get("ARIZE_ENABLED", "false").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
-    ARIZE_SPACE_ID = os.environ.get("ARIZE_SPACE_ID")
-    ARIZE_API_KEY = os.environ.get("ARIZE_API_KEY")
-    ARIZE_PROJECT_NAME = os.environ.get("ARIZE_PROJECT_NAME", "GATEWAYZ")
 
     # Redis Configuration (for real-time metrics and rate limiting)
     REDIS_ENABLED = os.environ.get("REDIS_ENABLED", "true").lower() in {
