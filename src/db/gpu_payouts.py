@@ -7,14 +7,18 @@ write returns bool, so a DB hiccup degrades a scheduled job's throughput
 for one run rather than crashing it.
 
 Ownership split (m4/_standing.md, WB-payouts.md): W-A1 owns the migration
-(all tables below) and src/db/gpu.py (get_provider, list_providers,
-set_node_status, ...). This module is built in parallel, before that
-lands, so provider/node lookups below try importing from src.db.gpu first
-and fall back to a direct query against the tables documented in
-m4/spec.md §2 -- functionally complete either way, and free of duplicate
-logic once src.db.gpu exists (the fallback branch simply stops being
-exercised). adjust_health_score has no W-A1 equivalent planned per
-WB-payouts.md, so it lives here permanently.
+(all tables below) and src/db/gpu.py (get_provider_by_user, list_providers,
+set_node_status, get_node, ...) -- merged as of gatewayz-backend#2285
+(commit 48ace7ef). The provider/node lookups below are now thin
+re-exports of the real src.db.gpu helpers (kept under this module's own
+names so every caller here only ever imports from gpu_payouts, not two
+different db modules). adjust_health_score has no W-A1 equivalent, so it
+lives here permanently -- it's the one function in this section that
+isn't a re-export.
+
+W-A2's community_adapter.get_node_adapter is a SEPARATE, still-unmerged
+dependency (src/services/gpu/spot_check.py) -- that one still needs its
+ImportError-fallback treatment; this module has nothing to do with it.
 """
 
 from __future__ import annotations
@@ -22,6 +26,10 @@ from __future__ import annotations
 import logging
 
 from src.config.supabase_config import get_supabase_client
+from src.db.gpu import get_node as _gpu_get_node
+from src.db.gpu import get_provider_by_user as _gpu_get_provider_by_user
+from src.db.gpu import list_providers as _gpu_list_providers
+from src.db.gpu import set_node_status as _gpu_set_node_status
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +38,10 @@ _WORK_TABLE = "provider_work"
 _EARNINGS_TABLE = "provider_earnings"
 _SETTLEMENTS_TABLE = "provider_settlements"
 _NODES_TABLE = "gpu_nodes"
-_PROVIDERS_TABLE = "gpu_providers"
 
 # Row caps -- testnet scale, but real limits rather than unbounded selects.
 _WORK_QUERY_ROW_CAP = 2000
 _EARNINGS_LIST_ROW_CAP = 50
-_PROVIDERS_ROW_CAP = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -216,48 +222,16 @@ def adjust_health_score(node_id: int, delta: float) -> bool:
 
 
 def get_node(node_id: int) -> dict | None:
-    """A single gpu_nodes row. Tries src.db.gpu.get_node (W-A1) first and
-    falls back to a direct query -- see module docstring."""
-    try:
-        from src.db.gpu import get_node as _get_node  # type: ignore[import-not-found]
-
-        return _get_node(node_id)
-    except ImportError:
-        pass
-    except Exception as e:
-        logger.warning(f"src.db.gpu.get_node failed for {node_id}, falling back: {e}")
-
-    try:
-        client = get_supabase_client()
-        result = client.table(_NODES_TABLE).select("*").eq("id", node_id).execute()
-        if not result.data:
-            return None
-        return result.data[0]
-    except Exception as e:
-        logger.warning(f"gpu_nodes lookup failed for {node_id}: {e}")
-        return None
+    """A single gpu_nodes row -- re-exports src.db.gpu.get_node (W-A1)."""
+    return _gpu_get_node(node_id)
 
 
 def disable_node(node_id: int) -> bool:
-    """Set a node's status to 'disabled' (3-fails/24h penalty). Tries
-    src.db.gpu.set_node_status (W-A1) first and falls back to a direct
-    update -- see module docstring."""
-    try:
-        from src.db.gpu import set_node_status  # type: ignore[import-not-found]
-
-        return set_node_status(node_id, "disabled")
-    except ImportError:
-        pass
-    except Exception as e:
-        logger.warning(f"src.db.gpu.set_node_status failed for {node_id}, falling back: {e}")
-
-    try:
-        client = get_supabase_client()
-        client.table(_NODES_TABLE).update({"status": "disabled"}).eq("id", node_id).execute()
-        return True
-    except Exception as e:
-        logger.warning(f"gpu_nodes disable failed for {node_id}: {e}")
-        return False
+    """Set a node's status to 'disabled' (3-fails/24h penalty). Wraps
+    src.db.gpu.set_node_status (W-A1), which returns the updated row (or
+    None on failure) rather than a bool -- normalized to bool here so
+    every write helper in this module has the same return contract."""
+    return _gpu_set_node_status(node_id, "disabled") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -266,60 +240,19 @@ def disable_node(node_id: int) -> bool:
 
 
 def get_provider_for_user(user_id: int) -> dict | None:
-    """The caller's own gpu_providers row, or None. Tries src.db.gpu first
-    (see module docstring) -- an OR-across-user lookup is never exposed
-    here, mirroring src/routes/faucet.py's IDOR-safety pattern of always
-    scoping provider-facing reads to the authenticated caller."""
-    try:
-        from src.db.gpu import (
-            get_provider_for_user as _get_provider_for_user,  # type: ignore[import-not-found]
-        )
-
-        return _get_provider_for_user(user_id)
-    except ImportError:
-        pass
-    except Exception as e:
-        logger.warning(
-            f"src.db.gpu.get_provider_for_user failed for user {user_id}, falling back: {e}"
-        )
-
-    try:
-        client = get_supabase_client()
-        result = client.table(_PROVIDERS_TABLE).select("*").eq("user_id", user_id).execute()
-        if not result.data:
-            return None
-        return result.data[0]
-    except Exception as e:
-        logger.warning(f"gpu_providers lookup failed for user {user_id}: {e}")
-        return None
+    """The caller's own gpu_providers row, or None -- re-exports
+    src.db.gpu.get_provider_by_user (W-A1). An OR-across-user lookup is
+    never exposed here, mirroring src/routes/faucet.py's IDOR-safety
+    pattern of always scoping provider-facing reads to the authenticated
+    caller."""
+    return _gpu_get_provider_by_user(user_id)
 
 
 def list_approved_providers() -> list[dict]:
     """All gpu_providers rows with status='approved' -- the settlement
-    job's per-provider iteration. Tries src.db.gpu first, see module
-    docstring."""
-    try:
-        from src.db.gpu import list_providers  # type: ignore[import-not-found]
-
-        return list_providers(status="approved")
-    except ImportError:
-        pass
-    except Exception as e:
-        logger.warning(f"src.db.gpu.list_providers failed, falling back: {e}")
-
-    try:
-        client = get_supabase_client()
-        result = (
-            client.table(_PROVIDERS_TABLE)
-            .select("*")
-            .eq("status", "approved")
-            .limit(_PROVIDERS_ROW_CAP)
-            .execute()
-        )
-        return result.data or []
-    except Exception as e:
-        logger.warning(f"gpu_providers approved-list failed: {e}")
-        return []
+    job's per-provider iteration. Re-exports src.db.gpu.list_providers
+    (W-A1)."""
+    return _gpu_list_providers(status="approved")
 
 
 # ---------------------------------------------------------------------------

@@ -141,21 +141,28 @@ def test_adjust_health_score_returns_false_when_node_missing(sb):
         assert gpu_payouts.adjust_health_score(999, -20) is False
 
 
-def test_get_node_falls_back_to_direct_query_when_gpu_module_absent(sb):
-    """src.db.gpu doesn't exist yet (W-A1 in progress) -- this is a REAL
-    ImportError, not a simulated one, proving the fallback path actually
-    engages rather than assuming it does."""
-    client, query = _client_with([{"id": 1, "name": "node-a"}])
-    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+def test_get_node_re_exports_real_gpu_module(sb):
+    """src.db.gpu (W-A1) merged as of gatewayz-backend#2285 -- get_node is
+    now a thin re-export, not a fallback. Patches the real underlying
+    function to prove the delegation, not a Supabase client double."""
+    with patch(
+        "src.db.gpu_payouts._gpu_get_node", return_value={"id": 1, "name": "node-a"}
+    ) as mock_get_node:
         assert gpu_payouts.get_node(1) == {"id": 1, "name": "node-a"}
-    query.eq.assert_called_once_with("id", 1)
+    mock_get_node.assert_called_once_with(1)
 
 
-def test_disable_node_falls_back_to_direct_update(sb):
-    client, query = _client_with([{"id": 1}])
-    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+def test_disable_node_calls_real_set_node_status(sb):
+    with patch(
+        "src.db.gpu_payouts._gpu_set_node_status", return_value={"id": 1, "status": "disabled"}
+    ) as mock_set_status:
         assert gpu_payouts.disable_node(1) is True
-    query.update.assert_called_once_with({"status": "disabled"})
+    mock_set_status.assert_called_once_with(1, "disabled")
+
+
+def test_disable_node_returns_false_when_set_node_status_fails(sb):
+    with patch("src.db.gpu_payouts._gpu_set_node_status", return_value=None):
+        assert gpu_payouts.disable_node(1) is False
 
 
 # ---------------------------------------------------------------------------
@@ -163,25 +170,24 @@ def test_disable_node_falls_back_to_direct_update(sb):
 # ---------------------------------------------------------------------------
 
 
-def test_get_provider_for_user_falls_back_to_direct_query(sb):
-    client, query = _client_with([{"id": 1, "user_id": 42}])
-    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+def test_get_provider_for_user_re_exports_real_gpu_module(sb):
+    with patch(
+        "src.db.gpu_payouts._gpu_get_provider_by_user", return_value={"id": 1, "user_id": 42}
+    ) as mock_get_provider:
         assert gpu_payouts.get_provider_for_user(42) == {"id": 1, "user_id": 42}
-    query.eq.assert_called_once_with("user_id", 42)
+    mock_get_provider.assert_called_once_with(42)
 
 
 def test_get_provider_for_user_returns_none_when_absent(sb):
-    client, _ = _client_with([])
-    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+    with patch("src.db.gpu_payouts._gpu_get_provider_by_user", return_value=None):
         assert gpu_payouts.get_provider_for_user(999) is None
 
 
-def test_list_approved_providers_falls_back_to_direct_query(sb):
+def test_list_approved_providers_re_exports_real_gpu_module(sb):
     rows = [{"id": 1, "status": "approved"}]
-    client, query = _client_with(rows)
-    with patch("src.db.gpu_payouts.get_supabase_client", return_value=client):
+    with patch("src.db.gpu_payouts._gpu_list_providers", return_value=rows) as mock_list:
         assert gpu_payouts.list_approved_providers() == rows
-    query.eq.assert_called_once_with("status", "approved")
+    mock_list.assert_called_once_with(status="approved")
 
 
 # ---------------------------------------------------------------------------

@@ -84,7 +84,8 @@ def _load_overrides() -> dict[str, str]:
         return overrides
     except Exception as e:
         logger.warning(
-            "COMMUNITY_MODEL_CLASS_OVERRIDES is set but failed to parse, ignoring it entirely: %s", e
+            "COMMUNITY_MODEL_CLASS_OVERRIDES is set but failed to parse, ignoring it entirely: %s",
+            e,
         )
         return {}
 
