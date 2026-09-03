@@ -361,6 +361,23 @@ caller. `400 last_auth_method` if the account's only auth method is
 `wallet` and this is its only linked wallet — unlinking it would lock the
 owner out, so it's refused.
 
+### Privy-sourced wallets
+
+`POST /auth` also ingests wallet-type Privy linked accounts
+(gatewayz-backend#2251): any `linked_accounts[]` entry with
+`type` in (`wallet`, `smart_wallet`) and `chain_type` `ethereum` is
+upserted into `user_wallets` with `source: "privy"` and
+`wallet_client_type` carried through from Privy. This only runs once the
+request's Privy access token has been cryptographically verified
+(`Config.PRIVY_TOKEN_VERIFICATION=enforce`, or a request that verified
+under `log`) — an unverified token's claimed wallets are never persisted,
+since they're unauthenticated client input. A wallet address already
+linked to a **different** account is skipped and logged rather than
+reassigned or failing the login; use `POST /auth/wallet/link` to resolve
+the conflict explicitly (it returns `409 wallet_linked_to_other_account`).
+Wallet ingestion failures never fail `POST /auth` — login always succeeds
+independent of wallet linking.
+
 ### Signing example (Python, `eth_account`)
 
 ```python

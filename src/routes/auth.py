@@ -13,6 +13,7 @@ import src.config.supabase_config as supabase_config
 import src.db.users as users_module
 import src.enhanced_notification_service as notif_module
 from src.db.activity import log_activity
+from src.db.user_wallets import count_wallets, get_wallet, link_wallet
 from src.db.users import _is_temporary_api_key
 from src.schemas import (
     AuthMethod,
@@ -49,6 +50,7 @@ from src.utils.security_validators import (
     sanitize_for_logging,
 )
 from src.utils.sentry_context import capture_error
+from src.utils.wallet_address import normalize_wallet_address
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -159,6 +161,70 @@ async def _get_subscription_status_for_email(email: str) -> tuple[str, bool]:
         return "trial", False
 
 
+def _ingest_privy_wallets(user_id: int, linked_accounts: list, verified: bool) -> int:
+    """Upsert verified Privy wallet linked-accounts into user_wallets
+    (gatewayz-backend#2251).
+
+    Unverified claims never create identity: this is a no-op unless
+    `verified` is True, i.e. `raw_request.state.privy_token_verified` was
+    set by `_enforce_privy_token`. Only EVM (`chain_type == "ethereum")
+    wallet/smart_wallet accounts are ingested; everything else (Solana, a
+    malformed address) is skipped. A wallet already owned by ANOTHER user is
+    skipped and logged, never reassigned -- login must still succeed, and
+    the user can resolve the conflict via the explicit link flow (#2251
+    returns 409 there). Never raises: wallet ingestion must never break
+    login.
+
+    Returns the number of wallets newly linked.
+    """
+    if not verified:
+        logger.debug("privy_auth.wallet_ingest_skipped_unverified user_id=%s", user_id)
+        return 0
+
+    linked_count = 0
+    try:
+        has_wallet = count_wallets(user_id) > 0
+        for account in linked_accounts or []:
+            if account.type not in ("wallet", "smart_wallet"):
+                continue
+            if (account.chain_type or "ethereum").lower() != "ethereum":
+                continue
+            if not account.address:
+                continue
+
+            try:
+                address = normalize_wallet_address(account.address)
+            except ValueError:
+                logger.debug("privy_auth.wallet_ingest_invalid_address user_id=%s", user_id)
+                continue
+
+            existing = get_wallet(address)
+            if existing is not None:
+                if existing.get("user_id") != user_id:
+                    logger.warning(
+                        "privy_auth.wallet_conflict addr=%s user_id=%s owner_id=%s",
+                        address,
+                        user_id,
+                        existing.get("user_id"),
+                    )
+                continue
+
+            linked = link_wallet(
+                user_id,
+                address,
+                source="privy",
+                wallet_client_type=account.wallet_client_type,
+                make_primary=not has_wallet,
+            )
+            if linked is not None:
+                has_wallet = True
+                linked_count += 1
+    except Exception as e:
+        logger.warning("privy_auth.wallet_ingest_failed user_id=%s: %s", user_id, e)
+
+    return linked_count
+
+
 def _handle_existing_user(
     existing_user: dict[str, Any],
     request: PrivyAuthRequest,
@@ -168,6 +234,7 @@ def _handle_existing_user(
     email: str | None,
     phone_number: str | None = None,
     auto_create_api_key: bool = True,
+    token_verified: bool = False,
 ) -> PrivyAuthResponse:
     """Build a consistent response for existing users."""
     logger.info(f"Existing Privy user found: {existing_user['id']}")
@@ -409,6 +476,8 @@ def _handle_existing_user(
             status_code=503,
             detail="Your account exists but no API key is available. Please try again or contact support.",
         )
+
+    _ingest_privy_wallets(existing_user["id"], request.user.linked_accounts, token_verified)
 
     return PrivyAuthResponse(
         success=True,
@@ -906,6 +975,7 @@ async def privy_auth(
                 auto_create_api_key=(
                     request.auto_create_api_key if request.auto_create_api_key is not None else True
                 ),
+                token_verified=token_verified,
             )
         else:
             # New user - create account
@@ -1028,6 +1098,7 @@ async def privy_auth(
                             if request.auto_create_api_key is not None
                             else True
                         ),
+                        token_verified=token_verified,
                     )
 
                 # Use a safe placeholder email if no valid email is available
@@ -1278,6 +1349,10 @@ async def privy_auth(
                 )
 
             logger.info(f"New Privy user created: {user_data['user_id']}")
+
+            _ingest_privy_wallets(
+                user_data["user_id"], request.user.linked_accounts, token_verified
+            )
 
             # OPTIMIZATION: Log registration activity in background
             activity_metadata = {
