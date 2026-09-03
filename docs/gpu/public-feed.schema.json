@@ -1,0 +1,258 @@
+{
+  "$id": "https://gatewayz.ai/schemas/gpu-public-feed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "nodes": {
+      "$defs": {
+        "GpuPublicNode": {
+          "description": "One row of GET /gpu/public/nodes.\n\nDeliberately excludes wallet address, endpoint URL, node token, and\nprovider identity -- see tests/security/test_gpu_public_aggregate_only.py.",
+          "properties": {
+            "gpu_model": {
+              "title": "Gpu Model",
+              "type": "string"
+            },
+            "models": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Models",
+              "type": "array"
+            },
+            "name": {
+              "title": "Name",
+              "type": "string"
+            },
+            "region": {
+              "title": "Region",
+              "type": "string"
+            },
+            "status": {
+              "title": "Status",
+              "type": "string"
+            },
+            "uptime_24h_pct": {
+              "description": "Approximation: share of the last 24 hourly rollup buckets in which any node serving this node's (region, model) pair was active. See docs/gpu/PUBLIC_FEED.md.",
+              "title": "Uptime 24H Pct",
+              "type": "number"
+            },
+            "vram_gb": {
+              "title": "Vram Gb",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "region",
+            "gpu_model",
+            "vram_gb",
+            "status",
+            "uptime_24h_pct",
+            "models"
+          ],
+          "title": "GpuPublicNode",
+          "type": "object"
+        }
+      },
+      "items": {
+        "$ref": "#/$defs/GpuPublicNode"
+      },
+      "title": "RootModel[list[GpuPublicNode]]",
+      "type": "array"
+    },
+    "summary": {
+      "$defs": {
+        "GpuLastHourStats": {
+          "properties": {
+            "avg_latency_ms": {
+              "title": "Avg Latency Ms",
+              "type": "integer"
+            },
+            "error_rate": {
+              "description": "Share of last_hour requests with status='failed', 0-1",
+              "title": "Error Rate",
+              "type": "number"
+            },
+            "requests": {
+              "title": "Requests",
+              "type": "integer"
+            },
+            "tokens": {
+              "title": "Tokens",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "requests",
+            "tokens",
+            "avg_latency_ms",
+            "error_rate"
+          ],
+          "title": "GpuLastHourStats",
+          "type": "object"
+        },
+        "GpuModelCount": {
+          "properties": {
+            "id": {
+              "title": "Id",
+              "type": "string"
+            },
+            "nodes": {
+              "title": "Nodes",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "id",
+            "nodes"
+          ],
+          "title": "GpuModelCount",
+          "type": "object"
+        },
+        "GpuRegionCount": {
+          "properties": {
+            "nodes": {
+              "title": "Nodes",
+              "type": "integer"
+            },
+            "region": {
+              "title": "Region",
+              "type": "string"
+            }
+          },
+          "required": [
+            "region",
+            "nodes"
+          ],
+          "title": "GpuRegionCount",
+          "type": "object"
+        }
+      },
+      "description": "GET /gpu/public/summary",
+      "properties": {
+        "active_nodes": {
+          "description": "Live snapshot: count of gpu_nodes currently in status='active' (approved providers only) at request time -- NOT an hourly aggregate. Contrast with GpuUtilizationPoint.active_nodes, which counts nodes with traffic in a specific past hour. See docs/gpu/PUBLIC_FEED.md.",
+          "title": "Active Nodes",
+          "type": "integer"
+        },
+        "approved_providers": {
+          "title": "Approved Providers",
+          "type": "integer"
+        },
+        "last_hour": {
+          "$ref": "#/$defs/GpuLastHourStats"
+        },
+        "models": {
+          "items": {
+            "$ref": "#/$defs/GpuModelCount"
+          },
+          "title": "Models",
+          "type": "array"
+        },
+        "regions": {
+          "items": {
+            "$ref": "#/$defs/GpuRegionCount"
+          },
+          "title": "Regions",
+          "type": "array"
+        },
+        "updated_at": {
+          "description": "ISO-8601 UTC timestamp, e.g. 2026-09-03T18:00:00+00:00",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "active_nodes",
+        "approved_providers",
+        "regions",
+        "models",
+        "last_hour",
+        "updated_at"
+      ],
+      "title": "GpuPublicSummary",
+      "type": "object"
+    },
+    "utilization": {
+      "$defs": {
+        "GpuUtilizationPoint": {
+          "description": "One hourly bucket of GET /gpu/public/utilization.",
+          "properties": {
+            "active_nodes": {
+              "description": "Nodes that completed at least one provider_work request in THIS hour bucket -- a historical traffic count, NOT a live status snapshot. Contrast with GpuPublicSummary.active_nodes, which reflects current gpu_nodes.status. See docs/gpu/PUBLIC_FEED.md.",
+              "title": "Active Nodes",
+              "type": "integer"
+            },
+            "avg_latency_ms": {
+              "title": "Avg Latency Ms",
+              "type": "integer"
+            },
+            "completion_tokens": {
+              "title": "Completion Tokens",
+              "type": "integer"
+            },
+            "error_rate": {
+              "title": "Error Rate",
+              "type": "number"
+            },
+            "hour": {
+              "description": "ISO-8601 UTC hour bucket start, e.g. 2026-09-03T17:00:00+00:00",
+              "title": "Hour",
+              "type": "string"
+            },
+            "key": {
+              "description": "The region or model value this bucket is grouped by",
+              "title": "Key",
+              "type": "string"
+            },
+            "prompt_tokens": {
+              "title": "Prompt Tokens",
+              "type": "integer"
+            },
+            "requests": {
+              "title": "Requests",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "hour",
+            "key",
+            "requests",
+            "prompt_tokens",
+            "completion_tokens",
+            "avg_latency_ms",
+            "error_rate",
+            "active_nodes"
+          ],
+          "title": "GpuUtilizationPoint",
+          "type": "object"
+        }
+      },
+      "description": "GET /gpu/public/utilization?window=24h|7d&group=region|model",
+      "properties": {
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "series": {
+          "items": {
+            "$ref": "#/$defs/GpuUtilizationPoint"
+          },
+          "title": "Series",
+          "type": "array"
+        },
+        "window": {
+          "title": "Window",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window",
+        "group",
+        "series"
+      ],
+      "title": "GpuPublicUtilizationResponse",
+      "type": "object"
+    }
+  },
+  "title": "Gatewayz GPU Public Transparency Feed"
+}

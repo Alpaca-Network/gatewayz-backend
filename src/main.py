@@ -555,6 +555,10 @@ def create_app() -> FastAPI:
             "gpu",
             "GPU Marketplace",
         ),  # Provider/node registry, node auth, heartbeats (gatewayz-backend#2262)
+        (
+            "gpu_public",
+            "GPU Public Transparency",
+        ),  # Public, no-auth GPU utilization feed (gatewayz-backend#2263 #2264)
     ]
 
     loaded_count = 0
