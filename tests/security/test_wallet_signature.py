@@ -26,7 +26,10 @@ def test_verify_wallet_signature_is_case_insensitive_on_address():
     signature = _sign(account, message)
 
     assert verify_wallet_signature(account.address.lower(), message, signature) is True
-    assert verify_wallet_signature(account.address.upper().replace("0X", "0x"), message, signature) is True
+    assert (
+        verify_wallet_signature(account.address.upper().replace("0X", "0x"), message, signature)
+        is True
+    )
 
 
 def test_verify_wallet_signature_rejects_wrong_signer():
@@ -48,7 +51,9 @@ def test_verify_wallet_signature_rejects_tampered_message():
 def test_verify_wallet_signature_rejects_garbage_signature():
     account = Account.create()
 
-    assert verify_wallet_signature(account.address, "Sign in to Gatewayz.", "0xnotasignature") is False
+    assert (
+        verify_wallet_signature(account.address, "Sign in to Gatewayz.", "0xnotasignature") is False
+    )
 
 
 def test_verify_wallet_signature_rejects_empty_signature():
