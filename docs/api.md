@@ -1138,6 +1138,109 @@ records `approved_at`/`approved_by`; `suspend` sets `status: "suspended"`
 — disable them individually if needed). `GET` lists providers, optionally
 filtered by `status`.
 
+## GPU Public Transparency Feed
+
+Public, no-auth read-only feed over the community GPU marketplace
+(gatewayz-backend#2263 #2264). No `{success, data}` envelope — same
+unwrapped-JSON convention as `/status/*`. Every response carries
+`Cache-Control: public, max-age=30` and is rate-limited to 60 requests/min
+per IP (`429` with a `Retry-After` header past that). Backed by an hourly
+rollup job (`gpu_utilization_hourly`), so `/utilization` data lags live
+traffic by up to ~1 hour; `/summary` and `/nodes` reflect current
+registration/heartbeat state plus the last completed hourly rollup.
+
+**Aggregate-only guarantee:** these endpoints never return a wallet
+address, `user_id`, `billing_ref`, endpoint URL, or node token — only
+node display name, region, GPU model, status, and aggregate counts.
+Enforced by `tests/security/test_gpu_public_aggregate_only.py`. See
+`docs/gpu/PUBLIC_FEED.md` for the full field-by-field breakdown and the
+`uptime_24h_pct` approximation.
+
+**Polling guidance:** this is v1's "real-time" feed — poll on an interval
+of 30s or more (matching the cache TTL; polling faster just re-serves the
+same cached response). There is no SSE/websocket push yet.
+
+### Get Summary
+
+```http
+GET /gpu/public/summary
+```
+
+**Response:**
+```json
+{
+  "active_nodes": 3,
+  "approved_providers": 2,
+  "regions": [{ "region": "us-east", "nodes": 3 }],
+  "models": [{ "id": "llama-3.1-8b-instruct", "nodes": 3 }],
+  "last_hour": { "requests": 120, "tokens": 54000, "avg_latency_ms": 340, "error_rate": 0.01 },
+  "updated_at": "2026-09-03T18:00:00+00:00"
+}
+```
+
+### Get Nodes
+
+```http
+GET /gpu/public/nodes
+```
+
+Returns a bare JSON array (not wrapped in an object). Each entry:
+
+**Response:**
+```json
+[
+  {
+    "name": "node-1",
+    "region": "us-east",
+    "gpu_model": "A100",
+    "vram_gb": 80,
+    "status": "active",
+    "uptime_24h_pct": 95.5,
+    "models": ["llama-3.1-8b-instruct"]
+  }
+]
+```
+
+### Get Utilization
+
+```http
+GET /gpu/public/utilization?window=24h|7d&group=region|model
+```
+
+`window` defaults to `24h`, `group` defaults to `region`; either an invalid
+value returns `422`. Hourly series from `gpu_utilization_hourly`.
+
+**Response:**
+```json
+{
+  "window": "24h",
+  "group": "region",
+  "series": [
+    {
+      "hour": "2026-09-03T17:00:00+00:00",
+      "key": "us-east",
+      "requests": 10,
+      "prompt_tokens": 100,
+      "completion_tokens": 50,
+      "avg_latency_ms": 200,
+      "error_rate": 0.0,
+      "active_nodes": 1
+    }
+  ]
+}
+```
+
+### Get Schema
+
+```http
+GET /gpu/public/schema
+```
+
+JSON Schema (draft 2020-12) for the three payloads above, generated
+directly from the Pydantic response models — also committed at
+`docs/gpu/public-feed.schema.json`, kept equal to the live schema by a
+test in CI.
+
 ## Subscription Plans
 
 ### Get All Plans
