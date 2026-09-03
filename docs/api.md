@@ -1270,6 +1270,27 @@ directly from the Pydantic response models — also committed at
 `docs/gpu/public-feed.schema.json`, kept equal to the live schema by a
 test in CI.
 
+### GPU Marketplace — Full Index
+
+The community GPU marketplace's docs are split across three sections in
+this file (they're not adjacent, since each ships with a different
+workstream) plus two dedicated docs. Starting points:
+
+- **Routing & trust model** — "Community GPU Marketplace (opt-in)" above
+  (Chat Endpoints section): the `community/<model>` prefix, the trust
+  disclosure, and the canonical hashing/attestation rule
+  (`docs/gpu/attestation.md`).
+- **Provider/node registration & heartbeats** — "GPU Marketplace —
+  Providers & Nodes" above: `POST /gpu/providers`, `POST /gpu/nodes`,
+  heartbeats, admin approval. Full operator walkthrough:
+  `docs/gpu/PROVIDER_ONBOARDING.md`.
+- **Public transparency feed** — "GPU Public Transparency Feed" above:
+  `/gpu/public/*`, no auth, aggregate-only, `docs/gpu/PUBLIC_FEED.md`.
+- **Earnings & payouts** (W-B, not yet shipped): will add `GET
+  /gpu/providers/me/earnings` here once merged; `docs/gpu/
+  PROVIDER_ONBOARDING.md`'s "Payouts" section has the operator-facing
+  rate/settlement rules in the meantime.
+
 ## Subscription Plans
 
 ### Get All Plans
