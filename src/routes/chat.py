@@ -18,6 +18,7 @@ from src.config import Config
 from src.db.chat_completion_requests import save_chat_completion_request_with_cost
 from src.schemas import ProxyRequest
 from src.security.deps import get_optional_api_key
+from src.security.identity import RequestIdentity, get_request_identity
 from src.services.anonymous_rate_limiter import (
     ANONYMOUS_DAILY_LIMIT,
     get_anonymous_allowed_models_sample,
@@ -321,6 +322,7 @@ async def chat_completions(
     api_key: str | None = Depends(get_optional_api_key),
     session_id: int | None = Query(None, description="Chat session ID to save messages to"),
     request: Request = None,
+    identity: RequestIdentity = Depends(get_request_identity),
 ):
     # === 0) Setup / sanity ===
     # Generate request correlation ID for distributed tracing
@@ -339,8 +341,13 @@ async def chat_completions(
                     f"Malformed Authorization header in testing mode: {auth_header[:20]}..."
                 )
 
-    # Determine if this is an authenticated or anonymous request
-    is_anonymous = api_key is None
+    # Determine if this is an authenticated or anonymous request. `identity`
+    # is resolved via the same get_optional_api_key dependency (see
+    # src/security/identity.py) before the IS_TESTING override above runs;
+    # the two agree because that override only re-derives the same bearer
+    # token get_optional_api_key already validated (validate_api_key_security
+    # short-circuits to "any token is valid" under IS_TESTING).
+    is_anonymous = identity.is_anonymous
 
     logger.info(
         "chat_completions start (request_id=%s, api_key=%s, model=%s, anonymous=%s)",
